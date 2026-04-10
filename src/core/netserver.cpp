@@ -1,33 +1,27 @@
 #include "options.h"
 #include <Arduino.h>
-#include <SPIFFS.h>
-#include <Update.h>
-#include <ESPmDNS.h>
-#include <esp_task_wdt.h>
-#include "config.h"
-#include "netserver.h"
 #include <ArduinoJson.h>
 #include <ESPFileUpdater.h>
+#include <ESPmDNS.h>
+#include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <SPIFFS.h>
+#include <Update.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include "battery.h"
+#include "commandhandler.h"
 #include "config.h"
+#include "controls.h"
+#include "display.h"
+#include "locale.h"
+#include "mqtt.h"
+#include "netserver.h"
+#include "network.h"
 #include "player.h"
 #include "telnet.h"
-#include "display.h"
-#include "options.h"
-#include "core/battery.h"
-#include "network.h"
-#include "mqtt.h"
-#include "controls.h"
-#include "commandhandler.h"
 #include "../displays/dspcore.h"
 #include "../displays/widgets/widgetsconfig.h" //BitrateFormat
-#include "locale.h"
-
-//#include <ESPmDNS.h>
-
-#if DSP_MODEL==DSP_DUMMY
-  #define DUMMYDISPLAY
-#endif
-
 #if USE_OTA
   #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     #include <NetworkUdp.h>
@@ -36,10 +30,6 @@
   #endif
   #include <ArduinoOTA.h>
 #endif
-
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
-#include <freertos/FreeRTOS.h>
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
@@ -56,7 +46,7 @@
 #endif
 
 #ifdef DEBUG_V
-  #define DBGVB(...) { char buf[200]; sprintf(buf, __VA_ARGS__); Serial.print("[DEBUG]\t"); Serial.println(buf); }
+  #define DBGVB(...) { char buf[200]; snprintf(buf, sizeof(buf), __VA_ARGS__); Serial.print("[DEBUG]\t"); Serial.println(buf); }
 #else
   #define DBGVB(...)
 #endif
@@ -77,7 +67,7 @@ AsyncWebSocket websocket("/ws");
 bool  shouldReboot  = false;
 #ifdef MQTT_ENABLE
   Ticker mqttplaylistticker;
-  bool  mqttplaylistblock = false;
+  volatile bool mqttplaylistblock = false;  // volatile: written from Ticker callback, read from AsyncWebServer task
   void mqttplaylistSend() {
     if (config.store.mqttenable) {
       mqttplaylistblock = true;
@@ -90,7 +80,7 @@ bool  shouldReboot  = false;
 
 char* updateError() {
   static char ret[140] = {0};
-  sprintf(ret, "Update failed with error (%d)<br /> %s", (int)Update.getError(), Update.errorString());
+  snprintf(ret, sizeof(ret), "Update failed with error (%d)<br /> %s", (int)Update.getError(), Update.errorString());
   return ret;
 }
 
@@ -383,7 +373,7 @@ void NetServer::processQueue() {
   if (nsQueue==NULL) return;
   nsRequestParams_t request;
   if (xQueueReceive(nsQueue, &request, NS_QUEUE_TICKS)) {
-    char wsbuf[BUFLEN * 2] = {0};
+    char wsbuf[WEBSOCKET_BUFFER] = {0};
     uint8_t clientId = request.clientId;
     switch (request.type) {
       case PLAYLIST:        getPlaylist(clientId); break;
@@ -432,10 +422,9 @@ void NetServer::processQueue() {
             if (IR_PIN != 255 || dbgact)                        act += F("\"group_ir\",");
           }
                                                                 act = act.substring(0, act.length() - 1);
-          sprintf (wsbuf, "{\"act\":[%s]}", act.c_str());
+          snprintf(wsbuf, sizeof(wsbuf), "{\"act\":[%s]}", act.c_str());
           break;
         }
-      //case STARTUP:       sprintf (wsbuf, "{\"command\":\"startup\", \"payload\": {\"mode\":\"%s\", \"version\":\"%s\"}}", network.status == CONNECTED ? "player" : "ap", RADIOVERSION); break;
       case GETINDEX:      {
           requestOnChange(STATION, clientId);
           requestOnChange(TITLE, clientId);
@@ -451,7 +440,7 @@ void NetServer::processQueue() {
           return; 
           break;
         }
-      case GETSYSTEM:     sprintf (wsbuf, "{\"sst\":%d,\"aif\":%d,\"vu\":%d,\"wifiscan\":%d,\"softr\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"vut\":%d,\"autoupdate\":%d,\"mdns\":\"%s\"}", 
+      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"sst\":%d,\"aif\":%d,\"vu\":%d,\"wifiscan\":%d,\"softr\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"vut\":%d,\"autoupdate\":%d,\"mdns\":\"%s\"}", 
                                   config.store.smartstart,
                                   config.store.audioinfo,
                                   config.store.vumeter,
@@ -463,7 +452,7 @@ void NetServer::processQueue() {
                                   config.store.autoupdate,
                                   config.store.mdnsname);
                                   break;
-      case GETSCREEN:     sprintf (wsbuf, "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrt\":%d,\"scrb\":%d,\"scrpe\":%d,\"scrpt\":%d,\"scrpb\":%d,\"volumepage\":%d,\"clock12\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrt\":%d,\"scrb\":%d,\"scrpe\":%d,\"scrpt\":%d,\"scrpb\":%d,\"volumepage\":%d,\"clock12\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -481,7 +470,7 @@ void NetServer::processQueue() {
                                   config.store.volumepage,
                                   config.store.clock12);
                                   break;
-      case GETLOCALE:     sprintf (wsbuf, "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
+      case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,
                                   DSP_LOCALE,
                                   config.store.tz_name,
@@ -490,24 +479,24 @@ void NetServer::processQueue() {
                                   config.store.sntp2,
                                   config.store.timesyncinterval);
                                   break;
-      case GETWEATHER:    sprintf (wsbuf, "{\"wen\":%d,\"wlat\":\"%s\",\"wlon\":\"%s\",\"wtempunit\":%d,\"wpressunit\":%d,\"wspeedunit\":\"%s\",\"wen_feelslike\":%d,\"wen_humidity\":%d,\"wen_pressure\":%d,\"wen_wind\":%d,\"wapi\":\"%s\",\"welev\":\"%d\",\"wlang\":\"%s\",\"wkey\":\"%s\",\"winterval\":%d}",
+      case GETWEATHER:    snprintf(wsbuf, sizeof(wsbuf), "{\"wen\":%d,\"wlat\":\"%s\",\"wlon\":\"%s\",\"wtempunit\":%d,\"wpressunit\":%d,\"wspeedunit\":\"%s\",\"wen_feelslike\":%d,\"wen_humidity\":%d,\"wen_pressure\":%d,\"wen_wind\":%d,\"wapi\":\"%s\",\"welev\":\"%d\",\"wlang\":\"%s\",\"wkey\":\"%s\",\"winterval\":%d}",
                                   config.store.showweather,
                                   config.store.weatherlat,
                                   config.store.weatherlon,
-                                  config.store.weathertempimp ? 1 : 0,
-                                  config.store.weatherpressimp ? 1 : 0,
+                                  config.store.weathertempimp,
+                                  config.store.weatherpressimp,
                                   config.store.weatherwindspeed,
-                                  config.store.weatherfeels ? 1 : 0,
-                                  config.store.weatherhumidity ? 1 : 0,
-                                  config.store.weatherpressure ? 1 : 0,
-                                  config.store.weatherwind ? 1 : 0,
+                                  config.store.weatherfeels,
+                                  config.store.weatherhumidity,
+                                  config.store.weatherpressure,
+                                  config.store.weatherwind,
                                   config.store.weatherapi,
                                   config.store.weatherelevation,
                                   config.store.weatherlang,
                                   config.store.weatherkey,
                                   config.store.weathersyncinterval);
                                   break;
-      case GETMQTT:       sprintf (wsbuf, "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
+      case GETMQTT:       snprintf(wsbuf, sizeof(wsbuf), "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
                                   config.store.mqttenable,
                                   config.store.mqtthost,
                                   config.store.mqttport,
@@ -515,28 +504,28 @@ void NetServer::processQueue() {
                                   config.store.mqttpass,
                                   config.store.mqtttopic);
                                   break;
-      case GETCONTROLS:   sprintf (wsbuf, "{\"vols\":%d,\"enca\":%d,\"irtl\":%d,\"skipup\":%d}",
+      case GETCONTROLS:   snprintf(wsbuf, sizeof(wsbuf), "{\"vols\":%d,\"enca\":%d,\"irtl\":%d,\"skipup\":%d}",
                                   config.store.volsteps,
                                   config.store.encacc,
                                   config.store.irtlp,
                                   config.store.skipPlaylistUpDown);
                                   break;
-      case DSPON:         sprintf (wsbuf, "{\"dspontrue\":%d}", 1); break;
+      case DSPON:         snprintf(wsbuf, sizeof(wsbuf), "{\"dspontrue\":%d}", 1); break;
       case STATION:       requestOnChange(STATIONNAME, clientId); requestOnChange(ITEM, clientId); break;
-      case STATIONNAME:   sprintf (wsbuf, "{\"payload\":[{\"id\":\"nameset\", \"value\": \"%s\"}]}", config.station.name); break;
-      case ITEM:          sprintf (wsbuf, "{\"current\": %d}", config.lastStation()); break;
-      case TITLE:         sprintf (wsbuf, "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); telnet.printf("##CLI.META#: %s\r\n", config.station.title); break;
-      case VOLUME:        sprintf (wsbuf, "{\"payload\":[{\"id\":\"volume\", \"value\": %d}]}", config.store.volume); telnet.printf("##CLI.VOL#: %d\r\n", config.store.volume); break;
-      case NRSSI:         sprintf (wsbuf, "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}]}", rssi); /*rssi = 255;*/ break;
-      case SDPOS:         sprintf (wsbuf, "{\"sdpos\": %d,\"sdend\": %d,\"sdtpos\": %d,\"sdtend\": %d}",
+      case STATIONNAME:   snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"nameset\", \"value\": \"%s\"}]}", config.station.name); break;
+      case ITEM:          snprintf(wsbuf, sizeof(wsbuf), "{\"current\": %d}", config.lastStation()); break;
+      case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); telnet.printf("##CLI.META#: %s\r\n", config.station.title); break;
+      case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d}]}", config.store.volume); telnet.printf("##CLI.VOL#: %d\r\n", config.store.volume); break;
+      case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}]}", rssi); /*rssi = 255;*/ break;
+      case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %d,\"sdend\": %d,\"sdtpos\": %d,\"sdtend\": %d}",
                                   player.getFilePos(),
                                   player.getFileSize(),
                                   player.getAudioCurrentTime(),
                                   player.getAudioFileDuration()); 
                                   break;
-      case SDLEN:         sprintf (wsbuf, "{\"sdmin\": %d,\"sdmax\": %d}", player.sd_min, player.sd_max); break;
-      case SDSHUFFLE:     sprintf (wsbuf, "{\"shuffle\": %d}", config.store.sdshuffle); break;
-      case BITRATE:       sprintf (wsbuf, "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
+      case SDLEN:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdmin\": %d,\"sdmax\": %d}", player.sd_min, player.sd_max); break;
+      case SDSHUFFLE:     snprintf(wsbuf, sizeof(wsbuf), "{\"shuffle\": %d}", config.store.sdshuffle); break;
+      case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
         BatteryStatus bat = battery_get_status();
         if (!bat.valid && !battery_is_initialized()) {
@@ -555,16 +544,16 @@ void NetServer::processQueue() {
         }
         break;
       }
-      case MODE:          sprintf (wsbuf, "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); telnet.info(); break;
-      case EQUALIZER:     sprintf (wsbuf, "{\"payload\":[{\"id\":\"bass\", \"value\": %d}, {\"id\": \"middle\", \"value\": %d}, {\"id\": \"treble\", \"value\": %d}]}", config.store.bass, config.store.middle, config.store.treble); break;
-      case BALANCE:       sprintf (wsbuf, "{\"payload\":[{\"id\": \"balance\", \"value\": %d}]}", config.store.balance); break;
-      case SDINIT:        sprintf (wsbuf, "{\"sdinit\": %d}", SDC_CS!=255); break;
-      case GETPLAYERMODE: sprintf (wsbuf, "{\"playermode\": \"%s\"}", config.getMode()==PM_SDCARD?"modesd":"modeweb"); break;
-      case SEARCH_DONE:   sprintf (wsbuf, "{\"search_done\":true}"); break;
-      case SEARCH_FAILED: sprintf (wsbuf, "{\"search_failed\":true}"); break;
-      case CURATED_INDEX_DONE: sprintf (wsbuf, "{\"curated_index_done\":true}"); break;
-      case CURATED_PLAYLIST_DONE: sprintf (wsbuf, "{\"curated_playlist_done\":true}"); break;
-      case CURATED_FAILED: sprintf (wsbuf, "{\"curated_failed\":true}"); break;
+      case MODE:          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); telnet.info(); break;
+      case EQUALIZER:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bass\", \"value\": %d}, {\"id\": \"middle\", \"value\": %d}, {\"id\": \"treble\", \"value\": %d}]}", config.store.bass, config.store.middle, config.store.treble); break;
+      case BALANCE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\": \"balance\", \"value\": %d}]}", config.store.balance); break;
+      case SDINIT:        snprintf(wsbuf, sizeof(wsbuf), "{\"sdinit\": %d}", SDC_CS!=255); break;
+      case GETPLAYERMODE: snprintf(wsbuf, sizeof(wsbuf), "{\"playermode\": \"%s\"}", config.getMode()==PM_SDCARD?"modesd":"modeweb"); break;
+      case SEARCH_DONE:   snprintf(wsbuf, sizeof(wsbuf), "{\"search_done\":true}"); break;
+      case SEARCH_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"search_failed\":true}"); break;
+      case CURATED_INDEX_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_index_done\":true}"); break;
+      case CURATED_PLAYLIST_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_playlist_done\":true}"); break;
+      case CURATED_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_failed\":true}"); break;
       #ifdef USE_SD
         case CHANGEMODE:    config.changeMode(config.newConfigMode); return; break;
       #endif
@@ -606,7 +595,7 @@ void NetServer::loop() {
 void NetServer::irToWs(const char* protocol, uint64_t irvalue) {
   #if IR_PIN!=255
     char buf[BUFLEN] = { 0 };
-    sprintf (buf, "{\"ircode\": %llu, \"protocol\": \"%s\"}", irvalue, protocol);
+    snprintf(buf, sizeof(buf), "{\"ircode\": %llu, \"protocol\": \"%s\"}", irvalue, protocol);
     websocket.textAll(buf);
   #endif
 }
@@ -614,7 +603,7 @@ void NetServer::irValsToWs() {
   #if IR_PIN!=255
     if (!irRecordEnable) return;
     char buf[BUFLEN] = { 0 };
-    sprintf (buf, "{\"irvals\": [%llu, %llu, %llu]}", config.ircodes.irVals[config.irindex][0], config.ircodes.irVals[config.irindex][1], config.ircodes.irVals[config.irindex][2]);
+    snprintf(buf, sizeof(buf), "{\"irvals\": [%llu, %llu, %llu]}", config.ircodes.irVals[config.irindex][0], config.ircodes.irVals[config.irindex][1], config.ircodes.irVals[config.irindex][2]);
     websocket.textAll(buf);
   #endif
 }
@@ -632,44 +621,9 @@ void NetServer::onWsMessage(void *arg, uint8_t *data, size_t len, uint8_t client
     memcpy(payload, data, payloadLen);
     payload[payloadLen] = '\0';
 
-    char comnd[65], val[65];
-    if (config.parseWsCommand(payload, comnd, val, 65)) {
-      if (strcmp(comnd, "treble") == 0) {
-        int8_t valb = atoi(val);
-        config.setTone(config.store.bass, config.store.middle, valb);
-        return;
-      }
-      if (strcmp(comnd, "middle") == 0) {
-        int8_t valb = atoi(val);
-        config.setTone(config.store.bass, valb, config.store.treble);
-        return;
-      }
-      if (strcmp(comnd, "bass") == 0) {
-        int8_t valb = atoi(val);
-        config.setTone(valb, config.store.middle, config.store.treble);
-        return;
-      }
-      if (strcmp(comnd, "submitplaylistdone") == 0) {
-        #ifdef MQTT_ENABLE
-          if (config.store.mqttenable) mqttplaylistticker.attach(5, mqttplaylistSend);
-        #endif
-        // Check if the currently playing station still exists in the updated playlist
-        uint16_t lastStn = config.lastStation();
-        uint16_t newLength = config.playlistLength();
-        if (lastStn > newLength) {
-          // Station number exceeds new playlist length, stop and reset to station 1
-          config.setLastStation(newLength > 0 ? 1 : 0);
-          config.loadStation(newLength > 0 ? 1 : 0);
-        } else if (lastStn == 0 && newLength > 0) {
-          // No station selected, set to station 1
-          config.setLastStation(1);
-          config.loadStation(1);
-        }
-        // Otherwise, player continues with current station
-        return;
-      }
-      
-      if (cmd.exec(comnd, val, clientId)) {
+    char command[65], val[65];
+    if (config.parseWsCommand(payload, command, val, 65)) {
+      if (cmd.exec(command, val, clientId)) {
         return;
       }
     }
@@ -678,7 +632,7 @@ void NetServer::onWsMessage(void *arg, uint8_t *data, size_t len, uint8_t client
 
 void NetServer::getPlaylist(uint8_t clientId) {
   char buf[BUFLEN*2] = {0};  // Increased buffer for IPv6 or longer paths
-  sprintf(buf, "{\"file\": \"http://%s%s\"}", WiFi.localIP().toString().c_str(), PLAYLIST_PATH);
+  snprintf(buf, sizeof(buf), "{\"file\": \"http://%s%s\"}", WiFi.localIP().toString().c_str(), PLAYLIST_PATH);
   if (clientId == 0) { websocket.textAll(buf); } else { websocket.text(clientId, buf); }
 }
 
@@ -703,13 +657,19 @@ void NetServer::resetQueue() {
   if (nsQueue!=NULL) xQueueReset(nsQueue);
 }
 
+void NetServer::triggerMqttPlaylistSync() {
+  #ifdef MQTT_ENABLE
+    if (config.store.mqttenable) mqttplaylistticker.attach(5, mqttplaylistSend);
+  #endif
+}
+
 int freeSpace;
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   if (request->url()=="/upload") {
     if (!index) {
       if (filename!="tempwifi.csv") {
         if (SPIFFS.exists(PLAYLIST_PATH)) SPIFFS.remove(PLAYLIST_PATH);
-        if (SPIFFS.exists(INDEX_PATH)) SPIFFS.remove(PLAYLIST_PATH);
+        if (SPIFFS.exists(INDEX_PATH)) SPIFFS.remove(INDEX_PATH);
         if (SPIFFS.exists(PLAYLIST_SD_PATH)) SPIFFS.remove(PLAYLIST_SD_PATH);
         if (SPIFFS.exists(INDEX_SD_PATH)) SPIFFS.remove(INDEX_SD_PATH);
       }
@@ -771,7 +731,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
 
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
-    case WS_EVT_CONNECT: /*netserver.requestOnChange(STARTUP, client->id()); */
+    case WS_EVT_CONNECT:
         if (config.store.audioinfo) Serial.printf("[WEBSOCKET] client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
         /* Send current battery status to the newly connected client immediately */
         netserver.requestOnChange(GETBATTERY, client->id());
@@ -821,16 +781,18 @@ void selectRadioBrowserServer() {
         rb_servers[count++] = srvr_name;
       }
     }
-    // Shuffle
-    for (size_t i = count - 1; i > 0; --i) {
-      size_t j = random(i + 1);
-      String temp = rb_servers[i];
-      rb_servers[i] = rb_servers[j];
-      rb_servers[j] = temp;
+    // Shuffle (Fisher-Yates)
+    if (count > 1) {
+      for (size_t i = count - 1; i > 0; --i) {
+        size_t j = random(i + 1);
+        String temp = rb_servers[i];
+        rb_servers[i] = rb_servers[j];
+        rb_servers[j] = temp;
+      }
     }
 
-    // Add fallback as last option after shuffled servers
-    rb_servers[count] = RADIO_BROWSER_SERVER;
+    // Add fallback as last entry after the shuffled servers
+    if (count < arr_size) rb_servers[count] = RADIO_BROWSER_SERVER;
   }
   return;
 useHostname:

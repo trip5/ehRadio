@@ -1,8 +1,8 @@
 #ifndef rgbled_h
 #define rgbled_h
 #pragma once
+#include "options.h"
 #include <Arduino.h>
-#include "core/options.h"
 
 void rgbled_init();
 bool rgbled_is_initialized();

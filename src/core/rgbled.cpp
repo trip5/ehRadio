@@ -1,4 +1,4 @@
-#include "core/rgbled.h"
+#include "rgbled.h"
 
 #if defined(RGB_LED_PIN) && (RGB_LED_PIN!=255) // ============================== Everything ignored if not defined ==============================
 

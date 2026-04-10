@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.03.30"
+#define RADIOVERSION "2026.04.09"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
@@ -16,6 +16,9 @@ myoptions.h and mytheme.h should exist in the root folder.
 Examine the examples in builds/trip5 and make your own!
 Read other notes in builds/ for more details regarding how
 to build your own and contribute your own myoptions.h!
+
+Locales are guarded seperately in locale.h so check
+that file if you need non-English language options.
 ********************************************************/
 
 #if __has_include("../../myoptions.h")
@@ -23,6 +26,10 @@ to build your own and contribute your own myoptions.h!
 #endif
 #if __has_include("../../mytheme.h")
   #include "../../mytheme.h" // Theme file
+#endif
+
+#if !(defined(ARDUINO_ESP32_DEV) || defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV))
+  #error define error in platformio.ini: only ARDUINO_ESP32_DEV, ARDUINO_ESP32S3_DEV, or ARDUINO_ESP32C3_DEV boards are supported
 #endif
 
 /*******************************************************
@@ -61,8 +68,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #define DSP_CUSTOM      101   // your display
 
 #ifndef DSP_MODEL
-  #define DSP_MODEL  DSP_DUMMY
+  #define DSP_MODEL DSP_DUMMY
 #endif
+
+#if DSP_MODEL==DSP_DUMMY
+  #define DUMMYDISPLAY
+#endif
+
 #ifndef DSP_HSPI
   #define DSP_HSPI   false      // use HSPI for displays (miso=12, mosi=13, clk=14) instead of VSPI (by default)
 #endif
@@ -157,6 +169,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef I2S_MCLK
   #define I2S_MCLK 255  // optional MCLK (not wired by default)
 #endif
+#if (I2S_DOUT!=255) && (VS1053_CS!=255)
+  #error define error in myoptions.h: both I2S_DOUT and VS1053_CS are active - set I2S_DOUT 255 or VS1053_CS 255 to disable one
+#endif
 
 /*             SDCARD             */
 #ifndef SDC_CS
@@ -176,6 +191,18 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #else
     #define SDSPISPEED 20000000 // safe
   #endif
+#endif
+#ifndef SD_CARD_DETECT_PIN
+  #define SD_CARD_DETECT_PIN 255  // GPIO pin for mechanical SD card-detect switch (LOW=card present, HIGH=slot empty). 255 = disabled.
+#endif
+#ifndef SD_AUTOPLAY
+  #define SD_AUTOPLAY false  // auto-switch to SD card mode when card is inserted (hot-insert detection). Requires SD_CARD_DETECT_PIN != 255
+#endif
+#ifndef SD_MAX_LEVELS
+  #define SD_MAX_LEVELS 3 //  search depth for files on the SD card
+#endif
+#if (SD_MAX_LEVELS < 1) || (SD_MAX_LEVELS > 10)
+  #error define error in myoptions.h: SD_MAX_LEVELS must be between 1 and 10
 #endif
 
 /*            ENCODER             */
@@ -242,6 +269,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef BTN_PRESS_TICKS
   #define BTN_PRESS_TICKS 500
 #endif
+#if BTN_PRESS_TICKS <= BTN_CLICK_TICKS
+  #error define error in myoptions.h: BTN_PRESS_TICKS must be greater than BTN_CLICK_TICKS
+#endif
 
 /*          TOUCH SCREEN          */
 #define TS_MODEL_UNDEFINED 0
@@ -251,6 +281,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 
 #ifndef TS_MODEL
   #define TS_MODEL TS_MODEL_UNDEFINED
+#endif
+#if (TS_MODEL < 0) || (TS_MODEL > 3)
+  #error define error in myoptions.h: TS_MODEL must be TS_MODEL_UNDEFINED, TS_MODEL_XPT2046, TS_MODEL_GT911, or TS_MODEL_FT6336
 #endif
 
 #ifndef TS_CS
@@ -301,6 +334,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef RTC_MODULE
   #define RTC_MODULE RTC_MODULE_UNDEFINED  /*  DS3231 or DS1307  */
 #endif
+#if (RTC_MODULE < 0) || (RTC_MODULE > 2)
+  #error define error in myoptions.h: RTC_MODULE must be DS3231 or DS1307 (or leave undefined)
+#endif
 #ifndef RTC_SDA
   #define RTC_SDA 255
 #endif
@@ -341,6 +377,30 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifdef RGB_LED_ORDER // Most WS2812 LEDs are actually GRB but can be over-ridden
   // #define RGB_LED_ORDER NEO_GRB
 #endif
+
+/* PREVENT BOARD-DEFINED PIN RE-USE */
+/* Board-assigned LED pins may float high/low and conflict with peripherals that share a reset pin. */
+#if REAL_LEDBUILTIN==TFT_RST
+  #error define error in myoptions.h: LED_BUILTIN is the same as TFT_RST
+#endif
+#if REAL_LEDBUILTIN==VS1053_RST
+  #error define error in myoptions.h: LED_BUILTIN is the same as VS1053_RST
+#endif
+#if (REAL_LEDBUILTIN != 255) && (I2C_RST != -1) && (REAL_LEDBUILTIN == I2C_RST)
+  #error define error in myoptions.h: LED_BUILTIN is the same as I2C_RST
+#endif
+#ifdef ESP_S3C3
+  #if (LED_BUILTIN_S3 != 255) && (LED_BUILTIN_S3 == TFT_RST)
+    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as TFT_RST
+  #endif
+  #if (LED_BUILTIN_S3 != 255) && (LED_BUILTIN_S3 == VS1053_RST)
+    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as VS1053_RST
+  #endif
+  #if (LED_BUILTIN_S3 != 255) && (I2C_RST != -1) && (LED_BUILTIN_S3 == I2C_RST)
+    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as I2C_RST
+  #endif
+#endif
+
 /*           SPI Stuff            */
 #include <SPI.h>
 #if !defined(CONFIG_IDF_TARGET_ESP32)
@@ -361,8 +421,14 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef WIFI_ATTEMPTS
   #define WIFI_ATTEMPTS 16
 #endif
-#ifndef LOOP_TASK_STACK_SIZE      // sets the stack size for the FreeRTOS task that runs the main loop
-  #define LOOP_TASK_STACK_SIZE 8  // Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks
+#if WIFI_ATTEMPTS < 1
+  #error define error in myoptions.h: WIFI_ATTEMPTS must be at least 1
+#endif
+#ifndef LOOP_TASK_STACK_SIZE     // sets the stack size for the FreeRTOS task that runs the main loop
+  #define LOOP_TASK_STACK_SIZE 8 // Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks
+#endif
+#if (LOOP_TASK_STACK_SIZE < 4) || (LOOP_TASK_STACK_SIZE > 64)
+  #error define error in myoptions.h: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
 #endif
 #ifndef CONFIG_ASYNC_TCP_QUEUE_SIZE
   #define CONFIG_ASYNC_TCP_QUEUE_SIZE 64 // maybe 32 for ESP32?
@@ -376,7 +442,14 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifdef MAX_PL_READ_BYTES
   //#define MAX_PL_READ_BYTES 65536 // Makes chunked HTML transfers... possibly enable if experiencing slowdowns when sending web UI to client. Untested.
 #endif
-
+/* Below defines maximum lengths of character buffers */
+/* Notes have been made regarding old yoRadio values */
+#ifndef WEATHER_STRING_L
+  #define WEATHER_STRING_L 512 // size of weather string, formerly 254
+#endif
+#ifndef WEBSOCKET_BUFFER
+  #define WEBSOCKET_BUFFER 384 // formerly BUFLEN * 2 = 340
+#endif
 
 #ifndef CONNECT_HTTP_HTTPS_TIMEOUT
   // Connection timeout in milliseconds: HTTP, HTTPS(SSL)
@@ -409,8 +482,17 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define ROTATE_90 false // Optional 90 degree rotation for square displays
 #endif
 #ifndef WAKE_PIN
-  #define WAKE_PIN 255 // Wake Pin (for manual wakeup from sleep mode. can match with BTN_XXXX, ENC_BTNB, ENC2_BTNB.  must be one of: 0,2,4,12,13,14,15,25,26,27,32,33,34,35,36,39)
+  #define WAKE_PIN 255 // Wake Pin (manual wakeup from deep sleep. can match with BTN_XXXX, ENC_BTNB, ENC2_BTNB)
+                       // ESP32:   RTC-capable GPIOs only: 0,2,4,12-15,25-27,32-39
+                       // ESP32-S3: RTC-capable GPIOs only: 0-21
+                       // ESP32-C3: RTC-capable GPIOs only: 0-5
 #endif
+// WAKE_PIN polarity default: LOW = active-low button (pin held HIGH by pull-up; wakes when button pulls to GND)
+// #define WAKE_PIN_STATE HIGH for active-high circuits (pin held LOW by pull-down; wakes when button pulls to VCC)
+#ifndef WAKE_PIN_STATE
+  #define WAKE_PIN_STATE LOW
+#endif
+
 #ifndef LIGHT_SENSOR
   #define LIGHT_SENSOR 255 // Light sensor
 #endif
@@ -441,12 +523,6 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef BITRATE_FULL
   #define BITRATE_FULL true // display bitrate badge
 #endif
-#ifndef SD_AUTOPLAY
-  #define SD_AUTOPLAY true // auto play from SD card when inserted
-#endif
-#ifndef SD_MAX_LEVELS
-  #define SD_MAX_LEVELS 3 //  search depth for files on the SD card
-#endif
 
 /*               IR               */
 #ifndef IR_PIN
@@ -456,104 +532,103 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define IR_TIMEOUT 80 // kTimeout, see IRremoteESP8266 documentation
 #endif
 
-/*        THEME                                        */
-/* Over-ridden by mytheme.h - here is yoRadio defaults */
-/*        color name                R,   G,   B        */
-#ifndef COLOR_BACKGROUND
+/* ehRadio Color Theme: over-ridden by mytheme.h */
+/*        color name                R,   G,   B  */
+#ifndef COLOR_BACKGROUND // background
   #define COLOR_BACKGROUND          0,   0,   0
 #endif
-#ifndef COLOR_STATION_NAME
+#ifndef COLOR_STATION_NAME // station text color
   #define COLOR_STATION_NAME        0,   0,   0
 #endif
-#ifndef COLOR_STATION_BG
-  #define COLOR_STATION_BG        231, 211,  90
+#ifndef COLOR_STATION_BG // current station background
+  #define COLOR_STATION_BG          0, 100, 255
 #endif
-#ifndef COLOR_STATION_FILL
-  #define COLOR_STATION_FILL      231, 211,  90
+#ifndef COLOR_STATION_FILL // fill color (outside bg)
+  #define COLOR_STATION_FILL        0,  98, 250
 #endif
-#ifndef COLOR_SNG_TITLE_1
+#ifndef COLOR_SNG_TITLE_1 // first title
   #define COLOR_SNG_TITLE_1       255, 255, 255
 #endif
-#ifndef COLOR_SNG_TITLE_2
-  #define COLOR_SNG_TITLE_2       165, 162, 132
+#ifndef COLOR_SNG_TITLE_2 // second title
+  #define COLOR_SNG_TITLE_2       220, 220, 220
 #endif
-#ifndef COLOR_WEATHER
-  #define COLOR_WEATHER           255, 150,   0
+#ifndef COLOR_WEATHER // weather string
+  #define COLOR_WEATHER             0, 255,   0
 #endif
-#ifndef COLOR_VU_MAX
-  #define COLOR_VU_MAX            231, 211,  90
+#ifndef COLOR_VU_MAX // max of VU meter "FireBrick"
+  #define COLOR_VU_MAX            178,  34,  34
 #endif
-#ifndef COLOR_VU_MIN
-  #define COLOR_VU_MIN            123, 125, 123
+#ifndef COLOR_VU_MIN // min of VU meter "Green"
+  #define COLOR_VU_MIN              0, 128,   0
 #endif
-#ifndef COLOR_CLOCK
-  #define COLOR_CLOCK             231, 211,  90
+#ifndef COLOR_CLOCK // clock color
+  #define COLOR_CLOCK             255,  32,  16
 #endif
-#ifndef COLOR_CLOCK_BG
-  #define COLOR_CLOCK_BG           28,  28,  28
+#ifndef COLOR_CLOCK_BG // clock color background
+  #define COLOR_CLOCK_BG           30,   2,   2
 #endif
-#ifndef COLOR_SECONDS
-  #define COLOR_SECONDS           231, 211,  90
+#ifndef COLOR_SECONDS // seconds color (DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
+  #define COLOR_SECONDS           255,  16,   4
 #endif
-#ifndef COLOR_DAY_OF_W
-  #define COLOR_DAY_OF_W          255, 255, 255
+#ifndef COLOR_DAY_OF_W // day of week color (for DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
+  #define COLOR_DAY_OF_W          240, 240, 240
 #endif
-#ifndef COLOR_DATE
-  #define COLOR_DATE              165, 162, 132
+#ifndef COLOR_DATE // date color (DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
+  #define COLOR_DATE              255, 255, 255
 #endif
-#ifndef COLOR_HEAP
-  #define COLOR_HEAP               41,  40,  41
+#ifndef COLOR_HEAP // heap string
+  #define COLOR_HEAP              231, 115,   0
 #endif
-#ifndef COLOR_BUFFER
-  #define COLOR_BUFFER            165, 162, 132
+#ifndef COLOR_BUFFER // buffer line
+  #define COLOR_BUFFER            220, 220,  90
 #endif
-#ifndef COLOR_IP
-  #define COLOR_IP                165, 162, 132
+#ifndef COLOR_IP // IP address
+  #define COLOR_IP                200, 20,  240
 #endif
-#ifndef COLOR_VOLUME_VALUE
-  #define COLOR_VOLUME_VALUE      165, 162, 132
+#ifndef COLOR_VOLUME_VALUE // volume number
+  #define COLOR_VOLUME_VALUE      15,  180,  15
 #endif
-#ifndef COLOR_RSSI
-  #define COLOR_RSSI              165, 162, 132
+#ifndef COLOR_RSSI // rssi
+  #define COLOR_RSSI              200,  20, 240
 #endif
-#ifndef COLOR_VOLBAR_OUT
-  #define COLOR_VOLBAR_OUT        231, 211,  90
+#ifndef COLOR_VOLBAR_OUT // border of volume bar
+  #define COLOR_VOLBAR_OUT        30,  200,  30
 #endif
-#ifndef COLOR_VOLBAR_IN
-  #define COLOR_VOLBAR_IN         231, 211,  90
+#ifndef COLOR_VOLBAR_IN // inside volume bar
+  #define COLOR_VOLBAR_IN         5,   140,   5
 #endif
-#ifndef COLOR_DIGITS
+#ifndef COLOR_DIGITS // numbers...?
   #define COLOR_DIGITS            255, 255, 255
 #endif
-#ifndef COLOR_DIVIDER
-  #define COLOR_DIVIDER           165, 162, 132
+#ifndef COLOR_DIVIDER // lines around clock
+  #define COLOR_DIVIDER           132, 132, 165
 #endif
-#ifndef COLOR_PL_CURRENT
-  #define COLOR_PL_CURRENT          0,   0,   0
+#ifndef COLOR_PL_CURRENT // playlist current item
+  #define COLOR_PL_CURRENT          0, 170, 250
 #endif
-#ifndef COLOR_PL_CURRENT_BG
-  #define COLOR_PL_CURRENT_BG     231, 211,  90
+#ifndef COLOR_PL_CURRENT_BG // playlist current item background
+  #define COLOR_PL_CURRENT_BG      30,  30,  30
 #endif
-#ifndef COLOR_PL_CURRENT_FILL
-  #define COLOR_PL_CURRENT_FILL   231, 211,  90
+#ifndef COLOR_PL_CURRENT_FILL // playlist current item fill background
+  #define COLOR_PL_CURRENT_FILL    60,  60,  60
 #endif
-#ifndef COLOR_PLAYLIST_0
-  #define COLOR_PLAYLIST_0        115, 115, 115
+#ifndef COLOR_PLAYLIST_0 // playlist string 0
+  #define COLOR_PLAYLIST_0        250, 250, 250
 #endif
-#ifndef COLOR_PLAYLIST_1
-  #define COLOR_PLAYLIST_1         89,  89,  89
+#ifndef COLOR_PLAYLIST_1 // playlist string 1
+  #define COLOR_PLAYLIST_1        230, 230, 230
 #endif
-#ifndef COLOR_PLAYLIST_2
-  #define COLOR_PLAYLIST_2         56,  56,  56
+#ifndef COLOR_PLAYLIST_2 // playlist string 2
+  #define COLOR_PLAYLIST_2        210, 210, 210
 #endif
-#ifndef COLOR_PLAYLIST_3
-  #define COLOR_PLAYLIST_3         35,  35,  35
+#ifndef COLOR_PLAYLIST_3 // playlist string 3
+  #define COLOR_PLAYLIST_3        190, 190, 190
 #endif
-#ifndef COLOR_PLAYLIST_4
-  #define COLOR_PLAYLIST_4         25,  25,  25
+#ifndef COLOR_PLAYLIST_4 // playlist string 4
+  #define COLOR_PLAYLIST_4        170, 170, 170
 #endif
-#ifndef COLOR_BITRATE
-  #define COLOR_BITRATE           231, 211,  90
+#ifndef COLOR_BITRATE // stream bitrate
+  #define COLOR_BITRATE           220, 220,  90
 #endif
 
 /*        SYSTEM DEFAULTS         */
@@ -580,6 +655,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifndef BUFLEN
   #define BUFLEN 170 // 170 seems safe... a lot of multipliers exist in the code...
+#endif
+#if BUFLEN < 64
+  #error define error in myoptions.h: BUFLEN is too small (minimum 64, default 170)
 #endif
 
 /* This bit will actually do something but needs to be handled a different way - configurable would be better */
@@ -610,6 +688,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifndef BATTERY_DIM_BRIGHTNESS
   #define BATTERY_DIM_BRIGHTNESS 20 // Battery dim fixed brightness when LOW battery (percentage 0-100)
+#endif
+#if (BATTERY_DIM_BRIGHTNESS < 0) || (BATTERY_DIM_BRIGHTNESS > 100)
+  #error define error in myoptions.h: BATTERY_DIM_BRIGHTNESS must be a percentage between 0 and 100
 #endif
 #ifndef BATTERY_RECOVER_HYSTERESIS_PCT
   #define BATTERY_RECOVER_HYSTERESIS_PCT 5 // Hysteresis for recovering from low-battery dimming (percent)
@@ -644,13 +725,21 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef BATTERY_LOW_THRESHOLD
   #define BATTERY_LOW_THRESHOLD 25 // Low battery warning threshold (percentage, 0-100)
 #endif
+#if (BATTERY_LOW_THRESHOLD < 0) || (BATTERY_LOW_THRESHOLD > 100)
+  #error define error in myoptions.h: BATTERY_LOW_THRESHOLD must be a percentage between 0 and 100
+#endif
 #ifndef BATTERY_CRITICAL_THRESHOLD
   #define BATTERY_CRITICAL_THRESHOLD 5 // Critical battery threshold (percentage, 0-100)
+#endif
+#if (BATTERY_CRITICAL_THRESHOLD < 0) || (BATTERY_CRITICAL_THRESHOLD > 100)
+  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be a percentage between 0 and 100
+#endif
+#if BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD
+  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be less than BATTERY_LOW_THRESHOLD
 #endif
 #ifdef BATTERY_DEBUG
   // if defined enables full information about battery in serial log
 #endif
-
 
 /*     SOURCE OF UPDATE FILES     */
 /* only used if FIRMWARE is defined as it is in Trip5's automatic Github builds */
@@ -768,35 +857,44 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 /*         USER DEFAULTS          */
 /*   sets defaults in config.h    */
 /*    still editable in WebUI     */
+#if defined(SOUND_VOLUME) && ((SOUND_VOLUME < 0) || (SOUND_VOLUME > 254))
+  #warning "define warning in myoptions.h: SOUND_VOLUME is out of range (0-254), reverting to default 12"
+  #undef SOUND_VOLUME
+#endif
 #ifndef SOUND_VOLUME
   #define SOUND_VOLUME 12
-#elif (SOUND_VOLUME < 0) || (SOUND_VOLUME > 254)
-  #undef SOUND_VOLUME
+#endif
+#if defined(SOUND_BALANCE) && ((SOUND_BALANCE < -16) || (SOUND_BALANCE > 16))
+  #warning "define warning in myoptions.h: SOUND_BALANCE is out of range (-16 to 16), reverting to default 0"
+  #undef SOUND_BALANCE
 #endif
 #ifndef SOUND_BALANCE
   #define SOUND_BALANCE 0
-#elif (SOUND_BALANCE < -16) || (SOUND_BALANCE > 16)
-  #undef SOUND_BALANCE
+#endif
+#if defined(EQ_TREBLE) && ((EQ_TREBLE < -16) || (EQ_TREBLE > 16))
+  #warning "define warning in myoptions.h: EQ_TREBLE is out of range (-16 to 16), reverting to default 0"
+  #undef EQ_TREBLE
 #endif
 #ifndef EQ_TREBLE
   #define EQ_TREBLE 0
-#elif (EQ_TREBLE < -16) || (EQ_TREBLE > 16)
-  #undef EQ_TREBLE
+#endif
+#if defined(EQ_MIDDLE) && ((EQ_MIDDLE < -16) || (EQ_MIDDLE > 16))
+  #warning "define warning in myoptions.h: EQ_MIDDLE is out of range (-16 to 16), reverting to default 0"
+  #undef EQ_MIDDLE
 #endif
 #ifndef EQ_MIDDLE
   #define EQ_MIDDLE 0
-#elif (EQ_MIDDLE < -16) || (EQ_MIDDLE > 16)
-  #undef EQ_MIDDLE
+#endif
+#if defined(EQ_BASS) && ((EQ_BASS < -16) || (EQ_BASS > 16))
+  #warning "define warning in myoptions.h: EQ_BASS is out of range (-16 to 16), reverting to default 0"
+  #undef EQ_BASS
 #endif
 #ifndef EQ_BASS
   #define EQ_BASS 0
-#elif (EQ_BASS < -16) || (EQ_BASS > 16)
-  #undef EQ_BASS
 #endif
 #ifndef SD_SHUFFLE
   #define SD_SHUFFLE false
 #endif
-
 #ifndef SMART_START
   #define SMART_START false
 #endif
@@ -812,12 +910,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef EHDP
   #define EHDP true
 #endif
-#ifndef SOFTAP_REBOOT_DELAY
-  #define SOFTAP_REBOOT_DELAY 0
-#elif (SOFTAP_REBOOT_DELAY < 0) || (SOFTAP_REBOOT_DELAY > 20)
+#if defined(SOFTAP_REBOOT_DELAY) && ((SOFTAP_REBOOT_DELAY < 0) || (SOFTAP_REBOOT_DELAY > 20))
+  #warning "define warning in myoptions.h: SOFTAP_REBOOT_DELAY is out of range (0-20), reverting to default 0"
   #undef SOFTAP_REBOOT_DELAY
 #endif
-
+#ifndef SOFTAP_REBOOT_DELAY
+  #define SOFTAP_REBOOT_DELAY 0
+#endif
 #ifndef SCREEN_FLIP
   #define SCREEN_FLIP false
 #endif
@@ -833,27 +932,32 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef VOLUME_PAGE
   #define VOLUME_PAGE false
 #endif
+#if defined(SCREEN_BRIGHTNESS) && ((SCREEN_BRIGHTNESS < 1) || (SCREEN_BRIGHTNESS > 100))
+  #warning "define warning in myoptions.h: SCREEN_BRIGHTNESS is out of range (1-100), reverting to default 100"
+  #undef SCREEN_BRIGHTNESS
+#endif
 #ifndef SCREEN_BRIGHTNESS
   #define SCREEN_BRIGHTNESS 100
-#elif (SCREEN_BRIGHTNESS < 1) || (SCREEN_BRIGHTNESS > 100)
-  #undef SCREEN_BRIGHTNESS
+#endif
+#if defined(SCREEN_CONTRAST) && ((SCREEN_CONTRAST < 1) || (SCREEN_CONTRAST > 100))
+  #warning "define warning in myoptions.h: SCREEN_CONTRAST is out of range (1-100), reverting to default 55"
+  #undef SCREEN_CONTRAST
 #endif
 #ifndef SCREEN_CONTRAST
   #define SCREEN_CONTRAST 55
-#elif (SCREEN_CONTRAST < 1) || (SCREEN_CONTRAST > 100)
-  #undef SCREEN_CONTRAST
 #endif
-
 #ifndef SS_NOTPLAYING
   #define SS_NOTPLAYING false
 #endif
 #ifndef SS_NOTPLAYING_BLANK
   #define SS_NOTPLAYING_BLANK false
 #endif
+#if defined(SS_NOTPLAYING_TIME) && ((SS_NOTPLAYING_TIME < 1) || (SS_NOTPLAYING_TIME > 65520))
+  #warning "define warning in myoptions.h: SS_NOTPLAYING_TIME is out of range (1-65520), reverting to default 1"
+  #undef SS_NOTPLAYING_TIME
+#endif
 #ifndef SS_NOTPLAYING_TIME
   #define SS_NOTPLAYING_TIME 1
-#elif (SS_NOTPLAYING_TIME < 1) || (SS_NOTPLAYING_TIME > 65520)
-  #undef SS_NOTPLAYING_TIME
 #endif
 #ifndef SS_PLAYING
   #define SS_PLAYING false
@@ -861,16 +965,19 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef SS_PLAYING_BLANK
   #define SS_PLAYING_BLANK false
 #endif
-#ifndef SS_PLAYING_TIME
-  #define SS_PLAYING_TIME 5
-#elif (SS_PLAYING_TIME < 1) || (SS_PLAYING_TIME > 1080)
+#if defined(SS_PLAYING_TIME) && ((SS_PLAYING_TIME < 1) || (SS_PLAYING_TIME > 1080))
+  #warning "define warning in myoptions.h: SS_PLAYING_TIME is out of range (1-1080), reverting to default 5"
   #undef SS_PLAYING_TIME
 #endif
-
+#ifndef SS_PLAYING_TIME
+  #define SS_PLAYING_TIME 5
+#endif
+#if defined(VOLUME_STEPS) && ((VOLUME_STEPS < 1) || (VOLUME_STEPS > 10))
+  #warning "define warning in myoptions.h: VOLUME_STEPS is out of range (1-10), reverting to default 1"
+  #undef VOLUME_STEPS
+#endif
 #ifndef VOLUME_STEPS
   #define VOLUME_STEPS 1
-#elif (VOLUME_STEPS < 1) || (VOLUME_STEPS > 10)
-  #undef VOLUME_STEPS
 #endif
 #ifndef TOUCH_FLIP
   #define TOUCH_FLIP false
@@ -878,20 +985,23 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef TOUCH_DEBUG
   #define TOUCH_DEBUG false
 #endif
+#if defined(ROTARY_ACCEL) && ((ROTARY_ACCEL < 1) || (ROTARY_ACCEL > 700))
+  #warning "define warning in myoptions.h: ROTARY_ACCEL is out of range (1-700), reverting to default 200"
+  #undef ROTARY_ACCEL
+#endif
 #ifndef ROTARY_ACCEL
   #define ROTARY_ACCEL 200
-#elif (ROTARY_ACCEL < 1) || (ROTARY_ACCEL > 700)
-  #undef ROTARY_ACCEL
 #endif
 #ifndef ONE_CLICK_SWITCH
   #define ONE_CLICK_SWITCH false
 #endif
-#ifndef IR_TOLERANCE
-  #define IR_TOLERANCE 35
-#elif (IR_TOLERANCE < 10) || (IR_TOLERANCE > 80)
+#if defined(IR_TOLERANCE) && ((IR_TOLERANCE < 10) || (IR_TOLERANCE > 80))
+  #warning "define warning in myoptions.h: IR_TOLERANCE is out of range (10-80), reverting to default 35"
   #undef IR_TOLERANCE
 #endif
-
+#ifndef IR_TOLERANCE
+  #define IR_TOLERANCE 35
+#endif
 #ifndef TIMEZONE_NAME
   #define TIMEZONE_NAME "Canada/Atlantic"
 #endif
@@ -911,10 +1021,18 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
     #define TIME_SYNC_INTERVAL 1
   #endif
 #endif
-
+#if (TIME_SYNC_INTERVAL < 1) || (TIME_SYNC_INTERVAL > 24)
+  #error define error in myoptions.h: TIME_SYNC_INTERVAL must be a number from 1 to 24 (hours)
+#endif
 #ifndef WEATHER_API
   #define WEATHER_API "OM1"
 #endif
+static_assert(
+  __builtin_strcmp(WEATHER_API, "OM1")  == 0 ||
+  __builtin_strcmp(WEATHER_API, "OW25") == 0 ||
+  __builtin_strcmp(WEATHER_API, "OW30") == 0,
+  "define error in myoptions.h: WEATHER_API must be \"OM1\", \"OW25\", or \"OW30\""
+);
 #ifndef WEATHER_LAT
   #define WEATHER_LAT "44.64738"
 #endif
@@ -923,6 +1041,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifndef WEATHER_SYNC_INTERVAL // minutes
   #define WEATHER_SYNC_INTERVAL 15
+#endif
+#if (WEATHER_SYNC_INTERVAL < 10) || (WEATHER_SYNC_INTERVAL > 60)
+  #error define error in myoptions.h: WEATHER_SYNC_INTERVAL must be a number from 10 to 60 (minutes)
 #endif
 /* Most of the world uses Metric but you can over-ride in myoptions.h */
 #ifndef WEATHER_METRIC
@@ -951,7 +1072,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
     #define WEATHER_WIND_SPEED_UNITS "mph"
   #endif
 #endif
-
+static_assert(
+  __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "kmh") == 0 ||
+  __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "mph") == 0 ||
+  __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "kn")  == 0 ||
+  __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "m/s") == 0,
+  "define error in myoptions.h: WEATHER_WIND_SPEED_UNITS must be \"kmh\", \"mph\", \"kn\", or \"m/s\""
+);
 #ifndef MQTT_HOST
   #define MQTT_HOST "192.168.1.2"
 #endif

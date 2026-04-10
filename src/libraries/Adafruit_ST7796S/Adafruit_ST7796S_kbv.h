@@ -31,9 +31,9 @@
 #ifndef _ADAFRUIT_ST7796S_KBV_H_
 #define _ADAFRUIT_ST7796S_KBV_H_
 
-#include "Adafruit_GFX.h"
+#include <Adafruit_GFX.h>
 #include <Arduino.h>
-#include "Print.h"
+#include <Print.h>
 #include <Adafruit_SPITFT.h>
 #include <Adafruit_SPITFT_Macros.h>
 #include <SPI.h>

@@ -12,9 +12,23 @@
  ********************************************************/
 
 //==================================================
-// Determine which locale file to include based on DSP_LANGUAGE_xx_XX flag
-// Also set language string and codepage flags
+// #define DSP_LANGUAGE_xx_XX defines the display locale
+// Other locale settings are auto-selected but can be
+// changed with over-ride defines.
+//
+// L10N_INCLUDE : display language file
+// DSP_LOCALE : locale abbreviation of display language
+// L10N_CP_LATIN or L10N_CP_CYRILLIC select font for display
+// WEATHER_LANG : used by OpenWeather API
+// WEBUI_LOCALE : selects .json for localized WebUI
+//                default is same as DSP_LOCALE
+//                (WebUI can support more languages than Display)
 //==================================================
+
+/* Guard against multiple codepages */
+#if defined(L10N_CP_CYRILLIC) && defined(L10N_CP_LATIN)
+  #error define error in myoptions.h: L10N_CP_CYRILLIC and L10N_CP_LATIN cannot both be defined
+#endif
 
 #if __has_include("../locale/displayL10n_custom.h")
   #define L10N_INCLUDE "../locale/displayL10n_custom.h"
@@ -437,7 +451,7 @@
 #endif
 
 /* Default is to use the same language in the WebUI as the display */
-/* This can be over-ridden in myoptions.h */
+/* This can be over-ridden in myoptions.h with something like #define WEBUI_LOCALE "de_DE" */
 #ifndef WEBUI_LOCALE
   #define WEBUI_LOCALE DSP_LOCALE
 #endif

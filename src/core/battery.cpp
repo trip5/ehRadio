@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-#include "core/battery.h"
-#include "core/common.h"
-#include "core/display.h"
-#include "core/config.h"
-#include "core/telnet.h"
-#include "core/netserver.h"
-#include <stdarg.h>
+#include "battery.h"
 
 #if (defined(BATTERY_PIN) && (BATTERY_PIN!=255)) || (defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255))
+#include <stdarg.h>
+#include "common.h"
+#include "config.h"
+#include "display.h"
+#include "netserver.h"
+#include "telnet.h"
 
 static bool _battery_inited = false;   // ADC available
 static bool _charge_pin_present = false; // Charge-status pin available
@@ -883,6 +883,22 @@ void battery_recalc_now() {
   }
 } 
 
+// Compute and save a new ADC reference from a measured voltage (mV).
+// Returns true if the calibration was accepted and saved.
+bool battery_calibrate(int meas_mv) {
+  if (meas_mv < 2500 || meas_mv > 4500) return false;
+  BatteryStatus b = battery_get_status();
+  if (!b.valid || b.voltage_mv == 0) return false;
+  double ratio = ((double)meas_mv) / ((double)b.voltage_mv);
+  if (ratio < 0.5 || ratio > 2.0) return false;
+  uint32_t curr_ref = (uint32_t)(config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : BATTERY_ADC_REF_MV);
+  uint32_t suggested_ref = (uint32_t)((double)curr_ref * ratio + 0.5);
+  if (suggested_ref < 2000 || suggested_ref > 4000) return false;
+  config.saveValue(&config.store.battery_adc_ref_mv, (uint16_t)suggested_ref);
+  battery_recalc_now();
+  return true;
+}
+
 #else
 // No-op stubs when BATTERY_PIN not defined
 void battery_init() {}
@@ -894,4 +910,5 @@ const BatteryStatus& battery_get_status() {
 }
 bool battery_is_initialized() { return false; }
 void battery_recalc_now() {}
+bool battery_calibrate(int) { return false; }
 #endif

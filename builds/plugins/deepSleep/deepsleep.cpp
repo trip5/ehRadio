@@ -11,7 +11,9 @@
 
 #define SLEEP_DELAY     60        /* 1 min        deep sleep delay                                                */
 #define WAKEUP_PIN      ENC_BTNB  /*              wakeup pin (one of: BTN_XXXX, ENC_BTNB, ENC2_BTNB)              */
-                                  /*              must be one of: 0,2,4,12,13,14,15,25,26,27,32,33,34,35,36,39    */
+                                  /*              ESP32: must be RTC-capable: 0,2,4,12-15,25-27,32-39            */
+                                  /*              ESP32-S3: any digital-input-capable GPIO                        */
+                                  /*              ESP32-C3: must be RTC-capable: 0, 1, 2, 3, 4, 5                 */
 #define WAKEUP_LEVEL    LOW       /*              wakeup level (usually LOW)                                      */
 
 Ticker deepSleepTicker;
@@ -34,7 +36,11 @@ void goToSleep(){
 void deepSleep::on_setup(){                                             /*  occurs during loading                 */
   log_i("%s called", __func__ );
   if(WAKEUP_PIN!=255){
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKEUP_PIN, WAKEUP_LEVEL);   /*  enable wakeup pin                     */
+    #if defined(ARDUINO_ESP32C3_DEV)
+      esp_deep_sleep_enable_gpio_wakeup((1ULL << WAKEUP_PIN), (WAKEUP_LEVEL == LOW) ? ESP_GPIO_WAKEUP_GPIO_LOW : ESP_GPIO_WAKEUP_GPIO_HIGH);
+    #else
+      esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKEUP_PIN, WAKEUP_LEVEL);   /*  enable wakeup pin                     */
+    #endif
     deepSleepTicker.attach(SLEEP_DELAY, goToSleep);                       /*  attach to delay                       */
   }
 }

@@ -137,10 +137,10 @@ function onMessage(event) {
     if(typeof data.sdinit !== 'undefined') {
       if(data.sdinit==1) {
         getId('playernav').classList.add("sd");
-        getId('volmbutton').classList.add("hidden");
+        getId('voldownbutton').classList.add("hidden");
       }else{
         getId('playernav').classList.remove("sd");
-        getId('volmbutton').classList.remove("hidden");
+        getId('voldownbutton').classList.remove("hidden");
       }
     }
     if(typeof data.sdpos !== 'undefined' && getId("sdpos")){

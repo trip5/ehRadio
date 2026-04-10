@@ -10,7 +10,7 @@ window.addEventListener('load', onCuratedLoad);
 function onCuratedLoad(event) {
   // Set curated source info if available
   if (typeof curatedName !== 'undefined' && curatedName) {
-    document.getElementById('curatedBy').innerHTML = `<a target="_blank" href="${curatedLink || '#'}">${curatedName}</a>`;
+    document.getElementById('curatedBy').innerHTML = `<a target="_blank" href="${curatedLink || '#'}">${escapeHtml(curatedName)}</a>`;
   }
 
   // Event listeners

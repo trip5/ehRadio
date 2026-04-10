@@ -1,27 +1,24 @@
-#include <Arduino.h>
-#include <esp_system.h>
-
 #include "core/options.h"
-
-SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
-
-#include "core/config.h"
-#include "pluginsManager/pluginsManager.h"
-#include "core/telnet.h"
-#include "core/player.h"
-#include "core/display.h"
-#include "core/network.h"
+#include <Arduino.h>
 #include <DNSServer.h>
-#include "core/netserver.h"
-#include "core/controls.h"
-#include "core/mqtt.h"
-#include "core/optionschecker.h"
-#include "core/rgbled.h"
+#include <esp_sleep.h>
+#include <esp_system.h>
 #include "core/battery.h"
-#include "esp_sleep.h"
+#include "core/config.h"
+#include "core/controls.h"
+#include "core/display.h"
+#include "core/mqtt.h"
+#include "core/netserver.h"
+#include "core/network.h"
+#include "core/player.h"
+#include "core/rgbled.h"
+#include "core/telnet.h"
+#include "pluginsManager/pluginsManager.h"
 #ifdef USE_NEXTION
   #include "displays/nextion.h"
 #endif
+
+SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
 
 #if DSP_HSPI || TS_HSPI || VS_HSPI
   SPIClass SPI2(HSPI);
@@ -75,7 +72,7 @@ void setup() {
     netserver.setBootReady(true);
     return;
   }
-  if (SDC_CS!=255) {
+  if (SDC_CS!=255 && config.store.play_mode==PM_SDCARD) {
     display.putRequest(WAITFORSD, 0);
     Serial.print("##[BOOT]#\tSD search\t");
   }
@@ -122,6 +119,7 @@ void loop() {
 
   if (network.status == CONNECTED || network.status==SDREADY) {
     player.loop();
+    config.processDeferredSaves();
   }
   loopControls();
   netserver.loop();
@@ -230,10 +228,7 @@ void battery_dim_loop() {
         battery_critical_handled = false;
         return;
       }
-      #if defined(WAKE_PIN) && (WAKE_PIN!=255)
-        esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKE_PIN, LOW);
-      #endif
-      esp_deep_sleep_start();
+      config.doSleepW();
     }
   }
 

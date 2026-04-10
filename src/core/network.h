@@ -5,10 +5,6 @@
 #include <DNSServer.h>
 #include <ImprovWiFiLibrary.h>
 
-//#define TSYNC_DELAY 10800000    // 1000*60*60*3 = 3 hours
-// #define TSYNC_DELAY       3600000     // 1000*60*60   = 1 hour - unused
-#define WEATHER_STRING_L  254
-
 enum n_Status_e { CONNECTED, SOFT_AP, FAILED, SDREADY };
 
 class MyNetwork {
@@ -17,7 +13,7 @@ class MyNetwork {
 // Ensure DNSServer full definition is available
     struct tm timeinfo = {0};
     bool firstRun = true, forceTimeSync = true, forceWeather = true;
-    bool lostPlaying = false, beginReconnect = false;
+    volatile bool lostPlaying = false, beginReconnect = false;  // volatile: accessed from multiple tasks/cores (WiFi callbacks, player loop, retry task)
     //uint8_t tsFailCnt, wsFailCnt;
     Ticker ctimer;
     char *weatherBuf = nullptr;
@@ -49,6 +45,7 @@ void doSync(void * pvParameters);
 bool getWeather(char *wstr);
 
 extern MyNetwork network;
+extern TaskHandle_t streamRetryTaskHandle;
 
 extern __attribute__((weak)) void network_on_connect();
 

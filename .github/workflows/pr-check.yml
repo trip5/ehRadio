@@ -1,0 +1,117 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - ehradio
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+
+  # -------------------------------------------------------------------------
+  # Job 1: Branch guard
+  # Blocks PRs targeting 'ehradio' from anyone other than the repo owner.
+  # The 'ehradio' branch is kept in sync with 'dev' by the owner only.
+  # -------------------------------------------------------------------------
+  branch-guard:
+    name: Branch check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block PRs to ehradio from non-owner
+        if: github.base_ref == 'ehradio' && github.actor != github.repository_owner
+        run: |
+          echo "❌ Pull requests to the 'ehradio' branch are not accepted."
+          echo ""
+          echo "Please retarget your PR to the 'dev' branch instead."
+          echo "The 'ehradio' branch is a release sync managed by the repo owner."
+          exit 1
+      - name: OK
+        run: echo "✅ Branch check passed."
+
+
+
+  # -------------------------------------------------------------------------
+  # Job 2: Static analysis via cppcheck + ReviewDog
+  # Runs only for PRs targeting 'dev'.
+  # Posts inline review comments on changed lines only (filter_mode: added).
+  # -------------------------------------------------------------------------
+  cppcheck:
+    name: Static analysis (cppcheck)
+    runs-on: ubuntu-latest
+    needs: branch-guard
+    if: github.base_ref == 'dev'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck and reviewdog
+        run: |
+          sudo apt-get install -y cppcheck
+          curl -sfL https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh \
+            | sh -s -- -b /usr/local/bin
+# Current version (note in case we need to pin the version): sh -s -- -b /usr/local/bin v0.20.2
+
+      - name: Run cppcheck via reviewdog
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cppcheck \
+            --enable=warning,style,performance \
+            --suppress=missingIncludeSystem \
+            --suppress=unmatchedSuppression \
+            --suppress=syntaxError \
+            --inline-suppr \
+            --language=c++ \
+            --std=c++17 \
+            -I src -I src/core -I src/displays \
+            --template='{file}:{line}:{column}: {severity}: {message} [{id}]' \
+            src/core src/displays/widgets src/main.cpp \
+            2>&1 | reviewdog \
+              -efm="%f:%l:%c: %t%*[^:]: %m %*[^ ]" \
+              -name="cppcheck" \
+              -reporter=github-pr-review \
+              -filter-mode=added \
+              -fail-level=any
+
+  # -------------------------------------------------------------------------
+  # Job 3: Compile firmware (test builds)
+  # Runs only for PRs targeting 'dev'.
+  # -------------------------------------------------------------------------
+  compile:
+    name: Compile firmware (test builds)
+    runs-on: ubuntu-latest
+    needs: branch-guard
+    if: github.base_ref == 'dev'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('builds/test/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Copy test config files
+        run: |
+          cp builds/test/platformio.ini platformio.ini
+          cp builds/test/myoptions.h myoptions.h
+
+      - name: Build test environments
+        run: pio run

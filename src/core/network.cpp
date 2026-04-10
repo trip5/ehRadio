@@ -1,21 +1,21 @@
 #include "options.h"
-#include <ESPmDNS.h>
 #include <time.h>
-#include "rtcsupport.h"
-#include "network.h"
-#include "display.h"
-#include "config.h"
-#include "telnet.h"
-#include "netserver.h"
-#include "player.h"
-#include "mqtt.h"
-#include "../pluginsManager/pluginsManager.h"
-#include <DNSServer.h>
-#include "locale.h"
-#include <ImprovWiFiLibrary.h>
 #include <ArduinoJson.h>
-#include <ESPFileUpdater.h>
+#include <DNSServer.h>
 #include <ehDP.h>
+#include <ESPFileUpdater.h>
+#include <ESPmDNS.h>
+#include <ImprovWiFiLibrary.h>
+#include "config.h"
+#include "display.h"
+#include "locale.h"
+#include "mqtt.h"
+#include "netserver.h"
+#include "network.h"
+#include "player.h"
+#include "rtcsupport.h"
+#include "telnet.h"
+#include "../pluginsManager/pluginsManager.h"
 
 #ifndef WIFI_ATTEMPTS
   #define WIFI_ATTEMPTS  16
@@ -114,6 +114,10 @@ void ticks() {
     }
     #ifdef USE_SD
       if (display.mode()!=SDCHANGE) player.sendCommand({PR_CHECKSD, 0});
+      #if SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255
+        if (config.getMode()!=PM_SDCARD && digitalRead(SD_CARD_DETECT_PIN)==LOW)
+          config.changeMode(PM_SDCARD);
+      #endif
     #endif
     player.sendCommand({PR_VUTONUS, 0});
   }
@@ -491,6 +495,7 @@ void MyNetwork::setWifiParams() {
   weatherBuf=NULL;
   trueWeather = false;
   #if (DSP_MODEL!=DSP_DUMMY || defined(USE_NEXTION)) && !defined(HIDE_WEATHER)
+    if (weatherBuf) { free(weatherBuf); weatherBuf = nullptr; }
     weatherBuf = (char *) malloc(sizeof(char) * WEATHER_STRING_L);
     memset(weatherBuf, 0, WEATHER_STRING_L);
   #endif
@@ -657,7 +662,7 @@ bool MyNetwork::buildWeatherString() {
     
     // If no cached data or cache expired, show loading message
     if (!WeatherCache::valid) {
-      strcpy(weatherBuf, LANG::weather_loading);
+      snprintf(weatherBuf, WEATHER_STRING_L, "%s", LANG::weather_loading);
       display.putRequest(NEWWEATHER);
       return false;
     }
@@ -695,19 +700,26 @@ bool MyNetwork::buildWeatherString() {
     
     // Build weather string dynamically based on enabled fields
     char *p = weatherBuf;
-    p += sprintf(p, "%s, %.1f%s", WeatherCache::description, temp_display, tempUnit);
+    size_t remaining = WEATHER_STRING_L;
+    int written;
+    written = snprintf(p, remaining, "%s, %.1f%s", WeatherCache::description, temp_display, tempUnit);
+    if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     
-    if (config.store.weatherfeels) {
-      p += sprintf(p, " \007 %s %.1f%s", LANG::weather_feelslike, feels_display, tempUnit);
+    if (config.store.weatherfeels && remaining > 1) {
+      written = snprintf(p, remaining, " \007 %s %.1f%s", LANG::weather_feelslike, feels_display, tempUnit);
+      if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherpressure) {
-      p += sprintf(p, " \007 %s %.0f %s", LANG::weather_pressure, press_display, pressUnit);
+    if (config.store.weatherpressure && remaining > 1) {
+      written = snprintf(p, remaining, " \007 %s %.0f %s", LANG::weather_pressure, press_display, pressUnit);
+      if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherhumidity) {
-      p += sprintf(p, " \007 %s %d%%", LANG::weather_humidity, WeatherCache::humidity);
+    if (config.store.weatherhumidity && remaining > 1) {
+      written = snprintf(p, remaining, " \007 %s %d%%", LANG::weather_humidity, WeatherCache::humidity);
+      if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherwind) {
-      p += sprintf(p, " \007 %s %.1f %s [%s]", LANG::weather_wind, wind_display, windUnit, LANG::wind[wind_dir_idx]);
+    if (config.store.weatherwind && remaining > 1) {
+      written = snprintf(p, remaining, " \007 %s %.1f %s [%s]", LANG::weather_wind, wind_display, windUnit, LANG::wind[wind_dir_idx]);
+      if (written > 0 && (size_t)written < remaining) { p += written; remaining -= (size_t)written; }
     }
     
     Serial.printf("Weather: %s\n", weatherBuf);

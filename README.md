@@ -10,20 +10,28 @@ This is a fork of yoRadio from version 0.9.533.  Many changes are coming... many
 
 The objective of this fork is to create a more pleasant experience to use for all users, including those we builders might want to give to family members.
 
-I will absolutely drop support for ESP8266 (mostly already deleted but some elements remain).  Support for low-end versions of ESP32s may get dropped (PSRAM is already a requirement).  I build with ESP32-S3s and various displays.
+No support for ESP8266.  Support for low-end versions of ESP32s may get dropped (PSRAM is already a requirement).  I build with ESP32-S3s and various displays.
 I can't test every piece of hardware this firmware is capable of suporting.
 
 I may drop support for certain components like Nextion (it's already likely broken).
 
-If you have issues it may help to also check yoRadio documentation.  The hardware implementations should still be 100% compatible.
+If you have issues it may help to also check yoRadio documentation.  The hardware implementations should still be 99% compatible.
 
 Documentation will be improved at some point... Until then, check this page and [yoRadio](https://github.com/e2002/yoradio) documentation.
 
 
 ## ehRadio Version history
 
+### 2026.04.09 - Feature Freeze ON
+  - Fixes worth a release even if still in repairs:
+    - aggressive re-connect on streams that disconnect (for any reason)
+    - SD card scan on boot fixed
+  - commandhandler re-arranged
+  - options.h expanded with checks (optionchecker.h removed)
+  - multiple other minor and major code changes
+
 ### 2026.03.30 - Feature Freeze ON
-  - not really a re-factor but the codebase is in serious need of repair
+  - the codebase is in serious need of organization and repair
     - see `.github/code-issues.md` for more info
     - please hold off on any PRs until this is finished (it could take some time)
     - the `ehRadio` branch will not be updated until finished
@@ -36,7 +44,7 @@ Documentation will be improved at some point... Until then, check this page and 
 ### 2026.03.22
   - [ehDP Library](https://github.com/trip5/ehDP) added
     - Device can be found using [eh Device Scanner](https://github.com/trip5/eh-Device-Scanner)
-  - Grabbable aand hovered items fixed in playlist editor for mobile devices
+  - Grabbable and hovered items fixed in playlist editor for mobile devices
   - Some major changes to the workflows that handle Releases and firmware generation
 
 ### 2026.03.18
@@ -64,7 +72,7 @@ Documentation will be improved at some point... Until then, check this page and 
     - configurable in WebUI
     - preferences for units can be defined in `myoptions.h` with
       - `#define WEATHER_METRIC false` (for °F, mmHg, mph)
-      - `#define WEATHER_IMPERIAL true` (for °C, hPa, km/h) (this is default)
+      - `#define WEATHER_METRIC true` (for °C, hPa, km/h) (this is default)
       - individual unit preferences can also be defined
         - `#define WEATHER_TEMPERATURE_F true` (for °F)
         - `#define WEATHER_PRESSURE_MMHG true` (for mmHg)

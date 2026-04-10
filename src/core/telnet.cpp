@@ -1,11 +1,11 @@
 #include "options.h"
 #include <stdarg.h>
-#include "config.h"
-#include "player.h"
-#include "network.h"
 #include "battery.h"
-#include "telnet.h"
+#include "config.h"
 #include "netserver.h" // For launchPlaybackTask
+#include "network.h"
+#include "player.h"
+#include "telnet.h"
 
 Telnet telnet;
 
@@ -518,8 +518,8 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
       printf(clientId, "New timezone offset: %c%02d:%02d\r\n", (tzh < 0 ? '-' : '+'), abs(tzh), tzm);
       printf(clientId, "##SYS.TZNAME#: %s\r\n", config.store.tz_name);
       printf(clientId, "##SYS.TZPOSIX#: %s\r\n", config.store.tzposix);
-      config.saveValue(config.store.tzposix, config.store.tzposix, sizeof(config.store.tzposix), true, true);
-      config.saveValue(config.store.tz_name, config.store.tz_name, sizeof(config.store.tz_name), true, true);
+      config.saveValue(config.store.tzposix, config.store.tzposix);
+      config.saveValue(config.store.tz_name, config.store.tz_name);
       network.forceTimeSync = true;
       network.requestTimeSync(true);
       return;
@@ -537,8 +537,8 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
       printf(clientId, "New timezone offset: %+d\r\n", tzh);
       printf(clientId, "##SYS.TZNAME#: %s\r\n", config.store.tz_name);
       printf(clientId, "##SYS.TZPOSIX#: %s\r\n", config.store.tzposix);
-      config.saveValue(config.store.tzposix, config.store.tzposix, sizeof(config.store.tzposix), true, true);
-      config.saveValue(config.store.tz_name, config.store.tz_name, sizeof(config.store.tz_name), true, true);
+      config.saveValue(config.store.tzposix, config.store.tzposix);
+      config.saveValue(config.store.tz_name, config.store.tz_name);
       network.forceTimeSync = true;
       network.requestTimeSync(true);
       return;
@@ -562,8 +562,8 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
           printf(clientId, "POSIX timezone string applied. If not valid, expect strange behavior!\r\n");
           printf(clientId, "##SYS.TZNAME#: %s\r\n", config.store.tz_name);
           printf(clientId, "##SYS.TZPOSIX: %s\r\n", config.store.tzposix);
-          config.saveValue(config.store.tzposix, config.store.tzposix, sizeof(config.store.tzposix), true, true);
-          config.saveValue(config.store.tz_name, config.store.tz_name, sizeof(config.store.tz_name), true, true);
+          config.saveValue(config.store.tzposix, config.store.tzposix);
+          config.saveValue(config.store.tz_name, config.store.tz_name);
           network.forceTimeSync = true;
           network.requestTimeSync(true);
         } else {

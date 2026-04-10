@@ -220,7 +220,7 @@ class ClockWidget: public Widget {
   #endif
   protected:
     char  _timebuffer[20]="00:00";
-    char _tmp[30], _datebuf[30];
+    char _tmp[64], _datebuf[30];
     uint8_t _superfont;
     uint16_t _clockleft, _clockwidth, _timewidth, _dotsleft, _linesleft;
     uint8_t  _clockheight, _timeheight, _dateheight, _space;

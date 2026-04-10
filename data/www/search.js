@@ -485,7 +485,7 @@ function populateSearchTable(data, afterSearch = false) {
             <path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/>
           </svg>
         </button></td>
-        <td class="name">${station.name}</td>
+        <td class="name">${escapeHtml(station.name)}</td>
         <td class="info">
           <table>
             <tr>
@@ -536,4 +536,10 @@ function handleStationAction(inx, addtoplaylist) {
   const name = station.name;
   const url = station.url_resolved || station.url;
   sendStationAction(name, url, addtoplaylist);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }

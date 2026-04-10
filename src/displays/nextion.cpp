@@ -1,9 +1,6 @@
 /* Dear Nextion User - I'm sorry.  This has probably broken beyond repair... You can try to fix it and I'd be thankful for it. Open an issue on the Repo and I'll do my best to help. -- Trip5 */
 
 #include "../core/options.h"
-#if DSP_MODEL==DSP_DUMMY
-#define DUMMYDISPLAY
-#endif
 #if NEXTION_RX!=255 && NEXTION_TX!=255
 #include "nextion.h"
 #include "../core/config.h"
@@ -159,12 +156,14 @@ void Nextion::loop() {
         continue;
       }
       if (RxTemp != '$') {
-        rxbuf[rx_pos] = RxTemp;
-        rx_pos++;
+        if (rx_pos < RXBUFLEN - 1) {
+          rxbuf[rx_pos] = RxTemp;
+          rx_pos++;
+        }
       } else {
         rxbuf[rx_pos] = '\0';
         rx_pos = 0;
-        if (sscanf(rxbuf, "page=%s", scanBuf) == 1){
+        if (sscanf(rxbuf, "page=%44s", scanBuf) == 1){
           if(strcmp(scanBuf, "player") == 0) display.putRequest(NEWMODE, PLAYER);
           if(strcmp(scanBuf, "playlist") == 0) display.putRequest(NEWMODE, STATIONS);
           if(strcmp(scanBuf, "info") == 0) {
@@ -239,7 +238,11 @@ void Nextion::loop() {
           player.sendCommand({PR_VOL, scanDigit});
         }
         if (sscanf(rxbuf, "balance=%d", &scanDigit) == 1){
-          config.setBalance((int8_t)scanDigit);
+          int b = scanDigit;
+          b = (b < -16) ? -16 : (b > 16 ? 16 : b);
+          config.saveValueButWait(&config.store.balance, static_cast<int8_t>(b), 5000);
+          player.setBalance(static_cast<int8_t>(b));
+          netserver.requestOnChange(BALANCE, 0);
         }
         if (sscanf(rxbuf, "treble=%d", &scanDigit) == 1){
           config.setTone(config.store.bass, config.store.middle, scanDigit);

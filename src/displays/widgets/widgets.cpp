@@ -1,13 +1,13 @@
 #include "../../core/options.h"
 #if DSP_MODEL!=DSP_DUMMY
-#include "../dspcore.h"
 #include <Arduino.h>
+#include "../dspcore.h"
+#include "../tools/psframebuffer.h"
 #include "widgets.h"
-#include "../../core/player.h"    //  for VU widget
-#include "../../core/network.h"   //  for Clock widget
 #include "../../core/config.h"
 #include "../../core/locale.h"
-#include "../tools/psframebuffer.h"
+#include "../../core/network.h"   //  for Clock widget
+#include "../../core/player.h"    //  for VU widget
 
 /************************
       FILL WIDGET

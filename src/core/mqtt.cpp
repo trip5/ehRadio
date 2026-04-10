@@ -1,9 +1,9 @@
 #include "options.h"
 #ifdef MQTT_ENABLE // ============================== Everything ignored if not defined ==============================
 
+#include <WiFi.h>
 #include "config.h"
 #include "mqtt.h"
-#include <WiFi.h>
 #include "player.h"
 
 AsyncMqttClient mqttClient;
@@ -44,7 +44,7 @@ void mqttPublishStatus() {
     char title[BUFLEN/2];
     config.escapeQuotes(config.station.name, name, sizeof(name)-10);
     config.escapeQuotes(config.station.title, title, sizeof(title)-10);
-    sprintf(status, "{\"status\": %d, \"station\": %d, \"name\": \"%s\", \"title\": \"%s\", \"on\": %d}", player.status()==PLAYING?1:0, config.lastStation(), name, title, config.store.dspon);
+    snprintf(status, sizeof(status), "{\"status\": %d, \"station\": %d, \"name\": \"%s\", \"title\": \"%s\", \"on\": %d}", player.status()==PLAYING?1:0, config.lastStation(), name, title, config.store.dspon);
     mqttClient.publish(topic, 0, true, status);
   }
 }
@@ -87,14 +87,8 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     if (strcmp(buf, "stop") == 0) { player.sendCommand({PR_STOP, 0}); return; }
     if (strcmp(buf, "start") == 0 || strcmp(buf, "play") == 0) { player.sendCommand({PR_PLAY, config.lastStation()}); return; }
     if (strcmp(buf, "boot") == 0 || strcmp(buf, "reboot") == 0) { ESP.restart(); return; }
-    if (strcmp(buf, "volm") == 0) {
-      player.stepVol(false);
-      return;
-    }
-    if (strcmp(buf, "volp") == 0) {
-      player.stepVol(true);
-      return;
-    }
+    if (strcmp(buf, "voldown") == 0 || strcmp(buf, "volm") == 0) { player.stepVol(false); return; }
+    if (strcmp(buf, "volup")   == 0 || strcmp(buf, "volp") == 0) { player.stepVol(true);  return; }
     if (strcmp(buf, "turnoff") == 0) {
       bool sst = config.store.smartstart;
       config.setDspOn(0);

@@ -1,11 +1,11 @@
 #include "options.h"
 #if (TS_MODEL!=TS_MODEL_UNDEFINED) && (DSP_MODEL!=DSP_DUMMY)
 #include <Arduino.h>
-#include "touchscreen.h"
 #include "config.h"
 #include "controls.h"
 #include "display.h"
 #include "player.h"
+#include "touchscreen.h"
 
 #ifndef TS_X_MIN
   #define TS_X_MIN              400

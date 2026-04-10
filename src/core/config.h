@@ -215,23 +215,11 @@ class Config {
     void initPlaylistMode();
     void loadTheme();
     void reset();
-    void enableScreensaver(bool val);
-    void setScreensaverTimeout(uint16_t val);
-    void setScreensaverBlank(bool val);
-    void setScreensaverPlayingEnabled(bool val);
-    void setScreensaverPlayingTimeout(uint16_t val);
-    void setScreensaverPlayingBlank(bool val);
-    void setShowweather(bool val);
-    void setWeatherKey(const char *val);
-    void setSDpos(uint32_t val);
-    void setIrBtn(int val);
     void saveIR();
-    void resetSystem(const char *val, uint8_t clientId);
-    void setShuffle(bool sn);
-    void saveVolume();
+    void defaultSettings(const char *val, uint8_t clientId);
+    void processDeferredSaves();
     uint8_t setVolume(uint8_t val);
     void setTone(int8_t bass, int8_t middle, int8_t treble);
-    void setBalance(int8_t balance);
     uint8_t setLastStation(uint16_t val);
     uint8_t setCountStation(uint16_t val);
     uint8_t setLastSSID(uint8_t val);
@@ -241,6 +229,7 @@ class Config {
     void initPlaylist();
     uint16_t playlistLength();
     bool loadStation(uint16_t station);
+    uint16_t findStationByUrl(const char* url);
     char * stationByNum(uint16_t num);
     void escapeQuotes(const char* input, char* output, size_t maxLen);
     bool parseCSV(const char* line, char* name, char* url, int &ovol);
@@ -289,41 +278,65 @@ class Config {
       const configKeyMap* entry = getKeyMapEntryForField(field);
       if (entry) prefs.getBytes(entry->key, field, entry->size);
     }
-    template <typename T>
-    void saveValue(T *field, const T &value, bool commit=true, bool force=false) {
-      // commit ignored (kept for compatibility)
-      const configKeyMap* entry = getKeyMapEntryForField(field);
-      if (entry) {
-        prefs.begin("ehradio", false);
-        T oldValue;
-        size_t existingLen = prefs.getBytesLength(entry->key);
-        size_t bytesRead = prefs.getBytes(entry->key, &oldValue, entry->size);
-        bool exists = bytesRead == entry->size;
-        bool needSave = (existingLen != entry->size) || !exists || memcmp(&oldValue, &value, entry->size) != 0;
-        if (needSave) {
-          prefs.putBytes(entry->key, &value, entry->size);
-          *field = value;
-        }
-        prefs.end();
+    bool saveRawValue(const configKeyMap* entry, const void* value, size_t size) {
+      prefs.begin("ehradio", false);
+      size_t existingLen = prefs.getBytesLength(entry->key);
+      bool keyExists = (existingLen == size);
+      bool needSave;
+      if (keyExists) {
+        uint8_t oldValue[size];
+        prefs.getBytes(entry->key, oldValue, size);
+        needSave = memcmp(oldValue, value, size) != 0;
+      } else {
+        // Key not in NVS: skip write if value matches current struct field (= struct/compile-time default)
+        const void* currentField = (const uint8_t*)&store + entry->fieldOffset;
+        needSave = memcmp(currentField, value, size) != 0;
       }
+      if (needSave) prefs.putBytes(entry->key, value, size);
+      prefs.end();
+      return needSave;
     }
-    void saveValue(char *field, const char *value, size_t N = 0, bool commit=true, bool force=false) {
-      // commit ignored (kept for compatibility)
+    template <typename T>
+    void saveValue(T *field, const T &value) {
+      const configKeyMap* entry = getKeyMapEntryForField(field);
+      if (entry && saveRawValue(entry, &value, entry->size)) *field = value;
+    }
+    void saveValue(char *field, const char *value) {
       const configKeyMap* entry = getKeyMapEntryForField(field);
       if (entry) {
         size_t sz = entry->size;
-        prefs.begin("ehradio", false);
-        char oldValue[sz];
-        memset(oldValue, 0, sz);
-        size_t existingLen = prefs.getBytesLength(entry->key);
-        bool exists = prefs.getBytes(entry->key, oldValue, sz) == sz;
-        bool needSave = (existingLen != sz) || !exists || strncmp(oldValue, value, sz) != 0 || force;
-        if (needSave) {
-          prefs.putBytes(entry->key, value, sz);
-          strlcpy(field, value, sz);
-        }
-        prefs.end();
+        char normalizedValue[sz];
+        memset(normalizedValue, 0, sz);
+        if (value != nullptr) strlcpy(normalizedValue, value, sz);
+        if (saveRawValue(entry, normalizedValue, sz)) strlcpy(field, normalizedValue, sz);
       }
+    }
+    /* Debounced save: updates the in-memory field immediately, defers the NVS write until
+       waitMs milliseconds after the last call for this field. Call processDeferredSaves()
+       from the main loop. Falls back to immediate saveValue if all slots are occupied or
+       the field has no key-map entry. Not for string/char-array fields (static_assert guards). */
+    template <typename T>
+    void saveValueButWait(T *field, const T &value, uint16_t waitMs = 2000) {
+      static_assert(sizeof(T) <= 4, "saveValueButWait: use saveValue for string/char-array fields");
+      const configKeyMap* entry = getKeyMapEntryForField(field);
+      if (!entry) { saveValue(field, value); return; }
+      *field = value;
+      for (uint8_t i = 0; i < DEFERRED_SAVE_SLOTS; ++i) {
+        if (_deferredSaves[i].entry == entry) {
+          memcpy(_deferredSaves[i].data, &value, sizeof(T));
+          _deferredSaves[i].dueMs = millis() + waitMs;
+          return;
+        }
+      }
+      for (uint8_t i = 0; i < DEFERRED_SAVE_SLOTS; ++i) {
+        if (_deferredSaves[i].entry == nullptr) {
+          memcpy(_deferredSaves[i].data, &value, sizeof(T));
+          _deferredSaves[i].dueMs = millis() + waitMs;
+          _deferredSaves[i].entry = entry; /* written last — acts as a release signal to processDeferredSaves */
+          return;
+        }
+      }
+      saveValue(field, value); /* all slots occupied — fall back to immediate write */
     }
     uint32_t getChipId() {
       uint32_t chipId = 0;
@@ -339,8 +352,17 @@ class Config {
     FS* _SDplaylistFS = nullptr;
     Ticker   _sleepTimer;
 
+    static constexpr uint8_t DEFERRED_SAVE_SLOTS = 8;
+    struct DeferredSave {
+      const configKeyMap* volatile entry = nullptr; /* volatile: written by WebSocket task, read by main loop */
+      uint8_t data[4] = {};
+      uint32_t dueMs = 0;
+    };
+    DeferredSave _deferredSaves[DEFERRED_SAVE_SLOTS];
+
     bool _wwwFilesExist();
     void _initHW();
+    bool _readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& ovol);
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
     void setDefaults();
     static void doSleep();

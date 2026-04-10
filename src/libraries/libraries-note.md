@@ -100,4 +100,4 @@ Because new Arduino-ESP32 v3.x uses unified network API. ehRadio still uses the 
 
 That would likely be a very large re-factor.
 
-
+- Trip5, 2026-03

@@ -164,6 +164,7 @@ void Player::loop() {
       }
       case PR_VOL: {
         config.setVolume(requestP.payload);
+        config.saveValueButWait(&config.store.volume, (uint8_t)requestP.payload, 3000);
         uint8_t i2sVol = volToI2S(requestP.payload);
         Audio::setVolume(i2sVol);
         #ifdef USE_ES8311
@@ -196,12 +197,17 @@ void Player::loop() {
     }
   }
   Audio::loop();
-  if (!isRunning() && _status==PLAYING) _stop(true);
-  if (_volTimer) {
-    if ((millis()-_volTicks)>3000) {
-      config.saveVolume();
-      _volTimer=false;
+  if (!isRunning() && _status==PLAYING) {
+    // Stream died unexpectedly - trigger reconnection if WiFi is still up
+    if (WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
+      Serial.println("Stream stopped unexpectedly. Starting reconnection attempts...");
+      network.lostPlaying = true;
+      // Launch retry task if not already running
+      if (streamRetryTaskHandle == NULL) {
+        xTaskCreatePinnedToCore(retryStreamConnection, "streamRetry", 1024 * 4, NULL, 1, &streamRetryTaskHandle, 0);
+      }
     }
+    _stop(true);
   }
   #ifdef MQTT_ENABLE
     if ((config.store.mqttenable) && (strlen(burl)>0)) browseUrl();
@@ -238,7 +244,6 @@ void Player::_play(uint16_t stationId) {
   display.putRequest(DBITRATE);
   display.putRequest(NEWSTATION);
   netserver.requestOnChange(STATION, 0);
-  netserver.loop();
   netserver.loop();
   bool isConnected = false;
   if (config.getMode()==PM_SDCARD && SDC_CS!=255) {
@@ -314,7 +319,6 @@ void Player::playUrl(const char* url) {
 }
 
 void Player::prev() {
-  
   uint16_t lastStation = config.lastStation();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
     if (lastStation == 1) config.lastStation(config.playlistLength()); else config.lastStation(lastStation-1);
@@ -385,7 +389,5 @@ void Player::_loadVol(uint8_t volume) {
 }
 
 void Player::setVol(uint8_t volume) {
-  _volTicks = millis();
-  _volTimer = true;
   player.sendCommand({PR_VOL, volume});
 }

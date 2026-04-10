@@ -1,7 +1,6 @@
 #include "../../core/options.h"
 #if DSP_MODEL==DSP_ST7920
 
-#include "Adafruit_GFX.h"
 #include "ST7920.h"
 
 //uint8_t buff[1024];    //This array serves as primitive "Video RAM" buffer

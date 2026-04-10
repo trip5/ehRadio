@@ -6,6 +6,8 @@ If any code change affects behavior, data flow, build configuration, platform ta
 
 This file exists to reduce re-analysis cost for humans and AI agents.
 
+It will get lengthy as more is added to it.
+
 ---
 
 ## Scope and Intent
@@ -31,6 +33,7 @@ Grouped (not one-by-one deep explained) areas:
 - `myoptions.h` selects hardware profile + defaults.
 - `src/core/options.h` resolves all defaults/fallbacks and feature flags.
 - `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts and now diff-checks `web_assets/` in addition to `firmware.txt` and `releases.md`.
+- `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
 
 ### Runtime chain
 - `src/main.cpp` bootstraps system: config -> display -> player -> network -> server/telnet/controls.
@@ -66,6 +69,7 @@ Grouped (not one-by-one deep explained) areas:
 ### `src/core/options.h`
 - Canonical fallback defaults and compile flags.
 - Includes `myoptions.h`, `mytheme.h`, `mqttoptions.h` when present.
+- **Owns all compile-time guardrails** inline, right next to each respective define.
 - Defines:
   - hardware defaults (pins, feature gates)
   - updater URLs (`FILESURL`, `UPDATEURL`, `CHECKUPDATEURL`) unless disabled
@@ -73,6 +77,13 @@ Grouped (not one-by-one deep explained) areas:
   - battery defaults/curve/thresholds
   - WebUI and localization defaults
   - curated list defaults
+  - **Exception**: locale and language options are handled by locale.h
+- **Guardrail conventions** (maintain these when adding new options):
+  - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g. `TS_MODEL`, `RTC_MODULE`), bad logical cross-constraints (e.g. `BTN_PRESS_TICKS <= BTN_CLICK_TICKS`, `BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD`).
+  - `#warning` + `#undef` for out-of-range tunables in `/* USER DEFAULTS */` section (e.g. `SOUND_VOLUME`, `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
+  - `static_assert` with `__builtin_strcmp` for enumerated string options (e.g. `WEATHER_API`, `WEATHER_WIND_SPEED_UNITS`). **Update the `static_assert` whenever a new provider/value is added.**
+  - `/* PREVENT BOARD-DEFINED PIN RE-USE */` section lives after the `/* ESP DEVBOARD */` LED block (requires `REAL_LEDBUILTIN` and `ESP_S3C3` to be defined first). Covers LED vs RST pin conflicts only — keep it narrowly scoped.
+- **What is intentionally NOT guarded**: booleans (compiler error is obvious), pin numbers (board-dependent range), free-form strings (`AP_SSID`, `MQTT_*`, URLs), color macros (R,G,B triplets), `AUTOBACKLIGHT(x)` (C macro function), `BATTERY_CURVE_MV/PCT` (already has `static_assert` in `battery.cpp`).
 
 ## Compile-Time Modularity and Build Variants (`#if` / `#ifdef` behavior)
 
@@ -92,7 +103,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 
 ### What commonly changes between builds
 - Audio backend and related controls:
-  - I2S audio path vs VS1053 path are mutually exclusive in validation (`optionschecker.h`).
+  - I2S audio path vs VS1053 path are mutually exclusive — enforced via `#error` in `options.h`.
 - Display backend:
   - selected display model changes driver implementation and capabilities.
   - Nextion is a special path (`src/displays/nextion.cpp`) with its own command protocol and UI assumptions.
@@ -158,15 +169,17 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 ## `src/core/options.h`
 - See earlier build section.
 
-## `src/core/optionschecker.h`
-- Compile-time/runtime option validation helpers (safety checks and diagnostics).
-- Used to catch incompatible settings early.
-
 ## `src/core/config.h`
 - Defines persistent struct `config_t store`.
 - Defines station/theme structs and config API.
 - Defines key constants for SPIFFS paths and data file locations.
 - `Config::keyMap` declaration controls Preferences key mapping.
+- `Config::saveValue(...)` API now has two simple overloads only:
+  - typed: `saveValue(T* field, const T& value)`
+  - string: `saveValue(char* field, const char* value)`
+- Legacy compatibility parameters (`commit`, `force`, and string `size_t N`) were removed.
+- String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short source strings.
+- Both overloads share a single internal write-if-changed path (`missing key` OR `size mismatch` OR `content changed`) before calling `prefs.putBytes(...)`.
 
 ## `src/core/config.cpp`
 - Startup/storage/file-integrity center.
@@ -178,7 +191,11 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - playlist indexing and station loading
   - locale/update helper routines
   - startup update services and online file maintenance
-  - reset section handlers (`resetSystem(...)`)
+  - reset section handlers (`defaultSettings(...)`)
+- SD-specific behavior:
+  - `_initHW()` configures `SD_CARD_DETECT_PIN` as `INPUT_PULLUP` when available
+  - `initPlaylistMode()` short-circuits to `PM_WEB` without calling `sdman.start()` when `SD_CARD_DETECT_PIN` reports slot-empty during SD boot
+  - `changeMode()` short-circuits SD mode switches the same way, avoiding the SPI retry path when the slot is empty
 - Key interaction:
   - almost every module reads/writes through `config`.
 
@@ -195,6 +212,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
     - weather sync interval
     - screensaver timing
     - RSSI updates
+    - SD card hot-insert detection (when `SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255`): polls `SD_CARD_DETECT_PIN` every ~2 s in `divrssi` block; calls `config.changeMode(PM_SDCARD)` on insertion
   - weather provider dispatch:
     - `OM1` Open-Meteo
     - `OW25` OpenWeather 2.5
@@ -323,7 +341,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 - `sdmanager.h` declares SD manager API and FS integration wrapper.
 - SD lifecycle and SD playlist indexing.
 - Responsibilities:
-  - mount/retry/unmount
+  - mount/retry/unmount — `start()` attempts up to 4 `SD.begin()` calls, early-returning on success (delays only between retries, not after success)
   - card-present checks
   - recursive scan and media file playlist/index creation
 - Coupling:
@@ -507,7 +525,7 @@ This section calls out hardware implementations that diverge from the common cod
 - Two major audio stacks are used depending on macros/hardware:
   - I2S audio library path
   - VS1053 external decoder path
-- `optionschecker.h` enforces that both are not enabled together.
+- `options.h` enforces that both are not enabled together.
 - Risk notes:
   - behavior differences between backends (metadata timing, codec handling, volume behavior) can create env-specific bugs.
   - some callback/metadata handling is shared while low-level decoder behavior is not.
@@ -526,6 +544,33 @@ This section calls out hardware implementations that diverge from the common cod
 - Risk notes:
   - orientation/flip and calibration behavior can diverge by controller.
   - long-press/swipe thresholds can feel different across hardware even with same app logic.
+
+---
+
+## Custom Libraries (`src/libraries`)
+
+These are **not** third-party packages installable via PlatformIO's registry. They are custom or heavily-modified libraries embedded directly in the repository, mostly inherited from yoRadio and extended for ehRadio. Consult `src/libraries/libraries-note.md` for the origin, upstream source, and modification status of each library.
+
+### Display driver libraries
+- `Adafruit_GC9106Ex/` — GC9106 TFT driver (not a real Adafruit library; adapted from prenticedavid)
+- `Adafruit_ST7796S/` — ST7796S TFT driver (same origin)
+- `ILI9225Fix/` — ILI9225 TFT driver (heavily modified)
+- `ILI9488/` — ILI9486/ILI9488 SPI driver (modified from ZinggJM)
+- `LiquidCrystalI2C/` — I2C LCD driver (slightly modified from johnrickman)
+- `SSD1322/` — SSD1322 OLED driver (slightly modified from JamesHagerman)
+- `ST7920/` — ST7920 GLCD driver
+
+### Audio decoder libraries
+- `I2S_Audio/` — software I2S audio decoder (adapted from schreibfaul1/ESP32-audioI2S via Maleksm's yoRadio mod)
+- `VS1053_Audio/` — VS1053 hardware decoder driver (adapted from schreibfaul1/ESP32-vs1053_ext via Maleksm's yoRadio mod)
+- `ES8311_Audio/` — ES8311 codec driver (written for ehRadio by kasperaitis)
+
+### Touchscreen library
+- `FT6336_Touchscreen/` — FT6336 capacitive touch driver (written for ehRadio by kasperaitis)
+
+### Include conventions in library files
+- Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line** (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if DSP_MODEL==DSP_ST7920`, `#if I2S_DOUT!=255 || I2S_INTERNAL`, `#if VS1053_CS!=255`). This pattern is acceptable and intentional.
+- Library `.h` files do not include `options.h`; they are self-contained and guarded with `#ifndef`/`#pragma once`.
 
 ---
 
@@ -567,7 +612,7 @@ This section is specifically for adding/removing settings and avoiding missed li
 1. Add macro default in `src/core/options.h` (and optionally override in `myoptions.h`).
 2. Add field in `config_t` in `src/core/config.h`.
 3. Add key mapping in `Config::keyMap` in `src/core/config.cpp`.
-4. Add reset behavior in `Config::resetSystem(...)` branch (the right group).
+4. Add reset behavior in `Config::defaultSettings(...)` branch (the right group).
 5. Add getter payload in `netserver.processQueue()`:
    - whichever `GET*` JSON block should include it (`GETSYSTEM`, `GETSCREEN`, etc.).
 6. Add command handling in `src/core/commandhandler.cpp`:
@@ -600,7 +645,7 @@ This section is specifically for adding/removing settings and avoiding missed li
 ## Why changes are often missed
 
 Frequent miss points:
-- `Config::resetSystem(...)` sections
+- `Config::defaultSettings(...)` sections
 - `Config::keyMap` update
 - `GET*` outbound payloads in `netserver`
 - DOM id mismatch vs websocket payload key

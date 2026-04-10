@@ -16,7 +16,7 @@
 #endif
 
 #define PLERR_LN        64
-#define SET_PLAY_ERROR(...) {char buff[512 + 64]; sprintf(buff,__VA_ARGS__); setError(buff);}
+#define SET_PLAY_ERROR(...) {char buff[576]; snprintf(buff, sizeof(buff), __VA_ARGS__); setError(buff);}
 
 enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9 };
 struct playerRequestParams_t
@@ -29,7 +29,7 @@ enum plStatus_e : uint8_t{ PLAYING = 1, STOPPED = 2 };
 
 class Player: public Audio {
   public:
-    bool lockOutput = true;
+    volatile bool lockOutput = true;  // volatile: written from WiFi callbacks, read from audio callbacks
     bool resumeAfterUrl = false;
     uint32_t sd_min, sd_max;
     bool remoteStationName = false;
@@ -57,8 +57,6 @@ class Player: public Audio {
     plStatus_e status() { return _status; }
     void setResumeFilePos(uint32_t pos) { _resumeFilePos = pos; }
   private:
-    uint32_t    _volTicks = 0;       /* delayed volume save  */
-    bool        _volTimer = false;   /* delayed volume save  */
     uint32_t    _resumeFilePos = 0;
     plStatus_e  _status = STOPPED;
     char        _plError[PLERR_LN];

@@ -3,8 +3,8 @@
 #include <WiFi.h>
 
 #define MAX_TLN_CLIENTS 5
-#define MAX_PRINTF_LEN BUFLEN+50
-#define BOOTLOG(...) { char buf[BUFLEN]; sprintf(buf, __VA_ARGS__); telnet.printf("##[BOOT]#\t%s\r\n",buf); }
+#define MAX_PRINTF_LEN 220
+#define BOOTLOG(...) { char buf[256]; snprintf(buf, sizeof(buf), __VA_ARGS__); telnet.printf("##[BOOT]#\t%s\r\n",buf); }
 
 class Telnet {
   public:

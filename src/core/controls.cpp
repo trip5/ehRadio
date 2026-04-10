@@ -1,20 +1,16 @@
-#include <Arduino.h>
 #include "options.h"
-#include "controls.h"
+#include <Arduino.h>
 #include "config.h"
-#include "player.h"
+#include "controls.h"
 #include "display.h"
-#include "network.h"
 #include "netserver.h"
+#include "network.h"
+#include "player.h"
 #include "../pluginsManager/pluginsManager.h"
 
 long encOldPosition  = 0;
 long enc2OldPosition  = 0;
 int lpId = -1;
-
-#if DSP_MODEL==DSP_DUMMY
-  #define DUMMYDISPLAY
-#endif
 
 #define ISPUSHBUTTONS BTN_LEFT!=255 || BTN_CENTER!=255 || BTN_RIGHT!=255 || ENC_BTNB!=255 || BTN_UP!=255 || BTN_DOWN!=255 || ENC2_BTNB!=255 || BTN_MODE!=255
 #if ISPUSHBUTTONS

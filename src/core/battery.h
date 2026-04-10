@@ -5,8 +5,8 @@
 
 #ifndef battery_h
 #define battery_h
+#include "options.h"
 #include <Arduino.h>
-#include "core/options.h"
 
 struct BatteryStatus {
   uint16_t voltage_mv;    // Battery voltage in millivolts
@@ -30,5 +30,6 @@ void battery_recalc_now(); // Force an immediate ADC read and status update
 const BatteryStatus& battery_get_status();
 bool battery_is_initialized();
 void battery_format_status_line(const BatteryStatus& status, char* buffer, size_t buffer_size, bool include_warning = false);
+bool battery_calibrate(int meas_mv); // Compute and save a new ADC ref from a measured voltage
 
 #endif // battery_h

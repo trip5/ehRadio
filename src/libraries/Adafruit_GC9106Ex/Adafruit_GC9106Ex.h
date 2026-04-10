@@ -30,9 +30,9 @@
 #ifndef _ADAFRUIT_GC9106_EX_H_
 #define _ADAFRUIT_GC9106_EX_H_
 
-#include "Adafruit_GFX.h"
+#include <Adafruit_GFX.h>
 #include <Arduino.h>
-#include "Print.h"
+#include <Print.h>
 #include <Adafruit_SPITFT.h>
 #include <Adafruit_SPITFT_Macros.h>
 #include <SPI.h>

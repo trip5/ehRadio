@@ -48,11 +48,27 @@ jobs:
 
       - name: Copy web assets (manifests and firmware-info.json)
         run: |
-          if [ "${{ github.event_name }}" = "release" ] && [ -d "builds/${{ github.repository_owner }}/web_assets" ]; then
-            echo "✅ Release publish: copying web assets from builds/${{ github.repository_owner }}/web_assets/"
-            cp -r "builds/${{ github.repository_owner }}/web_assets/"* docs/
-          elif curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/firmware-info.json" -o docs/firmware-info.json; then
-            echo "ℹ️ Non-release run: preserving published firmware JSON from GitHub Pages"
+          LOCAL_ASSETS="builds/${{ github.repository_owner }}/web_assets"
+          LOCAL_JSON="$LOCAL_ASSETS/firmware-info.json"
+          PUBLISHED_JSON=$(mktemp)
+          PRESERVE_PUBLISHED=false
+          if curl -fsSL "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/firmware-info.json" -o "$PUBLISHED_JSON" 2>/dev/null; then
+            if [ -f "$LOCAL_JSON" ] && ! diff -q "$LOCAL_JSON" "$PUBLISHED_JSON" > /dev/null 2>&1; then
+              echo "✅ firmware-info.json changed: treating as release, copying local web assets"
+              cp -r "$LOCAL_ASSETS/"* docs/
+            else
+              echo "ℹ️ firmware-info.json unchanged (or no local): preserving published assets"
+              cp "$PUBLISHED_JSON" docs/firmware-info.json
+              PRESERVE_PUBLISHED=true
+            fi
+          elif [ -d "$LOCAL_ASSETS" ]; then
+            echo "✅ Published firmware-info.json not found: copying local web assets"
+            cp -r "$LOCAL_ASSETS/"* docs/
+          else
+            echo "⚠️ No web assets found for ${{ github.repository_owner }}"
+            echo "Run the Build and Release Firmware workflow to generate them."
+          fi
+          if [ "$PRESERVE_PUBLISHED" = true ]; then
             mkdir -p docs/manifests
             python3 - <<'PY'
           import json, os, urllib.request
@@ -63,12 +79,6 @@ jobs:
                   os.makedirs(os.path.dirname(f"docs/{path}"), exist_ok=True)
                   urllib.request.urlretrieve(base + path, f"docs/{path}")
           PY
-          elif [ -d "builds/${{ github.repository_owner }}/web_assets" ]; then
-            echo "⚠️ Published firmware JSON not found; falling back to local web_assets"
-            cp -r "builds/${{ github.repository_owner }}/web_assets/"* docs/
-          else
-            echo "⚠️ No web assets found for ${{ github.repository_owner }}"
-            echo "Run the Build and Release Firmware workflow to generate them."
           fi
 
       - name: Convert relative YAML links to GitHub URLs

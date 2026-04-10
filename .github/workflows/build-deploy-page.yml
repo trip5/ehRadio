@@ -55,14 +55,14 @@ jobs:
             echo "ℹ️ Non-release run: preserving published firmware JSON from GitHub Pages"
             mkdir -p docs/manifests
             python3 - <<'PY'
-            import json, os, urllib.request
-            base = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
-            with open("docs/firmware-info.json", encoding="utf-8") as file:
-                for variant in json.load(file).get("variants", []):
-                    path = variant["manifest"]
-                    os.makedirs(os.path.dirname(f"docs/{path}"), exist_ok=True)
-                    urllib.request.urlretrieve(base + path, f"docs/{path}")
-            PY
+          import json, os, urllib.request
+          base = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          with open("docs/firmware-info.json", encoding="utf-8") as file:
+              for variant in json.load(file).get("variants", []):
+                  path = variant["manifest"]
+                  os.makedirs(os.path.dirname(f"docs/{path}"), exist_ok=True)
+                  urllib.request.urlretrieve(base + path, f"docs/{path}")
+          PY
           elif [ -d "builds/${{ github.repository_owner }}/web_assets" ]; then
             echo "⚠️ Published firmware JSON not found; falling back to local web_assets"
             cp -r "builds/${{ github.repository_owner }}/web_assets/"* docs/

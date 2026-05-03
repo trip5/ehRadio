@@ -4,7 +4,7 @@
 #include "../core/config.h"
 
 #ifndef DEF_SPI_FREQ
-#define DEF_SPI_FREQ        0 //26000000UL      /*  set it to 0 for system default */
+  #define DEF_SPI_FREQ        32000000UL      /*  set it to 0 for system default */
 #endif
 
 #if DSP_HSPI

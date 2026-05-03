@@ -4,6 +4,7 @@
 #if NEXTION_RX!=255 && NEXTION_TX!=255
 #include "nextion.h"
 #include "../core/config.h"
+#include "../core/logging.h"
 
 #include "../core/player.h"
 #include "../core/controls.h"
@@ -36,7 +37,7 @@ void Nextion::begin(bool dummy) {
   mode=LOST;
   hSerial.begin(NEXTION_BAUD, SERIAL_8N1, NEXTION_RX, NEXTION_TX);
   if (!hSerial) {
-    Serial.println("Invalid HardwareSerial pin configuration, check config");
+    ERRORLOG("Nextion invalid hardware or serial pin config, check configuration");
     while (1) {
       delay (1000);
     }
@@ -58,7 +59,7 @@ void Nextion::begin(bool dummy) {
 }
 
 void Nextion::start(){
-  Serial.print("##[BOOT]#\tNextion.start\t");
+  BOOTLOGX("nextion.start\t");
   delay(100);
   if (network.status != CONNECTED) {
     apScreen();
@@ -72,7 +73,7 @@ void Nextion::start(){
   putRequest({NEWSTATION, 0});
   putRequest({NEWTITLE, 0});
   putRequest({DRAWVOL, 0});
-  Serial.println("done");
+  SERIALLOG("done");
 }
 
 void Nextion::apScreen() {

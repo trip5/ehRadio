@@ -12,8 +12,12 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout repository
+      - name: Checkout repository with deploy key
         uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Download and update timezones.json if changed
         run: |
@@ -30,6 +34,9 @@ jobs:
             rm "$TMP_FILE"
           fi
 
+      - name: Force SSH remote for push
+        run: git remote set-url origin git@github.com:${{ github.repository }}.git
+
       - name: Commit updated files if changed
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -37,9 +44,7 @@ jobs:
           git add data/www/timezones.json
           if ! git diff --cached --quiet; then
             git commit -m "Update JSON automatically from external sources"
-            git push
+            git push origin HEAD:dev
           else
             echo "No changes to commit for JSON files."
           fi
-
-# git add data/www/rb_srvrs.json data/www/timezones.json.gz

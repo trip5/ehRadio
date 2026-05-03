@@ -3,6 +3,7 @@
 #include "dspcore.h"
 #include <Wire.h>
 #include "../core/config.h"
+#include "../core/logging.h"
 
 #ifndef SCREEN_ADDRESS
   #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32 or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
@@ -26,7 +27,7 @@ DspCore::DspCore(): Adafruit_SH1107(64, 128, &I2CSH1106, -1) {
 void DspCore::initDisplay() {
   I2CSH1106.begin(I2C_SDA, I2C_SCL);
   if (!begin(SCREEN_ADDRESS, true)) {
-    Serial.println(F("SH110X allocation failed"));
+    ERRORLOG("SH110X allocation failed");
     for (;;); // Don't proceed, loop forever
   }
 #include "tools/oledcolorfix.h"

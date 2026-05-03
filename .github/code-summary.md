@@ -2,7 +2,7 @@
 
 ## Mandatory Maintenance Directive
 
-If any code change affects behavior, data flow, build configuration, platform targets, WebUI functionality, stored settings, networking, display logic, localization, update flow, or dependency usage, this file **must** be updated in the same change set.
+If a change affects code interactions (how files/modules interact), storage keys, WebUI contracts, locale/build/dependency behavior, or other external contracts,`.github/code-summary.md` MUST be updated in the same change set; bug fixes that restore expected behavior are exempt unless they also change code interactions or external behavior/contracts.
 
 This file exists to reduce re-analysis cost for humans and AI agents.
 
@@ -34,12 +34,25 @@ Grouped (not one-by-one deep explained) areas:
 - `src/core/options.h` resolves all defaults/fallbacks and feature flags.
 - `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts and now diff-checks `web_assets/` in addition to `firmware.txt` and `releases.md`.
 - `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
+- `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to `dev`, enabling ruleset bypass configured for Deploy keys.
 
 ### Runtime chain
 - `src/main.cpp` bootstraps system: config -> display -> player -> network -> server/telnet/controls.
 - WebUI/WebSocket input path: `netserver` -> `commandhandler` -> `config/player/display/network`.
 - State output path: `requestOnChange(...)` in `netserver` -> WebSocket JSON to browser.
 - Settings persistence path: `config.saveValue(...)` -> ESP Preferences namespace `"ehradio"`.
+
+### Logging chain (serial + telnet)
+- `src/core/logging.h` / `src/core/logging.cpp` now define the common log path for runtime diagnostics.
+- Core macros:
+  - `SERIALLOG(...)`: writes one formatted line to both serial and telnet sinks.
+  - `FUNCTIONLOG(category, ...)`: category-tagged wrapper over `SERIALLOG`.
+  - `BOOTLOG(...)` / `BOOTLOGX(...)`: boot-sequence logging helpers. `BOOTLOG` ends with a line-wrapper, `BOOTLOGX` does not.
+  - `ERRORLOG(...)`: error-category wrapper.
+  - `SERIALLOGDOT()`: progress-dot helper for long-running loops.
+- Contract detail:
+  - `Telnet::printf(...)` is telnet-only transport and no longer mirrors to serial.
+  - Logs should use macros above; direct `Serial.print*`/`telnet.printf` is reserved for explicit transport-specific behavior (for example client-targeted telnet responses and OTA progress streaming).
 
 ### Primary shared state objects
 - `config` (`Config` singleton): persistent store + station/theme/runtime state.
@@ -161,6 +174,21 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 
 ## Core Folder Per-File Map (`src/core`)
 
+### Module Convention
+All modules in `src/core/` follow the **class + global instance** pattern:
+- The header declares a `class Foo` with the full public interface and private members/methods.
+- The `.cpp` defines all `Foo::` methods and declares the single global instance: `Foo foo;`
+- The header provides `extern Foo foo;` so callers can use `foo.method()`.
+- Hardware-conditional modules use a real class in the `#if` branch and a no-op stub class in the `#else` branch; `extern Foo foo;` is placed after the guard.
+- **C-style free-function modules are not acceptable in `src/core/`.**
+
+### Naming Style
+- **camelCase** for all identifiers: private members, local variables, private methods (e.g. `inferredCharging`, `lastVoltageMv`, `readAndUpdate`).
+- No underscore-prefixed names (e.g. `_myVar`, `_myMethod`) — use plain camelCase instead.
+- Public API methods follow existing verb-noun camelCase: `init()`, `getStatus()`, `setEncAcceleration()`.
+- File-scope `static const` constants also use camelCase (e.g. `pctSampleMax`, `emaAlphaQ`).
+- `ALL_CAPS` applies only to `#define` macros and hardware pin constants inherited from the config cascade.
+
 ## `src/core/common.h`
 - Shared enums and structs used across modules (display modes, requests, control events, etc.).
 - Coupling:
@@ -180,6 +208,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 - Legacy compatibility parameters (`commit`, `force`, and string `size_t N`) were removed.
 - String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short source strings.
 - Both overloads share a single internal write-if-changed path (`missing key` OR `size mismatch` OR `content changed`) before calling `prefs.putBytes(...)`.
+- Save-path writes now emit telnet+serial config logs by key name; sensitive keys (`mqttpass`, `weatherkey`) are masked as `*`.
 
 ## `src/core/config.cpp`
 - Startup/storage/file-integrity center.
@@ -218,6 +247,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
     - `OW25` OpenWeather 2.5
     - `OW30` OpenWeather 3.0
   - weather cache and formatting logic
+  - centralized runtime logging for reconnect/weather/boot progress/time-sync via `FUNCTIONLOG`/`SERIALLOG`/`BOOTLOGX`
 - Coupling:
   - pushes display updates (`display.putRequest(...)`)
   - calls player/netserver hooks
@@ -247,6 +277,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - error updates
   - SD EOF behavior
 - Important for title/bitrate side effects to WebUI and display.
+- Audio info/bitrate/ID3 notifications are now emitted through shared logging macros so telnet+serial output stays consistent with the rest of the firmware log contract.
 
 ## `src/core/display.h` / `display.cpp`
 - `display.h` declares Display class and display mode/change API.
@@ -275,53 +306,79 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - online update check/start tasks
   - radio-browser search and curated task management
   - playback launch helper for preview URL
+  - centralized logging for search/curated/playback/radio-browser-click/update/not-found paths via `FUNCTIONLOG`
 - Coupling:
   - uses `cmd.exec(...)` from commandhandler
   - emits JSON consumed by `data/www/script.js`
 - Readiness detail:
   - `/ready` returns `{"ready":true}` only when `netserver.bootReady` is true, required web files exist, and network state is stable (`CONNECTED` + `WL_CONNECTED`, or `SDREADY`).
+- OTA note:
+  - OTA start/end/error callbacks use `FUNCTIONLOG`.
+  - OTA progress now uses `FUNCTIONLOG` (line-oriented output, no raw `\r` streaming path).
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
-- Central command router for WS and URL command paths.
+- Central command router for WS, URL params, MQTT, and telnet fallback paths.
 - Main responsibilities:
   - map `key=value` commands into config/player/display/network actions
   - request websocket state snapshots
   - persist settings with `config.saveValue(...)`
+  - source-aware command policy (`WebSocket`, `HttpUrl`, `Mqtt`, `Telnet`) and shared non-WebUI blocklist checks for HTTP/MQTT/Telnet ingress
+  - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`, `dim`/`brightness`, `dspon`/`screenon`)
+  - player-command parity helpers (including direct URL playback command routing)
   - trigger curated operations and locale update tasks
 - Critical coupling file for setting changes.
 
 ## `src/core/controls.h` / `controls.cpp`
-- `controls.h` declares controls init/loop and helper functions for encoders/IR/touch.
+- `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`, `setIRTolerance()`, `flipTS()`, `controlsEvent()`.
+- `extern Controls controls;` provides the global instance; callers use `controls.init()`, `controls.loop()`, etc.
+- All internal helpers (`onBtnClick`, `encodersLoop`, `irLoop`, etc.) are private class methods.
+- Static trampoline methods (`_btnClickCb`, etc.) used for `OneButton` callbacks (function-pointer API; cannot capture `this`).
+- `readEncoderISR` / `readEncoder2ISR` remain free functions with `IRAM_ATTR` (ISR constraint; access file-scope `encoder`/`encoder2` directly).
 - Physical controls integration:
   - OneButton
   - rotary encoders
   - touchscreen gestures
   - IR remote decoding
 - Converts hardware input events into same core actions used by WebUI (`controlsEvent`, player commands, display mode changes).
+- IR record debug text now routes through centralized logging macros.
 
 ## `src/core/telnet.h` / `telnet.cpp`
 - Telnet and serial command handling.
 - Responsibilities:
   - manage client sessions
-  - parse command strings for playback/system/wifi/time/battery
-  - direct integration with config/player/network
+  - read input lines with CR/LF-pair handling so Enter submits immediately across CR/LF client variants and empty Enter events are preserved
+  - apply explicit 2000 ms stream timeout configuration for serial and per-client telnet streams
+  - normalize command strings (`key=value`, `key value`, `key(value)`) plus minimal payload-shape handling (`play` value-shape handling)
+  - route commands through `cmd.exec(...)` with source `Telnet`
+  - keep command handling output-minimal (no telnet-specific reporting command table)
 - Important:
   - acts as secondary control channel parallel to WebUI
-  - overlaps command surface with commandhandler but is separate code path
+  - command handling is intentionally kept near-parity with MQTT/HTTP routes
+  - `Telnet::printf(...)` is transport-only and no longer echoes to serial
+  - `help`, `quit`, and `bye` are handled locally in telnet before commandhandler dispatch
+  - `quit` / `bye` silently disconnect only the issuing Telnet client
+  - empty input lines now re-show prompt (`> `), aligning interactive UX with common telnet clients
 
 ## `src/core/mqtt.h` / `mqtt.cpp`
 - MQTT integration if `MQTT_ENABLE` compile flag exists.
+- `mqtt.h` declares `class Mqtt` with `init()`, `loop()`, `publishStatus()`, `publishVolume()`, `publishPlaylist()`.
+- `extern Mqtt mqtt;` (inside `#ifdef MQTT_ENABLE`) provides the global instance.
+- Private static callback methods (`_connectCb`, `_onConnect`, `_onDisconnect`, `_onMessage`) used for AsyncMqttClient API (static required by library callback interface).
 - Responsibilities:
   - connection lifecycle
   - subscribe to `.../command`
   - publish status/playlist/volume
-  - parse command payload into player/system actions
+  - parse command payload forms (`key=value`, `key value`, `key(value)`, raw URL)
+  - apply minimal payload-shape normalization (`play` value-shape handling) then dispatch through `cmd.exec(...)` with source `Mqtt`
+  - apply explicit non-WebUI blocklist rejections for unsupported MQTT-origin commands
 - Coupling:
-  - mirrors subset of telnet/commandhandler behavior.
+  - command behavior is now primarily centralized in commandhandler.
 
 ## `src/core/battery.h` / `battery.cpp`
-- `battery.h` declares battery status struct and API.
+- `battery.h` declares `class Battery` (real class under hardware guard; no-op stub in `#else`); `extern Battery battery;` provides the global instance.
+- Public interface: `init()`, `bootStatus()`, `isInitialized()`, `getStatus()`, `formatStatusLine()`, `loop()`, `recalcNow()`, `calibrate()`.
+- All ADC/inference state and helpers are private members/methods.
 - Battery monitoring/calibration/inference implementation.
 - Responsibilities:
   - ADC sampling and filtering
@@ -330,8 +387,12 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - threshold state (`low`, `critical`) tracking
   - status formatting for telnet/WebUI
   - triggers display and websocket updates
+- Logging note:
+  - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths), replacing direct serial/telnet prints.
 
 ## `src/core/rgbled.h` / `rgbled.cpp`
+- `rgbled.h` declares `class RgbLed` (real class under `RGB_LED_PIN` guard; no-op stub in `#else`); `extern RgbLed rgbled;` provides the global instance.
+- Public interface: `init()`, `isInitialized()`, `set()`, `playing()`, `stopped()`, `trackChange()`, `loop()`.
 - Optional RGB LED state machine:
   - playing/stopped colors
   - track-change flashing
@@ -344,6 +405,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - mount/retry/unmount — `start()` attempts up to 4 `SD.begin()` calls, early-returning on success (delays only between retries, not after success)
   - card-present checks
   - recursive scan and media file playlist/index creation
+  - scan/index progress and errors now use centralized logging macros (`SERIALLOGDOT`, `ERRORLOG`)
 - Coupling:
   - consumed by config/player for SD mode.
 
@@ -355,6 +417,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 - Responsibilities:
   - init and orientation/flip
   - swipe and tap/long press mapping to control events
+  - touch debug coordinates now route through centralized logging macros
 
 ## `src/core/rtcsupport.h` / `rtcsupport.cpp`
 - RTC init/get/set wrappers for DS3231/DS1307 when configured; `rtcsupport.h` has compile guards.
@@ -568,6 +631,13 @@ These are **not** third-party packages installable via PlatformIO's registry. Th
 ### Touchscreen library
 - `FT6336_Touchscreen/` — FT6336 capacitive touch driver (written for ehRadio by kasperaitis)
 
+### Logging integration in custom libraries
+- Selected library-level diagnostic prints now use centralized logging macros for consistency with core logs:
+  - `VS1053_Audio/audioVS1053Ex.cpp` (VU meter status/error)
+  - `ES8311_Audio/es8311.cpp` (register dump helper)
+  - `FT6336_Touchscreen/FT6336.cpp` (startup probe log)
+  - `ILI9225Fix/TFT_22_ILI9225Fix.cpp` (`DEBUG` macro print path)
+
 ### Include conventions in library files
 - Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line** (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if DSP_MODEL==DSP_ST7920`, `#if I2S_DOUT!=255 || I2S_INTERNAL`, `#if VS1053_CS!=255`). This pattern is acceptable and intentional.
 - Library `.h` files do not include `options.h`; they are self-contained and guarded with `#ifndef`/`#pragma once`.
@@ -627,7 +697,7 @@ This section is specifically for adding/removing settings and avoiding missed li
    - `setupElement(...)` supports element type/id.
    - incoming `GET*` payload key matches DOM element id or custom handler.
 9. If setting is locale/time/weather related, update `data/www/options.js` apply handlers too.
-10. If setting should be visible in telnet or CLI flows, update `src/core/telnet.cpp`.
+10. Telnet command handling is thin-dispatch by default: update `src/core/commandhandler.cpp` first, and only extend `src/core/telnet.cpp` if protocol normalization needs a new alias/form.
 11. If setting affects startup behavior, check `main.cpp` and `config.init()/startupServices`.
 12. Update this `code-summary.md`.
 
@@ -673,12 +743,13 @@ Frequent miss points:
 ## Matrix B: Same behavior surface via different channels
 
 - WebUI: `commandhandler.cpp`
-- Telnet/serial: `telnet.cpp` custom parser
-- MQTT: `mqtt.cpp` command payload parser
+- HTTP URL params: `netserver.cpp` `handleIndex()` multi-param loop -> `commandhandler.cpp` (with source blocklist)
+- Telnet/serial: normalized parser -> `commandhandler.cpp` (minimal local handling)
+- MQTT: normalized payload parser -> `commandhandler.cpp` (with source blocklist)
 - Physical controls: `controls.cpp`
 
 Implication:
-- If behavior should be universal, update all relevant channels.
+- For universal control behavior, update `commandhandler.cpp` first; then adjust only channel-specific parser aliases/blocklists.
 
 ## Matrix C: Playlist actions
 
@@ -691,14 +762,11 @@ Implication:
 
 ## Telnet Section Interactions (Explicit)
 
-`telnet.cpp` is not just diagnostics; it can mutate runtime config and behavior:
-- playback control (`play`, `stop`, `vol`, `next`, `prev`)
-- time and timezone commands (`tzo`, `tzposix`)
-- wifi management commands
-- battery calibration commands (`calbatt`)
-- reset/reboot operations
+`telnet.cpp` primarily acts as a command ingress path now. Most command behavior is owned by `commandhandler.cpp` and shared with MQTT/HTTP paths.
 
-If you add new setting logic only to WebUI and want CLI parity, you must add matching telnet handling.
+Input-line handling is delimiter-based (`\r` or `\n`) with explicit 2000 ms timeouts, which avoids delayed command execution on clients that submit CR without LF.
+
+If you add a setting command in `commandhandler.cpp`, telnet and MQTT generally inherit it automatically unless blocked by the shared HTTP/MQTT/Telnet non-WebUI policy.
 
 ---
 

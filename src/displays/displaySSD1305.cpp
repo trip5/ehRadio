@@ -2,6 +2,7 @@
 #if DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1305I2C
 #include "dspcore.h"
 #include "../core/config.h"
+#include "../core/logging.h"
 
 #ifndef SCREEN_ADDRESS
   #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32 or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
@@ -30,7 +31,7 @@ void DspCore::initDisplay() {
   I2CSSD1305.begin(I2C_SDA, I2C_SCL);
 #endif
   if (!begin(SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1305 allocation failed"));
+    ERRORLOG("SSD1305 allocation failed");
     for (;;); // Don't proceed, loop forever
   }
 #include "tools/oledcolorfix.h"

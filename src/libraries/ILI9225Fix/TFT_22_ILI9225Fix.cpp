@@ -1,10 +1,11 @@
 #include "../../core/options.h"
 #if DSP_MODEL==DSP_ILI9225
 #include "TFT_22_ILI9225Fix.h"
+#include "../../core/logging.h"
 
 //#define DEBUG
 #ifdef DEBUG
-    #define DB_PRINT( ... ) { char dbgbuf[60]; sprintf( dbgbuf,   __VA_ARGS__ ) ; Serial.println( dbgbuf ); }
+    #define DB_PRINT( ... ) { char dbgbuf[60]; sprintf( dbgbuf,   __VA_ARGS__ ) ; FUNCTIONLOG("ILI9225", "%s", dbgbuf); }
 #else
     #define DB_PRINT(  ... ) ;
 #endif

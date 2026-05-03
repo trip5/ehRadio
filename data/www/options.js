@@ -277,8 +277,13 @@ function applyLocale(){
 }
 
 /** MQTT **/
+function checkboxState(id){
+  const el = getId(id);
+  return (el && el.classList.contains('checked')) ? 1 : 0;
+}
+
 function applyMQTT(){
-  websocket.send("mqttenable="+getId("mqttenable").value);
+  websocket.send("mqttenable="+checkboxState("mqttenable"));
   websocket.send("mqtthost="+getId("mqtthost").value);
   websocket.send("mqttport="+getId("mqttport").value);
   websocket.send("mqttuser="+getId("mqttuser").value);
@@ -288,8 +293,12 @@ function applyMQTT(){
 
 /** WEATHER **/
 function applyWeather(){
-  // Only send fields that trigger API refetch
-  // Other fields (unit selects, checkboxes) send instantly via data-command event handlers
+  // Re-send all weather toggles on apply to keep final persisted state aligned with the UI.
+  websocket.send("wenable="+checkboxState("wen"));
+  websocket.send("wen_feelslike="+checkboxState("wen_feelslike"));
+  websocket.send("wen_humidity="+checkboxState("wen_humidity"));
+  websocket.send("wen_pressure="+checkboxState("wen_pressure"));
+  websocket.send("wen_wind="+checkboxState("wen_wind"));
   websocket.send("wlat="+getId("wlat").value);
   websocket.send("wlon="+getId("wlon").value);
   websocket.send("wapi="+getId("wapi").value);

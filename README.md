@@ -22,6 +22,16 @@ Documentation will be improved at some point... Until then, check this page and 
 
 ## ehRadio Version history
 
+### 2026.05.03 Dev - Feature Freeze ON
+  - Unified `commandhandler`
+    - all commands routed through the same path so websockets, Telnet, MQTT, and HTTP have (mostly) the same command set
+    - see `Commands.md` for a full list and how to use commands
+  - Unified logging
+    - logging uses formatting functions to be more readable
+    - logging is sent to serial and telnet simultaneously
+    - Telnet will show errors for commands that are blocked
+  - Home Assistant custom component fixed
+
 ### 2026.04.09 - Feature Freeze ON
   - Fixes worth a release even if still in repairs:
     - aggressive re-connect on streams that disconnect (for any reason)

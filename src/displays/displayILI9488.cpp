@@ -16,7 +16,7 @@
 void DspCore::initDisplay() {
   setSpiKludge(false);
   init();
-  //if(DEF_SPI_FREQ > 0) setSPISpeed(DEF_SPI_FREQ);
+  // if(DEF_SPI_FREQ > 0) setSPISpeed(DEF_SPI_FREQ); // set by driver and overridden by DEF_SPI_FREQ directly
   cp437(true);
   setTextWrap(false);
   setTextSize(1);

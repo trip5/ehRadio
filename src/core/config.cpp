@@ -8,6 +8,7 @@
 #include "config.h"
 #include "controls.h"
 #include "display.h"
+#include "logging.h"
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
@@ -62,7 +63,7 @@ void Config::init() {
   #if RTCSUPPORTED
     BOOTLOG("RTC begin(SDA=%d,SCL=%d)", RTC_SDA, RTC_SCL);
     if (rtc.init()) {
-      BOOTLOG("done");
+      BOOTLOG("RTC.init done");
       _rtcFound = true;
     } else {
       BOOTLOG("[ERROR] - Couldn't find RTC");
@@ -82,7 +83,7 @@ void Config::init() {
   if (store.play_mode>1) store.play_mode=PM_WEB;
   _initHW();
   if (!SPIFFS.begin(true)) {
-    Serial.println("##[ERROR]#\tSPIFFS Mount Failed");
+    ERRORLOG("SPIFFS Mount Failed");
     return;
   }
   BOOTLOG("SPIFFS mounted");
@@ -142,11 +143,11 @@ void Config::loadPreferences() {
   size_t configSetRead = prefs.getBytes("cfgset", &configSetValue, sizeof(configSetValue));
   if (configSetRead != sizeof(configSetValue)) {
     // Preferences is empty, save config_set and version
-    Serial.println("[Prefs] Empty NVS detected, initializing config_set...\n");
+    FUNCTIONLOG("Prefs", "Empty NVS detected, initializing config_set...");
     saveValue(&store.config_set, store.config_set);
   } else if (configSetValue != 4262) {
     // config_set present but not valid, reset config
-    Serial.printf("[Prefs] Invalid config_set (%u), resetting config...\n", configSetValue);
+    FUNCTIONLOG("Prefs", "Invalid config_set (%u), resetting config...", configSetValue);
     prefs.end();
     reset();
     return;
@@ -176,14 +177,14 @@ void Config::changeMode(int newmode) {
     if (!sdman.ready && newmode!=PM_WEB) {
       #if SD_CARD_DETECT_PIN!=255
         if (digitalRead(SD_CARD_DETECT_PIN)==HIGH) {
-          Serial.println("##[ERROR]#\tSD card not inserted");
+          ERRORLOG("SD card not inserted");
           netserver.requestOnChange(GETPLAYERMODE, 0);
           sdman.stop();
           return;
         }
       #endif
       if (!sdman.start()) {
-        Serial.println("##[ERROR]#\tSD Not Found");
+        ERRORLOG("SD card not found");
         netserver.requestOnChange(GETPLAYERMODE, 0);
         sdman.stop();
         return;
@@ -262,21 +263,21 @@ void Config::initPlaylistMode() {
       #if SD_CARD_DETECT_PIN!=255
         if (digitalRead(SD_CARD_DETECT_PIN)==HIGH) {
           store.play_mode=PM_WEB;
-          Serial.println("SD card not inserted");
+          ERRORLOG("SD card not inserted");
           changeMode(PM_WEB);
           _lastStation = store.lastStation;
         } else
       #endif
       if (!sdman.start()) {
         store.play_mode=PM_WEB;
-        Serial.println("SD Mount Failed");
+        ERRORLOG("SD mount failed");
         changeMode(PM_WEB);
         _lastStation = store.lastStation;
       } else {
-        if (_bootDone) Serial.println("SD Mounted"); else BOOTLOG("SD Mounted");
-          if (_bootDone) Serial.println("Waiting for SD card indexing..."); else BOOTLOG("Waiting for SD card indexing...");
+        if (_bootDone) FUNCTIONLOG("SD", "SD card mounted"); else BOOTLOG("SD card mounted");
+          if (_bootDone) FUNCTIONLOG("SD", "Waiting for SD card indexing..."); else BOOTLOGX("Waiting for SD card indexing...\t");
           initSDPlaylist();
-          if (_bootDone) Serial.println("done"); else BOOTLOG("done");
+          if (_bootDone) FUNCTIONLOG("SD", "done"); else SERIALLOG("done");
           _lastStation = store.lastSdStation;
           
           if (_lastStation>cs && cs>0) {
@@ -287,7 +288,7 @@ void Config::initPlaylistMode() {
           }
       }
     } else {
-      Serial.println("done");
+      if (_bootDone) FUNCTIONLOG("SD", "done"); else BOOTLOG("SD card done");
       _lastStation = store.lastStation;
     }
   #else
@@ -317,7 +318,7 @@ void Config::_initHW() {
     memset(&ircodes, 0, sizeof(ircodes));
     size_t read = prefs.getBytes("ircodes", &ircodes, sizeof(ircodes));
     if (read != sizeof(ircodes) || ircodes.ir_set != 4224) {
-      Serial.println("[_initHW] ircodes not initialized or corrupt, resetting...");
+      FUNCTIONLOG("_initHW", "ircodes not initialized or corrupt, resetting...");
       prefs.remove("ircodes");
       memset(ircodes.irVals, 0, sizeof(ircodes.irVals));
     }
@@ -374,7 +375,7 @@ void Config::loadTheme() {
 }
 
 void Config::reset() {
-  Serial.print("[Prefs] Reset requested, resetting config...\n");
+  FUNCTIONLOG("Prefs", "Reset requested, resetting config...");
   //prefs.begin("ehradio", false);
   //prefs.clear();
   //prefs.end();
@@ -466,10 +467,11 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
   if (strcmp(val, "controls") == 0) {
     saveValue(&store.volsteps, (uint8_t)VOLUME_STEPS);
     saveValue(&store.fliptouch, (bool)TOUCH_FLIP);
+    controls.flipTS();
     saveValue(&store.dbgtouch, (bool)TOUCH_DEBUG);
     saveValue(&store.skipPlaylistUpDown, (bool)ONE_CLICK_SWITCH);
-    setEncAcceleration(ROTARY_ACCEL);
-    setIRTolerance(IR_TOLERANCE);
+    controls.setEncAcceleration(ROTARY_ACCEL);
+    controls.setIRTolerance(IR_TOLERANCE);
     netserver.requestOnChange(GETCONTROLS, clientId);
     return;
   }
@@ -482,7 +484,7 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
 
 
 void Config::setDefaults() {
-  Serial.println("[setDefaults] called");
+  SERIALLOG("setDefaults called");
   nvs_flash_erase();
   nvs_flash_init();
   // defaults set by struct, except one
@@ -970,7 +972,7 @@ void Config::deleteMainwwwFile() {
       snprintf(mainfile, sizeof(mainfile), "/www/%s%s", lastFile, suffix);
       if (SPIFFS.exists(mainfile)) {
         SPIFFS.remove(mainfile);
-        Serial.printf("[Config] Deleted main www file: %s\n", mainfile);
+        FUNCTIONLOG("Config", "Deleted main www file: %s", mainfile);
       }
     }
   }
@@ -987,7 +989,7 @@ void cleanStaleSearchResults() {
       time_t fileTime = atol(timeStr.c_str());
       time_t now = time(nullptr);
       if (now < 100000000 || (now - fileTime) > 86400) {
-        Serial.print("Cleaning stale search results.\n");
+        SERIALLOG("Cleaning stale search results.");
         SPIFFS.remove(metaPath);
         SPIFFS.remove("/www/searchresults.json");
         SPIFFS.remove("/www/search.txt");
@@ -1040,7 +1042,7 @@ void getRequiredFiles() {
           snprintf(tryFile, sizeof(tryFile), "%s", localFile);
           snprintf(tryUrl, sizeof(tryUrl), "%s%s", FILESURL, fname);
         }
-        Serial.printf("[ESPFileUpdater: %s] Updating required file.\n", tryFile);
+        FUNCTIONLOG("ESPFileUpdater", "%s - updating required file...", tryFile);
         ESPFileUpdater::UpdateStatus result = getRequiredFile->checkAndUpdate(
             tryFile,
             tryUrl,
@@ -1048,12 +1050,12 @@ void getRequiredFiles() {
             ESPFILEUPDATER_VERBOSE
        );
         if (result == ESPFileUpdater::UPDATED) {
-          Serial.printf("[ESPFileUpdater: %s] Download completed.\n", tryFile);
+          FUNCTIONLOG("ESPFileUpdater", "%s - download complete", tryFile);
           success = true;
           break;
         } else {
-          if (j == 0) Serial.printf("[ESPFileUpdater: %s] Download failed. Will retry for uncompressed file.\n", tryFile);
-          if (j == 1) Serial.printf("[ESPFileUpdater: %s] Download failed. No online file available. Are you running a custom version?\n", tryFile);
+          if (j == 0) FUNCTIONLOG("ESPFileUpdater", "%s - download failed - will try for uncompressed file...", tryFile);
+          if (j == 1) FUNCTIONLOG("ESPFileUpdater", "%s - download failed because no online file available. Are you running a custom version?", tryFile);
         }
       }
       if (!success) {
@@ -1102,7 +1104,7 @@ void checkNewVersionFile() {
 }
 
 void Config::updateFile(void* param, const char* localFile, const char* onlineFile, const char* updatePeriod, const char* simpleName) {
-  Serial.printf("[ESPFileUpdater: %s] Started update.\n", simpleName);
+  FUNCTIONLOG("ESPFileUpdater", "%s - started update", simpleName);
   ESPFileUpdater* updatefile = (ESPFileUpdater*)param;
   ESPFileUpdater::UpdateStatus result = updatefile->checkAndUpdate(
       localFile,
@@ -1111,11 +1113,11 @@ void Config::updateFile(void* param, const char* localFile, const char* onlineFi
       ESPFILEUPDATER_VERBOSE
  );
   if (result == ESPFileUpdater::UPDATED) {
-    Serial.printf("[ESPFileUpdater: %s] Update completed.\n", simpleName);
+    FUNCTIONLOG("ESPFileUpdater", "%s - update completed", simpleName);
   } else if (result == ESPFileUpdater::NOT_MODIFIED||result == ESPFileUpdater::MAX_AGE_NOT_REACHED) {
-    Serial.printf("[ESPFileUpdater: %s] No update needed.\n", simpleName);
+    FUNCTIONLOG("ESPFileUpdater", "%s - no update needed", simpleName);
   } else {
-    Serial.printf("[ESPFileUpdater: %s] Update failed.\n", simpleName);
+    FUNCTIONLOG("ESPFileUpdater", "%s - update failed", simpleName);
   }
 }
 
@@ -1132,14 +1134,14 @@ bool updateLocaleFileCore(ESPFileUpdater* updater, const char* localeCode) {
   #ifdef UPDATEURL
     // Special case: hardcoded locale uses default, no file needed
     if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
-      Serial.printf("[Updating Locale: %s] No need to download, hardcoded locale uses default.\n", HARDCODED_WEBUI_LOCALE);
+      FUNCTIONLOG("Locale", "Updating locale: %s - no need to download, hardcoded locale uses default.", HARDCODED_WEBUI_LOCALE);
       return true;
     }
     char tryFile[64] = "/www/locale.new";
     char finalFile[64];
     char tryUrl[128];
     bool success = false;
-    Serial.printf("[Updating Locale: %s] Downloading file...\n", localeCode);
+    FUNCTIONLOG("Locale Update", "Downloading file for %s...", localeCode);
     for (size_t j = 0; j < 2; j++) {
       SPIFFS.remove(tryFile);
       if (j == 0) {
@@ -1156,7 +1158,7 @@ bool updateLocaleFileCore(ESPFileUpdater* updater, const char* localeCode) {
           ESPFILEUPDATER_VERBOSE
       );
       if (result == ESPFileUpdater::UPDATED) {
-        Serial.printf("[Updating Locale: %s] Download successful, saving as %s\n", localeCode, finalFile);
+        FUNCTIONLOG("Locale Update", "Download for %s successful, saving as %s", localeCode, finalFile);
         SPIFFS.remove(finalFile);
         if (SPIFFS.rename(tryFile, finalFile)) {
           success = true;
@@ -1165,7 +1167,7 @@ bool updateLocaleFileCore(ESPFileUpdater* updater, const char* localeCode) {
       }
     }
     if (!success) {
-      Serial.println("[Updating Locale] Failed to fetch file from either .gz or uncompressed URL");
+      FUNCTIONLOG("Locale Update", "Failed to fetch file from either .gz or uncompressed URL");
     }
     return success;
   #else
@@ -1186,14 +1188,14 @@ void updateLocaleFileAsyncWrapper(void* param) {
     SPIFFS.remove(oldLocale);
     // Download successful - commit the locale code to config
     config.saveValue(config.store.locale_webui, params->localeCode);
-    Serial.printf("[Updating Locale: %s] Successfully updated\n", params->localeCode);
+    FUNCTIONLOG("Locale Update", "Successfully updated to %s", params->localeCode);
     // Send success message to frontend
     char msg[64];
     snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", params->localeCode);
     websocket.text(params->clientId, msg);
   } else {
     // Download failed - don't modify config, send error message
-    Serial.printf("[Updating Locale: %s] Failed to update\n", params->localeCode);
+    FUNCTIONLOG("Locale Update", "Failed to update to %s", params->localeCode);
     websocket.text(params->clientId, "{\"locale_update_failed\":true}");
   }
   delete params->updater;
@@ -1208,9 +1210,9 @@ void Config::updateLocaleFile() {
     updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
     bool success = updateLocaleFileCore(updater, config.store.locale_webui);
     if (success) {
-      Serial.printf("[Locale Update] Successfully updated to %s\n", config.store.locale_webui);
+      FUNCTIONLOG("Locale Update", "Successfully updated to %s", config.store.locale_webui);
     } else {
-      Serial.printf("[Locale Update] Failed to update to %s\n", config.store.locale_webui);
+      FUNCTIONLOG("Locale Update", "Failed to update to %s", config.store.locale_webui);
     }
     delete updater;
   #endif
@@ -1231,7 +1233,7 @@ bool Config::updateLocaleFileAsync(const char* localeCode, uint8_t clientId) {
   #else
     // If not, then just need to switch
     config.saveValue(config.store.locale_webui, localeCode);
-    Serial.printf("[Locale Switch] Changed to %s\n", localeCode);
+    FUNCTIONLOG("Locale Switch", "Changed to %s", localeCode);
     char msg[64];
     snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", localeCode);
     websocket.text(clientId, msg);
@@ -1242,21 +1244,21 @@ bool Config::updateLocaleFileAsync(const char* localeCode, uint8_t clientId) {
 bool checkLocaleFile() {
   // Special case: hardcoded locale uses default, no file needed
   if (strcmp(config.store.locale_webui, HARDCODED_WEBUI_LOCALE) == 0) {
-    Serial.printf("[Locale Check] %s uses hardcoded default, no file needed\n", HARDCODED_WEBUI_LOCALE);
+    FUNCTIONLOG("Locale Check", "%s uses hardcoded default, no file needed", HARDCODED_WEBUI_LOCALE);
     return true;
   }
   char localeFileGz[64], localeFile[64];
   snprintf(localeFileGz, sizeof(localeFileGz), "/www/%s.json.gz", config.store.locale_webui);
   snprintf(localeFile, sizeof(localeFile), "/www/%s.json", config.store.locale_webui);
   if (SPIFFS.exists(localeFileGz)) {
-    Serial.printf("[Locale Check] Found %s.json.gz\n", config.store.locale_webui);
+    FUNCTIONLOG("Locale Check", "Found %s.json.gz", config.store.locale_webui);
     return true;
   }
   if (SPIFFS.exists(localeFile)) {
-    Serial.printf("[Locale Check] Found %s.json\n", config.store.locale_webui);
+    FUNCTIONLOG("Locale Check", "Found %s.json", config.store.locale_webui);
     return true;
   }
-  Serial.printf("[Locale Check] Locale file not found for %s\n", config.store.locale_webui);
+  FUNCTIONLOG("Locale Check", "Locale file not found for %s", config.store.locale_webui);
   return false;
 }
 
@@ -1264,13 +1266,13 @@ void startupServicesAsync(void* param) {
   fixPlaylistFileEnding(); // playlist.csv MUST have a line-feed at end (can happen easily by uploading a file)
   #ifdef UPDATEURL
     if (!checkLocaleFile()) {
-      Serial.printf("[Locale Check] Locale file verification failed, updating to %s...\n", config.store.locale_webui);
+      FUNCTIONLOG("Locale Check", "Locale file verification failed, updating to %s...", config.store.locale_webui);
       config.updateLocaleFile();
     }
     config.updateFile(param, "/data/new_ver.txt", CHECKUPDATEURL, CHECKUPDATEURL_TIME, "New version number");
     checkNewVersionFile();
     if (config.store.autoupdate && netserver.newVersionAvailable) {
-      Serial.println("[AutoUpdate] Autoupdate enabled and new version detected - starting online update");
+      FUNCTIONLOG("AutoUpdate", "New version detected - starting online update");
       startOnlineUpdate();
     }
   #endif

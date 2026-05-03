@@ -1,44 +1,137 @@
 #include "options.h"
 #ifdef MQTT_ENABLE // ============================== Everything ignored if not defined ==============================
 
+#include <ctype.h>
 #include <WiFi.h>
+#include "commandhandler.h"
 #include "config.h"
+#include "logging.h"
 #include "mqtt.h"
 #include "player.h"
 
-AsyncMqttClient mqttClient;
-TimerHandle_t mqttReconnectTimer;
-char topic[100], status[BUFLEN+50];
+namespace {
 
-void connectToMqtt() {
-  //config.waitConnection();
-  mqttClient.connect();
+void trimInPlace(char* text) {
+  if (!text || text[0] == '\0') return;
+
+  char* begin = text;
+  while (*begin && isspace(static_cast<unsigned char>(*begin))) {
+    ++begin;
+  }
+  if (begin != text) {
+    memmove(text, begin, strlen(begin) + 1);
+  }
+
+  size_t len = strlen(text);
+  while (len > 0 && isspace(static_cast<unsigned char>(text[len - 1]))) {
+    text[--len] = '\0';
+  }
 }
 
-void mqttInit() {
-  mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onMessage(onMqttMessage);
+void stripWrappingQuotes(char* text) {
+  size_t len = strlen(text);
+  if (len < 2) return;
+  if ((text[0] == '"' && text[len - 1] == '"') || (text[0] == '\'' && text[len - 1] == '\'')) {
+    memmove(text, text + 1, len - 2);
+    text[len - 2] = '\0';
+  }
+}
+
+bool startsWithHttp(const char* text) {
+  return strncmp(text, "http://", 7) == 0 || strncmp(text, "https://", 8) == 0;
+}
+
+bool parsePayloadToCommand(const char* payload, char* command, size_t commandSize, char* value, size_t valueSize) {
+  if (!payload || payload[0] == '\0') return false;
+
+  command[0] = '\0';
+  value[0] = '\0';
+
+  if (startsWithHttp(payload)) {
+    strlcpy(command, "burl", commandSize);
+    strlcpy(value, payload, valueSize);
+    return true;
+  }
+
+  const char* eq = strchr(payload, '=');
+  if (eq) {
+    size_t commandLen = static_cast<size_t>(eq - payload);
+    if (commandLen >= commandSize) commandLen = commandSize - 1;
+    memcpy(command, payload, commandLen);
+    command[commandLen] = '\0';
+    strlcpy(value, eq + 1, valueSize);
+  } else {
+    const char* open = strchr(payload, '(');
+    const char* close = strrchr(payload, ')');
+    if (open && close && close > open) {
+      size_t commandLen = static_cast<size_t>(open - payload);
+      if (commandLen >= commandSize) commandLen = commandSize - 1;
+      memcpy(command, payload, commandLen);
+      command[commandLen] = '\0';
+
+      size_t valueLen = static_cast<size_t>(close - open - 1);
+      if (valueLen >= valueSize) valueLen = valueSize - 1;
+      memcpy(value, open + 1, valueLen);
+      value[valueLen] = '\0';
+    } else {
+      const char* space = strchr(payload, ' ');
+      if (space) {
+        size_t commandLen = static_cast<size_t>(space - payload);
+        if (commandLen >= commandSize) commandLen = commandSize - 1;
+        memcpy(command, payload, commandLen);
+        command[commandLen] = '\0';
+        strlcpy(value, space + 1, valueSize);
+      } else {
+        strlcpy(command, payload, commandSize);
+      }
+    }
+  }
+
+  trimInPlace(command);
+  trimInPlace(value);
+  stripWrappingQuotes(value);
+
+  if (strcmp(command, "play") == 0) {
+    if (value[0] == '\0') {
+      strlcpy(command, "start", commandSize);
+    } else if (startsWithHttp(value)) {
+      strlcpy(command, "burl", commandSize);
+    }
+  }
+
+  return command[0] != '\0';
+}
+
+} // namespace
+
+void Mqtt::zeroBuf() { memset(topic, 0, sizeof(topic)); memset(status, 0, sizeof(status)); }
+
+void Mqtt::_connectCb() { mqtt.connect(); }
+
+void Mqtt::connect() { mqttClient.connect(); }
+
+void Mqtt::init() {
+  mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(_connectCb));
+  mqttClient.onConnect(_onConnect);
+  mqttClient.onDisconnect(_onDisconnect);
+  mqttClient.onMessage(_onMessage);
   if (strlen(config.store.mqttuser)>0) mqttClient.setCredentials(config.store.mqttuser, config.store.mqttpass);
   mqttClient.setServer(config.store.mqtthost, config.store.mqttport);
-  connectToMqtt();
+  connect();
 }
 
-void zeroBuffer() { memset(topic, 0, sizeof(topic)); memset(status, 0, sizeof(status)); }
-
-void onMqttConnect(bool sessionPresent) {
-  zeroBuffer();
-  sprintf(topic, "%s%s", config.store.mqtttopic, "command");
-  mqttClient.subscribe(topic, 2);
-  mqttPublishStatus();
-  mqttPublishVolume();
-  mqttPublishPlaylist();
+void Mqtt::_onConnect(bool sessionPresent) {
+  mqtt.zeroBuf();
+  sprintf(mqtt.topic, "%s%s", config.store.mqtttopic, "command");
+  mqtt.mqttClient.subscribe(mqtt.topic, 2);
+  mqtt.publishStatus();
+  mqtt.publishVolume();
+  mqtt.publishPlaylist();
 }
 
-void mqttPublishStatus() {
+void Mqtt::publishStatus() {
   if (mqttClient.connected()) {
-    zeroBuffer();
+    zeroBuf();
     sprintf(topic, "%s%s", config.store.mqtttopic, "status");
     char name[BUFLEN/2];
     char title[BUFLEN/2];
@@ -49,18 +142,18 @@ void mqttPublishStatus() {
   }
 }
 
-void mqttPublishPlaylist() {
+void Mqtt::publishPlaylist() {
   if (mqttClient.connected()) {
-    zeroBuffer();
+    zeroBuf();
     sprintf(topic, "%s%s", config.store.mqtttopic, "playlist");
     sprintf(status, "http://%s%s", WiFi.localIP().toString().c_str(), PLAYLIST_PATH);
     mqttClient.publish(topic, 0, true, status);
   }
 }
 
-void mqttPublishVolume() {
+void Mqtt::publishVolume() {
   if (mqttClient.connected()) {
-    zeroBuffer();
+    zeroBuf();
     char vol[5];
     memset(vol, 0, 5);
     sprintf(topic, "%s%s", config.store.mqtttopic, "volume");
@@ -69,66 +162,39 @@ void mqttPublishVolume() {
   }
 }
 
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+void Mqtt::_onDisconnect(AsyncMqttClientDisconnectReason reason) {
   if (WiFi.isConnected()) {
-    xTimerStart(mqttReconnectTimer, 0);
+    xTimerStart(mqtt.mqttReconnectTimer, 0);
   }
 }
 
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+void Mqtt::_onMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
   if (len == 0) return;
-  if (len<20) {
-    char buf[len+1];
-    strncpy(buf, payload, len);
-    buf[len]='\0';
-    if (strcmp(buf, "prev") == 0) { player.sendCommand({PR_PREV, 0}); return; }
-    if (strcmp(buf, "next") == 0) { player.sendCommand({PR_NEXT, 0}); return; }
-    if (strcmp(buf, "toggle") == 0) { player.sendCommand({PR_TOGGLE, 0}); return; }
-    if (strcmp(buf, "stop") == 0) { player.sendCommand({PR_STOP, 0}); return; }
-    if (strcmp(buf, "start") == 0 || strcmp(buf, "play") == 0) { player.sendCommand({PR_PLAY, config.lastStation()}); return; }
-    if (strcmp(buf, "boot") == 0 || strcmp(buf, "reboot") == 0) { ESP.restart(); return; }
-    if (strcmp(buf, "voldown") == 0 || strcmp(buf, "volm") == 0) { player.stepVol(false); return; }
-    if (strcmp(buf, "volup")   == 0 || strcmp(buf, "volp") == 0) { player.stepVol(true);  return; }
-    if (strcmp(buf, "turnoff") == 0) {
-      bool sst = config.store.smartstart;
-      config.setDspOn(0);
-      player.sendCommand({PR_STOP, 0});
-      delay(100);
-      config.saveValue(&config.store.smartstart, sst);
-      return;
-    }
-    if (strcmp(buf, "turnon") == 0) {
-      config.setDspOn(1);
-      if (config.store.smartstart) player.sendCommand({PR_PLAY, config.lastStation()});
-      return;
-    }
-    int volume;
-    if (sscanf(buf, "vol %d", &volume) == 1) {
-      if (volume < 0) volume = 0;
-      if (volume > 254) volume = 254;
-      player.setVol(volume);
-      return;
-    }
-    int sb;
-    if (sscanf(buf, "play %d", &sb) == 1) {
-      if (sb < 1) sb = 1;
-      uint16_t cs = config.playlistLength();
-      if (sb >= cs) sb = cs;
-      player.sendCommand({PR_PLAY, (uint16_t)sb});
-      return;
-    }
-  } else {
-    if (len>MQTT_BURL_SIZE) return;
-    strncpy(player.burl, payload, len);
-    player.burl[len]='\0';
-    player.sendCommand({PR_BURL, 0});
+  if (len > MQTT_BURL_SIZE) return;
+
+  char raw[MQTT_BURL_SIZE + 1];
+  memcpy(raw, payload, len);
+  raw[len] = '\0';
+  trimInPlace(raw);
+  if (raw[0] == '\0') return;
+
+  char command[65] = {0};
+  char value[MQTT_BURL_SIZE + 1] = {0};
+  if (!parsePayloadToCommand(raw, command, sizeof(command), value, sizeof(value))) {
+    FUNCTIONLOG("MQTT", "Ignored unparsed payload: %s", raw);
     return;
   }
-  /*if (strstr(buf, "http")==0) {
-    if (len+1>sizeof(player.burl)) return;
-    strlcpy(player.burl, payload, len+1);
+
+  if (cmd.isBlockedForSource(command, CommandSource::Mqtt)) {
+    FUNCTIONLOG("MQTT", "Rejected blocked command: %s", command);
     return;
-  }*/
+  }
+
+  if (!cmd.exec(command, value, 0, CommandSource::Mqtt)) {
+    FUNCTIONLOG("MQTT", "Unsupported command: %s (value: %s)", command, value);
+  }
 }
+
+Mqtt mqtt;
 
 #endif //  #ifdef MQTT_ENABLE

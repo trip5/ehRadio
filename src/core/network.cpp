@@ -9,6 +9,7 @@
 #include "config.h"
 #include "display.h"
 #include "locale.h"
+#include "logging.h"
 #include "mqtt.h"
 #include "netserver.h"
 #include "network.h"
@@ -131,12 +132,12 @@ void retryStreamConnection(void * pvParameters) {
     // Check if we should still be retrying
     if (network.lostPlaying && WiFi.status() == WL_CONNECTED && !player.isRunning()) {
       attemptCount++;
-      Serial.printf("Stream reconnect attempt %d/%d\n", attemptCount, maxAttempts);
+      SERIALLOG("Stream reconnect attempt %d/%d", attemptCount, maxAttempts);
       player.sendCommand({PR_PLAY, config.lastStation()});
       delay(3000);  // Give it a moment to try connecting
       // Check if it worked
       if (player.isRunning()) {
-        Serial.println("Stream reconnected successfully!");
+        SERIALLOG("Stream reconnected successfully!");
         network.lostPlaying = false;
         streamRetryTaskHandle = NULL;
         vTaskDelete(NULL);
@@ -153,7 +154,7 @@ void retryStreamConnection(void * pvParameters) {
     }
   }
   // Max attempts reached - give up
-  Serial.println("Stream reconnection failed after 10 minutes. User intervention required.");
+  SERIALLOG("Stream reconnection failed after 10 minutes. User intervention required.");
   network.lostPlaying = false;
   streamRetryTaskHandle = NULL;
   vTaskDelete(NULL);
@@ -178,13 +179,13 @@ void MyNetwork::WiFiReconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
     }
   }
   #ifdef MQTT_ENABLE
-    if (config.store.mqttenable) connectToMqtt();
+    if (config.store.mqttenable) mqtt.connect();
   #endif
 }
 
 void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (!network.beginReconnect) {
-    Serial.printf("WiFiLost: %lu ms, event=%d, SSID=%s, RSSI=%d\n", millis(), (int)event, config.ssids[config.store.lastSSID-1].ssid, WiFi.RSSI());
+    SERIALLOG("WiFiLost: %lu ms, event=%d, SSID=%s, RSSI=%d", millis(), (int)event, config.ssids[config.store.lastSSID-1].ssid, WiFi.RSSI());
     if (config.getMode()==PM_SDCARD) {
       network.status=SDREADY;
       display.putRequest(NEWIP, 0);
@@ -272,19 +273,18 @@ bool MyNetwork::wifiBegin(bool silent) {
                 matches[attempt].bssid[0], matches[attempt].bssid[1], matches[attempt].bssid[2],
                 matches[attempt].bssid[3], matches[attempt].bssid[4], matches[attempt].bssid[5],
                 matches[attempt].rssi);
-        Serial.print("##[BOOT]#\t");
+        BOOTLOGX("\t");
         display.putRequest(BOOTSTRING, configIdx);
       }
       WiFi.begin(config.ssids[configIdx].ssid, config.ssids[configIdx].password, 
                  matches[attempt].channel, matches[attempt].bssid); // Connect to specific AP by BSSID
       errcnt = 0;
       while (WiFi.status() != WL_CONNECTED) {
-        if (!silent) Serial.print(".");
+        if (!silent) SERIALLOGDOT();
         delay(500);
         if (REAL_LEDBUILTIN!=255 && !silent) digitalWrite(REAL_LEDBUILTIN, !digitalRead(REAL_LEDBUILTIN));
         errcnt++;
         if (errcnt > WIFI_ATTEMPTS) {
-          if (!silent) Serial.println();
           break;  // Failed, try next match
         }
       }
@@ -305,13 +305,13 @@ bool MyNetwork::wifiBegin(bool silent) {
   while (true) {
     if (!silent) {
       BOOTLOG("Attempt to connect to %s", config.ssids[ls].ssid);
-      Serial.print("##[BOOT]#\t");
+      BOOTLOGX("\t");
       display.putRequest(BOOTSTRING, ls);
     }
     WiFi.begin(config.ssids[ls].ssid, config.ssids[ls].password);
     
     while (WiFi.status() != WL_CONNECTED) {
-      if (!silent) Serial.print(".");
+      if (!silent) SERIALLOGDOT();
       delay(500);
       network.loopImprov();
       if (REAL_LEDBUILTIN!=255 && !silent) digitalWrite(REAL_LEDBUILTIN, !digitalRead(REAL_LEDBUILTIN));
@@ -320,7 +320,6 @@ bool MyNetwork::wifiBegin(bool silent) {
         errcnt = 0;
         ls++;
         if (ls > config.ssidsCount - 1) ls = 0;
-        if (!silent) Serial.println();
         break;
       }
     }
@@ -411,18 +410,19 @@ void MyNetwork::begin() {
   if (config.getMode()!=PM_SDCARD) {
     if (!wifiBegin()) {
       raiseSoftAP();
-      Serial.println("##[BOOT]#\tdone");
+      SERIALLOG("");
+      BOOTLOG("Raise SoftAP done");
       return;
     }
-    Serial.println(".");
+    SERIALLOGDOT();
     status = CONNECTED;
     setWifiParams();
   } else {
     status = SDREADY;
     xTaskCreatePinnedToCore(searchWiFi, "searchWiFi", 1024 * 4, NULL, 0, NULL, 0);
   }
-  
-  Serial.println("##[BOOT]#\tdone");
+  SERIALLOG("");
+  BOOTLOG("Wifi done");
   ehDPinit();
   if (REAL_LEDBUILTIN!=255) digitalWrite(REAL_LEDBUILTIN, LOW);
   
@@ -441,9 +441,6 @@ void MyNetwork::begin() {
 void MyNetwork::loopImprov() {
   if (!improv) return;
   improv->handleSerial();
-  // Note: periodic IMPROV heartbeat broadcast was removed — the Improv
-  // protocol state is driven by the host-side tool; unsolicited broadcasts
-  // caused false provisioning prompts on some platforms.
 }
 
 static Ticker improvRebootTicker;
@@ -508,15 +505,15 @@ void MyNetwork::setWifiParams() {
 
 void MyNetwork::requestTimeSync(bool withTelnetOutput, uint8_t clientId) {
   if (withTelnetOutput) {
+    (void)clientId;
     if (strlen(config.store.sntp1) > 0 && strlen(config.store.sntp2) > 0)
       configTzTime(config.store.tzposix, config.store.sntp1, config.store.sntp2);
     else if (strlen(config.store.sntp1) > 0)
       configTzTime(config.store.tzposix, config.store.sntp1);
     char timeStringBuff[50];
     strftime(timeStringBuff, sizeof(timeStringBuff), "%Y-%m-%dT%H:%M:%S", &timeinfo);
-    telnet.printf(clientId, "##SYS.DATE#: %s (%s)\r\n> ", timeStringBuff, config.store.tzposix);
-    telnet.printf(clientId, "##SYS.TZNAME#: %s\r\n> ", config.store.tz_name);
-    telnet.printf(clientId, "##SYS.TZPOSIX#: %s\r\n> ", config.store.tzposix);
+    FUNCTIONLOG("Time.sync", "Date Time: %s", timeStringBuff);
+    FUNCTIONLOG("Time.sync", "Time Zone Name & POSIX: %s, %s", config.store.tz_name, config.store.tzposix);
   }
 }
 
@@ -533,7 +530,7 @@ void MyNetwork::raiseSoftAP() {
   #endif
   dnsServer = new DNSServer();
   dnsServer->start(53, "*", WiFi.softAPIP());
-  Serial.println("##[BOOT]#");
+  BOOTLOG("");
   BOOTLOG("************************************************");
   BOOTLOG("Running in AP/Improv mode");
   #ifdef AP_PASSWORD
@@ -655,7 +652,7 @@ bool MyNetwork::buildWeatherString() {
       unsigned long cache_age = (millis() - WeatherCache::fetch_time) / 1000;  // Age in seconds
       unsigned long max_age = (unsigned long)config.store.weathersyncinterval * 60 * 2;  // 2x sync interval
       if (cache_age > max_age) {
-        Serial.printf("Weather: Cache expired (age: %lu sec, max: %lu sec)\n", cache_age, max_age);
+        FUNCTIONLOG("Weather", "Cache expired (age: %lu sec, max: %lu sec)", cache_age, max_age);
         WeatherCache::valid = false;
       }
     }
@@ -667,7 +664,7 @@ bool MyNetwork::buildWeatherString() {
       return false;
     }
     
-    Serial.println("Weather: Rebuilding display string from cached data");
+    FUNCTIONLOG("Weather", "Rebuilding display string from cached data");
     
     // Convert temperature based on user preference
     float temp_display = config.store.weathertempimp ? (WeatherCache::temp_c * 9.0 / 5.0 + 32.0) : WeatherCache::temp_c;
@@ -722,7 +719,7 @@ bool MyNetwork::buildWeatherString() {
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= (size_t)written; }
     }
     
-    Serial.printf("Weather: %s\n", weatherBuf);
+    FUNCTIONLOG("Weather", "%s", weatherBuf);
     display.putRequest(NEWWEATHER);
     return true;
   #endif
@@ -732,7 +729,7 @@ bool MyNetwork::buildWeatherString() {
 // Get weather from Open-Meteo API (free, no API key)
 bool getWeather_OpenMeteo(char *wstr) {
   #if (DSP_MODEL!=DSP_DUMMY || defined(USE_NEXTION)) && !defined(HIDE_WEATHER)
-    Serial.println("Weather: Calling Open-Meteo v1 API for current weather...");
+    FUNCTIONLOG("Weather", "Calling Open-Meteo v1 API for current weather...");
     
     // Build URL - always request metric (Celsius, m/s, hPa) for consistent processing
     // Wind speed: always request in m/s so we can cache and convert to any display unit
@@ -742,14 +739,14 @@ bool getWeather_OpenMeteo(char *wstr) {
     
     // Download JSON response to temp file (EspFileUpdater handles chunked encoding)
     if (!downloadToTempFile(url)) {
-      Serial.println("Weather: Failed to download Open-Meteo data");
+      FUNCTIONLOG("Weather", "Failed to download Open-Meteo data");
       return false;
     }
     
     // Read the downloaded JSON file
     File file = SPIFFS.open(TMP_PATH, "r");
     if (!file) {
-      Serial.println("Weather: Failed to open temp file");
+      FUNCTIONLOG("Weather", "Failed to open temp file");
       return false;
     }
     
@@ -761,7 +758,7 @@ bool getWeather_OpenMeteo(char *wstr) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
     if (error) {
-      Serial.printf("Weather: Open-Meteo JSON parse error: %s\n", error.c_str());
+      FUNCTIONLOG("Weather", "Open-Meteo JSON parse error: %s", error.c_str());
       return false;
     }
     
@@ -770,12 +767,12 @@ bool getWeather_OpenMeteo(char *wstr) {
       float elevation = doc["elevation"];
       config.store.weatherelevation = (int16_t)elevation;
       config.saveValue(&config.store.weatherelevation, config.store.weatherelevation);
-      Serial.printf("Weather: Elevation retrieved from Open-Meteo: %d meters\n", config.store.weatherelevation);
+      FUNCTIONLOG("Weather", "Elevation retrieved from Open-Meteo: %d meters", config.store.weatherelevation);
     }
     
     JsonObject current = doc["current"];
     if (current.isNull()) {
-      Serial.println("Weather: No current data in Open-Meteo response");
+      FUNCTIONLOG("Weather", "No current data in Open-Meteo response");
       return false;
     }
     
@@ -844,11 +841,11 @@ int getWeatherIconOffset(const char* icon) {
 // Get weather from OpenWeather API 2.5 (legacy)
 bool getWeather_OpenWeather25(char *wstr) {
   #if (DSP_MODEL!=DSP_DUMMY || defined(USE_NEXTION)) && !defined(HIDE_WEATHER)
-    Serial.println("Weather: Calling OpenWeather API 2.5 for current weather...");
+    FUNCTIONLOG("Weather", "Calling OpenWeather API 2.5 for current weather...");
     
     // Check for API key
     if (strlen(config.store.weatherkey) == 0) {
-      Serial.println("Weather: OpenWeather requires API key");
+      FUNCTIONLOG("Weather", "OpenWeather requires API key");
       return false;
     }
     
@@ -860,14 +857,14 @@ bool getWeather_OpenWeather25(char *wstr) {
     
     // Download JSON response to temp file (EspFileUpdater handles chunked encoding)
     if (!downloadToTempFile(url)) {
-      Serial.println("Weather: Failed to download OpenWeather 2.5 data");
+      FUNCTIONLOG("Weather", "Failed to download OpenWeather 2.5 data");
       return false;
     }
     
     // Read the downloaded JSON file
     File file = SPIFFS.open(TMP_PATH, "r");
     if (!file) {
-      Serial.println("Weather: Failed to open temp file");
+      FUNCTIONLOG("Weather", "Failed to open temp file");
       return false;
     }
     
@@ -879,7 +876,7 @@ bool getWeather_OpenWeather25(char *wstr) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
     if (error) {
-      Serial.printf("Weather: OpenWeather 2.5 JSON parse error: %s\n", error.c_str());
+      FUNCTIONLOG("Weather", "OpenWeather 2.5 JSON parse error: %s", error.c_str());
       return false;
     }
     
@@ -896,7 +893,7 @@ bool getWeather_OpenWeather25(char *wstr) {
     } else if (doc["main"]["pressure"].is<float>()) {
       pressure_hpa = doc["main"]["pressure"];
     } else {
-      Serial.println("Weather: No pressure data in OpenWeather 2.5 response");
+      FUNCTIONLOG("Weather", "No pressure data in OpenWeather 2.5 response");
       return false;
     }
     
@@ -949,7 +946,7 @@ void fetchAndCacheElevation() {
   bool success = false;
   
   // Try Open-Elevation API first
-  Serial.println("Weather: Getting elevation from Open-Elevation...");
+  FUNCTIONLOG("Weather", "Getting elevation from Open-Elevation...");
   char url[256];
   sprintf(url, "http://api.open-elevation.com/api/v1/lookup?locations=%.4f,%.4f", lat, lon);
   
@@ -971,7 +968,7 @@ void fetchAndCacheElevation() {
   
   // Fall back to Open-Meteo if Open-Elevation failed
   if (!success) {
-    Serial.println("Weather: Getting elevation from Open-Meteo...");
+    FUNCTIONLOG("Weather", "Getting elevation from Open-Meteo...");
     sprintf(url, "https://api.open-meteo.com/v1/elevation?latitude=%.4f&longitude=%.4f", lat, lon);
     
     if (downloadToTempFile(url)) {
@@ -998,9 +995,9 @@ void fetchAndCacheElevation() {
   if (success && elevation > 0.0) {
     config.store.weatherelevation = (int16_t)elevation;
     config.saveValue(&config.store.weatherelevation, config.store.weatherelevation);
-    Serial.printf("Weather: Caching elevation: %d meters\n", config.store.weatherelevation);
+    FUNCTIONLOG("Weather", "Caching elevation: %d meters", config.store.weatherelevation);
   } else {
-    Serial.println("Weather: Failed to retrieve elevation from all sources");
+    FUNCTIONLOG("Weather", "Failed to retrieve elevation from all sources");
   }
 }
 
@@ -1014,11 +1011,11 @@ float calculateGroundPressure(float seaLevelPressure, float elevationMeters) {
 // Get weather from OpenWeather API 3.0 (current)
 bool getWeather_OpenWeather30(char *wstr) {
   #if (DSP_MODEL!=DSP_DUMMY || defined(USE_NEXTION)) && !defined(HIDE_WEATHER)
-    Serial.println("Weather: Calling OpenWeather API 3.0 for current weather...");
+    FUNCTIONLOG("Weather", "Calling OpenWeather API 3.0 for current weather...");
     
     // Check for API key
     if (strlen(config.store.weatherkey) == 0) {
-      Serial.println("Weather: OpenWeather requires API key");
+      FUNCTIONLOG("Weather", "OpenWeather requires API key");
       return false;
     }
     
@@ -1030,14 +1027,14 @@ bool getWeather_OpenWeather30(char *wstr) {
     
     // Download JSON response to temp file (EspFileUpdater handles chunked encoding)
     if (!downloadToTempFile(url)) {
-      Serial.println("Weather: Failed to download OpenWeather 3.0 data");
+      FUNCTIONLOG("Weather", "Failed to download OpenWeather 3.0 data");
       return false;
     }
     
     // Read the downloaded JSON file
     File file = SPIFFS.open(TMP_PATH, "r");
     if (!file) {
-      Serial.println("Weather: Failed to open temp file");
+      FUNCTIONLOG("Weather", "Failed to open temp file");
       return false;
     }
     
@@ -1049,13 +1046,13 @@ bool getWeather_OpenWeather30(char *wstr) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
     if (error) {
-      Serial.printf("Weather: OpenWeather 3.0 JSON parse error: %s\n", error.c_str());
+      FUNCTIONLOG("Weather", "OpenWeather 3.0 JSON parse error: %s", error.c_str());
       return false;
     }
     
     JsonObject current = doc["current"];
     if (current.isNull()) {
-      Serial.println("Weather: No current data in OpenWeather 3.0 response");
+      FUNCTIONLOG("Weather", "No current data in OpenWeather 3.0 response");
       return false;
     }
     
@@ -1074,7 +1071,7 @@ bool getWeather_OpenWeather30(char *wstr) {
     float elevation = 0.0;
     if (config.store.weatherelevation != 0) {
       elevation = (float)config.store.weatherelevation;
-      Serial.printf("Weather: Using cached elevation: %d meters\n", config.store.weatherelevation);
+      FUNCTIONLOG("Weather", "Using cached elevation: %d meters", config.store.weatherelevation);
     } else {
       // Fetch and cache elevation
       fetchAndCacheElevation();
@@ -1083,7 +1080,7 @@ bool getWeather_OpenWeather30(char *wstr) {
     
     // Calculate ground-level pressure from sea-level pressure
     float pressure_hpa = calculateGroundPressure(pressure_sea_hpa, elevation);
-    Serial.printf("Weather: Adjusted pressure from %.0f hPa (sea) to %.0f hPa (ground) using %.0f m elevation\n",
+    FUNCTIONLOG("Weather", "Adjusted pressure from %.0f hPa (sea) to %.0f hPa (ground) using %.0f m elevation",
                   pressure_sea_hpa, pressure_hpa, elevation);
     
     // Cache raw weather data for later string rebuilding

@@ -5,5 +5,6 @@
     "dependencies": ["http", "mqtt"],
     "codeowners": ["@trip5"],
     "requirements": [],
-    "version": "2025.08.20"
+    "version": "2026.05.03",
+    "icon": "https://trip5.github.io/ehRadio/images/logo-color-icon.svg"
   }

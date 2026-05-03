@@ -22,7 +22,7 @@ that file if you need non-English language options.
 ********************************************************/
 
 #if __has_include("../../myoptions.h")
-  #include "../../myoptions.h" //  write your variable values here
+  #include "../../myoptions.h" // write your variable values here
 #endif
 #if __has_include("../../mytheme.h")
   #include "../../mytheme.h" // Theme file
@@ -38,34 +38,34 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 (a basic tool and not definitive for all possible configurations)
 ********************************************************/
 
-#define DSP_DUMMY       0     // without display
-#define DSP_ST7735      1     // 160x128  1.8"  or 128x128  1.44"  or 160x80   0.96"  https://aliexpress.com/item/1005002822797745.html
-#define DSP_SSD1306     2     // 128x64   0.96" https://aliexpress.com/item/1005001621806398.html
-#define DSP_NOKIA5110   3     // 84x48    1.6"  https://aliexpress.com/item/1005001621837569.html
-#define DSP_ST7789      4     // 320x240  2.4"  https://aliexpress.com/item/32960241206.html 
-#define DSP_SH1106      5     // 128x64   1.3"  https://aliexpress.com/item/32683094040.html
-#define DSP_1602I2C     6     // 16x2           https://aliexpress.com/item/32305776560.html
-#define DSP_SSD1306x32  7     // 128x32   0.91" https://aliexpress.com/item/32798439084.html
-#define DSP_SSD1327     8     // 128x128  1.5"  https://aliexpress.com/item/1005001414175498.html
-#define DSP_ILI9341     9     // 320x240  3.2"  https://aliexpress.com/item/33048191074.html
-#define DSP_SSD1305     10    // 128x64   2.4"  SSD1305 and SSD1309 SPI https://aliexpress.com/item/32950307344.html
-#define DSP_SH1107      11    // 128x64   1.3"  https://aliexpress.com/item/4000551696674.html
-#define DSP_1602        12    // 16x2           https://aliexpress.com/item/32685016568.html
-#define DSP_GC9106      13    // 160x80   0.96" (looks like ST7735S, but it"s not him) https://aliexpress.com/item/32947890530.html
-#define DSP_2004I2C     14    // 20x4           https://aliexpress.com/item/32783128355.html
-#define DSP_2004        15    // 20x4           https://aliexpress.com/item/32783128355.html
-#define DSP_SSD1305I2C  16    // 128x64   2.4"  SSD1305 and SSD1309 I2C https://aliexpress.com/item/32950307344.html
-#define DSP_ILI9225     17    // 220x176  2.0"  https://aliexpress.com/item/32952021835.html
-#define DSP_ST7789_240  18    // 240x240  1.3"  https://aliexpress.com/item/32996979276.html
+#define DSP_DUMMY       0    // without display
+#define DSP_ST7735      1    // 160x128  1.8"  or 128x128  1.44"  or 160x80   0.96"  https://aliexpress.com/item/1005002822797745.html
+#define DSP_SSD1306     2    // 128x64   0.96" https://aliexpress.com/item/1005001621806398.html
+#define DSP_NOKIA5110   3    // 84x48    1.6"  https://aliexpress.com/item/1005001621837569.html
+#define DSP_ST7789      4    // 320x240  2.4"  https://aliexpress.com/item/32960241206.html 
+#define DSP_SH1106      5    // 128x64   1.3"  https://aliexpress.com/item/32683094040.html
+#define DSP_1602I2C     6    // 16x2           https://aliexpress.com/item/32305776560.html
+#define DSP_SSD1306x32  7    // 128x32   0.91" https://aliexpress.com/item/32798439084.html
+#define DSP_SSD1327     8    // 128x128  1.5"  https://aliexpress.com/item/1005001414175498.html
+#define DSP_ILI9341     9    // 320x240  3.2"  https://aliexpress.com/item/33048191074.html
+#define DSP_SSD1305     10   // 128x64   2.4"  SSD1305 and SSD1309 SPI https://aliexpress.com/item/32950307344.html
+#define DSP_SH1107      11   // 128x64   1.3"  https://aliexpress.com/item/4000551696674.html
+#define DSP_1602        12   // 16x2           https://aliexpress.com/item/32685016568.html
+#define DSP_GC9106      13   // 160x80   0.96" (looks like ST7735S, but it"s not him) https://aliexpress.com/item/32947890530.html
+#define DSP_2004I2C     14   // 20x4           https://aliexpress.com/item/32783128355.html
+#define DSP_2004        15   // 20x4           https://aliexpress.com/item/32783128355.html
+#define DSP_SSD1305I2C  16   // 128x64   2.4"  SSD1305 and SSD1309 I2C https://aliexpress.com/item/32950307344.html
+#define DSP_ILI9225     17   // 220x176  2.0"  https://aliexpress.com/item/32952021835.html
+#define DSP_ST7789_240  18   // 240x240  1.3"  https://aliexpress.com/item/32996979276.html
 /* !!! DSP_ST7789_240 requires further development when used in conjunction with the VS1053 module !!! See the link https://www.instructables.com/Adding-CS-Pin-to-13-LCD/ */
-#define DSP_ST7796      19    // 480x320  3.5"  https://aliexpress.com/item/1005004632953455.html?sku_id=12000029911293172
-#define DSP_GC9A01A     20    // 240x240  1.28" https://aliexpress.com/item/1005004069703494.html?sku_id=12000029869654615
-#define DSP_ILI9488     21    // 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356570
-#define DSP_ILI9486     22    // (Testing mode) 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356568
-#define DSP_SSD1322     23    // 256x64   2.8"  https://aliexpress.com/item/1005003480981568.html
-#define DSP_ST7920      24    // 128x64   2.6"  https://aliexpress.com/item/32699482638.html
-#define DSP_ST7789_76   25    // 284x76 2.25"   https://aliexpress.ru/item/1005009016973081.html
-#define DSP_CUSTOM      101   // your display
+#define DSP_ST7796      19   // 480x320  3.5"  https://aliexpress.com/item/1005004632953455.html?sku_id=12000029911293172
+#define DSP_GC9A01A     20   // 240x240  1.28" https://aliexpress.com/item/1005004069703494.html?sku_id=12000029869654615
+#define DSP_ILI9488     21   // 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356570
+#define DSP_ILI9486     22   // (Testing mode) 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356568
+#define DSP_SSD1322     23   // 256x64   2.8"  https://aliexpress.com/item/1005003480981568.html
+#define DSP_ST7920      24   // 128x64   2.6"  https://aliexpress.com/item/32699482638.html
+#define DSP_ST7789_76   25   // 284x76 2.25"   https://aliexpress.ru/item/1005009016973081.html
+#define DSP_CUSTOM      101  // your display
 
 #ifndef DSP_MODEL
   #define DSP_MODEL DSP_DUMMY
@@ -76,7 +76,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 
 #ifndef DSP_HSPI
-  #define DSP_HSPI   false      // use HSPI for displays (miso=12, mosi=13, clk=14) instead of VSPI (by default)
+  #define DSP_HSPI false // use HSPI for displays (miso=12, mosi=13, clk=14) instead of VSPI (by default)
 #endif
 
 /* Use #define #BIG_BOOT_LOGO with 480x320 displays if you want a bigger boot logo */
@@ -104,15 +104,20 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 
 /*    ST7735 display submodel     */
-//  INITR_BLACKTAB        // 1.8" https://aliexpress.ru/item/1005002822797745.html
-//      See this note If INITR_BLACKTAB have a noisy line on one side of the screen https://github.com/e2002/yoradio#note-if-initr_blacktab-dsp-have-a-noisy-line-on-one-side-of-the-screen-then-in-adafruit_st7735cpp
-//  INITR_144GREENTAB     // 1.44" https://aliexpress.ru/item/1005002822797745.html
-//  INITR_MINI160x80      // 0.96" 160x80 ST7735S   https://????
-//  INITR_GREENTAB
-//  INITR_REDTAB
+// INITR_BLACKTAB       // 1.8" https://aliexpress.ru/item/1005002822797745.html
+//     See this note If INITR_BLACKTAB have a noisy line on one side of the screen https://github.com/e2002/yoradio#note-if-initr_blacktab-dsp-have-a-noisy-line-on-one-side-of-the-screen-then-in-adafruit_st7735cpp
+// INITR_144GREENTAB    // 1.44" https://aliexpress.ru/item/1005002822797745.html
+// INITR_MINI160x80     // 0.96" 160x80 ST7735S   https://????
+// INITR_GREENTAB
+// INITR_REDTAB
 #ifndef DTYPE
   #define DTYPE INITR_BLACKTAB
 #endif
+
+/* Override SPI, I2C Speeds and Addresses - may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL */
+// #define DEF_SPI_FREQ 8000000UL  // defaults usually OK; may range from 8000000UL (8 MHz) to 80000000UL (80 MHz); check your datasheet before changing! set to 0 
+// #define I2CFREQ_HZ   400000UL   // OLED driver default is 4000000UL (4 MHz); lower e.g. to 400000UL (400 kHz) if display is glitchy; range: 100000UL (100 kHz) to 4000000UL (4 MHz)
+// #define SCREEN_ADDRESS 0x3C     // see datasheet for address or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
 
 /*            NEXTION             */
 #ifndef NEXTION_RX
@@ -147,27 +152,27 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define VS1053_DREQ 26
 #endif
 #ifndef VS1053_RST
-  #define VS1053_RST    -1    // set to -1 if connected to Esp EN pin
+  #define VS1053_RST -1 // set to -1 if connected to Esp EN pin
 #endif
 #ifndef VS_HSPI
-  #define VS_HSPI   false      // use HSPI for VS1053 (miso=12, mosi=13, clk=14) instead of VSPI (by default)
+  #define VS_HSPI false // use HSPI for VS1053 (miso=12, mosi=13, clk=14) instead of VSPI (by default)
 #endif
 
 /*            I2S DAC             */
 #ifndef I2S_DOUT
-  #define I2S_DOUT 27  // DIN connection
+  #define I2S_DOUT 27 // DIN connection
 #endif
 #ifndef I2S_BCLK
-  #define I2S_BCLK 26  // BCLK Bit clock
+  #define I2S_BCLK 26 // BCLK Bit clock
 #endif
 #ifndef I2S_LRC
-  #define I2S_LRC 25  // WSEL Left Right Clock
+  #define I2S_LRC 25 // WSEL Left Right Clock
 #endif
 #ifndef I2S_DIN
-  #define I2S_DIN 255  // optional DIN (not wired by default)
+  #define I2S_DIN 255 // optional DIN (not wired by default)
 #endif
 #ifndef I2S_MCLK
-  #define I2S_MCLK 255  // optional MCLK (not wired by default)
+  #define I2S_MCLK 255 // optional MCLK (not wired by default)
 #endif
 #if (I2S_DOUT!=255) && (VS1053_CS!=255)
   #error define error in myoptions.h: both I2S_DOUT and VS1053_CS are active - set I2S_DOUT 255 or VS1053_CS 255 to disable one
@@ -175,10 +180,10 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 
 /*             SDCARD             */
 #ifndef SDC_CS
-  #define SDC_CS 255  // SDCARD CS pin: 255 = disabled
+  #define SDC_CS 255 // SDCARD CS pin: 255 = disabled
 #endif
 #ifndef SD_HSPI
-  #define SD_HSPI false  // use HSPI for SD (miso=12, mosi=13, clk=14) instead of VSPI (by default)
+  #define SD_HSPI false // use HSPI for SD (miso=12, mosi=13, clk=14) instead of VSPI (by default)
 #endif
 #if SDC_CS!=255
   #define USE_SD
@@ -193,13 +198,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #endif
 #endif
 #ifndef SD_CARD_DETECT_PIN
-  #define SD_CARD_DETECT_PIN 255  // GPIO pin for mechanical SD card-detect switch (LOW=card present, HIGH=slot empty). 255 = disabled.
+  #define SD_CARD_DETECT_PIN 255 // GPIO pin for mechanical SD card-detect switch (LOW=card present, HIGH=slot empty). 255 = disabled.
 #endif
 #ifndef SD_AUTOPLAY
-  #define SD_AUTOPLAY false  // auto-switch to SD card mode when card is inserted (hot-insert detection). Requires SD_CARD_DETECT_PIN != 255
+  #define SD_AUTOPLAY false // auto-switch to SD card mode when card is inserted (hot-insert detection). Requires SD_CARD_DETECT_PIN != 255
 #endif
 #ifndef SD_MAX_LEVELS
-  #define SD_MAX_LEVELS 3 //  search depth for files on the SD card
+  #define SD_MAX_LEVELS 3 // search depth for files on the SD card
 #endif
 #if (SD_MAX_LEVELS < 1) || (SD_MAX_LEVELS > 10)
   #error define error in myoptions.h: SD_MAX_LEVELS must be between 1 and 10
@@ -369,13 +374,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define LED_INVERT false
 #endif
 #ifdef RGB_LED_PIN // will use Neopixel library to control RGB LED with something like:
-  // #define RGB_LED_PIN 42
+ // #define RGB_LED_PIN 42
   #if RGB_LED_PIN==255
     #undef RGB_LED_PIN
   #endif
 #endif
 #ifdef RGB_LED_ORDER // Most WS2812 LEDs are actually GRB but can be over-ridden
-  // #define RGB_LED_ORDER NEO_GRB
+ // #define RGB_LED_ORDER NEO_GRB
 #endif
 
 /* PREVENT BOARD-DEFINED PIN RE-USE */
@@ -424,7 +429,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #if WIFI_ATTEMPTS < 1
   #error define error in myoptions.h: WIFI_ATTEMPTS must be at least 1
 #endif
-#ifndef LOOP_TASK_STACK_SIZE     // sets the stack size for the FreeRTOS task that runs the main loop
+#ifndef LOOP_TASK_STACK_SIZE    // sets the stack size for the FreeRTOS task that runs the main loop
   #define LOOP_TASK_STACK_SIZE 8 // Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks
 #endif
 #if (LOOP_TASK_STACK_SIZE < 4) || (LOOP_TASK_STACK_SIZE > 64)
@@ -440,7 +445,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define SEARCHRESULTS_YIELDINTERVAL 0 // With a large buffer, skipping is almost eliminated with 0
 #endif
 #ifdef MAX_PL_READ_BYTES
-  //#define MAX_PL_READ_BYTES 65536 // Makes chunked HTML transfers... possibly enable if experiencing slowdowns when sending web UI to client. Untested.
+ //#define MAX_PL_READ_BYTES 65536 // Makes chunked HTML transfers... possibly enable if experiencing slowdowns when sending web UI to client. Untested.
 #endif
 /* Below defines maximum lengths of character buffers */
 /* Notes have been made regarding old yoRadio values */
@@ -452,11 +457,11 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 
 #ifndef CONNECT_HTTP_HTTPS_TIMEOUT
-  // Connection timeout in milliseconds: HTTP, HTTPS(SSL)
-  // Library defaults: 250ms HTTP, 2700ms SSL
-  // Conservative values for slower networks: 1700ms HTTP, 3700ms SSL
-  // #define CONNECT_HTTP_HTTPS_TIMEOUT 1700, 3700 /* For ESP32? */
-  // undefined means using library defaults (preferred)
+ // Connection timeout in milliseconds: HTTP, HTTPS(SSL)
+ // Library defaults: 250ms HTTP, 2700ms SSL
+ // Conservative values for slower networks: 1700ms HTTP, 3700ms SSL
+ // #define CONNECT_HTTP_HTTPS_TIMEOUT 1700, 3700 /* For ESP32? */
+ // undefined means using library defaults (preferred)
 #endif
 
 /*        Other settings. You can overwrite them in the myoptions.h file        */
@@ -483,9 +488,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifndef WAKE_PIN
   #define WAKE_PIN 255 // Wake Pin (manual wakeup from deep sleep. can match with BTN_XXXX, ENC_BTNB, ENC2_BTNB)
-                       // ESP32:   RTC-capable GPIOs only: 0,2,4,12-15,25-27,32-39
-                       // ESP32-S3: RTC-capable GPIOs only: 0-21
-                       // ESP32-C3: RTC-capable GPIOs only: 0-5
+                      // ESP32:   RTC-capable GPIOs only: 0,2,4,12-15,25-27,32-39
+                      // ESP32-S3: RTC-capable GPIOs only: 0-21
+                      // ESP32-C3: RTC-capable GPIOs only: 0-5
 #endif
 // WAKE_PIN polarity default: LOW = active-low button (pin held HIGH by pull-up; wakes when button pulls to GND)
 // #define WAKE_PIN_STATE HIGH for active-high circuits (pin held LOW by pull-down; wakes when button pulls to VCC)
@@ -503,7 +508,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #ifndef AUTOBACKLIGHT_MIN
     #define AUTOBACKLIGHT_MIN 12
   #endif
-  #define AUTOBACKLIGHT(x) ({uint16_t _lh=(x>AUTOBACKLIGHT_MAX?AUTOBACKLIGHT_MAX:x); map(_lh, AUTOBACKLIGHT_MAX, 0, AUTOBACKLIGHT_MIN, 100);})  // autobacklight function
+  #define AUTOBACKLIGHT(x) ({uint16_t _lh=(x>AUTOBACKLIGHT_MAX?AUTOBACKLIGHT_MAX:x); map(_lh, AUTOBACKLIGHT_MAX, 0, AUTOBACKLIGHT_MIN, 100);}) // autobacklight function
 #endif
 #ifndef DSP_INVERT_TITLE
   #define DSP_INVERT_TITLE true // Invert title colors for displays ?
@@ -642,7 +647,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define USE_OTA false // define true to enable Arduino OTA
 #endif
 #ifdef OTA_PASS
-  // #define OTA_PASS "myotapassword12345" // you can also define an OTA password like this
+ // #define OTA_PASS "myotapassword12345" // you can also define an OTA password like this
 #endif
 
 #ifndef AP_SSID
@@ -738,7 +743,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be less than BATTERY_LOW_THRESHOLD
 #endif
 #ifdef BATTERY_DEBUG
-  // if defined enables full information about battery in serial log
+ // if defined enables full information about battery in serial log
 #endif
 
 /*     SOURCE OF UPDATE FILES     */
@@ -748,7 +753,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifdef FIRMWARE // this is the filename.bin online
   #ifndef FIRMWARE_NAME
-    // optional name of the firmware (appears only in eh Device Protocol and will appear as the filename (without .bin) by default if not defined)
+  // #define FIRMWARE_NAME "Trip5's Big Screen Radio" optional name of the firmware (appears only in eh Device Protocol and will appear as the filename (without .bin) by default if not defined)
   #endif
   #ifndef FILESURL
     #define FILESURL GITHUBURL "/releases/download/" RADIOVERSION "/" // + FILE for SPIFFS files (this version)
@@ -837,21 +842,21 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 /*  Here are other #defines that  */
 /*  may be added to myoptions.h   */
 #ifdef MQTT_ENABLE
-  // This enables MQTT. A nice option to have but not available in the code without this #define in myoptions.h
+ // This enables MQTT. A nice option to have but not available in the code without this #define in myoptions.h
 #endif
 #ifdef PLAYLIST_DEFAULT_URL
-  // This will download a playlist when first-booting and no playlist is present on SPIFFS.  Can be CSV or JSON format.  Example:
-  // #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
+ // This will download a playlist when first-booting and no playlist is present on SPIFFS.  Can be CSV or JSON format.  Example:
+ // #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
 #endif
 /* Debug Options not mentioned elsewhere */
 #ifdef ESPFILEUPDATER_DEBUG
-  // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
+ // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
 #endif
 #ifdef DEBUG_V
-  // This enables Netserver logging: GET client requests and sending files in chunks
+ // This enables Netserver logging: GET client requests and sending files in chunks
 #endif
 #ifdef CORS_DEBUG
-  // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
+ // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
 #endif
 
 /*         USER DEFAULTS          */

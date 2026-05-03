@@ -7,6 +7,7 @@
 #include "core/config.h"
 #include "core/controls.h"
 #include "core/display.h"
+#include "core/logging.h"
 #include "core/mqtt.h"
 #include "core/netserver.h"
 #include "core/network.h"
@@ -45,28 +46,28 @@ void setup() {
   #if CORE_DEBUG_LEVEL > 0
     if (esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_EXT) { // checking if this is a poweron boot
       delay(1000);
-      Serial.println("##[BOOT]#       Delay 1 second after cold boot to ensure serial logs are completely available. Only when CORE_DEBUG_LEVEL > 0.");
+      BOOTLOG("Delay 1 second after cold boot to ensure serial logs are completely available (only when CORE_DEBUG_LEVEL > 0)...");
     }
   #endif
 
   if (REAL_LEDBUILTIN!=255) pinMode(REAL_LEDBUILTIN, OUTPUT);
-  rgbled_init();
+  rgbled.init();
   // Initialize battery monitoring
-  battery_init();
+  battery.init();
 
   if (ehradio_on_setup) ehradio_on_setup();
   pm.on_setup();
   config.init();
   display.init();
   player.init();
-  battery_boot_status();
-  if (rgbled_is_initialized()) {
-    if (player.isRunning()) rgbled_playing(); else rgbled_stopped();
+  battery.bootStatus();
+  if (rgbled.isInitialized()) {
+    if (player.isRunning()) rgbled.playing(); else rgbled.stopped();
   }
   network.begin();
   if (network.status != CONNECTED && network.status!=SDREADY) {
     netserver.begin();
-    initControls();
+    controls.init();
     display.putRequest(DSP_START);
     while(!display.ready()) delay(10);
     netserver.setBootReady(true);
@@ -74,16 +75,16 @@ void setup() {
   }
   if (SDC_CS!=255 && config.store.play_mode==PM_SDCARD) {
     display.putRequest(WAITFORSD, 0);
-    Serial.print("##[BOOT]#\tSD search\t");
+    BOOTLOG("SD Search");
   }
   config.initPlaylistMode();
   netserver.begin();
   telnet.begin();
-  initControls();
+  controls.init();
   display.putRequest(DSP_START);
   while(!display.ready()) delay(10);
   #ifdef MQTT_ENABLE
-    if (config.store.mqttenable) mqttInit();
+    if (config.store.mqttenable) mqtt.init();
   #endif
   #if LED_INVERT
     if (REAL_LEDBUILTIN!=255) digitalWrite(REAL_LEDBUILTIN, true);
@@ -110,8 +111,8 @@ void loop() {
     telnet.loop();
   }
   
-  rgbled_loop();
-  battery_loop();
+  rgbled.loop();
+  battery.loop();
   /* Check battery status and apply dimming/deepsleep policy if needed */
   #if BRIGHTNESS_PIN!=255
     battery_dim_loop();
@@ -121,7 +122,7 @@ void loop() {
     player.loop();
     config.processDeferredSaves();
   }
-  loopControls();
+  controls.loop();
   netserver.loop();
 }
 
@@ -197,7 +198,7 @@ void loop() {
    When plugin is available (DOWN_LEVEL/DOWN_INTERVAL) we call brightnessOn(); otherwise use config.setBrightness(false). */
 #if BRIGHTNESS_PIN!=255
 void battery_dim_loop() {
-  BatteryStatus bat = battery_get_status();
+  BatteryStatus bat = battery.getStatus();
 
   /* Decide charging based on explicit detection or the existing inference logic only. */
   bool is_charging_present = bat.charging || bat.charging_inferred;
@@ -210,21 +211,21 @@ void battery_dim_loop() {
     if (is_charging_present) {
       if (!battery_critical_skipped) {
         battery_critical_skipped = true;
-        Serial.printf("##[BATTERY]#: CRITICAL battery (%d%%) but charging - skipping deep sleep\r\n", bat.percentage);
+        FUNCTIONLOG("Battery", "Critical (%d%%) but charging - skipping deep sleep", bat.percentage);
       }
     } else {
       battery_critical_skipped = false;
       battery_critical_handled = true;
-      Serial.printf("##[BATTERY]#: CRITICAL battery (%d%%) - entering deep sleep\r\n", bat.percentage);
+      FUNCTIONLOG("Battery", "Critical (%d%%) - entering deep sleep", bat.percentage);
       player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, SCREENBLANK);
       delay(200);
       display.deepsleep();
       // Re-check battery status immediately before sleep to avoid race condition
       // (charging may have started during shutdown sequence)
-      BatteryStatus final_check = battery_get_status();
+      BatteryStatus final_check = battery.getStatus();
       if (final_check.charging) {
-        Serial.println("##[BATTERY]#: Charging detected before sleep - aborting deep sleep");
+        FUNCTIONLOG("Battery", "Charging detected before sleep - aborting deep sleep");
         battery_critical_handled = false;
         return;
       }
@@ -237,14 +238,14 @@ void battery_dim_loop() {
     if (is_charging_present) {
       /* When charging (or charging trend detected), do not force a low-battery brightness — avoid flicker. */
       #ifdef BATTERY_DEBUG
-        Serial.printf("##[BATTERY]#: LOW battery (%d%%) but charging/trend detected - skipping forced brightness\r\n", bat.percentage);
+        FUNCTIONLOG("Battery", "Low (%d%%) but charging/trend detected - skipping forced brightness", bat.percentage);
       #endif
     } else {
       battery_low_handled = true;
       if (!battery_saved_valid) { battery_saved_brightness = config.store.brightness; battery_saved_valid = true; }
       uint8_t target_pct = (uint8_t)BATTERY_DIM_BRIGHTNESS;
       if (target_pct > 100) target_pct = 100;
-      Serial.printf("##[BATTERY]#: LOW battery (%d%%) - forcing brightness to %d%%\r\n", bat.percentage, target_pct);
+      FUNCTIONLOG("Battery", "Low (%d%%) - forcing brightness to %d%%", bat.percentage, target_pct);
       config.store.brightness = target_pct;
       #if defined(DOWN_LEVEL) || defined(DOWN_INTERVAL)
         brightnessOn();
@@ -267,7 +268,7 @@ void battery_dim_loop() {
         if (battery_saved_valid) {
           config.store.brightness = battery_saved_brightness;
           battery_saved_valid = false;
-          Serial.printf("##[BATTERY]#: Battery recovered - restoring brightness to %d%%\r\n", config.store.brightness);
+          FUNCTIONLOG("Battery", "Recovered - restoring brightness to %d%%", config.store.brightness);
         }
         #if defined(DOWN_LEVEL) || defined(DOWN_INTERVAL)
           brightnessOn();
@@ -288,28 +289,22 @@ void battery_dim_loop() {
 }
 #endif
 
-// Call rgbled loop from main loop too (no-op if not enabled)
-void rgbled_loop_caller() {
-  rgbled_loop();
-}
-
 void ehradio_on_setup() {
-  rgbled_init();
   brightnessOn();
 }
 
 void player_on_track_change() {
-  rgbled_trackchange();
+  rgbled.trackChange();
   brightnessOn();
 }
 
 void player_on_start_play() {
-  rgbled_playing();
+  rgbled.playing();
   brightnessOn();
 }
 
 void player_on_stop_play() {
-  rgbled_stopped();
+  rgbled.stopped();
   brightnessOn();
 }
 

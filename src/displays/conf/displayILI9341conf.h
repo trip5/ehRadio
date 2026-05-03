@@ -70,7 +70,7 @@ const char * const   batteryPlainFmt    PROGMEM = " %d%%";       // Plain percen
 // - `printFix` is configured to pass bytes 0xFB..0xFD unchanged so these codes survive UTF fixes.
 // - Display code composes the final string from the chosen range glyph and numeric percentage
 //   and will append " !" (low) or " !!" (critical) if needed; see `src/core/display.cpp`.
-// - Test: use serial debug (##[BATTERY]# txt HEX:) to confirm bytes (FB/FC/FD) are present at runtime.
+// - Test: use serial debug (##BATTERY# txt HEX:) to confirm bytes (FB/FC/FD) are present at runtime.
 // Mapping: 0-25% => dec11 (octal \013)
 //          25-75% => dec12 (octal \014)
 //          75-100% => dec15 (octal \017)

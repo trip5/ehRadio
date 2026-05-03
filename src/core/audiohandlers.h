@@ -1,6 +1,8 @@
 #ifndef AUDIOHANDLERS_H
 #define AUDIOHANDLERS_H
 
+#include "logging.h"
+
 //=============================================//
 //              Audio handlers                 //
 //=============================================//
@@ -10,7 +12,7 @@ void audio_info(const char *info) {
   if (config.store.audioinfo) {
     // Skip empty StreamTitle='' — emitted by library when switching streams
     if (strcmp(info, "StreamTitle=''") != 0)
-      telnet.printf("##AUDIO.INFO#: %s\r\n", info);
+      FUNCTIONLOG("Audio.info", "%s", info);
   }
   #ifdef USE_NEXTION
     nextion.audioinfo(info);
@@ -38,7 +40,7 @@ void audio_info(const char *info) {
 
 void audio_bitrate(const char *info)
 {
-  if (config.store.audioinfo) telnet.printf("%s %s\r\n", "##AUDIO.BITRATE#:", info);
+  if (config.store.audioinfo) FUNCTIONLOG("Audio.bitrate", "%s", info);
   config.station.bitrate = atoi(info) / 1000;
   display.putRequest(DBITRATE);
   #ifdef USE_NEXTION
@@ -133,7 +135,7 @@ void audio_beginSDread() {
 
 void audio_id3data(const char *info) {  //id3 metadata
     if (player.lockOutput) return;
-    telnet.printf("##AUDIO.ID3#: %s\r\n", info);
+  FUNCTIONLOG("Audio.id3", "%s", info);
 }
 
 void audio_eof_mp3(const char *info) {  //end of file

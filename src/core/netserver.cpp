@@ -15,6 +15,7 @@
 #include "controls.h"
 #include "display.h"
 #include "locale.h"
+#include "logging.h"
 #include "mqtt.h"
 #include "netserver.h"
 #include "network.h"
@@ -46,7 +47,7 @@
 #endif
 
 #ifdef DEBUG_V
-  #define DBGVB(...) { char buf[200]; snprintf(buf, sizeof(buf), __VA_ARGS__); Serial.print("[DEBUG]\t"); Serial.println(buf); }
+  #define DBGVB(...) { char buf[200]; snprintf(buf, sizeof(buf), __VA_ARGS__); FUNCTIONLOG("Netserver.debug", "%s", buf); }
 #else
   #define DBGVB(...)
 #endif
@@ -72,7 +73,7 @@ bool  shouldReboot  = false;
     if (config.store.mqttenable) {
       mqttplaylistblock = true;
       mqttplaylistticker.detach();
-      mqttPublishPlaylist();
+      mqtt.publishPlaylist();
       mqttplaylistblock = false;
     }
   }
@@ -236,7 +237,7 @@ void handleSearchPost(AsyncWebServerRequest *request) {
 
 bool NetServer::begin(bool quiet) {
   if (network.status==SDREADY) return true;
-  if (!quiet) Serial.print("##[BOOT]#\tnetserver.begin\t");
+  if (!quiet) BOOTLOGX("netserver.begin\t");
   nsQueue = xQueueCreate(20, sizeof(nsRequestParams_t));
   while(nsQueue==NULL) {;}
 
@@ -278,32 +279,34 @@ bool NetServer::begin(bool quiet) {
     ArduinoOTA
       .onStart([]() {
         display.putRequest(NEWMODE, UPDATING);
-        telnet.printf("Start OTA updating %s\r\n", ArduinoOTA.getCommand() == U_FLASH?"firmware":"filesystem");
+        FUNCTIONLOG("OTA", "Start OTA updating %s", ArduinoOTA.getCommand() == U_FLASH ? "firmware" : "filesystem");
       })
       .onEnd([]() {
-        telnet.printf("End OTA update, Rebooting...\r\n");
+        FUNCTIONLOG("OTA", "End OTA update, rebooting...");
       })
       .onProgress([](unsigned int progress, unsigned int total) {
-        telnet.printf("Progress OTA: %u%%\r", (progress / (total / 100)));
+        unsigned int percent = (total > 0) ? ((progress * 100U) / total) : 0;
+        FUNCTIONLOG("OTA.update", "Progress OTA: %u%%", percent);
       })
       .onError([](ota_error_t error) {
-        telnet.printf("Error[%u]: ", error);
+        const char* reason = "Unknown";
         if (error == OTA_AUTH_ERROR) {
-          telnet.printf("Auth Failed\r\n");
+          reason = "Auth Failed";
         } else if (error == OTA_BEGIN_ERROR) {
-          telnet.printf("Begin Failed\r\n");
+          reason = "Begin Failed";
         } else if (error == OTA_CONNECT_ERROR) {
-          telnet.printf("Connect Failed\r\n");
+          reason = "Connect Failed";
         } else if (error == OTA_RECEIVE_ERROR) {
-          telnet.printf("Receive Failed\n");
+          reason = "Receive Failed";
         } else if (error == OTA_END_ERROR) {
-          telnet.printf("End Failed\n");
+          reason = "End Failed";
         }
+        FUNCTIONLOG("OTA", "Error[%u]: %s", static_cast<unsigned>(error), reason);
       });
     ArduinoOTA.begin();
   #endif //#if USE_OTA
 
-  if (!quiet) Serial.println("done");
+  if (!quiet) SERIALLOG("done");
   return true;
 }
 
@@ -395,7 +398,7 @@ void NetServer::processQueue() {
           String act = F("\"group_wifi\",");
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
-            if (battery_is_initialized() || dbgact)             act += F("\"group_battery\",");
+            if (battery.isInitialized() || dbgact)             act += F("\"group_battery\",");
                                                               #ifdef MQTT_ENABLE
                                                                 act += F("\"group_mqtt\",");
                                                               #endif
@@ -514,8 +517,8 @@ void NetServer::processQueue() {
       case STATION:       requestOnChange(STATIONNAME, clientId); requestOnChange(ITEM, clientId); break;
       case STATIONNAME:   snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"nameset\", \"value\": \"%s\"}]}", config.station.name); break;
       case ITEM:          snprintf(wsbuf, sizeof(wsbuf), "{\"current\": %d}", config.lastStation()); break;
-      case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); telnet.printf("##CLI.META#: %s\r\n", config.station.title); break;
-      case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d}]}", config.store.volume); telnet.printf("##CLI.VOL#: %d\r\n", config.store.volume); break;
+      case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); break;
+      case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d}]}", config.store.volume); break;
       case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}]}", rssi); /*rssi = 255;*/ break;
       case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %d,\"sdend\": %d,\"sdtpos\": %d,\"sdtend\": %d}",
                                   player.getFilePos(),
@@ -527,8 +530,8 @@ void NetServer::processQueue() {
       case SDSHUFFLE:     snprintf(wsbuf, sizeof(wsbuf), "{\"shuffle\": %d}", config.store.sdshuffle); break;
       case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
-        BatteryStatus bat = battery_get_status();
-        if (!bat.valid && !battery_is_initialized()) {
+        BatteryStatus bat = battery.getStatus();
+        if (!bat.valid && !battery.isInitialized()) {
           /* Still send battref even if battery not detected so UI shows calibration value */
           uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
@@ -544,7 +547,7 @@ void NetServer::processQueue() {
         }
         break;
       }
-      case MODE:          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); telnet.info(); break;
+      case MODE:          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); break;
       case EQUALIZER:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bass\", \"value\": %d}, {\"id\": \"middle\", \"value\": %d}, {\"id\": \"treble\", \"value\": %d}]}", config.store.bass, config.store.middle, config.store.treble); break;
       case BALANCE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\": \"balance\", \"value\": %d}]}", config.store.balance); break;
       case SDINIT:        snprintf(wsbuf, sizeof(wsbuf), "{\"sdinit\": %d}", SDC_CS!=255); break;
@@ -563,8 +566,8 @@ void NetServer::processQueue() {
       if (clientId == 0) { websocket.textAll(wsbuf); } else { websocket.text(clientId, wsbuf); }
       #ifdef MQTT_ENABLE
         if (config.store.mqttenable) {
-          if (clientId == 0 && (request.type == STATION || request.type == ITEM || request.type == TITLE || request.type == MODE)) mqttPublishStatus();
-          if (clientId == 0 && request.type == VOLUME) mqttPublishVolume();
+          if (clientId == 0 && (request.type == STATION || request.type == ITEM || request.type == TITLE || request.type == MODE)) mqtt.publishStatus();
+          if (clientId == 0 && request.type == VOLUME) mqtt.publishVolume();
         }
       #endif
     }
@@ -574,7 +577,7 @@ void NetServer::processQueue() {
 void NetServer::loop() {
   if (network.status==SDREADY) return;
   if (shouldReboot) {
-    Serial.println("Rebooting...");
+    FUNCTIONLOG("Netserver.reboot", "Rebooting...");
     delay(100);
     ESP.restart();
   }
@@ -623,7 +626,7 @@ void NetServer::onWsMessage(void *arg, uint8_t *data, size_t len, uint8_t client
 
     char command[65], val[65];
     if (config.parseWsCommand(payload, command, val, 65)) {
-      if (cmd.exec(command, val, clientId)) {
+      if (cmd.exec(command, val, clientId, CommandSource::WebSocket)) {
         return;
       }
     }
@@ -687,7 +690,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
   } else if (request->url()=="/update") {
     if (!index) {
       int target = (request->getParam("updatetarget", true)->value() == "spiffs") ? U_SPIFFS : U_FLASH;
-      Serial.printf("Update Start: %s\n", filename.c_str());
+      FUNCTIONLOG("Netserver.update", "Update Start: %s", filename.c_str());
       player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, UPDATING);
       if (!Update.begin(UPDATE_SIZE_UNKNOWN, target)) {
@@ -703,7 +706,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     }
     if (final) {
       if (Update.end(true)) {
-        Serial.printf("Update Success: %uB\n", index + len);
+        FUNCTIONLOG("Netserver.update", "Update Success: %uB", index + len);
       } else {
         Update.printError(Serial);
         request->send(200, "text/html", updateError());
@@ -732,11 +735,11 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
-        if (config.store.audioinfo) Serial.printf("[WEBSOCKET] client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        if (config.store.audioinfo) FUNCTIONLOG("Websocket", "client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
         /* Send current battery status to the newly connected client immediately */
         netserver.requestOnChange(GETBATTERY, client->id());
         break;
-    case WS_EVT_DISCONNECT: if (config.store.audioinfo) Serial.printf("[WEBSOCKET] client #%u disconnected\n", client->id()); break;
+    case WS_EVT_DISCONNECT: if (config.store.audioinfo) FUNCTIONLOG("Websocket", "client #%u disconnected", client->id()); break;
     case WS_EVT_DATA: netserver.onWsMessage(arg, data, len, client->id()); break;
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
@@ -750,20 +753,19 @@ void selectRadioBrowserServer() {
   for (size_t i = 0; i < arr_size; ++i) rb_servers[i] = "";
   File serversFile = SPIFFS.open("/www/rb_srvrs.json", "r");
   if (!serversFile) {
-    Serial.println("[Search] [Error] Failed to open /www/rb_srvrs.json.");
+    FUNCTIONLOG("Search", "[Error] Failed to open /www/rb_srvrs.json.");
     goto useHostname;
   } else {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, serversFile);
     serversFile.close();
     if (error) {
-      Serial.print(F("[Search] [Error] deserializeJson() failed: "));
-      Serial.println(error.c_str());
+      FUNCTIONLOG("Search", "[Error] deserializeJson() failed: %s", error.c_str());
       goto useHostname; // get out of the else
     }
     JsonArray servers = doc.as<JsonArray>();
     if (servers.isNull() || servers.size() == 0) {
-      Serial.println("[Search] [Error] JSON is not a valid or is an empty array.");
+      FUNCTIONLOG("Search", "[Error] JSON is not a valid or is an empty array.");
       goto useHostname; //get out of the else
     }
     // Collect unique IPv4 server names
@@ -797,18 +799,18 @@ void selectRadioBrowserServer() {
   return;
 useHostname:
   // Use hostname instead of IP to ensure proper Host header and HTTPS support
-  Serial.printf("[Search] Using fallback: %s.\n", RADIO_BROWSER_SERVER);
+  FUNCTIONLOG("Search", "Using fallback: %s.", RADIO_BROWSER_SERVER);
   rb_servers[0] = RADIO_BROWSER_SERVER;
 }
 
 void vTaskSearchRadioBrowser(void *pvParameters) {
   char* search_str = (char*)pvParameters;
-  Serial.printf("[Search] Starting Radio Browser search. Search: %s\n", search_str);
+  FUNCTIONLOG("Search", "Starting Radio Browser search. Search: %s", search_str);
   SPIFFS.remove("/www/searchresults.json");
   // Check SPIFFS free space
   size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    Serial.printf("[Search] [Error] Not enough free SPIFFS space: %u bytes. Aborting.\n", freeSpace);
+    FUNCTIONLOG("Search", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(SEARCH_FAILED, 0);
     delete[] search_str;
     g_searchTaskHandle = NULL;
@@ -823,7 +825,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
   }
   // If the list is empty, it's the first run or all servers failed previously. Let's (re)populate it.
   if (server_count == 0) {
-    Serial.println("[Search] Server list is empty, repopulating from file.");
+    FUNCTIONLOG("Search", "Server list is empty, repopulating from file.");
     selectRadioBrowserServer();
     // Recount after filling
     server_count = 0;
@@ -833,7 +835,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
   }
   // If still no servers, then the API source is likely down or unreachable.
   if (server_count == 0) {
-    Serial.println("[Search] [Error] No servers available after attempting to select.");
+    FUNCTIONLOG("Search", "[Error] No servers available after attempting to select.");
     netserver.requestOnChange(SEARCH_FAILED, 0);
     delete[] search_str;
     g_searchTaskHandle = NULL;
@@ -853,10 +855,10 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
     String server = rb_servers[i];
     // Compose the URL using the full search string
     String url = "https://" + server + "/json/stations/search?" + String(search_str);
-    Serial.printf("[Search] Attempting to download from: %s\n", url.c_str());
+    FUNCTIONLOG("Search", "Attempting to download from: %s", url.c_str());
     auto status = searchResultsFetch.checkAndUpdate(localPath, url, ESPFILEUPDATER_VERBOSE);
     if (status == ESPFileUpdater::UPDATED) {
-      Serial.printf("[Search] Successfully downloaded from %s\n", server.c_str());
+      FUNCTIONLOG("Search", "Successfully downloaded from %s", server.c_str());
       // Check if the downloaded file ends with ']' (an incomplete .json will not)
       File jsonFile = SPIFFS.open(localPath, "r");
       if (jsonFile) {
@@ -875,11 +877,11 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
         jsonFile.close();
         if (lastChar != ']') {
           if (server_retried == true) {
-            Serial.printf("[Search] [Warning] JSON validation failed. Not retrying.\n");
+            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Not retrying.");
             server_retried = false;
             SPIFFS.remove(localPath); // Clean up bad file
           } else {
-            Serial.printf("[Search] [Warning] JSON validation failed. Retrying same server.\n");
+            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Retrying same server.");
             server_retried = true;
             --i;
             SPIFFS.remove(localPath); // Clean up bad file
@@ -890,10 +892,10 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
         }
       } else {
         if (server_retried == true) {
-          Serial.println("[Search] [Error] Could not open searchresults.json for validation. Not retrying.\n");
+          FUNCTIONLOG("Search", "[Error] Could not open searchresults.json for validation. Not retrying.");
           server_retried = false;
         } else {
-          Serial.println("[Search] [Error] Could not open searchresults.json for validation. Retrying same server.\n");
+          FUNCTIONLOG("Search", "[Error] Could not open searchresults.json for validation. Retrying same server.");
           server_retried = true;
           --i;
         }
@@ -906,17 +908,17 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
           file.printf("%s\n", search_str);
           file.close();
         } else {
-          Serial.println("[Search] [Error] Failed to open search.txt for writing.");
+          FUNCTIONLOG("Search", "[Error] Failed to open search.txt for writing.");
         }
         success = true;
         break;
       } else {
-        Serial.printf("[Search] [Error] Invalid JSON from %s. Removing from list.\n", server.c_str());
+        FUNCTIONLOG("Search", "[Error] Invalid JSON from %s. Removing from list.", server.c_str());
         rb_servers[i] = "";
         server_retried = false;
       }
     } else {
-      Serial.printf("[Search] [Error] Failed to download from %s. Removing from persistent list.\n", server.c_str());
+      FUNCTIONLOG("Search", "[Error] Failed to download from %s. Removing from persistent list.", server.c_str());
       rb_servers[i] = "";
       server_retried = false;
     }
@@ -924,7 +926,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
   if (success) {
     netserver.requestOnChange(SEARCH_DONE, 0);
   } else {
-    Serial.println("[Search] [Error] Failed to download from all available servers.");
+    FUNCTIONLOG("Search", "[Error] Failed to download from all available servers.");
     SPIFFS.remove(localPath); // Clean up any incomplete file
     netserver.requestOnChange(SEARCH_FAILED, 0);
   }
@@ -935,13 +937,13 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
 }
 
 void vTaskFetchCuratedIndex(void *pvParameters) {
-  Serial.println("[Curated] Starting curated index fetch");
+  FUNCTIONLOG("Curated", "Starting curated index fetch");
   SPIFFS.remove("/www/curated.json");
   
   // Check SPIFFS free space
   size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    Serial.printf("[Curated] [Error] Not enough free SPIFFS space: %u bytes. Aborting.\n", freeSpace);
+    FUNCTIONLOG("Curated", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(CURATED_FAILED, 0);
     g_curatedTaskHandle = NULL;
     vTaskDelete(NULL);
@@ -956,19 +958,19 @@ void vTaskFetchCuratedIndex(void *pvParameters) {
   
   #ifdef CURATED_LISTS_URL
     String url = String(CURATED_LISTS_URL) + String(CURATED_LISTS_INDEX);
-    Serial.printf("[Curated] Attempting to download index from: %s\n", url.c_str());
+    FUNCTIONLOG("Curated", "Attempting to download index from: %s", url.c_str());
     
     auto status = curatedFetch.checkAndUpdate(localPath, url, ESPFILEUPDATER_VERBOSE);
     if (status == ESPFileUpdater::UPDATED) {
-      Serial.println("[Curated] Successfully downloaded curated index");
+      FUNCTIONLOG("Curated", "Successfully downloaded curated index");
       netserver.requestOnChange(CURATED_INDEX_DONE, 0);
     } else {
-      Serial.println("[Curated] [Error] Failed to download curated index");
+      FUNCTIONLOG("Curated", "[Error] Failed to download curated index");
       SPIFFS.remove(localPath);
       netserver.requestOnChange(CURATED_FAILED, 0);
     }
   #else
-    Serial.println("[Curated] [Error] CURATED_LISTS_URL not defined");
+    FUNCTIONLOG("Curated", "[Error] CURATED_LISTS_URL not defined");
     netserver.requestOnChange(CURATED_FAILED, 0);
   #endif
   
@@ -978,13 +980,13 @@ void vTaskFetchCuratedIndex(void *pvParameters) {
 
 void vTaskFetchCuratedPlaylist(void *pvParameters) {
   char* filename = (char*)pvParameters;
-  Serial.printf("[Curated] Starting playlist fetch: %s\n", filename);
+  FUNCTIONLOG("Curated", "Starting playlist fetch: %s", filename);
   SPIFFS.remove("/www/pl_import.json");
   
   // Check SPIFFS free space
   size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    Serial.printf("[Curated] [Error] Not enough free SPIFFS space: %u bytes. Aborting.\n", freeSpace);
+    FUNCTIONLOG("Curated", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(CURATED_FAILED, 0);
     delete[] filename;
     g_curatedTaskHandle = NULL;
@@ -1000,19 +1002,19 @@ void vTaskFetchCuratedPlaylist(void *pvParameters) {
   
   #ifdef CURATED_LISTS_URL
     String url = String(CURATED_LISTS_URL) + String(filename);
-    Serial.printf("[Curated] Attempting to download playlist from: %s\n", url.c_str());
+    FUNCTIONLOG("Curated", "Attempting to download playlist from: %s", url.c_str());
     
     auto status = playlistFetch.checkAndUpdate(localPath, url, ESPFILEUPDATER_VERBOSE);
     if (status == ESPFileUpdater::UPDATED) {
-      Serial.printf("[Curated] Successfully downloaded playlist: %s\n", filename);
+      FUNCTIONLOG("Curated", "Successfully downloaded playlist: %s", filename);
       netserver.requestOnChange(CURATED_PLAYLIST_DONE, 0);
     } else {
-      Serial.printf("[Curated] [Error] Failed to download playlist: %s\n", filename);
+      FUNCTIONLOG("Curated", "[Error] Failed to download playlist: %s", filename);
       SPIFFS.remove(localPath);
       netserver.requestOnChange(CURATED_FAILED, 0);
     }
   #else
-    Serial.println("[Curated] [Error] CURATED_LISTS_URL not defined");
+    FUNCTIONLOG("Curated", "[Error] CURATED_LISTS_URL not defined");
     netserver.requestOnChange(CURATED_FAILED, 0);
   #endif
   
@@ -1029,7 +1031,7 @@ void launchPlaybackTask(const String& url, const String& name) {
   }
   player.sendCommand({PR_STOP, 0}); // Stop any current playback first
   display.putRequest(NEWSTATION, 0);
-  Serial.println("[netserver] Creating a dedicated task for playback.");
+  FUNCTIONLOG("Netserver.playback", "Creating a dedicated task for playback.");
   // Use a lambda to capture the URL and pass it to the task
   String* url_copy = new String(url);
   if (url_copy) {
@@ -1039,7 +1041,7 @@ void launchPlaybackTask(const String& url, const String& name) {
         [](void* pvParameters) {
           String* urlToPlay = (String*)pvParameters;
           vTaskDelay(pdMS_TO_TICKS(100)); // A small delay can help the network stack release resources
-          Serial.printf("[PlaybackTask] Starting playback for URL: %s. Free heap: %u\n", urlToPlay->c_str(), ESP.getFreeHeap());
+          FUNCTIONLOG("PlaybackTask", "Starting playback for URL: %s. Free heap: %u", urlToPlay->c_str(), ESP.getFreeHeap());
           player.playUrl(urlToPlay->c_str());
           delete urlToPlay; // Free the string
           vTaskDelete(NULL);
@@ -1051,7 +1053,7 @@ void launchPlaybackTask(const String& url, const String& name) {
         NULL
    );
   } else {
-    Serial.println("[netserver] ERROR: Failed to allocate memory for playback task URL.");
+    FUNCTIONLOG("Netserver.playback", "[Error] Failed to allocate memory for playback task URL.");
   }
 }
 
@@ -1072,7 +1074,7 @@ void launchPlaybackTask(const String& url, const String& name) {
     http.addHeader("User-Agent", ESPFILEUPDATER_USERAGENT);
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK) {
-      Serial.printf("[RB Click] HTTP error %d\n", httpCode);
+      FUNCTIONLOG("RB Click", "HTTP error %d", httpCode);
       http.end();
       return "";
     }
@@ -1088,7 +1090,7 @@ void launchPlaybackTask(const String& url, const String& name) {
     while (stream->connected() || stream->available()) {
       // Check for loop timeout
       if (millis() - loopStart > loopTimeout) {
-        Serial.println("[RB Click] Stream parsing timeout");
+        FUNCTIONLOG("RB Click", "Stream parsing timeout");
         http.end();
         return "";
       }
@@ -1158,12 +1160,12 @@ void launchPlaybackTask(const String& url, const String& name) {
 void radioBrowserSendClick(const char* stationUrl) {
   #ifdef RADIO_BROWSER_SEND_CLICKS
     // If a new request comes in, cancel the pending one and start fresh
-    if (clickDelayActive) Serial.println("[RB Click] New station - canceling pending click");
+    if (clickDelayActive) FUNCTIONLOG("RB Click", "New station - canceling pending click");
     // Store the URL and start the delay timer
     strlcpy(pendingClickUrl, stationUrl, sizeof(pendingClickUrl));
     clickDelayStart = millis();
     clickDelayActive = true;
-    Serial.printf("[RB Click] Starting %dms delay for: %s\n", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
+    FUNCTIONLOG("RB Click", "Starting %dms delay for: %s", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
   #endif //#ifdef RADIO_BROWSER_SEND_CLICKS
 }
 
@@ -1173,10 +1175,10 @@ void radioBrowserSendClick(const char* stationUrl) {
     char* stationUrl = (char*)pvParameters;
     // Step 1: Get station UUID from URL
     String lookupUrl = String("https://") + RADIO_BROWSER_SERVER + "/json/stations/byurl?url=" + String(stationUrl);
-    Serial.printf("[RB Click] Looking up UUID: %s\n", lookupUrl.c_str());
+    FUNCTIONLOG("RB Click", "Looking up UUID: %s", lookupUrl.c_str());
     String stationUuid = streamJsonExtract(lookupUrl, "stationuuid");
     if (stationUuid.length() == 0) {
-      Serial.println("[RB Click] Station not found in Radio-Browser database (empty response or lookup failed)");
+      FUNCTIONLOG("RB Click", "Station not found in Radio-Browser database (empty response or lookup failed)");
       delete[] stationUrl;
       vTaskDelete(NULL);
       return;
@@ -1185,9 +1187,9 @@ void radioBrowserSendClick(const char* stationUrl) {
     String clickUrl = String("https://") + RADIO_BROWSER_SERVER + "/json/url/" + stationUuid;
     String okStatus = streamJsonExtract(clickUrl, "ok");
     if (okStatus == "true") {
-      Serial.println("[RB Click] Click registered successfully");
+      FUNCTIONLOG("RB Click", "Click registered successfully");
     } else {
-      Serial.println("[RB Click] Click not confirmed");
+      FUNCTIONLOG("RB Click", "Click not confirmed");
     }
     delete[] stationUrl;
     vTaskDelete(NULL);
@@ -1205,7 +1207,7 @@ void processRadioBrowserClick() {
     // Copy URL to pass to task (task will delete it)
     char* urlCopy = new char[strlen(pendingClickUrl) + 1];
     if (urlCopy == nullptr) {
-      Serial.println("[RB Click] Failed to allocate memory for task");
+      FUNCTIONLOG("RB Click", "Failed to allocate memory for task");
       return;
     }
     strcpy(urlCopy, pendingClickUrl);
@@ -1275,7 +1277,7 @@ void checkForOnlineUpdate() {
 void startOnlineUpdate() {
   #ifdef UPDATEURL
     String updateUrl = String(UPDATEURL) + String(FIRMWARE);
-    Serial.printf("[Online Update] Online Update download URL: %s\n", updateUrl.c_str());
+    FUNCTIONLOG("Online Update", "Online Update download URL: %s", updateUrl.c_str());
     WiFiClientSecure client;
     client.setInsecure(); // skip server cert validation
     HTTPClient http;
@@ -1285,7 +1287,7 @@ void startOnlineUpdate() {
     int httpCode = http.GET();
     if (httpCode == HTTP_CODE_OK) {
       int contentLength = http.getSize();
-      Serial.printf("[Online Update] Content-Length: %d\n", contentLength);
+      FUNCTIONLOG("Online Update", "Content-Length: %d", contentLength);
       if (contentLength > 0) {
         bool canBegin = Update.begin(contentLength);
         if (canBegin) {
@@ -1316,7 +1318,7 @@ void startOnlineUpdate() {
             }
           }
           if (Update.end(true)) { // end(true) will finish and commit the update
-            Serial.println("[Online Update] Update successful, rebooting...");
+            FUNCTIONLOG("Online Update", "Update successful, rebooting...");
             config.deleteMainwwwFile();
             websocket.textAll("{\"onlineupdatestatus\": \"Update successful, rebooting...\"}");
             delay(1000);
@@ -1481,8 +1483,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(200, "text/html", emptyfs_html);
     return;
   }
-  Serial.print("Not Found: ");
-  Serial.println(request->url());
+  FUNCTIONLOG("Netserver.notfound", "Not Found: %s", request->url().c_str());
   request->send(404, "text/plain", "Not found");
 }
 
@@ -1502,8 +1503,7 @@ void handleIndex(AsyncWebServerRequest * request) {
       ESP.restart();
       return;
     }
-    Serial.print("Not Found: ");
-    Serial.println(request->url());
+    FUNCTIONLOG("Netserver.notfound", "Not Found: %s", request->url().c_str());
     request->send(404, "text/plain", "Not found");
     return;
   } // end if (!config.wwwFilesExist)
@@ -1520,25 +1520,43 @@ void handleIndex(AsyncWebServerRequest * request) {
   }
   if (network.status == CONNECTED) {
     int paramsNr = request->params();
-    if (paramsNr==1) {
-      const AsyncWebParameter* p = request->getParam(0);
-      if (cmd.exec(p->name().c_str(),p->value().c_str())) {
-        if (p->name()=="reset" || p->name()=="clearspiffs") request->redirect("/");
-        if (p->name()=="clearspiffs") { delay(100); ESP.restart(); }
-        request->send(200, "text/plain", "");
-        return;
+
+    bool handledAny = false;
+    bool shouldRedirect = false;
+    bool shouldRestart = false;
+
+    String sleepValue;
+    if (request->hasArg("sleep")) {
+      sleepValue = request->getParam("sleep")->value();
+      if (request->hasArg("after")) {
+        sleepValue += ",";
+        sleepValue += request->getParam("after")->value();
       }
     }
-    if (request->hasArg("treble") && request->hasArg("middle") && request->hasArg("bass")) {
-      config.setTone(request->getParam("bass")->value().toInt(), request->getParam("middle")->value().toInt(), request->getParam("treble")->value().toInt());
+
+    for (int i = 0; i < paramsNr; ++i) {
+      const AsyncWebParameter* p = request->getParam(i);
+      String command = p->name();
+      if (command == "after") continue;
+
+      String value = (command == "sleep" && sleepValue.length() > 0) ? sleepValue : p->value();
+      if (cmd.exec(command.c_str(), value.c_str(), 0, CommandSource::HttpUrl)) {
+        handledAny = true;
+        if (command == "reset" || command == "clearspiffs") shouldRedirect = true;
+        if (command == "clearspiffs") shouldRestart = true;
+      }
+    }
+
+    if (handledAny) {
+      if (shouldRedirect) {
+        request->redirect("/");
+        if (shouldRestart) { delay(100); ESP.restart(); }
+        return;
+      }
       request->send(200, "text/plain", "");
       return;
     }
-    if (request->hasArg("sleep")) {
-      int sford = request->getParam("sleep")->value().toInt();
-      int safterd = request->hasArg("after")?request->getParam("after")->value().toInt():0;
-      if (sford > 0 && safterd >= 0) { request->send(200, "text/plain", ""); config.sleepForAfter(sford, safterd); return; }
-    }
+
     request->send(404, "text/plain", "Not found");
     
   } else {

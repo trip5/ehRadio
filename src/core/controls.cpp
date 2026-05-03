@@ -3,14 +3,12 @@
 #include "config.h"
 #include "controls.h"
 #include "display.h"
+#include "logging.h"
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
 #include "../pluginsManager/pluginsManager.h"
 
-long encOldPosition  = 0;
-long enc2OldPosition  = 0;
-int lpId = -1;
 
 #define ISPUSHBUTTONS BTN_LEFT!=255 || BTN_CENTER!=255 || BTN_RIGHT!=255 || ENC_BTNB!=255 || BTN_UP!=255 || BTN_DOWN!=255 || ENC2_BTNB!=255 || BTN_MODE!=255
 #if ISPUSHBUTTONS
@@ -56,7 +54,6 @@ int lpId = -1;
   #include <IRac.h>
   #include <IRtext.h>
   #include <IRutils.h>
-  uint8_t irVolRepeat = 0;
   const uint16_t kCaptureBufferSize = 1024;
   const uint8_t kTimeout = IR_TIMEOUT;
   const uint16_t kMinUnknownSize = 12;
@@ -79,7 +76,12 @@ void IRAM_ATTR readEncoder2ISR() {
   #endif
 }
 
-void initControls() {
+void Controls::btnClickCb(void* p)           { controls.onBtnClick((int)p); }
+void Controls::btnDoubleClickCb(void* p)     { controls.onBtnDoubleClick((int)p); }
+void Controls::btnLongPressStartCb(void* p)  { controls.onBtnLongPressStart((int)p); }
+void Controls::btnLongPressStopCb(void* p)   { controls.onBtnLongPressStop((int)p); }
+
+void Controls::init() {
   #if ENC_BTNL!=255
     encoder.begin();
     encoder.setup(readEncoderISR);
@@ -96,18 +98,10 @@ void initControls() {
   #if ISPUSHBUTTONS
     for (int i = 0; i < nrOfButtons; i++) {
       if ((i == 0 && BTN_LEFT == 255) || (i == 1 && BTN_CENTER == 255) || (i == 2 && BTN_RIGHT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) || (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255)) continue;
-      button[i].attachClick([](void* p) {
-        onBtnClick((int)p);
-      }, (void*)i);
-      button[i].attachDoubleClick([](void* p) {
-        onBtnDoubleClick((int)p);
-      }, (void*)i);
-      button[i].attachLongPressStart([](void* p) {
-        onBtnLongPressStart((int)p);
-      }, (void*)i);
-      button[i].attachLongPressStop([](void* p) {
-        onBtnLongPressStop((int)p);
-      }, (void*)i);
+      button[i].attachClick(btnClickCb, (void*)i);
+      button[i].attachDoubleClick(btnDoubleClickCb, (void*)i);
+      button[i].attachLongPressStart(btnLongPressStartCb, (void*)i);
+      button[i].attachLongPressStop(btnLongPressStopCb, (void*)i);
       button[i].setClickMs(BTN_CLICK_TICKS);
       button[i].setPressMs(BTN_PRESS_TICKS);
     }
@@ -127,7 +121,7 @@ void initControls() {
   #endif // IR_PIN!=255
 }
 
-void loopControls() {
+void Controls::loop() {
   if (display.mode()==UPDATING || display.mode()==SDCHANGE) return;
   if (SDC_CS==255 && display.mode()==LOST) return;
   if (ctrls_on_loop) ctrls_on_loop();
@@ -156,7 +150,7 @@ void loopControls() {
 }
 
 #if (ENC_BTNL!=255 && ENC_BTNR!=255) || (ENC2_BTNL!=255 && ENC2_BTNR!=255)
-  void encodersLoop(AiEsp32RotaryEncoder *enc, bool first) {
+  void Controls::encodersLoop(AiEsp32RotaryEncoder *enc, bool first) {
     if (network.status != CONNECTED && network.status!=SDREADY) return;
     if (display.mode()==LOST) return;
     int8_t encoderDelta = enc->encoderChanged();
@@ -191,19 +185,19 @@ void loopControls() {
   }
 #endif //#if (ENC_BTNL!=255 && ENC_BTNR!=255) || (ENC2_BTNL!=255 && ENC2_BTNR!=255)
 
-void encoder1Loop() {
+void Controls::encoder1Loop() {
   #if ENC_BTNL!=255
    encodersLoop(&encoder, true);
   #endif
 }
 
-void encoder2Loop() {
+void Controls::encoder2Loop() {
   #if ENC2_BTNL!=255
     encodersLoop(&encoder2, false);
   #endif
 }
 
-void irBlink() {
+void Controls::irBlink() {
   #if IR_PIN!=255
     if (REAL_LEDBUILTIN==255) return;
     if (player.status() == STOPPED) {
@@ -215,7 +209,7 @@ void irBlink() {
   #endif
 }
 
-void irNumber(uint8_t num) {
+void Controls::irNumber(uint8_t num) {
   #if IR_PIN!=255
     uint16_t s;
     if (display.numOfNextStation == 0 && num == 0) return;
@@ -228,13 +222,14 @@ void irNumber(uint8_t num) {
   #endif
 }
 
-void irLoop() {
+void Controls::irLoop() {
   #if IR_PIN!=255
     if (irrecv.decode(&irResults)) {
       if (irResults.value<256) return;
       if (netserver.irRecordEnable) {
-        Serial.print(resultToHumanReadableBasic(&irResults));
-        Serial.println("--------------------------");
+        String irText = resultToHumanReadableBasic(&irResults);
+        FUNCTIONLOG("Controls.IR", "%s", irText.c_str());
+        FUNCTIONLOG("Controls.IR", "--------------------------");
         config.ircodes.irVals[config.irindex][config.irchck]=irResults.value;
         netserver.irToWs(typeToString(irResults.decode_type, irResults.repeat).c_str(), irResults.value);
         return;
@@ -355,7 +350,7 @@ void irLoop() {
   #endif // if IR_PIN!=255
 }
 
-void onBtnLongPressStart(int id) {
+void Controls::onBtnLongPressStart(int id) {
   switch ((controlEvt_e)id) {
     case EVT_BTNLEFT:
     case EVT_BTNRIGHT:
@@ -388,7 +383,7 @@ void onBtnLongPressStart(int id) {
   }
 }
 
-void onBtnLongPressStop(int id) {
+void Controls::onBtnLongPressStop(int id) {
   switch ((controlEvt_e)id) {
     case EVT_BTNLEFT:
     case EVT_BTNRIGHT:
@@ -406,8 +401,7 @@ void onBtnLongPressStop(int id) {
   }
 }
 
-unsigned long lpdelay;
-boolean checklpdelay(int m, unsigned long &tstamp) {
+boolean Controls::checklpdelay(int m, unsigned long &tstamp) {
   if (millis() - tstamp > m) {
     tstamp = millis();
     return true;
@@ -416,9 +410,9 @@ boolean checklpdelay(int m, unsigned long &tstamp) {
   }
 }
 
-void onBtnDuringLongPress(int id) {
+void Controls::onBtnDuringLongPress(int id) {
   if (network.status != CONNECTED && network.status!=SDREADY) return;
-  if (checklpdelay(BTN_LONGPRESS_LOOP_DELAY, lpdelay)) {
+  if (checklpdelay(BTN_LONGPRESS_LOOP_DELAY, lpDelay)) {
     switch ((controlEvt_e)id) {
       case EVT_BTNLEFT: {
           controlsEvent(false);
@@ -446,7 +440,7 @@ void onBtnDuringLongPress(int id) {
   }
 }
 
-void controlsEvent(bool toRight, int8_t volDelta) {
+void Controls::controlsEvent(bool toRight, int8_t volDelta) {
   if (display.mode() == SCREENSAVER || display.mode() == SCREENBLANK) {
     display.putRequest(NEWMODE, PLAYER);
     return;  // Don't perform action, just exit screensaver
@@ -479,7 +473,7 @@ void controlsEvent(bool toRight, int8_t volDelta) {
   }
 }
 
-void onBtnClick(int id) {
+void Controls::onBtnClick(int id) {
   bool passBnCenter = (controlEvt_e)id==EVT_BTNCENTER || (controlEvt_e)id==EVT_ENCBTNB || (controlEvt_e)id==EVT_ENC2BTNB;
   controlEvt_e btnid = static_cast<controlEvt_e>(id);
   pm.on_btn_click(btnid);
@@ -568,7 +562,7 @@ void onBtnClick(int id) {
   }
 }
 
-void onBtnDoubleClick(int id) {
+void Controls::onBtnDoubleClick(int id) {
   if (display.mode() == SCREENSAVER || display.mode() == SCREENBLANK) {
     display.putRequest(NEWMODE, PLAYER);
     return;
@@ -598,14 +592,14 @@ void onBtnDoubleClick(int id) {
   }
 }
 
-void setIRTolerance(uint8_t tl) {
+void Controls::setIRTolerance(uint8_t tl) {
   config.saveValue(&config.store.irtlp, tl);
   #if IR_PIN!=255
     irrecv.setTolerance(config.store.irtlp);
   #endif
 }
 
-void setEncAcceleration(uint16_t acc) {
+void Controls::setEncAcceleration(uint16_t acc) {
   config.saveValue(&config.store.encacc, acc);
   #if ENC_BTNL!=255
     encoder.setAcceleration(config.store.encacc);
@@ -615,8 +609,10 @@ void setEncAcceleration(uint16_t acc) {
   #endif
 }
 
-void flipTS() {
+void Controls::flipTS() {
   #if (TS_MODEL!=TS_MODEL_UNDEFINED) && (DSP_MODEL!=DSP_DUMMY)
     touchscreen.flip();
   #endif
 }
+
+Controls controls;

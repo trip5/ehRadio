@@ -4,7 +4,7 @@
 
 #define MAX_TLN_CLIENTS 5
 #define MAX_PRINTF_LEN 220
-#define BOOTLOG(...) { char buf[256]; snprintf(buf, sizeof(buf), __VA_ARGS__); telnet.printf("##[BOOT]#\t%s\r\n",buf); }
+#define TELNET_INPUT_TIMEOUT_MS 2000
 
 class Telnet {
   public:
@@ -17,7 +17,7 @@ class Telnet {
     void print(uint8_t id, const char *buf);
     void printf(const char *format, ...);
     void printf(uint8_t id, const char *format, ...);
-    void info();
+    void disconnectClient(uint8_t clientId);
     void showPromptNow(uint8_t clientId);
   protected:
     WiFiServer server = WiFiServer(23);

@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include "config.h"
 #include "display.h"
+#include "logging.h"
 #include "locale.h"
 #include "netserver.h"
 #include "network.h"
@@ -100,7 +101,7 @@ Display::~Display() {
 }
 
 void Display::init() {
-  Serial.print("##[BOOT]#\tdisplay.init\t");
+  BOOTLOGX("display.init\t");
   #ifdef USE_NEXTION
     nextion.begin();
   #endif
@@ -123,7 +124,7 @@ void Display::init() {
   _meta = new ScrollWidget();
   _title1 = new ScrollWidget();
   _plcurrent = new ScrollWidget();
-  Serial.println("done");
+  SERIALLOG("done");
 }
 
 uint16_t Display::width() { return dsp.width(); }
@@ -676,12 +677,12 @@ void Display::_setRSSI(int rssi) {
 #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
   void Display::_updateBattery() {
     if(_battery) {
-      BatteryStatus bat = battery_get_status();
-      if(!bat.valid && battery_is_initialized()) {
-        battery_recalc_now();
-        bat = battery_get_status();
+      BatteryStatus bat = battery.getStatus();
+      if(!bat.valid && battery.isInitialized()) {
+        battery.recalcNow();
+        bat = battery.getStatus();
       }
-      if(battery_is_initialized() || bat.valid) {
+      if(battery.isInitialized() || bat.valid) {
         const char *baseFmt;
         if(bat.percentage < 25) baseFmt = batteryRangeLowFmt;
         else if(bat.percentage < 75) baseFmt = batteryRangeMidFmt;

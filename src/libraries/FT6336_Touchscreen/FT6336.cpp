@@ -1,4 +1,5 @@
 #include "FT6336.h"
+#include "../../core/logging.h"
 
 FT_Point::FT_Point(void){
   id = 0; x = 0; y = 0; size = 0;
@@ -24,7 +25,7 @@ void FT6336::begin(){
   } else {
     Wire.begin();
   }
-  Serial.printf("FT6336: begin SDA=%d SCL=%d INT=%d RST=%d addr=0x%02X\n", pinSda, pinScl, pinInt, pinRst, addr);
+  FUNCTIONLOG("FT6336", "begin SDA=%d SCL=%d INT=%d RST=%d addr=0x%02X", pinSda, pinScl, pinInt, pinRst, addr);
   // Basic probe
   Wire.beginTransmission(addr);
   if (Wire.endTransmission() != 0) {

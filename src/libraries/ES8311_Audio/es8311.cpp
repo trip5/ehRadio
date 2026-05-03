@@ -29,6 +29,7 @@
 */
 
 #include "es8311.h"
+#include "../../core/logging.h"
 
 ES8311 es;
 
@@ -312,7 +313,7 @@ uint8_t ES8311::ReadReg(uint8_t reg){
 
 void ES8311::read_all(){
     for (uint8_t i = 0; i < 0x4A; i++) {
-        Serial.printf("0x%02X: 0x%02X\n", i, ReadReg(i));
+        FUNCTIONLOG("ES8311", "0x%02X: 0x%02X", i, ReadReg(i));
     }
 }
 

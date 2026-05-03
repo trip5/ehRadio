@@ -20,7 +20,7 @@ from homeassistant.components.media_player import (
     RepeatMode,
 )
 
-VERSION = '2025.08.20'
+VERSION = '2026.05.03'
 
 _LOGGER      = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class ehradioApi():
   def __init__(self, root_topic, hass, playlist):
     self.hass = hass
     self.mqtt = mqtt
-    self.root_topic = root_topic
+    self.root_topic = root_topic.strip('/')
     self.playlist = playlist
     self.playlisturl = ""
 
@@ -127,6 +127,7 @@ class ehradioDevice(MediaPlayerEntity):
     self._media_title = ''
     self._track_artist = ''
     self._track_album_name = ''
+    self._entity_picture = None
     self._volume = 0
     self._max_volume = max_volume
 
@@ -146,6 +147,8 @@ class ehradioDevice(MediaPlayerEntity):
       else:
         self._state = MediaPlayerState.PLAYING if js['status']==1 else MediaPlayerState.OFF
       self._current_source = str(js['station']) + '. ' + js['name']
+      if 'image_url' in js and js['image_url']:
+          self._entity_picture = js['image_url']
       try:
         self.async_schedule_update_ha_state()
       except:
@@ -184,8 +187,8 @@ class ehradioDevice(MediaPlayerEntity):
     return self._track_artist
 
   @property
-  def media_album_name(self):
-    return self._track_album_name
+  def entity_picture(self):
+    return self._entity_picture if self._entity_picture else "https://trip5.github.io/ehRadio/images/logo-color-icon.svg"
 
   @property
   def state(self):

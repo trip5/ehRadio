@@ -15,4 +15,4 @@ scene: !include scenes.yaml
 media_player:
   - platform: ehradio
     name: My ehRadio
-    root_topic: ehradio/myradio
+    root_topic: ehradio/bench/

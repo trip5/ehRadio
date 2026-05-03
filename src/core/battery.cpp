@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2026 Aivaras Kasperaitis (@kasperaitis)
  * SPDX-License-Identifier: GPL-3.0-only
+ *  Refactored by Trip5 & Copilot
  */
 
 #include "battery.h"
@@ -10,108 +11,68 @@
 #include "common.h"
 #include "config.h"
 #include "display.h"
+#include "logging.h"
 #include "netserver.h"
 #include "telnet.h"
 
-static bool _battery_inited = false;   // ADC available
-static bool _charge_pin_present = false; // Charge-status pin available
-static BatteryStatus _battery_status = {0, 0, false, false, 0, false, false, false, false, 0, false, false}; // added voltage_rate_valid and discharging_inferred
-static unsigned long _last_read = 0;
-static int16_t _last_percentage = -1;  // Track last percentage (-1 = unset)
-static bool _last_low_battery = false;  // Track low battery state changes
-static bool _last_critical_battery = false;  // Track critical battery state changes
-static bool _last_charging = false; // Track charging state changes
-
-// Inferred charging state when no charge pin is available
-static bool _inferred_charging = false;
-static bool _inferred_discharging = false;
-// Remembered thresholds for inference hysteresis (peak/trough)
-// - Remember peaks/troughs in percentage to make inference consistent with percent-based detection
-// - _inferred_remember_peak_pct: last observed charging peak percentage
-// - _inferred_remember_noncharging_pct: last observed non-charging percentage (trough)
-static int _inferred_remember_peak_pct = -1;
-static int _inferred_remember_noncharging_pct = -1;
-// Time-gating for charging/discharging inference to prevent false positives from temporary spikes
-static unsigned long _inferred_charging_candidate_start = 0;
-static bool _inferred_charging_candidate = false;
-static int _inferred_charging_candidate_start_pct = -1;
-static unsigned long _inferred_discharging_candidate_start = 0;
-static bool _inferred_discharging_candidate = false;
-static int _inferred_discharging_candidate_start_pct = -1;
-// Computed hold window (ms) = BATTERY_CHARGE_INFER_HOLD_SAMPLES * BATTERY_UPDATE_INTERVAL
-static unsigned long _charge_infer_hold_ms = 0;
-
-/* Time-gated percent samples for sliding-window confirmation */
-static const int _pct_sample_max = 64;
-struct _pct_sample_t { unsigned long t; int pct; };
-static _pct_sample_t _pct_samples[_pct_sample_max];
-static int _pct_head = 0;
-static int _pct_count = 0;
-
-/* EMA smoothing state (mV) */
-static int32_t _ema_voltage_mv = 0; /* integer EMA (mV) */
-static const int _ema_q_scale = 256;
-// Fixed-point EMA alpha (Q256) hardcoded to 0.30 -> 0.30 * 256 ≈ 76.8 -> 77
-static const int _ema_alpha_q = 77;
+/* File-level compile-time constants (instance state is in Battery class members — see battery.h) */
+static const int pctSampleMax = 64;
+static const int emaQScale = 256;
+// Fixed-point EMA alpha (Q256): 0.30 * 256 ≈ 76.8 → 77
+static const int emaAlphaQ = 77;
 // Precomputed divider ratio scaled by 100 to avoid float in hot path
-static const uint32_t _divider_ratio_x100 = (uint32_t)(BATTERY_DIVIDER_RATIO * 100.0 + 0.5);
-// Rate-of-change tracking for charging detection
-static uint32_t _last_voltage_mv = 0;
-static unsigned long _last_voltage_time = 0; 
-
-
-// Battery presence detection range (in millivolts)
-/* BATTERY_PRESENT_MIN_MV and BATTERY_PRESENT_MAX_MV moved to src/core/options.h. */
-static uint32_t _present_min_mv = (uint32_t)BATTERY_PRESENT_MIN_MV;
-static uint32_t _present_max_mv = (uint32_t)BATTERY_PRESENT_MAX_MV;
+static const uint32_t dividerRatioX100 = (uint32_t)(BATTERY_DIVIDER_RATIO * 100.0 + 0.5);
 
 // Debug helper (wrap telnet printf to avoid code duplication)
-#ifdef BATTERY_DEBUG
-static void _dbg_printf(const char* fmt, ...) {
-  char _dbgbuf[160];
-  va_list ap; va_start(ap, fmt);
-  vsnprintf(_dbgbuf, sizeof(_dbgbuf), fmt, ap);
-  va_end(ap);
-  /* Do not append CRLF here: callers often include their own trailing "\r\n".
-     Print the buffer verbatim to avoid producing an extra blank line. */
-  telnet.printf("%s", _dbgbuf);
-}
-#else
-static inline void _dbg_printf(const char*, ...) {}
-#endif
-
-// Candidate helpers
-static void _start_charging_candidate(unsigned long now, const char* dbg_fmt, int pct_diff) {
-  _inferred_charging_candidate = true;
-  _inferred_charging_candidate_start = now;
-  _inferred_charging_candidate_start_pct = _battery_status.percentage;
-  _battery_status.charging = false;
-  _battery_status.discharging_inferred = false;
+void Battery::dbgPrintf(const char* fmt, ...) {
   #ifdef BATTERY_DEBUG
-    _dbg_printf(dbg_fmt, _inferred_charging_candidate_start_pct, pct_diff);
+  char dbgBuf[160];
+  va_list ap; va_start(ap, fmt);
+  vsnprintf(dbgBuf, sizeof(dbgBuf), fmt, ap);
+  va_end(ap);
+  // Callers may include trailing CR/LF in format strings; strip them before FUNCTIONLOG.
+  size_t len = strlen(dbgBuf);
+  while (len > 0 && (dbgBuf[len - 1] == '\r' || dbgBuf[len - 1] == '\n')) {
+    dbgBuf[--len] = '\0';
+  }
+  FUNCTIONLOG("Battery", "%s", dbgBuf);
+  #else
+  (void)fmt;
   #endif
 }
-static void _start_discharging_candidate(unsigned long now, const char* dbg_fmt, int pct_diff) {
-  _inferred_discharging_candidate = true;
-  _inferred_discharging_candidate_start = now;
-  _inferred_discharging_candidate_start_pct = _battery_status.percentage;
-  _battery_status.charging = false;
-  _battery_status.discharging_inferred = false;
+
+// Candidate helpers
+void Battery::startChargingCandidate(unsigned long now, const char* dbg_fmt, int pct_diff) {
+  chargingCandidate = true;
+  chargingCandidateStart = now;
+  chargingCandidateStartPct = battStatus.percentage;
+  battStatus.charging = false;
+  battStatus.discharging_inferred = false;
   #ifdef BATTERY_DEBUG
-    _dbg_printf(dbg_fmt, _inferred_discharging_candidate_start_pct, pct_diff);
+    dbgPrintf(dbg_fmt, chargingCandidateStartPct, pct_diff);
+  #endif
+}
+void Battery::startDischargingCandidate(unsigned long now, const char* dbg_fmt, int pct_diff) {
+  dischargingCandidate = true;
+  dischargingCandidateStart = now;
+  dischargingCandidateStartPct = battStatus.percentage;
+  battStatus.charging = false;
+  battStatus.discharging_inferred = false;
+  #ifdef BATTERY_DEBUG
+    dbgPrintf(dbg_fmt, dischargingCandidateStartPct, pct_diff);
   #endif
 }
 
 // Clear both inferred states
-static void _clear_inferred_states() {
-  _inferred_charging = false;
-  _inferred_discharging = false;
-  _inferred_charging_candidate = false;
-  _inferred_discharging_candidate = false;
+void Battery::clearInferredStates() {
+  inferredCharging = false;
+  inferredDischarging = false;
+  chargingCandidate = false;
+  dischargingCandidate = false;
 } 
 
 // Helper functions
-static uint16_t _read_adc_median() {
+uint16_t Battery::readAdcMedian() {
   /* Read BATTERY_SAMPLES ADC values and return the median sample to avoid spikes. */
   uint16_t samples[BATTERY_SAMPLES];
   for (int i = 0; i < BATTERY_SAMPLES; ++i) {
@@ -131,44 +92,43 @@ static uint16_t _read_adc_median() {
   return samples[BATTERY_SAMPLES / 2];
 }
 
-static uint32_t _calculate_voltage(uint16_t adc_avg) {
+uint32_t Battery::calculateVoltage(uint16_t adc_avg) {
   uint32_t adc_ref = config.store.battery_adc_ref_mv ? 
                      config.store.battery_adc_ref_mv : BATTERY_ADC_REF_MV;
   // Validate ADC reference is in reasonable range (2000-4000mV)
   if (adc_ref < 2000 || adc_ref > 4000) {
     #ifdef BATTERY_DEBUG
-      Serial.printf("##[BATTERY WARNING]#: Invalid ADC ref %umV, using default %dmV\r\n", 
-                    (unsigned)adc_ref, BATTERY_ADC_REF_MV);
+      FUNCTIONLOG("Battery", "Invalid ADC ref %umV, using default %dmV", (unsigned)adc_ref, BATTERY_ADC_REF_MV);
     #endif
     adc_ref = BATTERY_ADC_REF_MV;
   }
   // Use uint64_t to prevent overflow, use precomputed divider ratio scaled by 100
-  return ((uint64_t)adc_avg * adc_ref * (uint64_t)_divider_ratio_x100) / (4095 * 100);
+  return ((uint64_t)adc_avg * adc_ref * (uint64_t)dividerRatioX100) / (4095 * 100);
 }
 
 // Battery discharge curve defaults are defined in src/core/options.h (override in myoptions.h)
-static const uint16_t _battery_curve_mv[] = { BATTERY_CURVE_MV };
-static const uint8_t _battery_curve_pct[] = { BATTERY_CURVE_PCT };
+static const uint16_t batteryCurveMv[] = { BATTERY_CURVE_MV };
+static const uint8_t batteryCurvePct[] = { BATTERY_CURVE_PCT };
 
-static uint8_t _calculate_percentage(uint32_t voltage_mv) {
+uint8_t Battery::calculatePct(uint32_t voltage_mv) {
   /* Piecewise LiPo discharge curve (mV -> %).
-     Uses _battery_curve_mv and _battery_curve_pct arrays defined above. */
-  const uint16_t* curve_mv = _battery_curve_mv;
-  const uint8_t* curve_pct = _battery_curve_pct;
-  const int points = sizeof(_battery_curve_mv)/sizeof(_battery_curve_mv[0]);
-  const int points_pct = sizeof(_battery_curve_pct)/sizeof(_battery_curve_pct[0]);
+     Uses batteryCurveMv and batteryCurvePct arrays defined above. */
+  const uint16_t* curve_mv = batteryCurveMv;
+  const uint8_t* curve_pct = batteryCurvePct;
+  const int points = sizeof(batteryCurveMv)/sizeof(batteryCurveMv[0]);
+  const int points_pct = sizeof(batteryCurvePct)/sizeof(batteryCurvePct[0]);
   
   // Compile-time check for curve size mismatch (shows warning during build)
   #if defined(BATTERY_CURVE_MV) && defined(BATTERY_CURVE_PCT)
     // User-defined curves - can't check at compile time, but warn if mismatch at runtime
     #ifdef BATTERY_DEBUG
       if (points != points_pct) {
-        Serial.printf("##[BATTERY]#: Curve size mismatch (%d vs %d) - using available range\r\n", points, points_pct);
+        FUNCTIONLOG("Battery", "Curve size mismatch (%d vs %d) - using available range", points, points_pct);
       }
     #endif
   #else
     // Using default curves - verify they match at compile time
-    static_assert(sizeof(_battery_curve_mv)/sizeof(_battery_curve_mv[0]) == sizeof(_battery_curve_pct)/sizeof(_battery_curve_pct[0]),
+    static_assert(sizeof(batteryCurveMv)/sizeof(batteryCurveMv[0]) == sizeof(batteryCurvePct)/sizeof(batteryCurvePct[0]),
                   "BATTERY: Default discharge curve size mismatch! curve_mv and curve_pct arrays must have same length.");
   #endif
 
@@ -192,179 +152,178 @@ static uint8_t _calculate_percentage(uint32_t voltage_mv) {
 }
 
 // Helper: Handle candidate expiration/confirmation for charging/discharging
-static void _handle_candidate_expiry(bool charging) {
+void Battery::handleCandidateExpiry(bool charging) {
   unsigned long now = millis();
   // Helper: compute min/max percent within the last window_ms (time-gated sliding window)
-  auto _compute_window_minmax = [&](int &min_pct, int &max_pct, unsigned long window_ms) {
+  auto computeWindowMinmax = [&](int &min_pct, int &max_pct, unsigned long window_ms) {
     min_pct = 127; max_pct = -127;
-    if (_pct_count == 0) {
-      min_pct = max_pct = _battery_status.percentage;
+    if (pctCount == 0) {
+      min_pct = max_pct = battStatus.percentage;
       return;
     }
-    for (int i = 0; i < _pct_count; ++i) {
-      int idx = (_pct_head - 1 - i + _pct_sample_max) % _pct_sample_max;
-      unsigned long t = _pct_samples[idx].t;
+    for (int i = 0; i < pctCount; ++i) {
+      int idx = (pctHead - 1 - i + pctSampleMax) % pctSampleMax;
+      unsigned long t = pctSamples[idx].t;
       if (now - t > window_ms) break;
-      int p = _pct_samples[idx].pct;
+      int p = pctSamples[idx].pct;
       if (p < min_pct) min_pct = p;
       if (p > max_pct) max_pct = p;
     }
     if (min_pct == 127 && max_pct == -127) {
-      min_pct = max_pct = _battery_status.percentage;
+      min_pct = max_pct = battStatus.percentage;
     }
   };
 
   if (charging) {
-    if (_inferred_charging_candidate && (now - _inferred_charging_candidate_start) >= _charge_infer_hold_ms) {
-      unsigned long dt = now - _inferred_charging_candidate_start;
+    if (chargingCandidate && (now - chargingCandidateStart) >= chargeInferHoldMs) {
+      unsigned long dt = now - chargingCandidateStart;
 
       int window_min = 0, window_max = 0;
-      _compute_window_minmax(window_min, window_max, _charge_infer_hold_ms);
-      int latest = _battery_status.percentage;
+      computeWindowMinmax(window_min, window_max, chargeInferHoldMs);
+      int latest = battStatus.percentage;
       int pct_diff_window = latest - window_min;
 
       if (pct_diff_window >= (int)BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD) {
         // Confirm charging
-        _inferred_charging = true;
-        _battery_status.charging = true;
-        _inferred_charging_candidate = false;
-        _inferred_discharging_candidate = false;
-        _inferred_remember_peak_pct = _battery_status.percentage;
-        _inferred_charging_candidate_start_pct = -1;
-        _battery_status.discharging_inferred = false;
+        inferredCharging = true;
+        battStatus.charging = true;
+        chargingCandidate = false;
+        dischargingCandidate = false;
+        peakPct = battStatus.percentage;
+        chargingCandidateStartPct = -1;
+        battStatus.discharging_inferred = false;
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Charging inferred (time-gated, latest %d%%, delta %d%%)\r\n", latest, pct_diff_window);
+          FUNCTIONLOG("Battery", "Charging inferred (time-gated, latest %d%%, delta %d%%)", latest, pct_diff_window);
         #endif
       } else {
         // Expired without confirmation
-        _inferred_charging_candidate = false;
-        _inferred_charging_candidate_start_pct = -1;
+        chargingCandidate = false;
+        chargingCandidateStartPct = -1;
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Charging candidate expired without confirmation (latest %d%%, window_min %d%%, delta %d%% over %lums)\r\n", latest, window_min, pct_diff_window, dt);
+          FUNCTIONLOG("Battery", "Charging candidate expired without confirmation (latest %d%%, window_min %d%%, delta %d%% over %lums)", latest, window_min, pct_diff_window, dt);
         #endif
       }
     }
   } else {
-    if (_inferred_discharging_candidate && (now - _inferred_discharging_candidate_start) >= _charge_infer_hold_ms) {
-      unsigned long dt = now - _inferred_discharging_candidate_start;
+    if (dischargingCandidate && (now - dischargingCandidateStart) >= chargeInferHoldMs) {
+      unsigned long dt = now - dischargingCandidateStart;
 
       int window_min = 0, window_max = 0;
-      _compute_window_minmax(window_min, window_max, _charge_infer_hold_ms);
-      int latest = _battery_status.percentage;
+      computeWindowMinmax(window_min, window_max, chargeInferHoldMs);
+      int latest = battStatus.percentage;
       int pct_diff_window = window_max - latest;
 
       if (pct_diff_window >= (int)BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD) {
         // Confirm discharging
-        _inferred_discharging = true;
-        _battery_status.discharging_inferred = true;
-        _inferred_discharging_candidate = false;
-        _inferred_charging_candidate = false;
-        _inferred_discharging_candidate_start_pct = -1;
-        _battery_status.charging = false;
-        _inferred_remember_noncharging_pct = _battery_status.percentage; // Start remembering trough on confirmed discharging
+        inferredDischarging = true;
+        battStatus.discharging_inferred = true;
+        dischargingCandidate = false;
+        chargingCandidate = false;
+        dischargingCandidateStartPct = -1;
+        battStatus.charging = false;
+        troughPct = battStatus.percentage; // Start remembering trough on confirmed discharging
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Discharging inferred (time-gated, latest %d%%, delta %d%%)\r\n", latest, pct_diff_window);
+          FUNCTIONLOG("Battery", "Discharging inferred (time-gated, latest %d%%, delta %d%%)", latest, pct_diff_window);
         #endif
       } else {
         // Expired without confirmation
-        _inferred_discharging_candidate = false;
-        _inferred_discharging_candidate_start_pct = -1;
+        dischargingCandidate = false;
+        dischargingCandidateStartPct = -1;
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Discharging candidate expired without confirmation (latest %d%%, window_max %d%%, delta %d%% over %lums)\r\n", latest, window_max, pct_diff_window, dt);
+          FUNCTIONLOG("Battery", "Discharging candidate expired without confirmation (latest %d%%, window_max %d%%, delta %d%% over %lums)", latest, window_max, pct_diff_window, dt);
         #endif
       }
     }
   }
 }
 
-void battery_init() {
-  // Initialize ADC if BATTERY_PIN available
+void Battery::init() {
   #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
     pinMode(BATTERY_PIN, INPUT);
     analogSetAttenuation(ADC_11db);  // 0-3.3V range
-    _battery_inited = true;
+    inited = true;
   #endif
 
   // Initialize charge status pin if present (TP4054 CHRG is active LOW)
   #if defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255)
     pinMode(BATTERY_CHARGE_PIN, INPUT_PULLUP);
-    _charge_pin_present = true;
+    chargePinPresent = true;
   #endif
 
   // Initialize and sanity-check presence thresholds
-  _present_min_mv = (uint32_t)BATTERY_PRESENT_MIN_MV;
-  _present_max_mv = (uint32_t)BATTERY_PRESENT_MAX_MV;
-  if (_present_min_mv < 2500) {
-    Serial.printf("##[BATTERY WARNING]#: BATTERY_PRESENT_MIN_MV too low (%u), clamping to 2500mV\r\n", (unsigned)_present_min_mv);
-    _present_min_mv = 2500;
+  presentMinMv = (uint32_t)BATTERY_PRESENT_MIN_MV;
+  presentMaxMv = (uint32_t)BATTERY_PRESENT_MAX_MV;
+  if (presentMinMv < 2500) {
+    FUNCTIONLOG("Battery", "BATTERY_PRESENT_MIN_MV too low (%u), clamping to 2500mV", (unsigned)presentMinMv);
+    presentMinMv = 2500;
   }
-  if (_present_max_mv > 5000) {
-    Serial.printf("##[BATTERY WARNING]#: BATTERY_PRESENT_MAX_MV too high (%u), clamping to 5000mV\r\n", (unsigned)_present_max_mv);
-    _present_max_mv = 5000;
+  if (presentMaxMv > 5000) {
+    FUNCTIONLOG("Battery", "BATTERY_PRESENT_MAX_MV too high (%u), clamping to 5000mV", (unsigned)presentMaxMv);
+    presentMaxMv = 5000;
   }
-  if (_present_min_mv >= _present_max_mv) {
-    Serial.printf("##[BATTERY WARNING]#: BATTERY_PRESENT_MIN_MV >= MAX (%u >= %u), resetting to 3000/4200\r\n", (unsigned)_present_min_mv, (unsigned)_present_max_mv);
-    _present_min_mv = 3000;
-    _present_max_mv = 4200;
+  if (presentMinMv >= presentMaxMv) {
+    FUNCTIONLOG("Battery", "BATTERY_PRESENT_MIN_MV >= MAX (%u >= %u), resetting to 3000/4200", (unsigned)presentMinMv, (unsigned)presentMaxMv);
+    presentMinMv = 3000;
+    presentMaxMv = 4200;
   }
 
   // Compute the hold window in milliseconds from configured number of measurements
-  _charge_infer_hold_ms = (unsigned long)BATTERY_CHARGE_INFER_HOLD_SAMPLES * (unsigned long)BATTERY_UPDATE_INTERVAL;
-  if (_charge_infer_hold_ms == 0) {
-    _charge_infer_hold_ms = (unsigned long)BATTERY_UPDATE_INTERVAL * 3; // fallback
+  chargeInferHoldMs = (unsigned long)BATTERY_CHARGE_INFER_HOLD_SAMPLES * (unsigned long)BATTERY_UPDATE_INTERVAL;
+  if (chargeInferHoldMs == 0) {
+    chargeInferHoldMs = (unsigned long)BATTERY_UPDATE_INTERVAL * 3; // fallback
   }
 
 } // end battery_init
 
-void battery_boot_status() {
+void Battery::bootStatus() {
   // Run boot status when either ADC or CHARGE pin is configured
   #if (defined(BATTERY_PIN) && (BATTERY_PIN!=255)) || (defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255))
-    if (!_battery_inited && !_charge_pin_present) return;
+    if (!inited && !chargePinPresent) return;
     
     // If charge pin present, read initial charging state first
     #if defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255)
       bool charging = (digitalRead(BATTERY_CHARGE_PIN) == LOW); // active LOW
-      _battery_status.charging = charging;
-      _last_charging = charging;
+      battStatus.charging = charging;
+      lastCharging = charging;
     #endif
     
     // If ADC available, do initial reading to show battery status at boot
-    if (_battery_inited) {
+    if (inited) {
       delay(10);  // Let ADC stabilize (shorter to reduce blocking)
-      uint16_t adc_sample = _read_adc_median();
-      uint32_t voltage_mv = _calculate_voltage(adc_sample);
+      uint16_t adc_sample = readAdcMedian();
+      uint32_t voltage_mv = calculateVoltage(adc_sample);
 
-      _ema_voltage_mv = (int32_t)voltage_mv; /* initialize EMA at boot */
-      _last_read = millis(); /* Set last read time to prevent immediate re-reading in battery_loop */
+      emaVoltageMv = (int32_t)voltage_mv; /* initialize EMA at boot */
+      lastRead = millis(); /* Set last read time to prevent immediate re-reading in battery_loop */
 
       // Check if battery is present
-      bool present = (voltage_mv >= _present_min_mv && voltage_mv <= _present_max_mv);
-      _battery_status.present = present;
+      bool present = (voltage_mv >= presentMinMv && voltage_mv <= presentMaxMv);
+      battStatus.present = present;
       if (present) {
-        uint8_t percentage = _calculate_percentage(voltage_mv);
+        uint8_t percentage = calculatePct(voltage_mv);
         
         // Save initial readings to avoid false triggers on first loop
-        _last_percentage = percentage;
-        _battery_status.percentage = percentage;
-        _battery_status.adc = adc_sample;
-        _battery_status.voltage_mv = voltage_mv;
-        _battery_status.valid = true; /* mark valid so GETBATTERY handlers will surface value immediately */
+        lastPct = percentage;
+        battStatus.percentage = percentage;
+        battStatus.adc = adc_sample;
+        battStatus.voltage_mv = voltage_mv;
+        battStatus.valid = true; /* mark valid so GETBATTERY handlers will surface value immediately */
 
         // Print combined boot status with charging state if available
-        if (_battery_status.charging) {
-          Serial.printf("##[BOOT]#\tbattery\t\tADC:%d, %dmV, %d%%, Charging\r\n", adc_sample, voltage_mv, percentage);
+        if (battStatus.charging) {
+          BOOTLOG("battery\t\tADC:%d, %dmV, %d%%, Charging", adc_sample, voltage_mv, percentage);
         } else {
-          Serial.printf("##[BOOT]#\tbattery\t\tADC:%d, %dmV, %d%%\r\n", adc_sample, voltage_mv, percentage);
+          BOOTLOG("battery\t\tADC:%d, %dmV, %d%%", adc_sample, voltage_mv, percentage);
         }
         // Update display immediately
         display.putRequest(DSPBATTERY, 0);
       } else {
-        Serial.println("##[BOOT]#\tbattery\t\tnot detected");
-        _battery_status.valid = false;
-        _battery_status.present = false;
-        _battery_status.percentage = 0;
-        _battery_status.adc = 0;
-        _battery_status.voltage_mv = 0;
+        BOOTLOG("battery\t\tnot detected");
+        battStatus.valid = false;
+        battStatus.present = false;
+        battStatus.percentage = 0;
+        battStatus.adc = 0;
+        battStatus.voltage_mv = 0;
         display.putRequest(DSPBATTERY, 0);
       }
     }
@@ -375,16 +334,16 @@ void battery_boot_status() {
 } 
 
 // Return true if either ADC or charge pin is initialized
-bool battery_is_initialized() {
-  return (_battery_inited || _charge_pin_present);
+bool Battery::isInitialized() {
+  return (inited || chargePinPresent);
 }
 
-const BatteryStatus& battery_get_status() {
-  return _battery_status;
+const BatteryStatus& Battery::getStatus() {
+  return battStatus;
 }
 
 // Format battery status line to buffer (shared by CLI and debug output)
-void battery_format_status_line(const BatteryStatus& status, char* buffer, size_t buffer_size, bool include_warning) {
+void Battery::formatStatusLine(const BatteryStatus& status, char* buffer, size_t buffer_size, bool include_warning) {
   if (!status.valid) {
     snprintf(buffer, buffer_size, "##CLI.BATTERY#: not detected");
     return;
@@ -405,12 +364,12 @@ void battery_format_status_line(const BatteryStatus& status, char* buffer, size_
   }
   
   // Add peak/trough info when available - show each independently if set
-  if (_inferred_remember_peak_pct >= 0 && _inferred_remember_noncharging_pct >= 0)
-    snprintf(remembered, sizeof(remembered), ", Peak:%d%%, Trough:%d%%", _inferred_remember_peak_pct, _inferred_remember_noncharging_pct);
-  else if (_inferred_remember_peak_pct >= 0)
-    snprintf(remembered, sizeof(remembered), ", Peak:%d%%", _inferred_remember_peak_pct);
-  else if (_inferred_remember_noncharging_pct >= 0)
-    snprintf(remembered, sizeof(remembered), ", Trough:%d%%", _inferred_remember_noncharging_pct);
+  if (peakPct >= 0 && troughPct >= 0)
+    snprintf(remembered, sizeof(remembered), ", Peak:%d%%, Trough:%d%%", peakPct, troughPct);
+  else if (peakPct >= 0)
+    snprintf(remembered, sizeof(remembered), ", Peak:%d%%", peakPct);
+  else if (troughPct >= 0)
+    snprintf(remembered, sizeof(remembered), ", Trough:%d%%", troughPct);
   
   if (status.charging) {
     if (status.charging_inferred)
@@ -429,35 +388,35 @@ void battery_format_status_line(const BatteryStatus& status, char* buffer, size_
 }
 
 // Internal helper: Read ADC, calculate voltage/percentage, update trends and status
-static void _battery_read_and_update() {
+void Battery::readAndUpdate() {
   unsigned long now = millis();
   uint16_t adc_avg = 0;
   uint32_t voltage_mv = 0;
 
   // If ADC available, read it and compute volt/percentage
-  if (_battery_inited) {
-    uint16_t adc_sample = _read_adc_median();
-    uint32_t raw_voltage_mv = _calculate_voltage(adc_sample);
+  if (inited) {
+    uint16_t adc_sample = readAdcMedian();
+    uint32_t raw_voltage_mv = calculateVoltage(adc_sample);
 
     // Battery detection: Check if voltage is in valid Li-Po range
-    if (raw_voltage_mv < _present_min_mv || raw_voltage_mv > _present_max_mv) {
-      _battery_status.valid = false;
-      _battery_status.present = false;
-      _battery_status.charging = false;
-      _battery_status.discharging_inferred = false;
+    if (raw_voltage_mv < presentMinMv || raw_voltage_mv > presentMaxMv) {
+      battStatus.valid = false;
+      battStatus.present = false;
+      battStatus.charging = false;
+      battStatus.discharging_inferred = false;
       // Reset tracking state to avoid stale data on reconnect
-      _last_voltage_mv = 0;
-      _last_voltage_time = 0;
-      _inferred_charging = false;
-      _inferred_discharging = false;
-      _inferred_charging_candidate = false;
-      _inferred_discharging_candidate = false;
-      _battery_status.voltage_rate_valid = false; // percent rate removed
+      lastVoltageMv = 0;
+      lastVoltageTime = 0;
+      inferredCharging = false;
+      inferredDischarging = false;
+      chargingCandidate = false;
+      dischargingCandidate = false;
+      battStatus.voltage_rate_valid = false; // percent rate removed
       #ifdef BATTERY_DEBUG
-        telnet.printf("##[BATTERY WARNING]#: No battery detected, %dmV out of range\r\n", raw_voltage_mv);
+        FUNCTIONLOG("Battery", "No battery detected, %dmV out of range", raw_voltage_mv);
       #endif
 
-      _ema_voltage_mv = 0; // reset EMA when battery absent
+      emaVoltageMv = 0; // reset EMA when battery absent
 
       return;
     }
@@ -465,59 +424,57 @@ static void _battery_read_and_update() {
 
 
     // Smooth voltage with integer EMA (fixed-point, Q format) and compute percentage from EMA
-    if (_ema_voltage_mv <= 0) _ema_voltage_mv = (int32_t)raw_voltage_mv;
+    if (emaVoltageMv <= 0) emaVoltageMv = (int32_t)raw_voltage_mv;
     else {
-      _ema_voltage_mv = (int32_t)(( (int64_t)_ema_alpha_q * raw_voltage_mv + (int64_t)(_ema_q_scale - _ema_alpha_q) * _ema_voltage_mv + (_ema_q_scale/2) ) / _ema_q_scale);
+      emaVoltageMv = (int32_t)(( (int64_t)emaAlphaQ * raw_voltage_mv + (int64_t)(emaQScale - emaAlphaQ) * emaVoltageMv + (emaQScale/2) ) / emaQScale);
     }
-    voltage_mv = (uint32_t)_ema_voltage_mv; 
+    voltage_mv = (uint32_t)emaVoltageMv; 
 
     // Calculate percentage (linear interpolation) from smoothed voltage
-    uint8_t percentage = _calculate_percentage(voltage_mv);
+    uint8_t percentage = calculatePct(voltage_mv);
 
     // Save raw ADC sample for external reporting
-    _battery_status.adc = adc_sample;
+    battStatus.adc = adc_sample;
 
     // Update status struct with all information
-    _battery_status.voltage_mv = voltage_mv;
-    _battery_status.percentage = percentage;
+    battStatus.voltage_mv = voltage_mv;
+    battStatus.percentage = percentage;
 
     // Append percent sample for sliding-window confirmation logic
-    unsigned long _pct_now = now;
-    _pct_samples[_pct_head].t = _pct_now;
-    _pct_samples[_pct_head].pct = _battery_status.percentage;
-    _pct_head = (_pct_head + 1) % _pct_sample_max;
-    if (_pct_count < _pct_sample_max) _pct_count++;
+    unsigned long pctNow = now;
+    pctSamples[pctHead].t = pctNow;
+    pctSamples[pctHead].pct = battStatus.percentage;
+    pctHead = (pctHead + 1) % pctSampleMax;
+    if (pctCount < pctSampleMax) pctCount++;
 
-    _battery_status.valid = true;
-    _battery_status.present = true;
+    battStatus.valid = true;
+    battStatus.present = true;
 
     // Low/critical thresholds
-    bool low_batt = (_battery_status.percentage <= BATTERY_LOW_THRESHOLD);
-    bool crit_batt = (_battery_status.percentage <= BATTERY_CRITICAL_THRESHOLD);
-    _battery_status.low_battery = low_batt;
-    _battery_status.critical_battery = crit_batt;
+    bool low_batt = (battStatus.percentage <= BATTERY_LOW_THRESHOLD);
+    bool crit_batt = (battStatus.percentage <= BATTERY_CRITICAL_THRESHOLD);
+    battStatus.low_battery = low_batt;
+    battStatus.critical_battery = crit_batt;
 
     // Print low battery warnings on state change
-    if (crit_batt && !_last_critical_battery) {
-      telnet.printf("##[BATTERY WARNING]#: CRITICAL BATTERY! %d%% remaining (%dmV)\r\n", 
-                    _battery_status.percentage, voltage_mv);
-    } else if (low_batt && !_last_low_battery && !crit_batt) {
-      telnet.printf("##[BATTERY WARNING]#: Low battery! %d%% remaining (%dmV)\r\n", 
-                    _battery_status.percentage, voltage_mv);
-    } else if (!low_batt && _last_low_battery) {
-      telnet.printf("##[BATTERY]#: Battery level normal (%d%%)\r\n", _battery_status.percentage);
+    if (crit_batt && !lastCritBattery) {
+      FUNCTIONLOG("Battery", "CRITICAL BATTERY! %d%% remaining (%dmV)", battStatus.percentage, voltage_mv);
+    } else if (low_batt && !lastLowBattery && !crit_batt) {
+      FUNCTIONLOG("Battery", "Low battery! %d%% remaining (%dmV)", battStatus.percentage, voltage_mv);
+    } else if (!low_batt && lastLowBattery) {
+      FUNCTIONLOG("Battery", "Battery level normal (%d%%)", battStatus.percentage);
     }
 
-    // Note: Don't update _last_low_battery and _last_critical_battery here - 
+    // Note: Don't update lastLowBattery and lastCritBattery here - 
     // they're updated after display update to detect changes
   } else {
     // No ADC: mark as not valid / not present
-    _battery_status.valid = false;
-    _battery_status.present = false;
+    battStatus.valid = false;
+    battStatus.present = false;
   }
 
   // Calculate voltage rate-of-change (mV per minute) - needed regardless of charge pin
-  uint32_t prev_voltage_mv = _last_voltage_mv;
+  uint32_t prev_voltage_mv = lastVoltageMv;
   int32_t voltage_rate = 0;
   bool rate_calculated = false;
 
@@ -526,8 +483,8 @@ static void _battery_read_and_update() {
   bool sudden_spike_pct = false;
   bool sudden_drop_pct = false;
   
-  if (_last_voltage_time > 0 && _last_voltage_mv > 0) {
-    unsigned long time_diff = now - _last_voltage_time;
+  if (lastVoltageTime > 0 && lastVoltageMv > 0) {
+    unsigned long time_diff = now - lastVoltageTime;
     if (time_diff > 0) {
       // Calculate rate using int64_t to prevent overflow: (voltage_change * 60000ms) / time_diff
       int64_t voltage_diff = (int64_t)voltage_mv - (int64_t)prev_voltage_mv;
@@ -539,8 +496,8 @@ static void _battery_read_and_update() {
       percent_diff = 0;
       sudden_spike_pct = false;
       sudden_drop_pct = false;
-      if (_last_percentage >= 0) {
-        percent_diff = (int32_t)_battery_status.percentage - (int32_t)_last_percentage;
+      if (lastPct >= 0) {
+        percent_diff = (int32_t)battStatus.percentage - (int32_t)lastPct;
 
         /* Immediate percent thresholds (single-reading change). */
         sudden_spike_pct = (percent_diff >= BATTERY_IMMEDIATE_PERCENT_THRESHOLD);
@@ -550,39 +507,39 @@ static void _battery_read_and_update() {
   }
   
   // Store voltage rate in status for external access
-  _battery_status.voltage_rate = voltage_rate;
+  battStatus.voltage_rate = voltage_rate;
   if (rate_calculated) {
-    _battery_status.voltage_rate_valid = true;
+    battStatus.voltage_rate_valid = true;
   } else {
-    _battery_status.voltage_rate_valid = false;
+    battStatus.voltage_rate_valid = false;
   }
 
   (void)percent_diff; // keep compiler happy when built without BATTERY_DEBUG
 
   
   // Update voltage tracking for next calculation
-  _last_voltage_mv = voltage_mv;
-  _last_voltage_time = now;
+  lastVoltageMv = voltage_mv;
+  lastVoltageTime = now;
 
   // Read charge pin if present
-  if (_charge_pin_present) {
+  if (chargePinPresent) {
     bool charging = (digitalRead(BATTERY_CHARGE_PIN) == LOW); // active LOW
-    _battery_status.charging = charging;
-    if (charging && !_last_charging) {
-      telnet.printf("##[BATTERY]#: Charging started\r\n");
-    } else if (!charging && _last_charging) {
-      telnet.printf("##[BATTERY]#: Charging stopped\r\n");
+    battStatus.charging = charging;
+    if (charging && !lastCharging) {
+      FUNCTIONLOG("Battery", "Charging started");
+    } else if (!charging && lastCharging) {
+      FUNCTIONLOG("Battery", "Charging stopped");
     }
   } else if (rate_calculated) {
     // No charge pin: infer charging/discharging state from voltage rate
     
     // Calculate curve points once for all inference logic
-    const int curve_points = sizeof(_battery_curve_mv)/sizeof(_battery_curve_mv[0]);
-    uint32_t threshold_95pct = (curve_points > 1) ? _battery_curve_mv[1] : 4100;
-    uint32_t threshold_55pct = (curve_points > 5) ? _battery_curve_mv[5] : 3700;
-    uint32_t threshold_10pct = (curve_points > 7) ? _battery_curve_mv[7] : 3400;
+    const int curve_points = sizeof(batteryCurveMv)/sizeof(batteryCurveMv[0]);
+    uint32_t threshold_95pct = (curve_points > 1) ? batteryCurveMv[1] : 4100;
+    uint32_t threshold_55pct = (curve_points > 5) ? batteryCurveMv[5] : 3700;
+    uint32_t threshold_10pct = (curve_points > 7) ? batteryCurveMv[7] : 3400;
 
-    if (!_inferred_charging && !_inferred_discharging) {
+    if (!inferredCharging && !inferredDischarging) {
       // State: Neither charging nor discharging
       // Detect charging by: sudden voltage spike OR sustained voltage increase rate
       
@@ -590,37 +547,37 @@ static void _battery_read_and_update() {
 
       /* Immediate confirmation on single-reading percent jump (spike). This is separate from trend detection. */
       if (sudden_drop_pct) {
-        _inferred_discharging = true;
-        _battery_status.discharging_inferred = true;
-        _inferred_discharging_candidate = false;
-        _inferred_charging_candidate = false;
-        _battery_status.charging = false;
+        inferredDischarging = true;
+        battStatus.discharging_inferred = true;
+        dischargingCandidate = false;
+        chargingCandidate = false;
+        battStatus.charging = false;
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Discharging inferred (immediate, %d%% change)\r\n", (int)(_battery_status.percentage - _last_percentage));
+          FUNCTIONLOG("Battery", "Discharging inferred (immediate, %d%% change)", (int)(battStatus.percentage - lastPct));
         #endif
       } else if (sudden_spike_pct) {
-        _inferred_charging = true;
-        _battery_status.charging = true;
-        _inferred_charging_candidate = false;
-        _inferred_discharging_candidate = false;
-        _inferred_remember_peak_pct = _battery_status.percentage;
-        _battery_status.discharging_inferred = false;
+        inferredCharging = true;
+        battStatus.charging = true;
+        chargingCandidate = false;
+        dischargingCandidate = false;
+        peakPct = battStatus.percentage;
+        battStatus.discharging_inferred = false;
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Charging inferred (immediate, %d%% change)\r\n", (int)(_battery_status.percentage - _last_percentage));
+          FUNCTIONLOG("Battery", "Charging inferred (immediate, %d%% change)", (int)(battStatus.percentage - lastPct));
         #endif
       }
       
       // Handle candidate confirmation or expiration using window-delta
-      _handle_candidate_expiry(true);
-      _handle_candidate_expiry(false);
+      handleCandidateExpiry(true);
+      handleCandidateExpiry(false);
 
       // If a time-gated confirmation just changed the state, skip starting new candidates
-      if (_inferred_charging || _inferred_discharging) {
+      if (inferredCharging || inferredDischarging) {
         /* State confirmed; nothing further to do in neutral processing */
       } else {
         // Check for small single-reading percent changes to start candidates (not immediate confirm)
-        if (_last_percentage >= 0) {
-          int pct_diff_now = (int)_battery_status.percentage - (int)_last_percentage;
+        if (lastPct >= 0) {
+          int pct_diff_now = (int)battStatus.percentage - (int)lastPct;
           int dir_now = 0; /* -1 = discharging, +1 = charging */
           if (pct_diff_now <= -BATTERY_CANDIDATE_PERCENT_DELTA) dir_now = -1;
           else if (pct_diff_now >= BATTERY_CANDIDATE_PERCENT_DELTA) dir_now = 1;  
@@ -631,30 +588,30 @@ static void _battery_read_and_update() {
             /* Start candidate immediately on a qualifying delta */
             if (dir_now < 0) {
               // Start discharging candidate based on percent delta
-              _inferred_charging_candidate = false;
-              if (!_inferred_discharging_candidate) {
-                _start_discharging_candidate(now, "##[BATTERY]#: Discharging candidate started (candidate, start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+              chargingCandidate = false;
+              if (!dischargingCandidate) {
+                startDischargingCandidate(now, "Discharging candidate started (candidate, start %d%%, pct-diff %+d%%)", pct_diff_now);
               }
             } else {
               // Start charging candidate based on percent delta
-              _inferred_discharging_candidate = false;
-              if (!_inferred_charging_candidate) {
-                _start_charging_candidate(now, "##[BATTERY]#: Charging candidate started (candidate, start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+              dischargingCandidate = false;
+              if (!chargingCandidate) {
+                startChargingCandidate(now, "Charging candidate started (candidate, start %d%%, pct-diff %+d%%)", pct_diff_now);
               }
             }
           }
         } else {
           // Borderline reading - keep any existing candidates without clearing
-          _battery_status.charging = false;
-          _battery_status.discharging_inferred = false;
+          battStatus.charging = false;
+          battStatus.discharging_inferred = false;
           // Clear both peak and trough in neutral (no active charge/discharge state)
-          if (!_inferred_charging_candidate && !_inferred_discharging_candidate) {
-            _inferred_remember_peak_pct = -1;
-            _inferred_remember_noncharging_pct = -1;
+          if (!chargingCandidate && !dischargingCandidate) {
+            peakPct = -1;
+            troughPct = -1;
           }
         }
       }
-    } else if (_inferred_charging) {
+    } else if (inferredCharging) {
 
       // State: Currently charging
       // Clear charging inference on:
@@ -668,76 +625,76 @@ static void _battery_read_and_update() {
       
       // Compute percent delta since last reading
       int pct_diff_now = 0;
-      if (_last_percentage >= 0) pct_diff_now = (int)_battery_status.percentage - (int)_last_percentage;
+      if (lastPct >= 0) pct_diff_now = (int)battStatus.percentage - (int)lastPct;
 
       // If percent dropped enough while charging, clear charging and start discharging candidate
       if (pct_diff_now <= -(int)BATTERY_CANDIDATE_PERCENT_DELTA) {
-        _inferred_charging = false;
-        _inferred_charging_candidate = false;
-        _battery_status.charging = false;
-        _battery_status.discharging_inferred = false;
-        _inferred_remember_peak_pct = -1;  // Clear peak when charging stops
+        inferredCharging = false;
+        chargingCandidate = false;
+        battStatus.charging = false;
+        battStatus.discharging_inferred = false;
+        peakPct = -1;  // Clear peak when charging stops
 
-        if (!_inferred_discharging_candidate) {
-          _start_discharging_candidate(now, "##[BATTERY]#: Discharging candidate started on charging drop (start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+        if (!dischargingCandidate) {
+          startDischargingCandidate(now, "Discharging candidate started on charging drop (start %d%%, pct-diff %+d%%)", pct_diff_now);
         }
 
       } else if (sudden_drop_pct || discharging_rate) {
         // Sudden drop or discharge rate -> stop charging and possibly switch to discharging
         if (sudden_drop_pct || (pct_diff_now <= -BATTERY_IMMEDIATE_PERCENT_THRESHOLD)) {
           // Strong drop or immediate percent fall -> switch to discharging immediately
-          _inferred_charging = false;
-          _inferred_charging_candidate = false;
-          _inferred_discharging = true;
-          _inferred_discharging_candidate = false;
-          _battery_status.charging = false;
-          _battery_status.discharging_inferred = true;
-          _inferred_remember_peak_pct = -1;  // Clear peak when charging stops
-          _inferred_remember_noncharging_pct = _battery_status.percentage; // Start remembering trough
+          inferredCharging = false;
+          chargingCandidate = false;
+          inferredDischarging = true;
+          dischargingCandidate = false;
+          battStatus.charging = false;
+          battStatus.discharging_inferred = true;
+          peakPct = -1;  // Clear peak when charging stops
+          troughPct = battStatus.percentage; // Start remembering trough
           #ifdef BATTERY_DEBUG
-            telnet.printf("##[BATTERY]#: Charging cleared -> Discharging inferred (immediate, %+d%% change)\r\n", pct_diff_now);
+            FUNCTIONLOG("Battery", "Charging cleared -> Discharging inferred (immediate, %+d%% change)", pct_diff_now);
           #endif
         } else {
           // Clear charging inference only
-          _inferred_charging = false;
-          _inferred_charging_candidate = false;
-          _battery_status.charging = false;
-          _battery_status.discharging_inferred = false;
-          _inferred_remember_peak_pct = -1;  // Clear peak when charging stops
+          inferredCharging = false;
+          chargingCandidate = false;
+          battStatus.charging = false;
+          battStatus.discharging_inferred = false;
+          peakPct = -1;  // Clear peak when charging stops
 
           /* If the percent drop is notable (>= BATTERY_CANDIDATE_PERCENT_DELTA),
              start discharging candidate immediately. */
           if (pct_diff_now <= -(int)BATTERY_CANDIDATE_PERCENT_DELTA) {
-            _battery_status.charging = false;
-            _battery_status.discharging_inferred = false;
-            if (!_inferred_discharging_candidate) {
-              _start_discharging_candidate(now, "##[BATTERY]#: Discharging candidate started on charging clear (start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+            battStatus.charging = false;
+            battStatus.discharging_inferred = false;
+            if (!dischargingCandidate) {
+              startDischargingCandidate(now, "Discharging candidate started on charging clear (start %d%%, pct-diff %+d%%)", pct_diff_now);
             }
           } else {
             #ifdef BATTERY_DEBUG
-              telnet.printf("##[BATTERY]#: Charging cleared (pct %+d%% change)\r\n", pct_diff_now);
+              FUNCTIONLOG("Battery", "Charging cleared (pct %+d%% change)", pct_diff_now);
             #endif
           }
         }
-      } else if (_inferred_remember_noncharging_pct >= 0 && _battery_status.percentage <= _inferred_remember_noncharging_pct) {
+      } else if (troughPct >= 0 && battStatus.percentage <= troughPct) {
         // Percentage dropped to discharging level -> stop charging
-        _inferred_charging = false;
-        _inferred_charging_candidate = false;
-        _battery_status.charging = false;
-        _battery_status.discharging_inferred = false;
-        _inferred_remember_peak_pct = -1;  // Clear peak when charging stops
+        inferredCharging = false;
+        chargingCandidate = false;
+        battStatus.charging = false;
+        battStatus.discharging_inferred = false;
+        peakPct = -1;  // Clear peak when charging stops
         #ifdef BATTERY_DEBUG
-          telnet.printf("##[BATTERY]#: Charging inference cleared (now %d%%)\r\n", _battery_status.percentage);
+          FUNCTIONLOG("Battery", "Charging inference cleared (now %d%%)", battStatus.percentage);
         #endif
       } else {
         // Still charging; update peak if a new peak is observed
-        _battery_status.charging = true;
-        _battery_status.discharging_inferred = false;
-        if (_battery_status.percentage > _inferred_remember_peak_pct) {
-          _inferred_remember_peak_pct = _battery_status.percentage;
+        battStatus.charging = true;
+        battStatus.discharging_inferred = false;
+        if (battStatus.percentage > peakPct) {
+          peakPct = battStatus.percentage;
         }
       }
-    } else if (_inferred_discharging) {
+    } else if (inferredDischarging) {
       // State: Currently discharging
       // Clear discharging inference only on:
       // 1. Sudden voltage spike
@@ -748,65 +705,65 @@ static void _battery_read_and_update() {
       
       // Compute percent delta since last reading
       int pct_diff_now = 0;
-      if (_last_percentage >= 0) pct_diff_now = (int)_battery_status.percentage - (int)_last_percentage;
+      if (lastPct >= 0) pct_diff_now = (int)battStatus.percentage - (int)lastPct;
 
       // If percent rose enough while discharging, clear discharging and start charging candidate
       if (pct_diff_now >= (int)BATTERY_CANDIDATE_PERCENT_DELTA) {
-        _inferred_discharging = false;
-        _inferred_discharging_candidate = false;
-        _battery_status.discharging_inferred = false;
-        _battery_status.charging = false;
-        _inferred_remember_noncharging_pct = -1;  // Clear trough when discharging stops
+        inferredDischarging = false;
+        dischargingCandidate = false;
+        battStatus.discharging_inferred = false;
+        battStatus.charging = false;
+        troughPct = -1;  // Clear trough when discharging stops
 
-        if (!_inferred_charging_candidate) {
-              _start_charging_candidate(now, "##[BATTERY]#: Charging candidate started on discharging rise (start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+        if (!chargingCandidate) {
+              startChargingCandidate(now, "Charging candidate started on discharging rise (start %d%%, pct-diff %+d%%)", pct_diff_now);
         }
 
       } else if (sudden_spike_pct || charging_rate) {
         // Sudden spike or charging rate -> stop discharging and possibly switch to charging
         if (sudden_spike_pct || (pct_diff_now >= BATTERY_IMMEDIATE_PERCENT_THRESHOLD)) {
           // Strong spike or immediate percent jump -> switch to charging immediately
-          _inferred_discharging = false;
-          _inferred_discharging_candidate = false;
-          _inferred_charging = true;
-          _inferred_charging_candidate = false;
-          _battery_status.discharging_inferred = false;
-          _battery_status.charging = true;
-          _inferred_remember_noncharging_pct = -1;  // Clear trough when discharging stops
-          _inferred_remember_peak_pct = _battery_status.percentage; // Start remembering peak
+          inferredDischarging = false;
+          dischargingCandidate = false;
+          inferredCharging = true;
+          chargingCandidate = false;
+          battStatus.discharging_inferred = false;
+          battStatus.charging = true;
+          troughPct = -1;  // Clear trough when discharging stops
+          peakPct = battStatus.percentage; // Start remembering peak
           #ifdef BATTERY_DEBUG
-            telnet.printf("##[BATTERY]#: Discharging cleared -> Charging inferred (immediate, %+d%% change)\r\n", pct_diff_now);
+            FUNCTIONLOG("Battery", "Discharging cleared -> Charging inferred (immediate, %+d%% change)", pct_diff_now);
           #endif
         } else {
           // Clear discharging inference only
-          _inferred_discharging = false;
-          _inferred_discharging_candidate = false;
-          _battery_status.discharging_inferred = false;
-          _battery_status.charging = false;
-          _inferred_remember_noncharging_pct = -1;  // Clear trough when discharging stops
+          inferredDischarging = false;
+          dischargingCandidate = false;
+          battStatus.discharging_inferred = false;
+          battStatus.charging = false;
+          troughPct = -1;  // Clear trough when discharging stops
 
           /* If the percent increase is notable (>= BATTERY_CANDIDATE_PERCENT_DELTA),
              start charging candidate immediately. */
           if (pct_diff_now >= (int)BATTERY_CANDIDATE_PERCENT_DELTA) {
-            _battery_status.charging = false;
-            _battery_status.discharging_inferred = false;
-            if (!_inferred_charging_candidate) {
-              _start_charging_candidate(now, "##[BATTERY]#: Charging candidate started on discharging clear (start %d%%, pct-diff %+d%%)\r\n", pct_diff_now);
+            battStatus.charging = false;
+            battStatus.discharging_inferred = false;
+            if (!chargingCandidate) {
+              startChargingCandidate(now, "Charging candidate started on discharging clear (start %d%%, pct-diff %+d%%)", pct_diff_now);
             }
           } else {
             #ifdef BATTERY_DEBUG
-              telnet.printf("##[BATTERY]#: Discharging cleared (pct %+d%% change)\r\n", pct_diff_now);
+              FUNCTIONLOG("Battery", "Discharging cleared (pct %+d%% change)", pct_diff_now);
             #endif
           }
         }
       } else {
         // Still discharging; update trough if a new low is observed
-        _battery_status.discharging_inferred = true;
-        _battery_status.charging = false;
-        if (_inferred_remember_noncharging_pct < 0) {
-          _inferred_remember_noncharging_pct = _battery_status.percentage;  // Initialize trough on first discharging reading
-        } else if (_battery_status.percentage < _inferred_remember_noncharging_pct) {
-          _inferred_remember_noncharging_pct = _battery_status.percentage;  // Update if new low
+        battStatus.discharging_inferred = true;
+        battStatus.charging = false;
+        if (troughPct < 0) {
+          troughPct = battStatus.percentage;  // Initialize trough on first discharging reading
+        } else if (battStatus.percentage < troughPct) {
+          troughPct = battStatus.percentage;  // Update if new low
         }
       }
     }
@@ -818,66 +775,66 @@ static void _battery_read_and_update() {
   // Notify web clients about battery status
   netserver.requestOnChange(GETBATTERY, 0);
   // Surface inferred state into the public status struct for CLI/debugging
-  _battery_status.charging_inferred = _inferred_charging;
-  _battery_status.discharging_inferred = _inferred_discharging;
+  battStatus.charging_inferred = inferredCharging;
+  battStatus.discharging_inferred = inferredDischarging;
 
-  _last_percentage = _battery_status.percentage;
-  _last_low_battery = _battery_status.low_battery;
-  _last_critical_battery = _battery_status.critical_battery;
-  _last_charging = _battery_status.charging;
+  lastPct = battStatus.percentage;
+  lastLowBattery = battStatus.low_battery;
+  lastCritBattery = battStatus.critical_battery;
+  lastCharging = battStatus.charging;
 
   // Debug output (format aligned with CLI for easier grepping)
   #ifdef BATTERY_DEBUG
     char status_line[256];  // Increased buffer for extended charging info with peak/trough/rate
-    battery_format_status_line(_battery_status, status_line, sizeof(status_line), false);
-    telnet.printf("%s\r\n", status_line);
+    formatStatusLine(battStatus, status_line, sizeof(status_line), false);
+    FUNCTIONLOG("Battery", "%s", status_line);
 
   #endif
 } 
 
-void battery_loop() {
+void Battery::loop() {
   // If neither ADC nor charge pin is present, nothing to do
-  if (!_battery_inited && !_charge_pin_present) return;
+  if (!inited && !chargePinPresent) return;
 
   unsigned long now = millis();
 
   // If no ADC but charge pin is present, just poll the charge pin for changes
-  if (!_battery_inited && _charge_pin_present) {
+  if (!inited && chargePinPresent) {
     bool charging = (digitalRead(BATTERY_CHARGE_PIN) == LOW);
-    if (charging != _last_charging) {
-      _battery_status.charging = charging;
+    if (charging != lastCharging) {
+      battStatus.charging = charging;
       if (charging) {
-        telnet.printf("##[BATTERY]#: Charging started (charge-pin only)\r\n");
+        FUNCTIONLOG("Battery", "Charging started (charge-pin only)");
       } else {
-        telnet.printf("##[BATTERY]#: Charging stopped (charge-pin only)\r\n");
+        FUNCTIONLOG("Battery", "Charging stopped (charge-pin only)");
       }
       display.putRequest(DSPBATTERY, 0);
-      _last_charging = charging;
+      lastCharging = charging;
     }
     return;
   }
   
   // Update at configured interval
-  if (now - _last_read < BATTERY_UPDATE_INTERVAL) return;
-  _last_read = now;
+  if (now - lastRead < BATTERY_UPDATE_INTERVAL) return;
+  lastRead = now;
   
-  _battery_read_and_update();
+  readAndUpdate();
 } 
 
 // Force immediate recalculation and update status (used by CLI after calibration)
-void battery_recalc_now() {
+void Battery::recalcNow() {
   // If ADC present, force immediate recalculation
-  if (_battery_inited) {
-    _last_read = millis();
-    _battery_read_and_update();
+  if (inited) {
+    lastRead = millis();
+    readAndUpdate();
     return;
   }
   // If ADC not present but charge-pin is available, force a single charge-pin read
-  if (_charge_pin_present && !_battery_inited) {
+  if (chargePinPresent && !inited) {
     bool charging = (digitalRead(BATTERY_CHARGE_PIN) == LOW);
-    _battery_status.charging = charging;
+    battStatus.charging = charging;
     display.putRequest(DSPBATTERY, 0);
-    _last_charging = charging;
+    lastCharging = charging;
     /* Notify web clients about the updated charge-only status */
     netserver.requestOnChange(GETBATTERY, 0);
   }
@@ -885,9 +842,9 @@ void battery_recalc_now() {
 
 // Compute and save a new ADC reference from a measured voltage (mV).
 // Returns true if the calibration was accepted and saved.
-bool battery_calibrate(int meas_mv) {
+bool Battery::calibrate(int meas_mv) {
   if (meas_mv < 2500 || meas_mv > 4500) return false;
-  BatteryStatus b = battery_get_status();
+  BatteryStatus b = getStatus();
   if (!b.valid || b.voltage_mv == 0) return false;
   double ratio = ((double)meas_mv) / ((double)b.voltage_mv);
   if (ratio < 0.5 || ratio > 2.0) return false;
@@ -895,20 +852,12 @@ bool battery_calibrate(int meas_mv) {
   uint32_t suggested_ref = (uint32_t)((double)curr_ref * ratio + 0.5);
   if (suggested_ref < 2000 || suggested_ref > 4000) return false;
   config.saveValue(&config.store.battery_adc_ref_mv, (uint16_t)suggested_ref);
-  battery_recalc_now();
+  recalcNow();
   return true;
 }
 
 #else
-// No-op stubs when BATTERY_PIN not defined
-void battery_init() {}
-void battery_boot_status() {}
-void battery_loop() {}
-const BatteryStatus& battery_get_status() {
-  static const BatteryStatus empty_status = {0, 0, false, false, 0, false, false, false, false, 0, false, false};
-  return empty_status;
-}
-bool battery_is_initialized() { return false; }
-void battery_recalc_now() {}
-bool battery_calibrate(int) { return false; }
+// No-op stubs are provided by the Battery stub class in battery.h
 #endif
+
+Battery battery;

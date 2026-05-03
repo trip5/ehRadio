@@ -5,6 +5,7 @@
 #include "../tools/psframebuffer.h"
 #include "widgets.h"
 #include "../../core/config.h"
+#include "../../core/logging.h"
 #include "../../core/locale.h"
 #include "../../core/network.h"   //  for Clock widget
 #include "../../core/player.h"    //  for VU widget
@@ -982,7 +983,7 @@ uint8_t PlayListWidget::_fillPlMenu(int from, uint8_t count) {
       dsp.setTextColor(config.theme.playlist[plColor], config.theme.background);
       dsp.setCursor(TFT_FRAMEWDT, _plYStart + pos * _plItemHeight);
       dsp.fillRect(0, _plYStart + pos * _plItemHeight - 1, dsp.width(), _plItemHeight - 2, config.theme.background);
-      Serial.println(item);
+      FUNCTIONLOG("Widget.Playlist", "%s", item);
       dsp.print(utf8To(item, true));
     }
   }

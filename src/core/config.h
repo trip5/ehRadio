@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <Ticker.h>
 #include <SPI.h>
+#if defined(SPI_BUS_SECONDARY)
+  extern SPIClass SPIB;
+#endif
 #include <SPIFFS.h>
 #include <Preferences.h>
 #include "locale.h"
@@ -388,9 +391,5 @@ class Config {
 };
 
 extern Config config;
-
-#if DSP_HSPI || TS_HSPI || VS_HSPI
-  extern SPIClass  SPI2;
-#endif
 
 #endif

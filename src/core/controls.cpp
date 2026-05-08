@@ -7,7 +7,6 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
-#include "../pluginsManager/pluginsManager.h"
 
 
 #define ISPUSHBUTTONS BTN_LEFT!=255 || BTN_CENTER!=255 || BTN_RIGHT!=255 || ENC_BTNB!=255 || BTN_UP!=255 || BTN_DOWN!=255 || ENC2_BTNB!=255 || BTN_MODE!=255
@@ -64,14 +63,14 @@
 
 void IRAM_ATTR readEncoderISR() {
   #if ENC_BTNL!=255
-    if ((SDC_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
+    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
     encoder.readEncoder_ISR();
   #endif
 }
 
 void IRAM_ATTR readEncoder2ISR() {
   #if ENC2_BTNL!=255
-    if ((SDC_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
+    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
     encoder2.readEncoder_ISR();
   #endif
 }
@@ -123,7 +122,7 @@ void Controls::init() {
 
 void Controls::loop() {
   if (display.mode()==UPDATING || display.mode()==SDCHANGE) return;
-  if (SDC_CS==255 && display.mode()==LOST) return;
+  if (SD_CS==255 && display.mode()==LOST) return;
   if (ctrls_on_loop) ctrls_on_loop();
   #if ENC_BTNL!=255
     encoder1Loop();
@@ -476,7 +475,6 @@ void Controls::controlsEvent(bool toRight, int8_t volDelta) {
 void Controls::onBtnClick(int id) {
   bool passBnCenter = (controlEvt_e)id==EVT_BTNCENTER || (controlEvt_e)id==EVT_ENCBTNB || (controlEvt_e)id==EVT_ENC2BTNB;
   controlEvt_e btnid = static_cast<controlEvt_e>(id);
-  pm.on_btn_click(btnid);
   if (network.status != CONNECTED && network.status!=SDREADY && (controlEvt_e)id!=EVT_BTNMODE && !passBnCenter) return;
   switch (btnid) {
     case EVT_BTNLEFT: {

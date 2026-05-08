@@ -1,1 +1,0 @@
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_kasperaitis_es3c28p|Kasperaitis ES3C28P

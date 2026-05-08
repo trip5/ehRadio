@@ -25,9 +25,6 @@
 #endif
 
 #if TS_MODEL==TS_MODEL_XPT2046
-  #ifdef TS_SPIPINS
-    SPIClass  TSSPI(HSPI);
-  #endif
   #include <XPT2046_Touchscreen.h>
   XPT2046_Touchscreen ts(TS_CS);
   typedef TS_Point TSPoint;
@@ -44,15 +41,12 @@
 void TouchScreen::init(uint16_t w, uint16_t h) {
   
 #if TS_MODEL==TS_MODEL_XPT2046
-  #ifdef TS_SPIPINS
-    TSSPI.begin(TS_SPIPINS);
-    ts.begin(TSSPI);
+  #if defined(TS_SPI) && (TS_SPI == 'B') && defined(SPIB_SCK)
+    ts.begin(SPIB);
+  #elif defined(TS_SPI) && (TS_SPI == 'A')
+    ts.begin(SPIA);
   #else
-    #if TS_HSPI
-      ts.begin(SPI2);
-    #else
-      ts.begin();
-    #endif
+    ts.begin();
   #endif
   ts.setRotation(config.store.fliptouch?3:1);
 #endif

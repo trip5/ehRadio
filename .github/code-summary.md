@@ -15,7 +15,6 @@ It will get lengthy as more is added to it.
 This document is intentionally per-file focused for:
 - `src/main.cpp`
 - `src/core/*`
-- `src/pluginsManager/*`
 - `data/www/*`
 - `src/locale/*`
 
@@ -32,7 +31,7 @@ Grouped (not one-by-one deep explained) areas:
 - `platformio.ini` selects environment, included libraries, and included source files.
 - `myoptions.h` selects hardware profile + defaults.
 - `src/core/options.h` resolves all defaults/fallbacks and feature flags.
-- `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts and now diff-checks `web_assets/` in addition to `firmware.txt` and `releases.md`.
+- `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts by re-running `builds/fix_releases.py` on CI and diff-checking `builds/releases/` (contains `firmware.txt`, `releases.md`, and `web_assets/`) against what was committed.
 - `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
 - `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to `dev`, enabling ruleset bypass configured for Deploy keys.
 
@@ -91,6 +90,21 @@ Grouped (not one-by-one deep explained) areas:
   - WebUI and localization defaults
   - curated list defaults
   - **Exception**: locale and language options are handled by locale.h
+- **SPI architecture — Named Bus System** (auto-derived internals — do NOT define `SPI_BUS_SECONDARY`, `SPIA`, or `VS1053_SPIBUS` in `myoptions.h`):
+  - **Bus A** = `SPIA` (alias for `&SPI`, the default ESP32 SPI instance). Pins configured by `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` in `Config::init()` when `SPIA_SCK` is defined; otherwise `SPI.begin()` uses hardware defaults.
+  - **Bus B** = `SPIB` (`SPIClass SPIB(SPI_BUS_SECONDARY)` declared and initialized in `config.cpp`). Only exists when `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` is auto-derived: ESP32 → `2`, ESP32-S3/C3 → `1`.
+  - **Bus pin defines** (set in `myoptions.h`): `SPIA_SCK/MISO/MOSI` manually, or use shorthands: `SPIA_DEFAULT` (chip default pins), `SPIA_DEFAULT_XMISO` (chip default SCK/MOSI, MISO=255 — for display-only Bus A). `SPIB_SCK/MISO/MOSI` manually, or `SPIB_DEFAULT` (chip default secondary-bus pins). `SPI.begin()` / `SPIB.begin()` are only called when the respective SCK is defined and `!= 255`; I2C-only builds skip SPI init entirely.
+  - **Per-peripheral bus assignment** (char literals `'A'` or `'B'` — NOT strings): `SD_SPI`, `TS_SPI`, `VS1053_SPI`. `VS1053_SPI` resolves `VS1053_SCK/MISO/MOSI` from the matching bus pins in `options.h` (soft — does not override direct pin defines). SD and TS use the bus *object* directly (`SPIA`/`SPIB`) — no separate SCK/MISO/MOSI derivation needed.
+  - **`VSPI FSPI` shim** — defined when target is not ESP32 (`!CONFIG_IDF_TARGET_ESP32`) for third-party library compatibility.
+  - **VS1053 bus assignment** — `VS1053_SPIBUS` macro auto-derived in `options.h`. `VS1053_CS != 255` requires `VS1053_SCK` to be set (via `VS1053_SPI` or directly); `#error` if missing. Resolves to `SPIB` if `VS1053_SCK == SPIB_SCK`, otherwise `SPIA`. Used as `&VS1053_SPIBUS` in the `Audio` constructor in `player.cpp`.
+  - **SD bus selection** — `SDREALSPI` macro in `sdmanager.cpp`: `SPIB` when `SD_SPI == 'B'` and `SPIB_SCK` is defined, otherwise `SPIA`.
+  - **Touchscreen bus selection** — inline in `touchscreen.cpp` `init()`: `SPIB` when `TS_SPI == 'B'` and `SPIB_SCK` is defined; `SPIA` when `TS_SPI == 'A'`; `ts.begin()` (default `&SPI`) otherwise.
+- **SD card defines** (set in `myoptions.h`, fallback `255` = disabled in `options.h`):
+  - `SD_CS` — chip-select pin; `255` disables SD entirely.
+  - `SD_SPI 'A'/'B'` — assigns SD to Bus A or B; SD uses the bus object directly, no per-pin derivation needed.
+  - `USE_SD` — feature presence macro, derived from `SD_CS!=255`.
+- **I2S internal DAC**:
+  - `USE_AUDIO_ESP32_DAC` — defined directly in `myoptions.h` to use the ESP32 internal DAC (ESP32 only, not S3/C3). `I2S_INTERNAL` boolean is removed.
 - **Guardrail conventions** (maintain these when adding new options):
   - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g. `TS_MODEL`, `RTC_MODULE`), bad logical cross-constraints (e.g. `BTN_PRESS_TICKS <= BTN_CLICK_TICKS`, `BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD`).
   - `#warning` + `#undef` for out-of-range tunables in `/* USER DEFAULTS */` section (e.g. `SOUND_VOLUME`, `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
@@ -145,13 +159,12 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 ### `src/main.cpp`
 - `setup()` major sequence:
   1. serial + LED + RGB + battery init
-  2. plugin setup hooks (`pm.on_setup()`)
-  3. `config.init()`
-  4. `display.init()`
-  5. `player.init()`
-  6. `network.begin()`
-  7. if no connectivity: start minimal server + controls + display start and return
-  8. if connectivity:
+  2. `config.init()`
+  3. `display.init()`
+  4. `player.init()`
+  5. `network.begin()`
+  6. if no connectivity: start minimal server + controls + display start and return
+  7. if connectivity:
      - `config.initPlaylistMode()`
      - `netserver.begin()`
      - `telnet.begin()`
@@ -160,8 +173,7 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
      - optional MQTT init
      - optional smart-start playback
      - `config.startupServices()`
-     - plugin end-setup hook
-    - `netserver.setBootReady(true)` only after setup work is actually complete
+     - `netserver.setBootReady(true)` only after setup work is actually complete
 - `loop()`:
   - AP mode: Improv + captive DNS
   - normal: telnet loop
@@ -192,7 +204,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 ## `src/core/common.h`
 - Shared enums and structs used across modules (display modes, requests, control events, etc.).
 - Coupling:
-  - Imported by display, controls, plugins manager, and command paths.
+  - Imported by display, controls, and command paths.
 
 ## `src/core/options.h`
 - See earlier build section.
@@ -221,6 +233,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - locale/update helper routines
   - startup update services and online file maintenance
   - reset section handlers (`defaultSettings(...)`)
+- SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is defined and `!= 255`, and `SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI)` only when `SPIB_SCK` is defined and `!= 255`. I2C-only builds skip SPI init entirely. Both buses are initialized before `_initHW()` and before `display.init()` / `player.init()`. Both SPI buses are fully configured before any peripheral uses them. `SPIClass SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in `config.h`.
 - SD-specific behavior:
   - `_initHW()` configures `SD_CARD_DETECT_PIN` as `INPUT_PULLUP` when available
   - `initPlaylistMode()` short-circuits to `PM_WEB` without calling `sdman.start()` when `SD_CARD_DETECT_PIN` reports slot-empty during SD boot
@@ -263,6 +276,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - volume conversion (`volToI2S`) including ES8311 path
   - SD/web mode specific playback behavior
   - error reporting and display/net updates
+- VS1053 SPI: `Player::Player()` constructor passes `&VS1053_SPIBUS` to the `Audio(CS, DCS, DREQ, SPIClass*)` constructor. `VS1053_SPIBUS` is the `SPIB` or `SPIA` object resolved by `options.h`. No `SPIClass` declared in `player.cpp` or `player.h`.
 - Coupling:
   - updates display queue and websocket state
   - uses `config` station and mode state
@@ -402,10 +416,12 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - `sdmanager.h` declares SD manager API and FS integration wrapper.
 - SD lifecycle and SD playlist indexing.
 - Responsibilities:
-  - mount/retry/unmount — `start()` attempts up to 4 `SD.begin()` calls, early-returning on success (delays only between retries, not after success)
+  - mount/retry/unmount — `start()` attempts up to 4 `SD.begin(SD_CS, ...)` calls, early-returning on success (delays only between retries, not after success)
   - card-present checks
   - recursive scan and media file playlist/index creation
   - scan/index progress and errors now use centralized logging macros (`SERIALLOGDOT`, `ERRORLOG`)
+- SPI bus: `SDREALSPI` macro resolved at compile time — `SPIB` when `SD_SPI == 'B'` and `SPIB_SCK` defined, otherwise `SPIA`. Both buses are initialized in `Config::init()` before `SDManager::start()` runs. No `SPIClass` declared in `sdmanager.cpp`.
+- SD CS pin is `SD_CS`. Guard macro: `#if SD_CS!=255`.
 - Coupling:
   - consumed by config/player for SD mode.
 
@@ -421,18 +437,6 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 
 ## `src/core/rtcsupport.h` / `rtcsupport.cpp`
 - RTC init/get/set wrappers for DS3231/DS1307 when configured; `rtcsupport.h` has compile guards.
-
----
-
-## Plugins Manager (`src/pluginsManager`)
-
-## `src/pluginsManager/pluginsManager.h` / `pluginsManager.cpp`
-- `pluginsManager.h` defines plugin base class and hook surface (setup/start/stop/ticker/button/display queue events).
-- `pluginsManager.cpp` registers plugins and dispatches hook calls.
-
-Notes:
-- Current workspace has no `src/plugins/*` plugin implementation files.
-- Hook points are still used by core code (`pm.on_*` calls).
 
 ---
 
@@ -639,7 +643,7 @@ These are **not** third-party packages installable via PlatformIO's registry. Th
   - `ILI9225Fix/TFT_22_ILI9225Fix.cpp` (`DEBUG` macro print path)
 
 ### Include conventions in library files
-- Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line** (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if DSP_MODEL==DSP_ST7920`, `#if I2S_DOUT!=255 || I2S_INTERNAL`, `#if VS1053_CS!=255`). This pattern is acceptable and intentional.
+- Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line** (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if DSP_MODEL==DSP_ST7920`, `#if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)`, `#if defined(USE_AUDIO_VS1053)`). This pattern is acceptable and intentional.
 - Library `.h` files do not include `options.h`; they are self-contained and guarded with `#ifndef`/`#pragma once`.
 
 ---

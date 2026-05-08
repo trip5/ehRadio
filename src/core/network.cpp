@@ -16,7 +16,6 @@
 #include "player.h"
 #include "rtcsupport.h"
 #include "telnet.h"
-#include "../pluginsManager/pluginsManager.h"
 
 #ifndef WIFI_ATTEMPTS
   #define WIFI_ATTEMPTS  16
@@ -36,7 +35,6 @@ EhDP ehdp;
 
 void ticks() {
   if (!display.ready()) return; //waiting for SD is ready
-  pm.on_ticker();
   static uint32_t timeSyncTicks = 0;
   static uint16_t weatherSyncTicks = 0;
   static bool divrssi;
@@ -435,7 +433,6 @@ void MyNetwork::begin() {
   #endif
   ctimer.attach(1, ticks);
   if (network_on_connect) network_on_connect();
-  pm.on_connect();
 }
 
 void MyNetwork::loopImprov() {

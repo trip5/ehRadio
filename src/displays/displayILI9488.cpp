@@ -7,11 +7,7 @@
   #define DEF_SPI_FREQ        40000000UL      /*  set it to 0 for system default */
 #endif
 
-#if DSP_HSPI
-  DspCore::DspCore(): ILI9486_SPI(&SPI2, TFT_CS, TFT_DC, TFT_RST) {}
-#else
   DspCore::DspCore(): ILI9486_SPI(TFT_CS, TFT_DC, TFT_RST) {}
-#endif
 
 void DspCore::initDisplay() {
   setSpiKludge(false);

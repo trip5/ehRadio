@@ -34,6 +34,10 @@ static const size_t wwwFilesCount = sizeof(wwwFiles) / sizeof(wwwFiles[0]);
 static const char* dataFiles[] = {"playlist.csv", "wifi.csv"};
 static const size_t dataFilesCount = sizeof(dataFiles) / sizeof(dataFiles[0]);
 
+#if defined(SPI_BUS_SECONDARY)
+  SPIClass SPIB(SPI_BUS_SECONDARY);
+#endif
+
 Config config;
 
 bool wasUpdated(ESPFileUpdater::UpdateStatus status) { return status == ESPFileUpdater::UPDATED; }
@@ -69,12 +73,11 @@ void Config::init() {
       BOOTLOG("[ERROR] - Couldn't find RTC");
     }
   #endif
-  #if defined(SD_SPIPINS) || SD_HSPI
-    #if !defined(SD_SPIPINS)
-      SDSPI.begin();
-    #else
-      SDSPI.begin(SD_SPIPINS); // SCK, MISO, MOSI
-    #endif
+  #if defined(SPIA_SCK) && (SPIA_SCK != 255)
+    SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI);
+  #endif
+  #if defined(SPIB_SCK) && (SPIB_SCK != 255)
+    SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI);
   #endif
   if (store.config_set != 4262) {
     setDefaults();
@@ -165,7 +168,7 @@ void Config::loadPreferences() {
 void Config::changeMode(int newmode) {
   #ifdef USE_SD
     bool pir = player.isRunning();
-    if (SDC_CS==255) return;
+    if (SD_CS==255) return;
     if (getMode()==PM_SDCARD) {
       sdResumePos = player.getFilePos();
     }
@@ -1082,14 +1085,12 @@ void checkNewVersionFile() {
       if (newVerFile) {
         String line = newVerFile.readStringUntil('\n');
         line.trim();
-        if (line.indexOf(VERSIONSTRING) >= 0) {
-          int firstQuote = line.indexOf('"');
-          int lastQuote = line.lastIndexOf('"');
-          if (firstQuote >= 0 && lastQuote > firstQuote) {
-            String extractedVersion = line.substring(firstQuote + 1, lastQuote);
-            if (extractedVersion.length() > 0) {
-              netserver.newVersion = extractedVersion;
-            }
+        int vsPos = line.indexOf(VERSIONSTRING);
+        if (vsPos >= 0) {
+          String extractedVersion = line.substring(vsPos + strlen(VERSIONSTRING));
+          extractedVersion.trim();
+          if (extractedVersion.length() > 0) {
+            netserver.newVersion = extractedVersion;
           }
         }
         newVerFile.close();
@@ -1320,7 +1321,7 @@ void Config::bootInfo() {
   if (VS1053_CS==255) {
     BOOTLOG("audio:\t\t%s (%d, %d, %d)", "I2S", I2S_DOUT, I2S_BCLK, I2S_LRC);
   } else {
-    BOOTLOG("audio:\t\t%s (%d, %d, %d, %d, %s)", "VS1053", VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST, VS_HSPI?"true":"false");
+    BOOTLOG("audio:\t\t%s (%d, %d, %d, %d)", "VS1053", VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RST);
   }
   BOOTLOG("display locale :\t%s", DSP_LOCALE);
   BOOTLOG("webui locale :\t%s", store.locale_webui);
@@ -1340,7 +1341,7 @@ void Config::bootInfo() {
   BOOTLOG("encoders:\tl1=%d, b1=%d, r1=%d, pullup=%s, l2=%d, b2=%d, r2=%d, pullup=%s", 
           ENC_BTNL, ENC_BTNB, ENC_BTNR, ENC_INTERNALPULLUP?"true":"false", ENC2_BTNL, ENC2_BTNB, ENC2_BTNR, ENC2_INTERNALPULLUP?"true":"false");
   BOOTLOG("ir:\t\t%d", IR_PIN);
-  if (SDC_CS!=255) BOOTLOG("SD:\t%d", SDC_CS);
+  if (SD_CS!=255) BOOTLOG("SD:\t%d", SD_CS);
   #ifdef FIRMWARE
     BOOTLOG("firmware:\t%s", FIRMWARE);
   #endif

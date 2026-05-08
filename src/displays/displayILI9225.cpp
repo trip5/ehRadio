@@ -74,11 +74,7 @@ void DspCore::drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color){
 }
       
 void DspCore::initDisplay() {
-#if DSP_HSPI
-  begin(SPI2);
-#else
   begin();
-#endif
   invert();
   flip();
   setTextSize(1);

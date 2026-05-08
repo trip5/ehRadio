@@ -22,6 +22,20 @@ Documentation will be improved at some point... Until then, check this page and 
 
 ## ehRadio Version history
 
+### 2026.05.08 - Feature Freeze ON
+  - Sorry, I broke OTA updates with a new file-naming scheme
+    - binary file names have been simplified, shortened (this breaks OTA)
+    - `version.txt` contents changed, too (I avoided this until now because it would break OTA)
+    - Using workflows and scripts, other contributers can now add their myoptions.h to official releases (and OTA will work)
+    - contributors can keep their `myoptions.h` files simple (see `builds/kasperaitis/`)
+  - `Platformio.ini` and `myoptions.h` files simplified (they were getting complicated)
+    - python scripts added to assist in managing them
+  - Plugins removed
+
+### 2026.05.06 Dev - Feature Freeze ON
+  - SPI Buses and devices now more flexible (not forced to use board defaults)
+    - See `options.h` and `myoptions.h` for more
+
 ### 2026.05.03 Dev - Feature Freeze ON
   - Unified `commandhandler`
     - all commands routed through the same path so websockets, Telnet, MQTT, and HTTP have (mostly) the same command set

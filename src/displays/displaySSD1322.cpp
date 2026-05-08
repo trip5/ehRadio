@@ -10,11 +10,7 @@
   #define SSD1322_GRAYSCALE   false
 #endif
 
-#if DSP_HSPI
-  DspCore::DspCore(): Jamis_SSD1322(256, 64, &SPI2, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
-#else
   DspCore::DspCore(): Jamis_SSD1322(256, 64, &SPI, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
-#endif
 
 void DspCore::initDisplay() {
 #if !SSD1322_GRAYSCALE

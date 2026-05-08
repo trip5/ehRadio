@@ -4,11 +4,7 @@
 #include <Wire.h>
 #include "../core/config.h"
 
-#if DSP_HSPI
-DspCore::DspCore(): Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST, &SPI2) {}
-#else
 DspCore::DspCore(): Adafruit_PCD8544(TFT_DC, TFT_CS, TFT_RST) {}
-#endif
 
 void DspCore::initDisplay() {
   begin();

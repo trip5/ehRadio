@@ -7,11 +7,7 @@
   #define DEF_SPI_FREQ        40000000UL      /*  set it to 0 for system default */
 #endif
 
-#if DSP_HSPI
-DspCore::DspCore(): Adafruit_ST7796S_kbv(&SPI2, TFT_DC, TFT_CS, TFT_RST) {}
-#else
 DspCore::DspCore(): Adafruit_ST7796S_kbv(TFT_CS, TFT_DC, TFT_RST) {}
-#endif
 
 void DspCore::initDisplay() {
   begin();

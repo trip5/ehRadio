@@ -4,90 +4,67 @@
 /*        ************************************************************************      */
 /*        *        This file must be in the root folder of the sketch !!!        *      */
 /*        ************************************************************************      */
-/*        . . .  CHECK options.h for full options, examples, and over-rides  . . .      */
+/*        . . .  CHECK options.h for full options, examples, and overrides   . . .      */
 
 /* - - - = = = - - - Choose the Radio (defined by platformio.ini env) - - - = = = - - - */
-/* automatic builds define the board - - - be sure to comment all lines after debugging */
+/* automatic builds define the board -- be sure to comment these lines if not debugging */
 
-//#define DEBUG_MYOPTIONS                              // uncomment to debug myoptions.h -- and uncomment one option below!
-//#define ESP32_S3_TRIP5_SH1106_PCM_REMOTE             // Self-contained OLED with PCM, Remote
-//#define ESP32_S3_TRIP5_SH1106_PCM_1BUTTON            // Mini OLED with PCM, 1 Button, Speakers built-in
-//#define ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON        // Mini Tiny OLED with PCM, 1 Button, Speakers built-in
-//#define ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS        // Ali Speaker with OLED, VS1053, 3 Buttons
-//#define ESP32_S3_TRIP5_ST7735_PCM_1BUTTON            // Color TFT (red board) with PCM I2S, 1 Button
-//#define ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON           // Big Screen with PCM, 1 button
-//#define ESP32_S3_TRIP5_ES3C28P                       // ESP32-S3 ES3C28P Dev Board (attached 240x320 screen and ES8311 + FM8002E Decoder)
-//#define ESP32_S3_KASPERAITIS_ES3C28P                 // ESP32-S3 ES3C28P Dev Board (attached 240x320 screen and ES8311 + FM8002E Decoder)
+// in VSCode, the first environment in platformio.ini is used to evaluate the #ifdef chains
+// The build_flags = -DSH1106_PCM_REMOTE is a #define... so to debug, we need to undefine it first:
+//#undef SH1106_PCM_REMOTE
+//
+// Then uncomment the build to debug:
+//
+//#define SH1106_PCM_REMOTE            // Self-contained OLED with PCM, Remote
+//#define SH1106_PCM_1BUTTON           // Mini OLED with PCM, 1 Button, Speakers built-in
+//#define SH1106_VS1053_3BUTTONS       // Ali Speaker with OLED, VS1053, 3 Buttons
+//#define ST7735_PCM_1BUTTON           // Color TFT (red board) with PCM I2S, 1 Button
+//#define ILI9488_PCM_1BUTTON          // Big Screen with PCM, 1 button
+//#define ES3C28P                      // ESP32-S3 ES3C28P Dev Board (attached 240x320 screen and ES8311 + FM8002E Decoder)
+
 
 /* --- FIRMWARE FILENAME & BOARD --- */
 
-#if defined(BOARD_ESP32) & not defined(DEBUG_MYOPTIONS)
-  #undef FIRMWARE
-  #define FIRMWARE "board_esp32.bin"
-  #define FIRMWARE_NAME "ESP32"
-  #define ARDUINO_ESP32_DEV
-  //#undef UPDATEURL /* if an ESP does not have the memory to do online updates from https sources (this will disable it) */
-#elif defined(BOARD_ESP32_S3_N16R8)
-  #undef FIRMWARE                             // This information feeds the Github workflow to assist creating releases.md and firmware.txt (which is used to build the Github Page, if even one field is missing, it will not appear in any list)
-  #define FIRMWARE "board_esp32_s3_n16r8.bin" // "board_for_bootloader", "chip-family (ESP32, ESP32-S3, ESP32-C3)", "contributer"
-  #define FIRMWARE_NAME "ESP32S3"             // "link to board config or specifications or store page"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_sh1106_pcm_remote.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+//  This block is here to assist in debugging... and to show the format of this section which is processed by fix_web_assets_and_releases.py to create Releases
+//
+//  filename used for OTA update                 ESP Board family (all boards in the same family will share bootloader, partitions)      * If any of these 3 fields are missing
+//  prefix is contributor/builds folder name + _  |                ESP chip family (used by flasher)                                     * (or not formatted exactly like this),
+//                    |    the build name + .bin  |                 |          Contributer's Name / Github ID (shown on Releases page)   * this firmware will not be added to Releases
+//                    ↓     ↓                     ↓                 ↓           ↓
+//  #define FIRMWARE "trip5_my_eh_radio.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
+//  #define FIRMWARE_NAME "Nice ehRadio" // "https://nice.com/ehRadio/"
+//                         ↑                          ↑
+//  Used by Web-flasher & ehDP as a friendly name    A helpful URL shown on the Releases page (optional but highly recommended)
+#if defined(SH1106_PCM_REMOTE)
+  #define FIRMWARE "trip5_sh1106_pcm_remote.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "OLED with Remote" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,7,15,43,49,51,52,53,54,75,66&i=5,6,15,16,17,22,23,24,25,26,27,28,29,30,39,45,46,47,40&v=42,41,12,11,10,7,18,15,17,16,255,40,39,38,47,21,13,14,8"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_sh1106_pcm_1button.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+#elif defined(SH1106_PCM_1BUTTON)
+  #define FIRMWARE "trip5_sh1106_pcm_1button.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "OLED with 1-Button" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,15,43,49,51,52,53,54,75&i=5,6,15,16,17,22,23,24,25,26,27,28,29,30,39,45,46,47&v=42,41,12,11,10,255,255,255,255,17,255,7,15,16,47,21,13,14"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_ssd1306x32_pcm_1button.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
-  #define FIRMWARE_NAME "Tiny OLED with 1-Button" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,17,43,49,51,52,53,54,75&i=5,6,15,16,17,22,23,24,25,26,27,28,29,30,39,45,46,47&v=42,41,12,11,10,255,255,255,255,17,255,7,15,16,47,21,13,14"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_sh1106_vs1053_3buttons.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+#elif defined(SH1106_VS1053_3BUTTONS)
+  #define FIRMWARE "trip5_sh1106_vs1053_3buttons.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "OLED with 3-Buttons" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,15,44,48,49,51,52,53,54,75&i=5,6,18,19,20,21,22,23,24,25,26,27,28,29,30,39,45,46,47&v=42,41,9,14,10,-1,255,255,255,17,18,16,40,39,38,47,21,2,1"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_st7735_pcm_1button.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+#elif defined(ST7735_PCM_1BUTTON)
+  #define FIRMWARE "trip5_st7735_pcm_1button.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "Color Screen with 1-Button" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,11,36,43,49,51,52,53,54,75&i=1,2,3,4,15,16,17,22,23,24,25,26,27,28,29,30,39,45,46,47&v=10,9,-1,4,15,7,6,255,255,255,255,42,255,40,39,38,47,21,13,14"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_ili9488_pcm_1button.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+#elif defined(ILI9488_PCM_1BUTTON)
+  #define FIRMWARE "trip5_ili9488_pcm_1button.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "Big Color Screen with 1-Button" // "https://trip5.github.io/ehRadio_myoptions/generator.html?b=ESP32-S3-DevKitC-1_44Pin&r=72,2,3,4,6,31,43,49,51,52,53,54,75&i=1,2,3,4,15,16,17,22,23,24,25,26,27,28,29,30,39,45,46,47&v=10,9,-1,4,15,7,6,255,255,255,255,42,255,40,39,38,47,21,2,1"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_TRIP5_ES3C28P)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_trip5_es3c28p.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Trip5"
+#elif defined(ES3C28P)
+  #define FIRMWARE "trip5_es3c28p.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
   #define FIRMWARE_NAME "ES3C28P" // "https://www.lcdwiki.com/2.8inch_ESP32-S3_Display"
-  #define ARDUINO_ESP32S3_DEV
-#elif defined(ESP32_S3_KASPERAITIS_ES3C28P)
-  #undef FIRMWARE
-  #define FIRMWARE "esp32_s3_kasperaitis_es3c28p.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "Kasperaitis"
-  #define FIRMWARE_NAME "ES3C28P" // "https://www.lcdwiki.com/2.8inch_ESP32-S3_Display"
-  #define ARDUINO_ESP32S3_DEV
 #endif
 
 
 /* --- LED --- */
 
-#if defined(BOARD_ESP32) & not defined(DEBUG_MYOPTIONS)
-  #define USE_BUILTIN_LED     true     /* Usually you want this false unless you want to use the onboard LED */
-#elif defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE)
+#if defined(SH1106_PCM_REMOTE)
   #define USE_BUILTIN_LED     false
   #define LED_BUILTIN_S3      8
   #define LED_INVERT          true
-#elif defined(ESP32_S3_KASPERAITIS_ES3C28P) || defined(ESP32_S3_TRIP5_ES3C28P)
+#elif defined(ES3C28P)
   #define USE_BUILTIN_LED     false
   #define RGB_LED_PIN         42       /* for Adafruit NeoPixel */
-#elif defined(BOARD_ESP32_S3_N16R8)
-  #define USE_BUILTIN_LED     true     /* This uses the board definition so the S3's RGB is white ON and that's it */
 #else
   /* LED config for all others - keep LEDs off */
   #define USE_BUILTIN_LED     false
@@ -95,27 +72,50 @@
 #endif
 
 
+/* --- SPI BUS PINS --- */
+/* When using SPI Displays (always SPIA Bus), VS1053 should probably use SPIB */
+#if defined(ST7735_PCM_1BUTTON)
+  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK        21      /* Bus B pins (SD) */
+  #define SPIB_MISO       13
+  #define SPIB_MOSI       14
+#elif defined(SH1106_VS1053_3BUTTONS)
+  #define SPIA_DEFAULT            /* SCK 12, MISO 13, MOSI 11 */
+  #define SPIB_SCK        21      /* Bus B pins (SD) */
+  #define SPIB_MISO       2
+  #define SPIB_MOSI       1
+#elif defined(ILI9488_PCM_1BUTTON)
+  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK        21      /* Bus B pins (SD) */
+  #define SPIB_MISO       2
+  #define SPIB_MOSI       1
+#elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
+  #define SPIA_SCK        21      /* Bus A pins (SD) - no Bus B device, no need for default pins */
+  #define SPIA_MISO       13
+  #define SPIA_MOSI       14
+#elif defined(ES3C28P)
+  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK        38      /* Bus B pins (SD) */
+  #define SPIB_MISO       39
+  #define SPIB_MOSI       40
+#endif
+
+
 /* --- DISPLAY --- */
 
 /* Display config for I2C displays */
-#if defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE) || defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) ||\
-    defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS)
+#if defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON) ||\
+    defined(SH1106_VS1053_3BUTTONS)
   #define DSP_MODEL       DSP_SH1106      /* Regular OLED - platformio.ini */
-  #define I2C_SDA         42
-  #define I2C_SCL         41
-#endif
-#if defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
-  #define DSP_MODEL       DSP_SSD1306x32  /* Tiny OLED */
   #define I2C_SDA         42
   #define I2C_SCL         41
 #endif
 
 /* Display config for SPI displays */
-/* When using SPI Displays, trying to use same SPI MOSI, SCK, MISO as VS1053 doesn't work */
-#if defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON)
+#if defined(ILI9488_PCM_1BUTTON)
   #define DSP_MODEL       DSP_ILI9488     /* Big Display */
   #define BIG_BOOT_LOGO
-  #define SCREEN_INVERT true
+  #define SCREEN_INVERT   true
   #define TFT_DC          10
   #define TFT_CS          9
   #define BRIGHTNESS_PIN  4
@@ -123,8 +123,7 @@
   #define DOWN_LEVEL      63      /* Maleksm's mod: brightness level 0 to 255, default 2 */
   #define DOWN_INTERVAL   120     /* Maleksm's mod: seconds to dim, default 60 = 60 seconds */
   /* modify src\displays\displayILI9488.cpp -- in section DspCore::initDisplay and add setRotation(3); to do 180 degree rotation */
-#endif
-#if defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON)
+#elif defined(ST7735_PCM_1BUTTON)
   #define DSP_MODEL       DSP_ST7735          /* Red board / 1.8" Black Tab, if problems try one of DTYPE */
   /* DSP_ST7735 DTYPES BELOW (add if needed but so far, not needed)*/
   //#define DTYPE           INITR_GREENTAB      /* add for Green Tab */
@@ -135,18 +134,7 @@
   #define TFT_CS          9
   #define BRIGHTNESS_PIN  4       /* Red Smaller TFT doesn't have brightness control so leave commented? use unused pin? or 255? */
   #define TFT_RST         -1      /* set to -1 if connected to ESP EN pin */
-#endif
-#if defined(ESP32_S3_TRIP5_ES3C28P)
-  #define DSP_MODEL       DSP_ILI9341
-  #define SCREEN_INVERT   true
-  #define TFT_CS          10
-  #define TFT_DC          46
-  #define TFT_RST         -1
-  #define BRIGHTNESS_PIN  45
-#endif
-
-#if defined(ESP32_S3_KASPERAITIS_ES3C28P)
-  #define DSP_LANGUAGE_lt_LT
+#elif defined(ES3C28P)
   #define DSP_MODEL       DSP_ILI9341
   #define SCREEN_INVERT   true
   #define TFT_CS          10
@@ -158,30 +146,23 @@
 
 /* --- AUDIO DECODER --- */
 
-#if defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS)
-  #define VS_HSPI         false
+#if defined(SH1106_VS1053_3BUTTONS)
+  #define VS1053_SPI      'A'     /* assign VS1053 to Bus A */
   #define VS1053_CS       9
   #define VS1053_DCS      14
   #define VS1053_DREQ     10
   #define VS1053_RST      -1      /* set to -1 if connected to ESP EN pin */
-  #define I2S_DOUT        255     /* set to 255 to disable PCM */
   #define VS_PATCH_ENABLE false   /* For the 2.5V boards with wrong voltage regulator.  See here: https://github.com/e2002/yoradio/issues/108 */
                                   /* Probably works on all */
-#endif
-#if defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON)
+#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
   #define I2S_DOUT        15
   #define I2S_BCLK        7
   #define I2S_LRC         6
-  #define VS1053_CS       255     /* set to 255 to disable VS1053 */
-#endif
-#if defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE) || defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) ||\
-    defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
+#elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
   #define I2S_DOUT        12
   #define I2S_BCLK        11
   #define I2S_LRC         10
-  #define VS1053_CS       255     /* set to 255 to disable VS1053 */
-#endif
-#if defined(ESP32_S3_KASPERAITIS_ES3C28P) || defined(ESP32_S3_TRIP5_ES3C28P)
+#elif defined(ES3C28P)
   #define USE_ES8311                  /* a special define for a special decoder */
   /* ES3C28P I2S pins (from LCDWiki / user) */
   #define I2S_MCLK        4
@@ -198,17 +179,14 @@
   #define MUTE_PIN        1
   #define MUTE_VAL        HIGH
   /* Maximum I2S value to allow when mapping to ES8311 codec (0..254). */
-  #ifndef ES8311_MAX_I2S
-    #define ES8311_MAX_I2S 180
-  #endif
+  #define ES8311_MAX_I2S 180
   #define PLAYER_FORCE_MONO true
-  #define VS1053_CS       255     /* set to 255 to disable VS1053 */
 #endif
 
 
 /* --- TOUCH --- */
 
-#if defined(ESP32_S3_KASPERAITIS_ES3C28P) || defined(ESP32_S3_TRIP5_ES3C28P)
+#if defined(ES3C28P)
   // For some ES3C28P boards the touch controller may be D-FT6336G family — set to TS_MODEL_FT6336 if required
   #define TS_MODEL            TS_MODEL_FT6336
   #define TS_SDA              16
@@ -220,18 +198,16 @@
 
 /* --- BUTTONS --- */
 
-#if defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS)
+#if defined(SH1106_VS1053_3BUTTONS)
   #define ONE_CLICK_SWITCH true
   #define BTN_UP          17      /* Prev, Move Up */
   #define BTN_DOWN        18      /* Next, Move Down */
   #define BTN_MODE        16      /* MODE switcher  */
   #define WAKE_PIN        16      /* Wake from Deepsleep (actually using existing pins kind of disables sleep) */
-#endif
-#if defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
+#elif defined(SH1106_PCM_1BUTTON)
   #define ONE_CLICK_SWITCH true
   #define BTN_DOWN        17      /* Next, Move Down */
-#endif
-#if defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE)
+#elif defined(SH1106_PCM_REMOTE)
   #define ONE_CLICK_SWITCH true
   #define VOLUME_STEPS 2
   #define BTN_UP          17      /* Prev, Move Up */
@@ -240,12 +216,10 @@
   #define BTN_LEFT        7       /* VolDown, Prev */
   #define BTN_RIGHT       15      /* VolUp, Next */
   #define WAKE_PIN        18      /* Wake from Deepsleep (actually using existing pins kind of disables sleep) */
-#endif
-#if defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON)
+#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
   #define ONE_CLICK_SWITCH true
   #define BTN_DOWN		42		/* Next, Move Down */
-#endif
-#if defined(ESP32_S3_KASPERAITIS_ES3C28P)
+#elif defined(ES3C28P)
   #define ONE_CLICK_SWITCH true
   #define BTN_DOWN        0       /* BOOT button - Next, Move Down */
 #endif
@@ -259,12 +233,12 @@
 
 /* --- ROTARY ENCODER(S) --- */
 
-#if defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS) || defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) ||\
-    defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE)
+#if defined(SH1106_VS1053_3BUTTONS) || defined(ST7735_PCM_1BUTTON) ||\
+    defined(ILI9488_PCM_1BUTTON) || defined(SH1106_PCM_REMOTE)
   #define ENC_BTNR        40
   #define ENC_BTNL        39
   #define ENC_BTNB        38
-#elif defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
+#elif defined(SH1106_PCM_1BUTTON)
   #define ENC_BTNR        7
   #define ENC_BTNL        15
   #define ENC_BTNB        16
@@ -285,25 +259,19 @@
 
 /* --- SD CARD --- */
 
-#if defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE) ||\
-    defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON)
-  #define SD_SPIPINS      21, 13, 14      /* SCK, MISO, MOSI */
-  #define SDC_CS          47
-#elif defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS ) || defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON)
-  #define SD_SPIPINS      21, 2, 1        /* SCK, MISO, MOSI */
-  #define SDC_CS          47
-#elif defined(ESP32_S3_KASPERAITIS_ES3C28P) || defined(ESP32_S3_TRIP5_ES3C28P)
-  #define SD_SPIPINS      38, 39, 40     /* SCK, MISO, MOSI */
-  #define SDC_CS          47
+#if defined(ST7735_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS ) ||\
+   defined(ILI9488_PCM_1BUTTON) || defined(ES3C28P)
+  #define SD_SPI          'B'     /* assign SD to Bus B */
+  #define SD_CS           47
+#elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
+  #define SD_SPI          'A'     /* assign SD to Bus B */
+  #define SD_CS           47
 #endif
-
-/* Extras: unused in all */
-//#define SD_HSPI     /* false (not needed when using custom pins) */
 
 
 /* --- Battery --- */
 
-#if defined(ESP32_S3_KASPERAITIS_ES3C28P)
+#if defined(ES3C28P)
   /* Battery monitoring on ES3C28P board */
   #define BATTERY_PIN     9       /* GPIO9: ADC pin for battery voltage */
   //#define BATTERY_CHARGE_PIN 255  /* No charging status GPIO exposed (TP4054 CHRG pin not connected on ES3C28P) */
@@ -322,67 +290,32 @@
 
 /* --- USER DEFAULTS --- */
 
-#if defined (BOARD_ESP32_S3_N16R8) || defined (BOARD_ESP32) & not defined(DEBUG_MYOPTIONS)
-  #define TIMEZONE_NAME   "Europe/Moscow"
-  #define TIMEZONE_POSIX  "MSK-3"
-  #define SNTP_1          "pool.ntp.org"
-  #define SNTP_2          "0.ru.pool.ntp.org"
-  #define WEATHER_LAT     "55.7512"       /* latitude */
-  #define WEATHER_LON     "37.6184"       /* longitude */
-
-#elif defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE) ||\
-      defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON) ||\
-      defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS ) || defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON) ||\
-      defined(ESP32_S3_TRIP5_ES3C28P)
-  #define SMART_START true
-  #define SD_SHUFFLE true
-  #define SHOW_AUDIO_INFO true
-  #define SHOW_VU_METER true
-  #define SS_PLAYING true
-  #define WIFI_SCAN_BEST_RSSI true
-  #define TIMEZONE_NAME   "Canada/Atlantic"
-  #define TIMEZONE_POSIX  "AST4ADT,M3.2.0,M11.1.0"
-  #define SNTP_1          "ca.pool.ntp.org"
-  #define SNTP_2          "pool.ntp.org"
-  #define WEATHER_LAT     "44.64738"       /* latitude */
-  #define WEATHER_LON     "-63.58029"      /* longitude */
-  #define MQTT_ENABLE
-  #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv" /* can be CSV or JSON */
-#elif defined(ESP32_S3_KASPERAITIS_ES3C28P)
-  #define SMART_START true
-  #define SHOW_AUDIO_INFO true
-  #define SS_PLAYING true
-  #define WIFI_SCAN_BEST_RSSI true
-  #define TIMEZONE_NAME   "Europe/Vilnius"
-  #define TIMEZONE_POSIX  "EET-2EEST,M3.5.0/3,M10.5.0/42"
-  #define SNTP_1          "lt.pool.ntp.org"
-  #define SNTP_2          "pool.ntp.org"
-  #define WEATHER_LAT     "55.721924"       /* latitude */
-  #define WEATHER_LON     "21.117868"      /* longitude */
-  #define SCREEN_FLIP     true
-  #define SHOW_VU_METER   true
-  #define VOLUME_STEPS    5
-  #define DISABLE_UPDATER
-#endif
+#define SMART_START true
+#define SD_SHUFFLE true
+#define SHOW_AUDIO_INFO true
+#define SHOW_VU_METER true
+#define SS_PLAYING true
+#define WIFI_SCAN_BEST_RSSI true
+#define TIMEZONE_NAME   "Canada/Atlantic"
+#define TIMEZONE_POSIX  "AST4ADT,M3.2.0,M11.1.0"
+#define SNTP_1          "ca.pool.ntp.org"
+#define SNTP_2          "pool.ntp.org"
+#define WEATHER_LAT     "44.64738"       /* latitude */
+#define WEATHER_LON     "-63.58029"      /* longitude */
+#define MQTT_ENABLE
+#define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv" /* can be CSV or JSON */
 
 
 /* --- SYSTEM OVERRIDES --- */
 
-#if defined (BOARD_ESP32) & not defined(DEBUG_MYOPTIONS)
-  #define LOOP_TASK_STACK_SIZE 8  /* Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks */
-  #define CONFIG_ASYNC_TCP_QUEUE_SIZE 32
-  #define CONNECT_HTTP_HTTPS_TIMEOUT 1700, 3700 // library default http 250ms https 2700ms
-#elif defined (BOARD_ESP32_S3_N16R8) ||\
-      defined(ESP32_S3_TRIP5_ST7735_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SH1106_PCM_REMOTE) ||\
-      defined(ESP32_S3_TRIP5_SH1106_PCM_1BUTTON) || defined(ESP32_S3_TRIP5_SSD1306X32_PCM_1BUTTON) ||\
-      defined(ESP32_S3_TRIP5_SH1106_VS1053_3BUTTONS ) || defined(ESP32_S3_TRIP5_ILI9488_PCM_1BUTTON) ||\
-      defined(ESP32_S3_KASPERAITIS_ES3C28P) || defined(ESP32_S3_TRIP5_ES3C28P)
+#if defined(ST7735_PCM_1BUTTON) || defined(SH1106_PCM_REMOTE) ||\
+    defined(SH1106_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS ) ||\
+    defined(ILI9488_PCM_1BUTTON) || defined(ES3C28P)
   #define LOOP_TASK_STACK_SIZE 16  /* Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks / 8KB is safe when using a VS1053 decoder */
   #define CONFIG_ASYNC_TCP_QUEUE_SIZE 64
   #define SEARCHRESULTS_BUFFER 1024*32 // 32KB matches chunk sizes from radio-browser.info but likely only good for ESP32-S3
   #define SEARCHRESULTS_YIELDINTERVAL 0 // With a large buffer, skipping is almost eliminated with 0
 #endif
-
 
 /* --- USEFUL OPTIONS --- */
 

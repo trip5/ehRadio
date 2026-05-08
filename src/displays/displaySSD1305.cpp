@@ -13,11 +13,7 @@
 #endif
 
 #if DSP_MODEL==DSP_SSD1305
-  #if DSP_HSPI
-    DspCore::DspCore(): Adafruit_SSD1305(128, 64, &SPI2, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
-  #else
-    DspCore::DspCore(): Adafruit_SSD1305(128, 64, &SPI, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
-  #endif
+  DspCore::DspCore(): Adafruit_SSD1305(128, 64, &SPI, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
 #else
 #include <Wire.h>
 TwoWire I2CSSD1305 = TwoWire(0);

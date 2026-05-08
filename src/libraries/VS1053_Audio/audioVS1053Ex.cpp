@@ -7,7 +7,7 @@
  */
 #include "../../core/options.h"
 
-#if I2S_DOUT==255
+#if defined(USE_AUDIO_VS1053)
 
 #include "../../core/config.h"
 #include "../../core/logging.h"
@@ -6232,4 +6232,4 @@ uint32_t Audio::getHighWatermark(){
     return highWaterMark; // dwords
 }
 //****************************************************************************************
-#endif  //  if I2S_DOUT==255
+#endif  //  if defined(USE_AUDIO_VS1053)

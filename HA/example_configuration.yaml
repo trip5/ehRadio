@@ -11,8 +11,8 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
-# ehRadio entity
+# ehRadio entity (relies on MQTT)
 media_player:
   - platform: ehradio
     name: My ehRadio
-    root_topic: ehradio/bench/
+    root_topic: ehradio/myradio/

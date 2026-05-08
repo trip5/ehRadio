@@ -14,7 +14,7 @@
 //==================================================
 // #define DSP_LANGUAGE_xx_XX defines the display locale
 // Other locale settings are auto-selected but can be
-// changed with over-ride defines.
+// changed with override defines.
 //
 // L10N_INCLUDE : display language file
 // DSP_LOCALE : locale abbreviation of display language
@@ -457,7 +457,7 @@
 #endif
 
 /* Is the hardcoded text in the HTML files not English? */
-/* If yes, then you should over-ride this */
+/* If yes, then you should override this */
 /* Over-ride with extreme caution!! */
 /* You must prepare the HTML files with hardcode_locale_to_html.py */
 #ifndef HARDCODED_WEBUI_LOCALE

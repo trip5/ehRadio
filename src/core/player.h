@@ -1,7 +1,7 @@
 #ifndef player_h
 #define player_h
 
-#if I2S_DOUT!=255 || I2S_INTERNAL
+#if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
  #include "../libraries/I2S_Audio/Audio.h"
 #else
   #include "../libraries/VS1053_Audio/audioVS1053Ex.h"

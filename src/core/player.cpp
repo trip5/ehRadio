@@ -8,7 +8,6 @@
 #include "netserver.h"
 #include "network.h"
 #include "locale.h"
-#include "../pluginsManager/pluginsManager.h"
 #ifdef USE_ES8311
   #include "../libraries/ES8311_Audio/es8311.h"
 #endif
@@ -19,12 +18,8 @@
 Player player;
 QueueHandle_t playerQueue;
 
-#if VS1053_CS!=255 && !I2S_INTERNAL
-  #if VS_HSPI
-    Player::Player(): Audio(VS1053_CS, VS1053_DCS, VS1053_DREQ, &SPI2) {}
-  #else
-    Player::Player(): Audio(VS1053_CS, VS1053_DCS, VS1053_DREQ, &SPI) {}
-  #endif
+#if defined(USE_AUDIO_VS1053)
+  Player::Player(): Audio(VS1053_CS, VS1053_DCS, VS1053_DREQ, &VS1053_SPIBUS) {}
   void ResetChip() {
     pinMode(VS1053_RST, OUTPUT);
     digitalWrite(VS1053_RST, LOW);
@@ -33,7 +28,7 @@ QueueHandle_t playerQueue;
     delay(100);
   }
 #else
-  #if !I2S_INTERNAL
+  #ifndef USE_AUDIO_ESP32_DAC
     Player::Player() {}
   #else
     Player::Player(): Audio(true, I2S_DAC_CHANNEL_BOTH_EN)  {}
@@ -53,12 +48,12 @@ void Player::init() {
     if (config.store.mqttenable) memset(burl, 0, MQTT_BURL_SIZE);
   #endif
   if (MUTE_PIN!=255) pinMode(MUTE_PIN, OUTPUT);
-  #if I2S_DOUT!=255
-    #if !I2S_INTERNAL
+  #if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
+    #ifndef USE_AUDIO_ESP32_DAC
       setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT, I2S_DIN, I2S_MCLK);
     #endif
   #else
-    SPI.begin();
+    // SPI.begin(); // started in config.init()
     if (VS1053_RST>0) ResetChip();
     begin();
   #endif
@@ -126,7 +121,6 @@ void Player::_stop(bool alreadyStopped) {
   if (!alreadyStopped) stopSong();
   if (!lockOutput) stopInfo();
   if (player_on_stop_play) player_on_stop_play();
-  pm.on_stop_play();
 }
 
 void Player::initHeaders(const char *file) {
@@ -156,7 +150,6 @@ void Player::loop() {
         }
         _play((uint16_t)abs(requestP.payload)); 
         if (player_on_station_change) player_on_station_change(); 
-        pm.on_station_change();
         break;
       }
       case PR_TOGGLE: {
@@ -247,7 +240,7 @@ void Player::_play(uint16_t stationId) {
   netserver.requestOnChange(STATION, 0);
   netserver.loop();
   bool isConnected = false;
-  if (config.getMode()==PM_SDCARD && SDC_CS!=255) {
+  if (config.getMode()==PM_SDCARD && SD_CS!=255) {
     isConnected=connecttoFS(sdman,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min);
   } else {
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
@@ -275,7 +268,6 @@ void Player::_play(uint16_t stationId) {
       if (config.getMode()==PM_WEB) radioBrowserSendClick(config.station.url);
     #endif
     if (player_on_start_play) player_on_start_play();
-    pm.on_start_play();
   } else {
     ERRORLOG("Error connecting to %s", config.station.url);
     SET_PLAY_ERROR("Error connecting to %s", config.station.url);
@@ -308,7 +300,6 @@ void Player::playUrl(const char* url) {
       radioBrowserSendClick(url);
     #endif
     if (player_on_start_play) player_on_start_play();
-    pm.on_start_play();
   } else {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);

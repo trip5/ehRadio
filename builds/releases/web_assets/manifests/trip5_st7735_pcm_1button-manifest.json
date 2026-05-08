@@ -1,0 +1,24 @@
+{
+  "name": "ehRadio - Color Screen with 1-Button",
+  "version": "2026.05.08",
+  "funding_url": "https://github.com/sponsors/trip5",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/esp32_s3_n16r8_bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "../firmware/esp32_s3_n16r8_partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "../firmware/trip5_st7735_pcm_1button.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

@@ -1,8 +1,0 @@
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_sh1106_pcm_remote|Trip5 OLED with Remote
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_sh1106_pcm_1button|Trip5 OLED with 1-Button
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_ssd1306x32_pcm_1button|Trip5 Tiny OLED with 1-Button
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_sh1106_vs1053_3buttons|Trip5 OLED with 3-Buttons
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_st7735_pcm_1button|Trip5 Color Screen with 1-Button
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_ili9488_pcm_1button|Trip5 Big Color Screen with 1-Button
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_trip5_es3c28p|Trip5 ES3C28P
-board_esp32_s3_n16r8|ESP32-S3|esp32_s3_kasperaitis_es3c28p|Kasperaitis ES3C28P

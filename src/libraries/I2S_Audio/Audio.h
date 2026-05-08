@@ -7,7 +7,7 @@
  *  Updated on: Feb 27.2025, Apr 04.2025 (Maleksm)
  *      Author: Wolle (schreibfaul1)
  */
-#if I2S_DOUT!=255
+#if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
 
 #include <esp_arduino_version.h>
 
@@ -800,4 +800,4 @@ private:
 };
 
 //----------------------------------------------------------------------------------------------------------------------
-#endif	// #if I2S_DOUT!=255
+#endif	// #if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)

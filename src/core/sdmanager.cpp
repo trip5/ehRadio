@@ -1,5 +1,5 @@
 #include "options.h"
-#if SDC_CS!=255 // ============================== Everything ignored if not defined ==============================
+#if SD_CS!=255 // ============================== Everything ignored if not defined ==============================
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
@@ -12,26 +12,27 @@
 #include "display.h"
 #include "player.h"
 
-#if defined(SD_SPIPINS) || SD_HSPI
-  SPIClass SDSPI(HSPI);
-  #define SDREALSPI SDSPI
+// SPIB is declared and initialized in config.cpp (Config::init) — do not re-declare here.
+// SD uses Bus B if assigned via SD_SPI 'B', otherwise Bus A.
+#if defined(SD_SPI) && (SD_SPI == 'B') && defined(SPIB_SCK)
+  #define SDREALSPI SPIB
 #else
-  #define SDREALSPI SPI
+  #define SDREALSPI SPIA
 #endif
 
 SDManager sdman(FSImplPtr(new VFSImpl()));
 
 bool SDManager::start() {
-  ready = begin(SDC_CS, SDREALSPI, SDSPISPEED);
+  ready = begin(SD_CS, SDREALSPI, SDSPISPEED);
   if (ready) return ready;
   vTaskDelay(10);
-  ready = begin(SDC_CS, SDREALSPI, SDSPISPEED);
+  ready = begin(SD_CS, SDREALSPI, SDSPISPEED);
   if (ready) return ready;
   vTaskDelay(20);
-  ready = begin(SDC_CS, SDREALSPI, SDSPISPEED);
+  ready = begin(SD_CS, SDREALSPI, SDSPISPEED);
   if (ready) return ready;
   vTaskDelay(50);
-  ready = begin(SDC_CS, SDREALSPI, SDSPISPEED);
+  ready = begin(SD_CS, SDREALSPI, SDSPISPEED);
   return ready;
 }
 

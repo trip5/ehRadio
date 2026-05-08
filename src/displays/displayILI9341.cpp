@@ -3,11 +3,7 @@
 #include "dspcore.h"
 #include "../core/config.h"
 
-#if DSP_HSPI
-DspCore::DspCore(): Adafruit_ILI9341(&SPI2, TFT_DC, TFT_CS, TFT_RST) {}
-#else
 DspCore::DspCore(): Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST) {}
-#endif
 
 void DspCore::initDisplay() {
   begin();             /* SPI_DEFAULT_FREQ 40000000 */

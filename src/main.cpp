@@ -14,16 +14,11 @@
 #include "core/player.h"
 #include "core/rgbled.h"
 #include "core/telnet.h"
-#include "pluginsManager/pluginsManager.h"
 #ifdef USE_NEXTION
   #include "displays/nextion.h"
 #endif
 
 SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
-
-#if DSP_HSPI || TS_HSPI || VS_HSPI
-  SPIClass SPI2(HSPI);
-#endif
 
 extern __attribute__((weak)) void ehradio_on_setup();
 
@@ -56,7 +51,6 @@ void setup() {
   battery.init();
 
   if (ehradio_on_setup) ehradio_on_setup();
-  pm.on_setup();
   config.init();
   display.init();
   player.init();
@@ -73,7 +67,7 @@ void setup() {
     netserver.setBootReady(true);
     return;
   }
-  if (SDC_CS!=255 && config.store.play_mode==PM_SDCARD) {
+  if (SD_CS!=255 && config.store.play_mode==PM_SDCARD) {
     display.putRequest(WAITFORSD, 0);
     BOOTLOG("SD Search");
   }
@@ -99,7 +93,6 @@ void setup() {
     }
   }
   config.startupServices();
-  pm.on_end_setup();
   netserver.setBootReady(true);
 }
 

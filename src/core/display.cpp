@@ -13,7 +13,6 @@
 #include "../displays/dspcore.h"
 #include "../displays/widgets/pages.h"
 #include "../displays/widgets/widgets.h"
-#include "../pluginsManager/pluginsManager.h"
 #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
   #include "battery.h"
 #endif
@@ -358,7 +357,6 @@ void Display::_start() {
   _station();
   _time(false);
   _bootStep = 2;
-  pm.on_display_player();
 }
 
 void Display::_showDialog(const char *title) {
@@ -402,7 +400,6 @@ void Display::_swichMode(displayMode_e newmode) {
     config.isScreensaver = false;
     _pager->setPage(pages[PG_PLAYER]);
     config.setDspOn(config.store.dspon, false);
-    pm.on_display_player();
   }
   if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
     config.isScreensaver = true;
@@ -556,10 +553,7 @@ void Display::loop() {
   #endif
   requestParams_t request;
   if (xQueueReceive(displayQueue, &request, DSP_QUEUE_TICKS)) {
-    bool pm_result = true;
-    pm.on_display_queue(request, pm_result);
-    if (pm_result)
-      switch (request.type) {
+    switch (request.type) {
         case NEWMODE: _swichMode((displayMode_e)request.payload); break;
         case CLOSEPLAYLIST: player.sendCommand({PR_PLAY, request.payload});
         case CLOCK: 
@@ -652,7 +646,7 @@ void Display::loop() {
 
   dsp.loop();
 /*
-  #if I2S_DOUT==255
+  #if defined(USE_AUDIO_VS1053)
   player.computeVUlevel();
   #endif
 */
@@ -773,7 +767,6 @@ void Display::_title() {
     if (_title2) _title2->setText("");
   }
   if (player_on_track_change) player_on_track_change();
-  pm.on_track_change();
 }
 
 void Display::_time(bool redraw) {

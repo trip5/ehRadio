@@ -1,0 +1,7 @@
+esp32_s3_n16r8|ESP32-S3|kasperaitis_es3c28p|ES3C28P
+esp32_s3_n16r8|ESP32-S3|trip5_sh1106_pcm_remote|OLED with Remote
+esp32_s3_n16r8|ESP32-S3|trip5_sh1106_pcm_1button|OLED with 1-Button
+esp32_s3_n16r8|ESP32-S3|trip5_sh1106_vs1053_3buttons|OLED with 3-Buttons
+esp32_s3_n16r8|ESP32-S3|trip5_st7735_pcm_1button|Color Screen with 1-Button
+esp32_s3_n16r8|ESP32-S3|trip5_ili9488_pcm_1button|Big Color Screen with 1-Button
+esp32_s3_n16r8|ESP32-S3|trip5_es3c28p|ES3C28P

@@ -49,6 +49,9 @@ jobs:
       - name: Copy web assets (manifests and firmware-info.json)
         run: |
           LOCAL_ASSETS="builds/${{ github.repository_owner }}/web_assets"
+          if [ ! -d "$LOCAL_ASSETS" ]; then
+            LOCAL_ASSETS="builds/releases/web_assets"
+          fi
           LOCAL_JSON="$LOCAL_ASSETS/firmware-info.json"
           PUBLISHED_JSON=$(mktemp)
           PRESERVE_PUBLISHED=false

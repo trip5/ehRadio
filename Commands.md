@@ -38,7 +38,7 @@ Order and sections match that file.
 | --- | --- |
 | `getindex` | Request index payload to clients. Blocked in HTTP/MQTT/Telnet. |
 | `getactive` | Request active-state payload to clients. Blocked in HTTP/MQTT/Telnet. |
-| `clearspiffs` | Cleanup SPIFFS and force play mode to web. |
+| `clearspiffs` | Run allowlist-based SPIFFS cleanup and force play mode to web. |
 
 ## Options: Load Settings
 
@@ -83,8 +83,8 @@ Order and sections match that file.
 | `numplaylist` | Toggle numbered playlist display and redraw player view. |
 | `clock12` | Toggle 12-hour clock display and refresh clock. |
 | `volumepage` | Toggle dedicated volume page behavior and refresh player view. |
-| `brightness`, `dim` | Set brightness (0..100), ensure screen-on state, apply brightness. |
-| `screenon`, `dspon` | Turn display on/off. |
+| `brightness`, `dim` | Set brightness (0..100), ensure screen-on state, clamp dimmed brightness if needed, and apply brightness. |
+| `screenon`, `dspon` | Turn display on/off and reset dimming state. |
 | `contrast` | Set contrast (0..100) and apply to display. |
 | `screensaverenabled` | Enable/disable idle screensaver behavior. |
 | `screensavertimeout` | Set idle screensaver timeout (5..65520). |
@@ -92,6 +92,9 @@ Order and sections match that file.
 | `screensaverplayingenabled` | Enable/disable playing screensaver behavior. |
 | `screensaverplayingtimeout` | Set playing screensaver timeout (1..1080). |
 | `screensaverplayingblank` | Enable/disable playing screensaver blanking behavior. |
+| `dimmingenabled` | Enable/disable idle dimming behavior. |
+| `dimmingtimeout` | Set idle dimming timeout (5..65520). |
+| `dimmingbrightness` | Set dimmed brightness (0..100, clamped to the current brightness setting). |
 
 ## Options: Controls
 

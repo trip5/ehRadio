@@ -4,7 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include "../displays/widgets/widgetsconfig.h"
 
-enum requestType_e : uint8_t  { PLAYLIST=1, STATION=2, STATIONNAME=3, ITEM=4, TITLE=5, VOLUME=6, NRSSI=7, BITRATE=8, MODE=9, EQUALIZER=10, BALANCE=11, PLAYLISTSAVED=12, GETINDEX=13, GETACTIVE=14, GETSYSTEM=15, GETSCREEN=16, GETLOCALE=17, GETWEATHER=18, GETCONTROLS=19, DSPON=20, SDPOS=21, SDLEN=22, SDSHUFFLE=23, SDINIT=24, GETPLAYERMODE=25, CHANGEMODE=26, SEARCH_DONE=27, SEARCH_FAILED=28, CURATED_INDEX_DONE=29, CURATED_PLAYLIST_DONE=30, CURATED_FAILED=31, GETMQTT=32, GETBATTERY=33 }; 
+enum requestType_e : uint8_t  { PLAYLIST=1, STATION=2, STATIONNAME=3, ITEM=4, TITLE=5, VOLUME=6, NRSSI=7, BITRATE=8, MODE=9, EQUALIZER=10, BALANCE=11, PLAYLISTSAVED=12, GETINDEX=13, GETACTIVE=14, GETSYSTEM=15, GETSCREEN=16, GETLOCALE=17, GETWEATHER=18, GETCONTROLS=19, DSPON=20, SDPOS=21, SDLEN=22, SDSHUFFLE=23, SDINIT=24, GETPLAYERMODE=25, CHANGEMODE=26, SEARCH_DONE=27, SEARCH_FAILED=28, CURATED_INDEX_DONE=29, CURATED_PLAYLIST_DONE=30, CURATED_FAILED=31, GETMQTT=32, GETBATTERY=33, ARTWORK=34 }; 
 enum import_e      : uint8_t  { IMDONE=0, IMWIFI=2 };
 // the only place we use the 32 pixel .png icon is here for empty_fs
 const char emptyfs_html[] PROGMEM = R"(
@@ -156,6 +156,8 @@ class NetServer {
   public:
     NetServer() {};
     bool begin(bool quiet=false);
+    void startLoopTask();
+    void restartMdns();
     void chunkedHtmlPage(const String& contentType, AsyncWebServerRequest *request, const char * path);
     void loop();
     void irToWs(const char* protocol, uint64_t irvalue);
@@ -183,5 +185,6 @@ class NetServer {
 
 extern NetServer netserver;
 extern AsyncWebSocket websocket;
+extern TaskHandle_t nsTaskHandle;
 
 #endif

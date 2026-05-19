@@ -20,7 +20,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ fillScreen(black?0:config.theme.background); }
 void DspCore::flip(){ if(ROTATE_90) setRotation(config.store.flipscreen?2:0); else setRotation(config.store.flipscreen?3:1); }
-void DspCore::invert(){ invertDisplay((DTYPE==INITR_MINI160x80)?!config.store.invertdisplay:config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ enableSleep(true); delay(150); enableDisplay(false); delay(150); }
 void DspCore::wake(void){ enableDisplay(true); delay(150); enableSleep(false); delay(150); }
 

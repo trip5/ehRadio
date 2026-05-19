@@ -1,0 +1,182 @@
+["Locale",
+{
+  "locale_code": "be_BY",
+  "locale": "беларуская мова",
+  "locale_en": "Belarusian"
+},
+{
+  "locale_code": "bg_BG",
+  "locale": "български език",
+  "locale_en": "Bulgarian"
+},
+{
+  "locale_code": "bs_BA",
+  "locale": "bosanski jezik",
+  "locale_en": "Bosnian"
+},
+{
+  "locale_code": "bs_ME",
+  "locale": "crnogorski jezik",
+  "locale_en": "Bosnian-Montenegrin"
+},
+{
+  "locale_code": "cs_CZ",
+  "locale": "čeština",
+  "locale_en": "Czech"
+},
+{
+  "locale_code": "da_DK",
+  "locale": "dansk",
+  "locale_en": "Danish"
+},
+{
+  "locale_code": "de_DE",
+  "locale": "Deutsch",
+  "locale_en": "German"
+},
+{
+  "locale_code": "el_GR",
+  "locale": "Ελληνικά",
+  "locale_en": "Greek"
+},
+{
+  "locale_code": "en_US",
+  "locale": "English",
+  "locale_en": "English"
+},
+{
+  "locale_code": "es_ES",
+  "locale": "español",
+  "locale_en": "Spanish"
+},
+{
+  "locale_code": "et_EE",
+  "locale": "eesti keel",
+  "locale_en": "Estonian"
+},
+{
+  "locale_code": "fi_FI",
+  "locale": "suomi",
+  "locale_en": "Finnish"
+},
+{
+  "locale_code": "fr_FR",
+  "locale": "français",
+  "locale_en": "French"
+},
+{
+  "locale_code": "hr_HR",
+  "locale": "hrvatski jezik",
+  "locale_en": "Croatian"
+},
+{
+  "locale_code": "hu_HU",
+  "locale": "magyar nyelv",
+  "locale_en": "Hungarian"
+},
+{
+  "locale_code": "is_IS",
+  "locale": "íslenska",
+  "locale_en": "Icelandic"
+},
+{
+  "locale_code": "kk_KZ",
+  "locale": "қазақ тілі",
+  "locale_en": "Kazakh"
+},
+{
+  "locale_code": "ky_KG",
+  "locale": "кыргызча",
+  "locale_en": "Kyrgyz"
+},
+{
+  "locale_code": "lt_LT",
+  "locale": "lietuvių kalba",
+  "locale_en": "Lithuanian"
+},
+{
+  "locale_code": "lv_LV",
+  "locale": "latviešu valoda",
+  "locale_en": "Latvian"
+},
+{
+  "locale_code": "mk_MK",
+  "locale": "македонски јазик",
+  "locale_en": "Macedonian"
+},
+{
+  "locale_code": "mn_MN",
+  "locale": "монгол хэл",
+  "locale_en": "Mongolian"
+},
+{
+  "locale_code": "nl_NL",
+  "locale": "Nederlands",
+  "locale_en": "Dutch"
+},
+{
+  "locale_code": "no_NO",
+  "locale": "norsk",
+  "locale_en": "Norwegian"
+},
+{
+  "locale_code": "pl_PL",
+  "locale": "polski",
+  "locale_en": "Polish"
+},
+{
+  "locale_code": "pt_PT",
+  "locale": "português",
+  "locale_en": "Portuguese"
+},
+{
+  "locale_code": "ro_RO",
+  "locale": "română",
+  "locale_en": "Romanian"
+},
+{
+  "locale_code": "ru_RU",
+  "locale": "русский язык",
+  "locale_en": "Russian"
+},
+{
+  "locale_code": "sk_SK",
+  "locale": "slovenčina",
+  "locale_en": "Slovak"
+},
+{
+  "locale_code": "sl_SI",
+  "locale": "slovenščina",
+  "locale_en": "Slovenian"
+},
+{
+  "locale_code": "sr_RS",
+  "locale": "српски језик",
+  "locale_en": "Serbian"
+},
+{
+  "locale_code": "sv_SE",
+  "locale": "svenska",
+  "locale_en": "Swedish"
+},
+{
+  "locale_code": "tg_TJ",
+  "locale": "тоҷикӣ",
+  "locale_en": "Tajik"
+},
+{
+  "locale_code": "tr_TR",
+  "locale": "Türkçe",
+  "locale_en": "Turkish"
+},
+{
+  "locale_code": "uk_UA",
+  "locale": "українська мова",
+  "locale_en": "Ukrainian"
+},
+{
+  "locale_code": "uz_UZ",
+  "locale": "oʻzbek tili",
+  "locale_en": "Uzbek"
+}
+]

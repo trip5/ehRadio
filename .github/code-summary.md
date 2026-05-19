@@ -40,17 +40,21 @@ Grouped (not one-by-one deep explained) areas:
 - WebUI/WebSocket input path: `netserver` -> `commandhandler` -> `config/player/display/network`.
 - State output path: `requestOnChange(...)` in `netserver` -> WebSocket JSON to browser.
 - Settings persistence path: `config.saveValue(...)` -> ESP Preferences namespace `"ehradio"`.
+- Web-stream resume path: `Config::setLastStationUrl(...)` -> debounced SPIFFS file `/data/laststation.url` -> `player.resumeLastWebSource()` for smartstart/reconnect/direct-URL resume.
 
 ### Logging chain (serial + telnet)
 - `src/core/logging.h` / `src/core/logging.cpp` now define the common log path for runtime diagnostics.
+- The public usage pattern remains uppercase macros at call sites, but they now wrap function-backed implementations (`serialLog`, `functionLog`, `bootLog`, `bootLogX`, `errorLog`, `serialLogDot`, `audioLog`) so formatting happens in one backend instead of nested macro layers.
 - Core macros:
   - `SERIALLOG(...)`: writes one formatted line to both serial and telnet sinks.
   - `FUNCTIONLOG(category, ...)`: category-tagged wrapper over `SERIALLOG`.
   - `BOOTLOG(...)` / `BOOTLOGX(...)`: boot-sequence logging helpers. `BOOTLOG` ends with a line-wrapper, `BOOTLOGX` does not.
   - `ERRORLOG(...)`: error-category wrapper.
   - `SERIALLOGDOT()`: progress-dot helper for long-running loops.
+  - `AUDIOLOG(category, ...)`: callback-safe logging wrapper for stack-sensitive audio callback contexts.
 - Contract detail:
   - `Telnet::printf(...)` is telnet-only transport and no longer mirrors to serial.
+  - Normal logs no longer route through `Telnet::printf(...)`; `logging.cpp` uses `Telnet::logLine(...)` / `Telnet::logRaw(...)` so the shared logging path avoids the prompt-aware telnet formatter and its extra stack use.
   - Logs should use macros above; direct `Serial.print*`/`telnet.printf` is reserved for explicit transport-specific behavior (for example client-targeted telnet responses and OTA progress streaming).
 
 ### Primary shared state objects
@@ -82,6 +86,7 @@ Grouped (not one-by-one deep explained) areas:
 - Canonical fallback defaults and compile flags.
 - Includes `myoptions.h`, `mytheme.h`, `mqttoptions.h` when present.
 - **Owns all compile-time guardrails** inline, right next to each respective define.
+- Owns shared buffer sizing macros under `/* Maximum lengths of character buffers */`, including `MQTT_URL_SIZE` for stream/artwork URL buffers used by `player`, `audiohandlers`, and MQTT status payload sizing.
 - Defines:
   - hardware defaults (pins, feature gates)
   - updater URLs (`FILESURL`, `UPDATEURL`, `CHECKUPDATEURL`) unless disabled
@@ -90,7 +95,7 @@ Grouped (not one-by-one deep explained) areas:
   - WebUI and localization defaults
   - curated list defaults
   - **Exception**: locale and language options are handled by locale.h
-- **SPI architecture — Named Bus System** (auto-derived internals — do NOT define `SPI_BUS_SECONDARY`, `SPIA`, or `VS1053_SPIBUS` in `myoptions.h`):
+  - **SPI architecture — Named Bus System** (auto-derived internals — do NOT define `SPI_BUS_SECONDARY`, `SPIA`, or `VS1053_SPIBUS` in `myoptions.h`):
   - **Bus A** = `SPIA` (alias for `&SPI`, the default ESP32 SPI instance). Pins configured by `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` in `Config::init()` when `SPIA_SCK` is defined; otherwise `SPI.begin()` uses hardware defaults.
   - **Bus B** = `SPIB` (`SPIClass SPIB(SPI_BUS_SECONDARY)` declared and initialized in `config.cpp`). Only exists when `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` is auto-derived: ESP32 → `2`, ESP32-S3/C3 → `1`.
   - **Bus pin defines** (set in `myoptions.h`): `SPIA_SCK/MISO/MOSI` manually, or use shorthands: `SPIA_DEFAULT` (chip default pins), `SPIA_DEFAULT_XMISO` (chip default SCK/MOSI, MISO=255 — for display-only Bus A). `SPIB_SCK/MISO/MOSI` manually, or `SPIB_DEFAULT` (chip default secondary-bus pins). `SPI.begin()` / `SPIB.begin()` are only called when the respective SCK is defined and `!= 255`; I2C-only builds skip SPI init entirely.
@@ -109,7 +114,7 @@ Grouped (not one-by-one deep explained) areas:
   - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g. `TS_MODEL`, `RTC_MODULE`), bad logical cross-constraints (e.g. `BTN_PRESS_TICKS <= BTN_CLICK_TICKS`, `BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD`).
   - `#warning` + `#undef` for out-of-range tunables in `/* USER DEFAULTS */` section (e.g. `SOUND_VOLUME`, `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
   - `static_assert` with `__builtin_strcmp` for enumerated string options (e.g. `WEATHER_API`, `WEATHER_WIND_SPEED_UNITS`). **Update the `static_assert` whenever a new provider/value is added.**
-  - `/* PREVENT BOARD-DEFINED PIN RE-USE */` section lives after the `/* ESP DEVBOARD */` LED block (requires `REAL_LEDBUILTIN` and `ESP_S3C3` to be defined first). Covers LED vs RST pin conflicts only — keep it narrowly scoped.
+  - `/* PREVENT BOARD-DEFINED PIN RE-USE */` section lives after the `/* ESP DEVBOARD */` LED block (requires `LED_PIN` and `ESP_S3C3` to be defined first). Covers LED vs RST pin conflicts only — keep it narrowly scoped.
 - **What is intentionally NOT guarded**: booleans (compiler error is obvious), pin numbers (board-dependent range), free-form strings (`AP_SSID`, `MQTT_*`, URLs), color macros (R,G,B triplets), `AUTOBACKLIGHT(x)` (C macro function), `BATTERY_CURVE_MV/PCT` (already has `static_assert` in `battery.cpp`).
 
 ## Compile-Time Modularity and Build Variants (`#if` / `#ifdef` behavior)
@@ -160,11 +165,13 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
 - `setup()` major sequence:
   1. serial + LED + RGB + battery init
   2. `config.init()`
-  3. `display.init()`
-  4. `player.init()`
-  5. `network.begin()`
-  6. if no connectivity: start minimal server + controls + display start and return
-  7. if connectivity:
+  3. `backlightControls.init()`
+  4. `display.init()`
+  5. `player.init()`
+  6. `battery.bootStatus()`
+  7. `network.begin()`
+  8. if no connectivity: start minimal server + controls + display start and return
+  9. if connectivity:
      - `config.initPlaylistMode()`
      - `netserver.begin()`
      - `telnet.begin()`
@@ -172,15 +179,15 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
      - display start
      - optional MQTT init
      - optional smart-start playback
-     - `config.startupServices()`
+     - `startup.startupServices()`
      - `netserver.setBootReady(true)` only after setup work is actually complete
 - `loop()`:
   - AP mode: Improv + captive DNS
   - normal: telnet loop
-  - RGB loop + battery loop + battery dim/sleep policy
+  - RGB loop
+  - `battery.loop()` + `battery.applyPowerPolicy()`
   - player loop (connected/SD ready)
   - controls loop
-  - netserver loop
 
 ---
 
@@ -213,25 +220,28 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Defines persistent struct `config_t store`.
 - Defines station/theme structs and config API.
 - Defines key constants for SPIFFS paths and data file locations.
+- `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (default 170, defined in `options.h`). These are RAM-only fields — not NVS-stored. `BUFLEN` has been retired; use `STATION_FIELD_LENGTH` for station metadata buffers across the codebase.
+- `SD_PATH_LENGTH` (256, defined in `sdmanager.h`) is used for SD filesystem path buffers where paths may exceed 170 bytes.
 - `Config::keyMap` declaration controls Preferences key mapping.
 - `Config::saveValue(...)` API now has two simple overloads only:
   - typed: `saveValue(T* field, const T& value)`
   - string: `saveValue(char* field, const char* value)`
+- `Config` also owns a separate RAM-backed `lastStationUrl` resume buffer that is intentionally *not* part of `config_t` / Preferences; it is persisted through `/data/laststation.url` with a dedicated debounce path because previews/direct URLs can change more often than normal prefs.
 - Legacy compatibility parameters (`commit`, `force`, and string `size_t N`) were removed.
 - String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short source strings.
 - Both overloads share a single internal write-if-changed path (`missing key` OR `size mismatch` OR `content changed`) before calling `prefs.putBytes(...)`.
 - Save-path writes now emit telnet+serial config logs by key name; sensitive keys (`mqttpass`, `weatherkey`) are masked as `*`.
 
 ## `src/core/config.cpp`
-- Startup/storage/file-integrity center.
+- Persistent storage/defaults/hardware bootstrap center.
 - Main responsibilities:
   - load and validate Preferences (`cfgset` marker)
   - defaults/init logic
-  - SPIFFS mount and required file checks
+  - SPIFFS mount and Config-owned required-file checks used during playlist-mode initialization
   - version marker management (`/data/ehradio.ver`)
-  - playlist indexing and station loading
-  - locale/update helper routines
-  - startup update services and online file maintenance
+  - load/save the debounced Web-stream resume hint (`/data/laststation.url`)
+  - playlist-mode initialization and file-presence checks before delegating playlist indexing/load helpers to `utility`
+  - canonical SPIFFS asset allowlists (`Config::wwwFiles[]`, `Config::dataFiles[]`) used by startup recovery and file-maintenance flows
   - reset section handlers (`defaultSettings(...)`)
 - SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is defined and `!= 255`, and `SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI)` only when `SPIB_SCK` is defined and `!= 255`. I2C-only builds skip SPI init entirely. Both buses are initialized before `_initHW()` and before `display.init()` / `player.init()`. Both SPI buses are fully configured before any peripheral uses them. `SPIClass SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in `config.h`.
 - SD-specific behavior:
@@ -240,6 +250,24 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `changeMode()` short-circuits SD mode switches the same way, avoiding the SPI retry path when the slot is empty
 - Key interaction:
   - almost every module reads/writes through `config`.
+
+## `src/core/startup.h` / `startup.cpp`
+- Boot-only orchestration module following the standard core `class + global instance` pattern (`Startup startup;`).
+- Owns startup-time helpers that were previously mixed into `config.cpp`:
+  - boot-time version marker and required SPIFFS/WebUI file verification (`checkVerAndSpiffs()`)
+  - loading saved SSIDs from `/data/wifi.csv` into `config.ssids`
+  - newline repair for `/data/playlist.csv`
+  - stale search-result cleanup under `/www/searchresults.*`
+  - required WebUI asset download and recovery flow
+  - version-file parsing for online-update detection
+  - startup background update scheduling (`startupServicesAsync`)
+- Coupling:
+  - drives `utility` for shared update/download helpers
+  - reads Config-owned asset allowlists during required-file recovery
+  - updates `netserver.newVersion` / `newVersionAvailable`
+  - stops playback and drives `display` during required-file recovery
+  - `main.cpp` calls `startup.startupServices()` after network/server startup
+  - `network.cpp` calls `startup.initNetwork()` during WiFi credential load
 
 ## `src/core/network.h` / `network.cpp`
 - `network.h` declares `MyNetwork` state and API; states: `CONNECTED`, `SOFT_AP`, `FAILED`, `SDREADY`.
@@ -261,10 +289,12 @@ All modules in `src/core/` follow the **class + global instance** pattern:
     - `OW30` OpenWeather 3.0
   - weather cache and formatting logic
   - centralized runtime logging for reconnect/weather/boot progress/time-sync via `FUNCTIONLOG`/`SERIALLOG`/`BOOTLOGX`
+  - web-stream reconnect now resumes through `player.resumeLastWebSource()` so direct URL sources can recover via `/data/laststation.url` instead of always falling back to `lastStation`
 - Coupling:
   - pushes display updates (`display.putRequest(...)`)
   - calls player/netserver hooks
   - reads/writes `config.store`
+- Successful connect handling now stays internal to `network.cpp`; there is no remaining app-level weak `network_on_connect` callback.
 
 ## `src/core/player.h` / `player.cpp`
 - `player.h` declares player command queue, playback API, and status.
@@ -273,17 +303,21 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - initialize codec/I2S/VS1053
   - queue command handling (`PR_PLAY`, `PR_STOP`, `PR_VOL`, etc.)
   - station play/stop/toggle/next/prev flow
+  - exact-match-first URL playback routing for `playurl` / preview resume (`queueResolvedUrl`, `resumeLastWebSource`)
   - volume conversion (`volToI2S`) including ES8311 path
   - SD/web mode specific playback behavior
   - error reporting and display/net updates
+  - direct playback lifecycle side effects for `rgbled` and `backlightControls` (start/stop + initial stopped-state sync)
 - VS1053 SPI: `Player::Player()` constructor passes `&VS1053_SPIBUS` to the `Audio(CS, DCS, DREQ, SPIClass*)` constructor. `VS1053_SPIBUS` is the `SPIB` or `SPIA` object resolved by `options.h`. No `SPIClass` declared in `player.cpp` or `player.h`.
 - Coupling:
   - updates display queue and websocket state
   - uses `config` station and mode state
   - interacts with radio-browser click reporting
+  - calls `rgbled` and `backlightControls` directly during playback start/stop
 
-## `src/core/audiohandlers.h`
-- Callback bridge used by audio library.
+## `src/core/audiohandlers.h` / `audiohandlers.cpp`
+- Callback bridge used by the audio libraries.
+- `audiohandlers.h` now declares the `AudioHandlers` module and the required free `audio_*` callback symbols; `audiohandlers.cpp` owns the implementation as a normal core translation unit.
 - Converts decoder callbacks into:
   - metadata updates
   - title/station updates
@@ -291,7 +325,12 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - error updates
   - SD EOF behavior
 - Important for title/bitrate side effects to WebUI and display.
-- Audio info/bitrate/ID3 notifications are now emitted through shared logging macros so telnet+serial output stays consistent with the rest of the firmware log contract.
+- Owns runtime artwork state and policy:
+  - parses `StreamUrl='...'` from `audio_info(...)`
+  - accepts `audio_icylogo(...)` as a fallback image source
+  - exposes the filtered `image_url` to MQTT through `audioHandlers` getters
+- Uses shared utility helpers for string normalization instead of keeping those helpers in `config.cpp`.
+- Audio info/bitrate/ID3 notifications are emitted through shared logging macros so telnet+serial output stays consistent with the rest of the firmware log contract.
 
 ## `src/core/display.h` / `display.cpp`
 - `display.h` declares Display class and display mode/change API.
@@ -305,6 +344,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Coupling:
   - depends on `config.store` for many visual toggles
   - reads `network` time/weather, `player` status
+  - title changes now directly trigger `rgbled.trackChange()` and `backlightControls.restart()` instead of a weak hook
 
 ## `src/core/netserver.h`
 - Declares request enums, websocket/server globals, and NetServer API.
@@ -319,11 +359,12 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - state request queue processing (`GETSYSTEM`, `GETSCREEN`, `GETLOCALE`, etc.)
   - online update check/start tasks
   - radio-browser search and curated task management
-  - playback launch helper for preview URL
+  - exact-match-first preview/add handling on `/search`; unmatched preview now uses the same direct URL playback path as `playurl` instead of a mutating playlist scan
   - centralized logging for search/curated/playback/radio-browser-click/update/not-found paths via `FUNCTIONLOG`
 - Coupling:
   - uses `cmd.exec(...)` from commandhandler
   - emits JSON consumed by `data/www/script.js`
+  - `GETSCREEN` carries both display state and persisted dimming fields used by `data/www/options.html`
 - Readiness detail:
   - `/ready` returns `{"ready":true}` only when `netserver.bootReady` is true, required web files exist, and network state is stable (`CONNECTED` + `WL_CONNECTED`, or `SDREADY`).
 - OTA note:
@@ -339,7 +380,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - persist settings with `config.saveValue(...)`
   - source-aware command policy (`WebSocket`, `HttpUrl`, `Mqtt`, `Telnet`) and shared non-WebUI blocklist checks for HTTP/MQTT/Telnet ingress
   - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`, `dim`/`brightness`, `dspon`/`screenon`)
-  - player-command parity helpers (including direct URL playback command routing)
+  - player-command parity helpers (including exact-match-first direct URL playback command routing for `playurl` / `burl`)
   - trigger curated operations and locale update tasks
 - Critical coupling file for setting changes.
 
@@ -355,6 +396,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - touchscreen gestures
   - IR remote decoding
 - Converts hardware input events into same core actions used by WebUI (`controlsEvent`, player commands, display mode changes).
+- `Controls::loop()` now calls `backlightControls.controlsLoop()` directly for non-PLAYER backlight wake behavior.
 - IR record debug text now routes through centralized logging macros.
 
 ## `src/core/telnet.h` / `telnet.cpp`
@@ -383,15 +425,38 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - connection lifecycle
   - subscribe to `.../command`
   - publish status/playlist/volume
+  - status payload now includes `image_url` (HTTP/S image-only artwork URL used by Home Assistant)
   - parse command payload forms (`key=value`, `key value`, `key(value)`, raw URL)
   - apply minimal payload-shape normalization (`play` value-shape handling) then dispatch through `cmd.exec(...)` with source `Mqtt`
   - apply explicit non-WebUI blocklist rejections for unsupported MQTT-origin commands
 - Coupling:
   - command behavior is now primarily centralized in commandhandler.
+  - `ARTWORK` queue events in `netserver` trigger MQTT status republishes even without a WebSocket payload.
+  - artwork payload data is read from `audioHandlers`, not from `config.station`.
+- Status buffer sizing now derives from `STATION_FIELD_LENGTH` plus `MQTT_URL_SIZE`, replacing the older duplicated browse-URL size macro.
+
+## `src/core/utility.h` / `utility.cpp`
+- Shared helper module following the standard core `class + global instance` pattern (`Utility utility;`).
+- Current responsibilities:
+  - `stripWhitespace(char*)`
+  - `stripWrappingQuotes(char*)`
+  - `ipToStr(...)`
+  - `escapeQuotes(...)`
+  - playlist CSV parsing and station lookup/load helpers
+  - WiFi credential parse/save/import helpers
+  - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`)
+  - SPIFFS file-maintenance helpers shared with startup and WebUI update paths:
+    - `cleanupSpiffs()`
+    - `deleteMainwwwFile()`
+    - `updateFile(...)`
+    - `updateLocaleFile()`
+    - `updateLocaleFileAsync(...)`
+- Holds small reusable scratch/state buffers (`ipBuf`, `stationBuf`) plus the sleep duration state and sleep `Ticker`; it still does not own playback/artwork runtime state.
+- Current consumers include `audiohandlers.cpp`, `battery.cpp`, `commandhandler.cpp`, `config.cpp`, `display.cpp`, `netserver.cpp`, `network.cpp`, `player.cpp`, and startup/update flows.
 
 ## `src/core/battery.h` / `battery.cpp`
 - `battery.h` declares `class Battery` (real class under hardware guard; no-op stub in `#else`); `extern Battery battery;` provides the global instance.
-- Public interface: `init()`, `bootStatus()`, `isInitialized()`, `getStatus()`, `formatStatusLine()`, `loop()`, `recalcNow()`, `calibrate()`.
+- Public interface: `init()`, `bootStatus()`, `isInitialized()`, `getStatus()`, `formatStatusLine()`, `loop()`, `applyPowerPolicy()`, `recalcNow()`, `calibrate()`.
 - All ADC/inference state and helpers are private members/methods.
 - Battery monitoring/calibration/inference implementation.
 - Responsibilities:
@@ -399,10 +464,28 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - battery presence detection
   - charge/discharge inference with candidate windows
   - threshold state (`low`, `critical`) tracking
+  - battery-driven brightness reduction / recovery and critical deep-sleep policy
   - status formatting for telnet/WebUI
   - triggers display and websocket updates
 - Logging note:
   - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths), replacing direct serial/telnet prints.
+
+## `src/core/backlightcontrols.h` / `backlightcontrols.cpp`
+- `backlightcontrols.h` declares `class BacklightControls` (real class under `BRIGHTNESS_PIN` + `DSP_DIMMING_ENABLED` guards; no-op stub in `#else`); `extern BacklightControls backlightControls;` provides the global instance.
+- Public interface: `init()`, `restart()`, `controlsLoop()`.
+- Responsibilities:
+  - own persisted idle-dimming timer state and non-blocking brightness ramp
+  - use `config.store.dimmingEnabled`, `dimmingTimeout`, and `dimmingBrightness` instead of board-only compile-time dimming thresholds
+  - clamp the dim target to the current screen brightness, restore configured brightness, and restart the idle timer on explicit activity/settings events
+  - centralize the former `main.cpp` backlight code without moving it into the display task owner
+- Explicit call sites:
+  - `main.cpp` after `config.init()`
+  - `config.cpp` screen-default reset path
+  - `commandhandler.cpp` brightness / dimming / display-on commands
+  - `player.cpp` playback start/stop paths
+  - `display.cpp` title-change path
+  - `controls.cpp` loop path
+  - `battery.cpp` low-battery recovery / restore path when the dimmer feature is enabled
 
 ## `src/core/rgbled.h` / `rgbled.cpp`
 - `rgbled.h` declares `class RgbLed` (real class under `RGB_LED_PIN` guard; no-op stub in `#else`); `extern RgbLed rgbled;` provides the global instance.
@@ -459,7 +542,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `/ready` probes now use a short client-side fetch timeout so reboot/reset flows do not stall waiting on a dead device connection during restart.
   - reboot and update redirect calls now explicitly apply a 1-second post-ready grace in JavaScript before navigation.
   - manual upload completion now uses a 60 second fallback, while OTA still uses 180 seconds; both can redirect early as soon as `/ready` reports true.
-  - mDNS rename (`rebootmdns`) now reuses the same reboot status screen as a normal reboot, then uses browser-side ready polling against the new `.local` host; backend no longer sends WebSocket redirect JSON before reboot.
+  - mDNS rename (`restartmdns`) calls `MDNS.end()` + `MDNS.begin()` at runtime via `NetServer::restartMdns()` — no reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without redirect.
 
 ## `data/www/options.js`
 - Settings page behavior.
@@ -571,6 +654,110 @@ Purpose:
 
 ## Display fonts/assets
 - `src/displays/fonts/*` for boot logos and digit/font assets.
+
+---
+
+## CPU Core Assignments & Stack Sizes
+
+The ESP32 has two hardware cores: **Core 0** (PRO_CPU) and **Core 1** (APP_CPU). The ESP32 Arduino framework runs `setup()` and `loop()` on Core 1. Audio decoding is isolated on Core 0; all other application tasks run on Core 1.
+
+### Compile-time Core Macros (`src/core/options.h`)
+
+Two macros control core assignment across the codebase:
+
+| Macro | Default | Valid override | Purpose |
+|---|---|---|---|
+| `AUDIO_CORE` | `0` | `1` | Core for audio decode task |
+| `NETWORK_CORE` | `1` | `0` | Core for netserver and all network/utility tasks |
+| `DSP_TASK_CORE_ID` | `1` | `0` | Core for the display loop task (independent of `NETWORK_CORE`) |
+
+On single-core ESP32-C3 (`CONFIG_FREERTOS_UNICORE`), all three macros are forced to `0` automatically; defining any of them manually on a unicore build is a compile-time `#error`. `CONFIG_ASYNC_TCP_RUNNING_CORE` is tied to `NETWORK_CORE` so the AsyncTCP internal event task follows automatically.
+
+### Board Stack Multiplier (`STACK_MULTIPLIER`)
+
+A board-aware multiplier scales all five user-configurable FreeRTOS task stacks automatically:
+
+| Board | `STACK_MULTIPLIER` | Effect |
+|---|---|---|
+| ESP32-S3 | 2 | All base stack sizes doubled |
+| ESP32 | 1 | Base sizes unchanged |
+| ESP32-C3 | 1 | Base sizes unchanged (C3 has *less* RAM than base ESP32) |
+
+- Defined automatically after the board guard in `src/core/options.h`. Override in `myoptions.h` with `#define STACK_MULTIPLIER 1` or `2` if needed.
+- Only values `1` and `2` are accepted — a compile-time `#error` fires otherwise.
+- Per-task manual overrides (e.g. `#define DSP_TASK_STACK_SIZE 6`) bypass the multiplier; a `#elif` range guard validates the manually-set value.
+- The multiplier applies **only** to the five configurable task stacks. Fixed-stack tasks (HTTPS workers, OTA) are unaffected.
+- `SEARCHRESULTS_BUFFER` and `CONFIG_ASYNC_TCP_QUEUE_SIZE` use separate per-board explicit values (not `STACK_MULTIPLIER`) since they scale differently.
+
+### Core 0 — Audio
+
+#### `src/libraries/I2S_Audio/Audio.cpp` + `src/libraries/VS1053_Audio/audioVS1053Ex.cpp`
+- Both audio libraries pin their `PeriodicTask` (audio decode loop) to `m_audioTaskCoreId`.
+- `src/core/player.cpp` `Player::init()` calls `setAudioTaskCore(AUDIO_CORE)` to set this explicitly (defaults to Core 0).
+
+### Core 1 — Everything Else
+
+#### `src/core/display.cpp`
+- `loopDspTask` ("DspTask") is pinned to `DSP_TASK_CORE_ID` (default `1`) via `xTaskCreatePinnedToCore`.
+- This task calls `display.loop()` only. `netserver.loop()` was moved to its own dedicated task (see `netserverLoopTask` below).
+
+#### `src/core/network.cpp`
+- `doSync` (time/weather sync task) is pinned to `NETWORK_CORE`.
+- `searchWiFi` (WiFi connection/retry loop) is pinned to `NETWORK_CORE`.
+- `retryStreamConnection` (post-disconnect reconnect) is pinned to `NETWORK_CORE`.
+
+#### `src/displays/nextion.cpp`
+- `nextionCore0` is pinned to `NETWORK_CORE` explicitly (previously used `!xPortGetCoreID()` which unsafely resolved to Core 0 at runtime — now fixed).
+
+#### `src/core/netserver.cpp` — `netserverLoopTask` + all utility tasks pinned to `NETWORK_CORE`
+- `netserverLoopTask` (started by `NetServer::startLoopTask()`, called from `main.cpp` after each `netserver.begin()`) is pinned to `NETWORK_CORE`. It is the sole caller of `netserver.loop()`.
+- All formerly scheduler-assigned (`xTaskCreate`) utility tasks are explicitly pinned to `NETWORK_CORE` via `xTaskCreatePinnedToCore`:
+  `vTaskSearchRadioBrowser`, playback task (lambda), radio-browser click task (lambda), `checkForOnlineUpdateTask` (lambda), `startOnlineUpdateTask` (lambda)
+
+#### `src/core/startup.cpp`, `src/core/utility.cpp`, `src/core/commandhandler.cpp` — pinned to `NETWORK_CORE`
+- `src/core/startup.cpp`: `startupServicesAsync`
+- `src/core/utility.cpp`: `updateLocaleFileAsyncWrapper`
+- `src/core/commandhandler.cpp`: `vTaskFetchCuratedIndex`, `vTaskFetchCuratedPlaylist`
+
+#### Arduino `loop()` — implicit Core 1
+- All calls from `src/main.cpp` `loop()` run on Core 1: `telnet.loop()`, `battery.loop()`, `player.loop()`, `controls.loop()`.
+- `netserver.loop()` is **not** called from `loop()` or from DspTask; it runs exclusively in `netserverLoopTask` pinned to `NETWORK_CORE`.
+
+### FreeRTOS Task Reference
+
+Stack sizes and priorities are controlled by macros in `src/core/options.h` (`/* Tweaks for Core Processes */`). Higher priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used. Per-task local conversion macros (`_BYTES`) are defined at the top of each `.cpp` file (except `SET_LOOP_TASK_STACK_SIZE` which is an `Arduino.h` macro). Stack defaults scale with `STACK_MULTIPLIER` — values shown as ESP32/C3 (1x) / S3 (2x).
+
+| Task | File | Stack macro (default ESP32 / S3) | Priority macro (default) | Notes |
+|---|---|---|---|---|
+| `loopTask` | main.cpp | `LOOP_TASK_STACK_SIZE` KB (8 / 16) | 1 (framework) | Arduino loop(); `SET_LOOP_TASK_STACK_SIZE()` applies at boot |
+| `DspTask` | display.cpp | `DSP_TASK_STACK_SIZE` KB (4 / 8) | `DSP_TASK_PRIORITY` (2) | — |
+| `netserverLoopTask` | netserver.cpp | `NETSERVER_TASK_STACK_SIZE` KB (4 / 8) | `NETSERVER_TASK_PRIORITY` (2) | — |
+| `nextionCore0` | nextion.cpp | `NEXTION_TASK_STACK_SIZE` KB (3 / 6) | `NEXTION_TASK_PRIORITY` (2) | Nextion display only |
+| `doSync` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `LOW_TASK_PRIORITY` (1) | Time/weather sync |
+| `searchWiFi` ×2 | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | — |
+| `retryStreamConnection` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Post-disconnect reconnect |
+| `retryStreamConnection` | player.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Stream drop reconnect; was hardcoded to Core 0 (bug) |
+| `vTaskFetchCuratedIndex/Playlist` | commandhandler.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `vTaskSearchRadioBrowser` | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `playbackTask` (lambda) | netserver.cpp | 4096 http / 8192 https | `PLAYBACK_TASK_PRIORITY` (3) | Dynamic stack based on URL scheme |
+| `rbClickTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `checkForOnlineUpdateTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `startOnlineUpdateTask` (lambda) | netserver.cpp | 16384 fixed | `NET_TASK_PRIORITY` (3) | OTA — stack hardcoded |
+| `updateLocaleFileAsyncWrapper` | utility.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `startupServicesAsync` | startup.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+
+### CORE_MONITOR debug feature (opt-in)
+
+Enable by adding `#define CORE_MONITOR` to `myoptions.h`. Zero impact on binary when not defined.
+
+When active, emits a `FUNCTIONLOG("Core Monitor", ...)` line to serial+telnet every 5 seconds:
+- **Dual-core output**: `Core0(+Audio) loops/s: 82 (12.15ms/loop) | Core1(Main+Net+TCP+Disp) loops/s: 15327 (0.07ms/loop) | MaxMainLoopUs: 5197 | Heap: 163732`
+  - The labels in parentheses are built at compile time via `CORE_0` / `CORE_1` string macros defined in `options.h`. Each macro concatenates component tokens (`+Audio`, `+Net`, `+TCP`, `+Disp`) conditioned on where `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE`, and `DSP_TASK_CORE_ID` are assigned. These macros are only defined when both `CORE_MONITOR` and `!CONFIG_FREERTOS_UNICORE` are true.
+- **Unicore C3 output**: `Core0 loops/5s: N (worst: N) | Core0(Main) loops/5s: N (worst: N) | MaxMainLoopUs: N | Heap: N` — `CORE_0`/`CORE_1` are not available on unicore; labels are static strings
+
+Implementation:
+- `src/core/display.cpp`: `volatile uint32_t cmDspLoopCount` incremented each `loopDspTask` iteration
+- `src/main.cpp`: `extern` reference to `cmDspLoopCount` + per-loop timing via `micros()`; worst-case counters are all-time minimums (never reset between windows)
 
 ---
 
@@ -702,8 +889,9 @@ This section is specifically for adding/removing settings and avoiding missed li
    - incoming `GET*` payload key matches DOM element id or custom handler.
 9. If setting is locale/time/weather related, update `data/www/options.js` apply handlers too.
 10. Telnet command handling is thin-dispatch by default: update `src/core/commandhandler.cpp` first, and only extend `src/core/telnet.cpp` if protocol normalization needs a new alias/form.
-11. If setting affects startup behavior, check `main.cpp` and `config.init()/startupServices`.
+11. If setting affects startup behavior, check `main.cpp`, `config.init()`, and `startup.startupServices()`.
 12. Update this `code-summary.md`.
+13. Update `Commands.md`.
 
 ## When removing a setting field
 

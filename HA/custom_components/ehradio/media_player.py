@@ -20,7 +20,7 @@ from homeassistant.components.media_player import (
     RepeatMode,
 )
 
-VERSION = '2026.05.03'
+VERSION = '2026.05.13'
 
 _LOGGER      = logging.getLogger(__name__)
 
@@ -140,15 +140,16 @@ class ehradioDevice(MediaPlayerEntity):
   async def status_listener(self, msg):
     try:
       js = json.loads(msg.payload)
-      self._media_title = js['title']
-      self._track_artist = js['name']
+      station_name = js.get('name', '')
+      track_title = js.get('title', '')
+      self._media_title = station_name or track_title
+      self._track_artist = track_title if station_name else None
       if js['on']==1:
         self._state = MediaPlayerState.PLAYING if js['status']==1 else MediaPlayerState.IDLE
       else:
         self._state = MediaPlayerState.PLAYING if js['status']==1 else MediaPlayerState.OFF
       self._current_source = str(js['station']) + '. ' + js['name']
-      if 'image_url' in js and js['image_url']:
-          self._entity_picture = js['image_url']
+      self._entity_picture = js.get('image_url') or None
       try:
         self.async_schedule_update_ha_state()
       except:
@@ -181,6 +182,10 @@ class ehradioDevice(MediaPlayerEntity):
   @property
   def media_title(self):
     return self._media_title
+
+  @property
+  def media_content_type(self):
+    return MediaType.MUSIC
 
   @property
   def media_artist(self):

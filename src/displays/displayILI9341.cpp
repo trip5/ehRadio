@@ -15,7 +15,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ fillScreen(black?0:config.theme.background); }
 void DspCore::flip(){ setRotation(config.store.flipscreen?1:3); }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ sendCommand(ILI9341_SLPIN); delay(150); sendCommand(ILI9341_DISPOFF); delay(150);}
 void DspCore::wake(void){ sendCommand(ILI9341_DISPON); delay(150); sendCommand(ILI9341_SLPOUT); delay(150);}
 

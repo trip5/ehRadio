@@ -82,7 +82,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ clear(black?0x0000:config.theme.background); }
 void DspCore::flip(){ setOrientation(config.store.flipscreen?3:1); }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ setDisplay(false); }
 void DspCore::wake(void){ setDisplay(true); }
 

@@ -11,9 +11,9 @@ Telnet telnet;
 
 namespace {
 
-char serialInputBuffer[BUFLEN] = {0};
+char serialInputBuffer[STATION_FIELD_LENGTH] = {0};
 size_t serialInputLength = 0;
-char clientInputBuffer[MAX_TLN_CLIENTS][BUFLEN] = {{0}};
+char clientInputBuffer[MAX_TLN_CLIENTS][STATION_FIELD_LENGTH] = {{0}};
 size_t clientInputLength[MAX_TLN_CLIENTS] = {0};
 
 void resetInputBuffer(char* buffer, size_t& len) {
@@ -248,7 +248,7 @@ void Telnet::cleanupClients() {
 }
 
 void Telnet::handleSerial() {
-  char request[BUFLEN] = {0};
+  char request[STATION_FIELD_LENGTH] = {0};
   while (readStreamLine(Serial, serialInputBuffer, sizeof(serialInputBuffer), serialInputLength, request, sizeof(request))) {
     on_input(request, 100);
   }
@@ -283,7 +283,7 @@ void Telnet::loop() {
     }
     for (i = 0; i < MAX_TLN_CLIENTS; i++) {
       if (clients[i] && clients[i].connected() && clients[i].available()) {
-        char inputLine[BUFLEN] = {0};
+        char inputLine[STATION_FIELD_LENGTH] = {0};
         while (readStreamLine(clients[i], clientInputBuffer[i], sizeof(clientInputBuffer[i]), clientInputLength[i], inputLine, sizeof(inputLine))) {
           on_input(inputLine, i);
         }
@@ -314,6 +314,36 @@ void Telnet::print(uint8_t id, const char *buf) {
   if (id >= MAX_TLN_CLIENTS) return; // Bounds check
   if (clients[id] && clients[id].connected()) {
     clients[id].print(buf);
+  }
+}
+
+void Telnet::logLine(const char *buf) {
+  if (!buf) return;
+
+  for (int id = 0; id < MAX_TLN_CLIENTS; id++) {
+    if (clients[id] && clients[id].connected()) {
+      clients[id].print("\r");
+      clients[id].print(buf);
+      clients[id].print("\r\n");
+      clients[id].print("> ");
+    }
+  }
+}
+
+void Telnet::logRaw(const char *buf) {
+  if (!buf) return;
+
+  size_t len = strlen(buf);
+  bool endsWithNewline = (len > 0 && buf[len - 1] == '\n');
+
+  for (int id = 0; id < MAX_TLN_CLIENTS; id++) {
+    if (clients[id] && clients[id].connected()) {
+      clients[id].print("\r");
+      clients[id].print(buf);
+      if (endsWithNewline) {
+        clients[id].print("> ");
+      }
+    }
   }
 }
 
@@ -398,7 +428,7 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
   }
 
   char fallbackCommand[65];
-  char fallbackValue[BUFLEN];
+  char fallbackValue[STATION_FIELD_LENGTH];
 
   auto dispatchCommand = [&](const char* command, const char* value) {
     if (cmd.isBlockedForSource(command, CommandSource::Telnet)) {

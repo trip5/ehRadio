@@ -19,9 +19,8 @@
   #define TITLE_FIX 0
 #endif
 #define bootLogoTop     28
-//#define DSP_QUEUE_TICKS 5
 
-/* SROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+/* SCROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
 const ScrollConfig metaConf       PROGMEM = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 2, WA_LEFT }, 140, true, DSP_WIDTH+10, 5000, 4, 30 };
 const ScrollConfig title1Conf     PROGMEM = {{ TFT_FRAMEWDT, 28, 1, WA_LEFT }, 140, true, MAX_WIDTH-TITLE_FIX, 5000, 3, 25 };
 const ScrollConfig title2Conf     PROGMEM = {{ TFT_FRAMEWDT, 40, 1, WA_LEFT }, 140, true, MAX_WIDTH-TITLE_FIX, 5000, 3, 25 };

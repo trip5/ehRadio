@@ -22,7 +22,7 @@
 
 #define bootLogoTop     0
 
-/* SROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+/* SCROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
 const ScrollConfig metaConf       PROGMEM = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 1, WA_LEFT }, 140, true, MAX_WIDTH, 5000, 5, SCROLLDELAY };
 const ScrollConfig title1Conf     PROGMEM = {{ TFT_FRAMEWDT, 8, 1, WA_LEFT }, 140, true, MAX_WIDTH-24, 5000, 5, SCROLLDELAY };
 const ScrollConfig playlistConf   PROGMEM = {{ 2, 22, 1, WA_LEFT }, 140, true, MAX_WIDTH-4, 1000, 5, SCROLLDELAY };

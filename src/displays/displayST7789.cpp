@@ -37,7 +37,7 @@ void DspCore::flip(){
   }
 #endif
 }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ enableSleep(true); delay(150); enableDisplay(false); delay(150); }
 void DspCore::wake(void){ enableDisplay(true); delay(150); enableSleep(false); delay(150); }
 

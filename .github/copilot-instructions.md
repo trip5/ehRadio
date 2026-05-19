@@ -55,7 +55,7 @@
 - **Core logic**: `src/core/` (Player, Display, Network, Config, Controls).
 - **Libraries path**: Software codecs: `libraries/I2S_Audio/`, `libraries/ES8311_Audio` / Hardware decoder: `libraries/VS1053_Audio/` (Hardware chip), other folders are custom drivers for other display, touchscreen, and other hardware.
 - **UI**: Widgets in `src/displays/widgets/`, drivers in `src/displays/`.
-- **Plugins**: Class-based hooks in `src/plugins/`, registered in `main.cpp`.
+- **Plugins**: The former yoRadio plugin hook system has been removed. Add new behavior in the owning core module instead of reviving plugin-style hooks.
 - **Web UI**: Most files in `data/www` are served with headers in `src/core/netserver.h`. `search.html` and `curated.html` are not.
 
 ## Functionality

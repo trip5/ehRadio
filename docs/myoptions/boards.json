@@ -1,0 +1,14 @@
+[
+  {
+    "name": "ESP32-S3-N16R4 (16MB Flash 4MB PSRAM)",
+    "file": "esp32-s3_n16r4.json"
+  },
+  {
+    "name": "ESP32-S3-N16R8 (16MB Flash 8MB PSRAM)",
+    "file": "esp32-s3_n16r8.json"
+  },
+  {
+    "name": "ES3C28P (ESP32-S3-N16R8)",
+    "file": "esp32-s3_es3c28p.json"
+  }
+]

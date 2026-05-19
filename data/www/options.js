@@ -21,12 +21,79 @@ if (document.readyState === 'loading') {
     loadTimezones();
     loadLocales();
     setupWeatherProviderToggle();
+    setupDimmingControls();
   });
 } else {
   // DOM already loaded (script loaded dynamically)
   loadTimezones();
   loadLocales();
   setupWeatherProviderToggle();
+  setupDimmingControls();
+}
+
+/** SCREEN DIMMING **/
+function syncDimmingUi(sendClampCommand = false) {
+  const brightness = getId('br');
+  const dimmingToggle = getId('dimmingenabled');
+  const dimmingTimeout = getId('dimmingtimeout');
+  const dimmingBrightness = getId('dimmingbrightness');
+  if (!brightness || !dimmingToggle || !dimmingTimeout || !dimmingBrightness) {
+    return false;
+  }
+
+  dimmingBrightness.min = '0';
+  dimmingBrightness.max = '100';
+
+  const brightnessValue = Number.isFinite(brightness.valueAsNumber) ? brightness.valueAsNumber : 0;
+  const currentDimmingValue = Number.isFinite(dimmingBrightness.valueAsNumber) ? dimmingBrightness.valueAsNumber : 0;
+  const nextDimmingValue = Math.max(0, Math.min(brightnessValue, currentDimmingValue));
+  const changed = nextDimmingValue !== currentDimmingValue;
+
+  if (changed) {
+    dimmingBrightness.value = String(nextDimmingValue);
+  }
+  fillSlider(dimmingBrightness);
+
+  if (changed && sendClampCommand) {
+    websocket.send(`dimmingbrightness=${nextDimmingValue}`);
+  }
+
+  return changed;
+}
+
+function setupDimmingControls() {
+  const brightness = getId('br');
+  const dimmingToggle = getId('dimmingenabled');
+  const dimmingBrightness = getId('dimmingbrightness');
+  if (!brightness || !dimmingToggle || !dimmingBrightness) {
+    return;
+  }
+
+  const previousAfterSetupElement = window.afterSetupElement;
+  window.afterSetupElement = (id, value, element) => {
+    if (typeof previousAfterSetupElement === 'function') {
+      previousAfterSetupElement(id, value, element);
+    }
+    if (id === 'br' || id === 'dimmingbrightness' || id === 'dimmingenabled' || id === 'dimmingtimeout') {
+      syncDimmingUi();
+    }
+  };
+
+  brightness.addEventListener('input', () => {
+    syncDimmingUi(true);
+  });
+
+  dimmingBrightness.addEventListener('input', () => {
+    syncDimmingUi();
+  });
+
+  dimmingToggle.addEventListener('click', () => {
+    setTimeout(() => {
+      syncDimmingUi();
+    }, 0);
+  });
+
+  syncDimmingUi();
 }
 
 /** WEATHER **/

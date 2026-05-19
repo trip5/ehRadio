@@ -1,0 +1,89 @@
+[ "Input",
+  {
+    "name": "XPT2046 Touch Screen (SPI)",
+    "define": "TS_MODEL TS_MODEL_XPT2046",
+    "pins": "TS_CS",
+    "defines": [
+      { "define": "TS_SPI", "type": "spi", "comment": "assign touchscreen to SPI Bus" }
+    ],
+    "lib_deps": "${library.xpt2046}"
+  },
+  {
+    "name": "GT911 Touch Screen (I2C)",
+    "define": "TS_MODEL TS_MODEL_GT911",
+    "pins": [ "TS_SDA", "TS_SCL", "TS_INT", "TS_RST" ],
+    "lib_deps": "${library.tamc_gt911}"
+  },
+  {
+    "name": "FT6336 Touch Screen (I2C)",
+    "define": "TS_MODEL TS_MODEL_FT6336",
+    "pins": [ "TS_SDA", "TS_SCL", "TS_INT", "TS_RST" ],
+    "build_src_filter": "+<libraries/FT6336_Touchscreen/*>"
+  },
+  {
+    "name": "Rotary Encoder",
+    "pins": [ "ENC_BTNL", "ENC_BTNB", "ENC_BTNR" ],
+    "defines": [
+      { "define": "ENC_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on rotary" },
+      { "define": "ENC_BTNB_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.rotaryencoder}"
+  },
+  {
+    "name": "Rotary Encoder 2",
+    "pins": [ "ENC2_BTNL", "ENC2_BTNB", "ENC2_BTNR" ],
+    "defines": [
+      { "define": "ENC2_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on rotary" },
+      { "define": "ENC2_BTNB_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.rotaryencoder}"
+  },
+  {
+    "name": "Previous station/track button",
+    "pins": [ "BTN_PREV" ],
+    "defines": [
+      { "define": "BTN_PREV_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  },
+  {
+    "name": "Play/pause button",
+    "pins": [ "BTN_PLAY" ],
+    "defines": [
+      { "define": "BTN_PLAY_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  },
+  {
+    "name": "Next station/track button",
+    "pins": [ "BTN_NEXT" ],
+    "defines": [
+      { "define": "BTN_NEXT_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  },
+  {
+    "name": "Volume up button",
+    "pins": [ "BTN_UP" ],
+    "defines": [
+      { "define": "BTN_UP_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  },
+  {
+    "name": "Volume down button",
+    "pins": [ "BTN_DOWN" ],
+    "defines": [
+      { "define": "BTN_DOWN_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  },
+  {
+    "name": "Mode switch button",
+    "pins": [ "BTN_MODE" ],
+    "defines": [
+      { "define": "BTN_MODE_PULLUP", "type": "boolean", "default": true, "comment": "use internal pullup on button" }
+    ],
+    "lib_deps": "${library.onebutton}"
+  }
+]

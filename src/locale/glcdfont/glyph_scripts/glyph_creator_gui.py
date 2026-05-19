@@ -215,10 +215,10 @@ if TK_AVAILABLE:
             # ── Font File ─────────────────────────────────────────────────────────
             file_lf = ttk.LabelFrame(frm, text='Font File', padding=(8, 4))
             file_lf.pack(fill='x', pady=(0, 6))
-            ttk.Button(file_lf, text='Load font\u2026',    command=self.load_font).pack(side='left')
+            ttk.Button(file_lf, text='Load font...',    command=self.load_font).pack(side='left')
             ttk.Button(file_lf, text='Save font',           command=self.save_font).pack(side='left', padx=4)
             ttk.Button(file_lf, text='Export bytes',        command=self.export_bytes).pack(side='left')
-            ttk.Button(file_lf, text='Import bytes\u2026',  command=self.import_bytes).pack(side='left', padx=4)
+            ttk.Button(file_lf, text='Import bytes...',  command=self.import_bytes).pack(side='left', padx=4)
             ttk.Separator(file_lf, orient='vertical').pack(side='left', fill='y', padx=6)
             ttk.Button(file_lf, text='Copy glyph',          command=self.copy_glyph).pack(side='left')
             ttk.Button(file_lf, text='Paste glyph',         command=self.paste_glyph).pack(side='left', padx=4)
@@ -271,7 +271,7 @@ if TK_AVAILABLE:
             # ── Menu ──────────────────────────────────────────────────────────────
             menubar = tk.Menu(self)
             filem = tk.Menu(menubar, tearoff=False)
-            filem.add_command(label='Load font\u2026', command=self.load_font)
+            filem.add_command(label='Load font...', command=self.load_font)
             filem.add_command(label='Save font', command=self.save_font)
             filem.add_separator()
             filem.add_command(label='Exit', command=self.quit)

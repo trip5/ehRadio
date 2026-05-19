@@ -1,0 +1,32 @@
+[ "Peripherals and Build Options",
+  {
+    "name": "LED",
+    "pins": [ "LED_PIN" ],
+    "defines": [
+      { "define": "LED_INVERT", "type": "boolean", "default": false, "comment": "inverted LED behavior" }
+    ]
+  },
+  {
+    "name": "RGB LED",
+    "pins": [ "RGB_LED_PIN" ],
+    "info": "if you want MQTT enabled, check this",
+    "defines": [
+      { "define": "RGB_LED_ORDER", "type": "enum", "options": ["NEO_GRB", "NEO_RGB", "NEO_RGBW"], "default": "NEO_GRB", "optional": true, "comment": "type of pixel (usually NEO_GRB) see https://learn.adafruit.com/adafruit-neopixel-uberguide/arduino-library-use" }
+    ],
+    "lib_deps": "${library.neopixel}"
+  },
+  {
+    "name": "MQTT Enable",
+    "define": "MQTT_ENABLE", "type": "flag", "optional": false, "comment": "enable MQTT",
+    "info": "This must be checked to enable MQTT"
+  },
+  {
+    "name": "SD Card Reader",
+    "pins": [ "SD_CS" ],
+    "defines": [
+      { "define": "SD_SPI", "type": "spi", "comment": "assign SD to SPI bus" },
+      { "define": "SD_CARD_DETECT_PIN", "type": "numeric", "default": 255, "min": 0, "max": 255, "optional": true, "comment": "Pin DETECT is attached to (255 for unused)"},
+      { "define": "SD_AUTOPLAY", "type": "boolean", "default": false, "comment": "auto-switch to SD card mode when card is inserted (requires SD_CARD_DETECT_PIN != 255)" }
+    ]
+  }
+]

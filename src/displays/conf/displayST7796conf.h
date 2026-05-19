@@ -20,12 +20,12 @@
 #endif
 
 #ifdef BIG_BOOT_LOGO
-  #define bootLogoTop     110
-#else
   #define bootLogoTop     60
+#else
+  #define bootLogoTop     110
 #endif
 
-/* SROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+/* SCROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
 const ScrollConfig metaConf       PROGMEM = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_LEFT }, 140, true, MAX_WIDTH, 5000, 7, 40 };
 const ScrollConfig title1Conf     PROGMEM = {{ TFT_FRAMEWDT, 62, 2, WA_LEFT }, 140, true, MAX_WIDTH-(TITLE_FIX==0?6*2*7-6:TITLE_FIX), 5000, 7, 40 };
 const ScrollConfig title2Conf     PROGMEM = {{ TFT_FRAMEWDT, 86, 2, WA_LEFT }, 140, true, MAX_WIDTH-TITLE_FIX, 5000, 7, 40 };

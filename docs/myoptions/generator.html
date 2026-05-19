@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, minimum-scale=0.25">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>ehRadio - myoptions Generator</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body {
+      background-color: #000;
+      color: #ccc;
+      font-family: Times, "Times New Roman", serif;
+      font-size: 16px;
+    }
+    a { color: #e3d25f; text-decoration: none; font-weight: bold; }
+    a:hover { text-decoration: underline; }
+    h1 {
+      margin: 0 auto;
+      padding: 20px 0 10px 0;
+      font-weight: bold;
+      font-size: 1.6rem;
+      color: #C80C02;
+      text-align: center;
+    }
+    #slogan {
+      margin: 0 0 20px 0;
+      color: #777;
+      font-weight: normal;
+      text-align: center;
+      font-size: 1rem;
+    }
+    #content {
+      width: 100%;
+      max-width: 960px;
+      min-width: 600px;
+      padding: 0 40px 40px 40px;
+      box-sizing: border-box;
+      margin: 0 auto;
+      position: relative;
+    }
+    .hidden { display: none !important; }
+
+    /* Sections */
+    .gen-section {
+      border: #333 1px solid;
+      border-radius: 10px;
+      box-sizing: border-box;
+      padding: 20px;
+      margin-top: 20px;
+      margin-bottom: 20px;
+      width: 100%;
+      background-image: linear-gradient(#000, #0b0b0b);
+      position: relative;
+    }
+    .gen-section-title {
+      width: auto;
+      margin-top: -34px;
+      padding: 4px 0 16px 0;
+      text-align: center;
+    }
+    .gen-section-title span {
+      padding: 4px 12px;
+      background: #000;
+      font-weight: bold;
+      font-size: 1.1rem;
+      text-transform: uppercase;
+      color: #ccc;
+    }
+
+    /* Flex rows for controls - 3 column */
+    .ctrl-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px 20px;
+      margin-bottom: 10px;
+    }
+    .ctrl-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 140px;
+      flex: 0 0 auto;
+    }
+    .ctrl-label {
+      font-size: 0.9rem;
+      color: #aaa;
+      text-align: center;
+      margin-bottom: 4px;
+      font-family: 'Courier New', monospace;
+    }
+    .ctrl-label.mandatory { color: #ccc; }
+    .ctrl-label.has-help { cursor: default; }
+    .ctrl-label .help-btn {
+      display: inline-block;
+      background: #000;
+      border: #555 2px solid;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      line-height: 18px;
+      color: #555;
+      font-weight: bold;
+      text-align: center;
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-left: 4px;
+      vertical-align: middle;
+      font-family: Times, serif;
+    }
+    .ctrl-label .help-btn:hover { background: #555; color: #000; }
+
+    /* Optional checkbox inline with label */
+    .opt-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.9rem;
+      color: #aaa;
+      text-align: center;
+      margin-bottom: 4px;
+      font-family: 'Courier New', monospace;
+      cursor: pointer;
+      user-select: none;
+    }
+    .opt-label input[type="checkbox"] { cursor: pointer; accent-color: #C80C02; }
+    .opt-label.checked { color: #ccc; font-weight: bold; }
+    .opt-label .help-btn {
+      display: inline-block;
+      background: #000;
+      border: #555 2px solid;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      line-height: 18px;
+      color: #555;
+      font-weight: bold;
+      text-align: center;
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-left: 4px;
+      vertical-align: middle;
+      font-family: Times, serif;
+    }
+    .opt-label .help-btn:hover { background: #555; color: #000; }
+
+    /* Input fields */
+    input[type="number"], input[type="text"] {
+      background: #1a1a2e;
+      color: #ccc;
+      border: #555 1px solid;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 1rem;
+      font-family: 'Courier New', monospace;
+      text-align: center;
+      width: 90px;
+      box-sizing: border-box;
+    }
+    input[type="number"]:focus, input[type="text"]:focus { outline: none; border-color: #888; }
+    input.pin-error { border-color: #C80C02 !important; background: #2a0000 !important; }
+    input.wide-text { width: 200px; }
+
+    /* Select dropdowns */
+    select {
+      background-color: #003DA5;
+      color: #fff;
+      padding: 4px 8px;
+      border: none;
+      font-size: 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: Times, "Times New Roman", serif;
+      max-width: 400px;
+    }
+    select.wide { max-width: 600px; width: 100%; }
+    select.narrow { max-width: 100px; }
+
+    /* Radio bool pairs */
+    .radio-pair {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .radio-pair label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #aaa;
+      font-size: 0.9rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .radio-pair label:has(> input:checked) { color: #fff; font-weight: bold; }
+    .radio-pair input[type="radio"] { cursor: pointer; accent-color: #C80C02; }
+
+    /* Board selector */
+    .board-select-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .board-select-row label {
+      font-size: 1.1rem;
+      color: #ccccdd;
+      font-weight: bold;
+    }
+
+    /* Board image area */
+    #board-image-area {
+      text-align: center;
+      margin: 10px 0;
+    }
+    #board-thumb {
+      max-width: 400px;
+      max-height: 280px;
+      border: #777 2px solid;
+      border-radius: 8px;
+      cursor: pointer;
+      display: block;
+      margin: 0 auto 6px auto;
+    }
+    #board-thumb:hover { border-color: #aaa; }
+    .board-click-hint {
+      color: #888;
+      font-size: 0.9rem;
+      margin: 2px 0;
+    }
+    .board-url-link {
+      display: block;
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+
+    /* Zoom overlay */
+    #zoom-overlay {
+      position: fixed;
+      top: 0; right: 0; bottom: 0; left: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    #zoom-overlay img {
+      max-width: 95vw;
+      max-height: 95vh;
+      border: #777 3px solid;
+      border-radius: 16px;
+      box-shadow: 0 15px 30px #000;
+    }
+
+    /* Section info note */
+    .section-info {
+      text-align: center;
+      color: #777;
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+      font-style: italic;
+    }
+
+    /* Checkbox item (Input/Peripherals) */
+    .check-item {
+      border: #2a2a2a 1px solid;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: #080808;
+    }
+    .check-item-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .check-item-header input[type="checkbox"] { cursor: pointer; accent-color: #C80C02; width: 16px; height: 16px; }
+    .check-item-header .item-name {
+      font-size: 1rem;
+      color: #aaa;
+      font-weight: bold;
+    }
+    .check-item-header:hover .item-name { color: #ccc; }
+    .check-item-header input:checked ~ .item-name { color: #fff; }
+    .check-item-body {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: #1a1a1a 1px solid;
+    }
+
+    /* Defaults item */
+    .default-item {
+      border: #2a2a2a 1px solid;
+      border-radius: 6px;
+      padding: 8px 14px;
+      margin-bottom: 8px;
+      background: #080808;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .default-item-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .default-item-header input[type="checkbox"] { cursor: pointer; accent-color: #C80C02; width: 16px; height: 16px; }
+    .default-item-header .item-name {
+      font-size: 1rem;
+      color: #aaa;
+      font-weight: bold;
+    }
+    .default-item-header input:checked ~ .item-name { color: #fff; }
+    .default-item-header .help-btn {
+      display: inline-block;
+      background: #000;
+      border: #555 2px solid;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      line-height: 18px;
+      color: #555;
+      font-weight: bold;
+      text-align: center;
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-left: 4px;
+      vertical-align: middle;
+      font-family: Times, serif;
+    }
+    .default-item-header .help-btn:hover { background: #555; color: #000; }
+    .default-item-ctrl { text-align: center; }
+
+    /* Divider */
+    hr.gen-hr {
+      border: 0;
+      border-top: #333 1px solid;
+      margin: 16px 0;
+    }
+
+    /* Buttons */
+    .buttons-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .buttons-row-small {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .gen-btn {
+      background-color: #003DA5;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 20px;
+      font-size: 1rem;
+      font-family: Times, "Times New Roman", serif;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .gen-btn:hover { background-color: #0050d0; }
+    .gen-btn:active { background-color: #002a7a; }
+    .gen-btn.red { background-color: #8a0000; }
+    .gen-btn.red:hover { background-color: #b00000; }
+
+    /* Alert */
+    #alert-bar {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 300;
+      padding: 14px 24px;
+      border-radius: 10px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      min-width: 300px;
+      max-width: 600px;
+    }
+    #alert-bar.info { border: #76db5b 3px solid; background: #62b74b; color: #1a3a15; }
+    #alert-bar.warning { border: #e3aa5f 3px solid; background: #c59453; color: #43341a; }
+    #alert-bar.error { border: #e35f5f 3px solid; background: #ca5555; color: #431a1a; }
+
+    /* Help popup */
+    #help-overlay {
+      position: fixed;
+      top: 0; right: 0; bottom: 0; left: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 250;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #help-box {
+      background: #111;
+      border: #555 2px solid;
+      border-radius: 12px;
+      padding: 24px 30px;
+      max-width: 500px;
+      width: 90%;
+      color: #ccc;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+    #help-box h3 { color: #C80C02; margin: 0 0 12px 0; font-family: 'Courier New', monospace; }
+    #help-box p { margin: 0 0 12px 0; }
+    #help-close {
+      display: block;
+      margin: 0 auto;
+      background: #003DA5;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 20px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #help-close:hover { background: #0050d0; }
+
+    /* Select wide row */
+    .select-row {
+      display: flex;
+      justify-content: center;
+      margin: 10px 0;
+    }
+
+    /* SPI info row */
+    .spi-info {
+      text-align: center;
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+    }
+
+    /* Pin Configuration Preview console */
+    #preview-text {
+      background: #000;
+      color: #ccc;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      padding: 16px;
+      border-radius: 8px;
+      margin: 0;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Zoom overlay -->
+<div id="zoom-overlay" class="hidden" onclick="closeZoom()">
+  <img id="zoom-img" src="" alt="Board Image" />
+</div>
+
+<!-- Help popup -->
+<div id="help-overlay" class="hidden" onclick="closeHelp(event)">
+  <div id="help-box">
+    <h3 id="help-define-name"></h3>
+    <p id="help-text"></p>
+    <button id="help-close" onclick="closeHelp(null,true)">Close</button>
+  </div>
+</div>
+
+<!-- Alert bar -->
+<div id="alert-bar" class="hidden"></div>
+
+<div id="content">
+  <h1>ehRadio - myoptions Generator</h1>
+  <div id="slogan">Configure your hardware and generate myoptions.h</div>
+
+  <!-- All sections rendered here by JS -->
+  <div id="gen-root"></div>
+
+  <!-- Buttons -->
+  <div class="buttons-row" id="buttons-area" style="display:none">
+    <button class="gen-btn red" onclick="resetPins()">Reset Pins</button>
+  </div>
+  <div class="buttons-row" id="buttons-area2" style="display:none">
+    <button class="gen-btn" onclick="getFile('options')">Get myoptions.h</button>
+    <button class="gen-btn" onclick="getFile('platformio')">Get platformio.ini</button>
+    <button class="gen-btn" onclick="copyFile('options')">Copy myoptions.h</button>
+    <button class="gen-btn" onclick="copyFile('platformio')">Copy platformio.ini</button>
+    <button class="gen-btn" onclick="copyLink()">Copy Link</button>
+  </div>
+
+  <!-- Pin Configuration Preview -->
+  <div class="gen-section hidden" id="preview-section">
+    <div class="gen-section-title"><span>Pin Configuration Preview</span></div>
+    <pre id="preview-text"></pre>
+  </div>
+</div>
+
+<script src="generator.js"></script>
+</body>
+</html>

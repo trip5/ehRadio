@@ -1,0 +1,22 @@
+[
+  {
+    "name": "ES3C28P (ESP32-S3-N16R8)",
+    "env": "es3c28p",
+    "board": "esp32-s3-devkitc-1",
+    "build_flags": "-DBOARD_HAS_PSRAM -DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1",
+    "board_build.arduino.memory_type": "qio_opi",
+    "board_build.flash_mode": "qio",
+    "board_build.psram_type": "opi",
+    "board_upload.flash_size": "16MB",
+    "board_upload.maximum_size": "16777216",
+    "default_pins": [{
+      "SPIA_SCK": 12 , "SPIA_MISO": 255, "SPIA_MOSI": 11,
+      "SPIB_SCK": 38 , "SPIB_MISO": 39, "SPIB_MOSI": 40,
+      "I2C_SDA": 16, "I2C_SCL": 15, "RGB_LED_PIN": 42
+    }],
+    "spi": [ "A", "B" ],
+        "valid_pins": [ -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 ],
+    "image": "esp32-s3_es3c28p.png",
+    "url": "https://www.lcdwiki.com/2.8inch_ESP32-S3_Display"
+  }
+]

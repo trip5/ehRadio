@@ -1,0 +1,14 @@
+[ "SPI Bus Pins",
+  {
+    "name": "SPI Bus A",
+    "info": "SPIA_MISO = 255 if display is only device on SPI A",
+    "spi": "A",
+    "pins": [ "SPIA_SCK", "SPIA_MISO", "SPIA_MOSI" ]
+  },
+  {
+    "name": "SPI Bus B",
+    "info": "SPI display always gets A so make others use B",
+    "spi": "B",
+    "pins": [ "SPIB_SCK", "SPIB_MISO", "SPIB_MOSI" ]
+  }
+]

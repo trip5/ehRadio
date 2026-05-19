@@ -126,6 +126,7 @@ class Display {
 void returnPlayer();
 
 extern Display display;
+extern TaskHandle_t dspTaskHandle;
 
 
 #endif

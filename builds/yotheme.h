@@ -5,12 +5,8 @@
 /*        *        This file must be in the root folder of the sketch !!!        *      */
 /*        ************************************************************************      */
 
-/* Theming of color displays:                                                           */
-/*         DSP_ST7735, DSP_ST7789, DSP_ILI9341, DSP_GC9106, DSP_ILI9225, DSP_ST7789_240 */
-/* Uncomment (remove double slash //) from desired line to apply color                  */
-
-/* This file contains the original yoRadio theme colors (gold & red when inverted)      */
-/* You can use it as a template for your own theming!                                   */
+/* This file contains the original yoRadio theme colors (gold & red)                    */
+/*                                               Don't forget to rename it to mytheme.h */
 
 #define ENABLE_THEME
 #ifdef  ENABLE_THEME
@@ -38,6 +34,7 @@
 #define COLOR_IP                165, 162, 132 // IP address
 #define COLOR_VOLUME_VALUE      165, 162, 132 // volume number
 #define COLOR_RSSI              165, 162, 132 // rssi
+#define COLOR_BATTERY           165, 162, 132 // battery
 #define COLOR_VOLBAR_OUT        231, 211,  90 // border of volume bar
 #define COLOR_VOLBAR_IN         231, 211,  90 // inside volume bar
 #define COLOR_DIGITS            255, 255, 255 // numbers...?
@@ -52,5 +49,5 @@
 #define COLOR_PLAYLIST_4         25,  25,  25 // playlist string 4
 #define COLOR_BITRATE           231, 211,  90 // stream bitrate
 
-#endif  /* #ifdef  ENABLE_THEME */
+#endif  /* #ifdef ENABLE_THEME */
 #endif  /* #define _my_theme_h  */

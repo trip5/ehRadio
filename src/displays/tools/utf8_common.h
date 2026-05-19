@@ -105,22 +105,22 @@ static inline char transliterateCyrillic(uint8_t first, uint8_t second);
 // MAIN CONVERSION FUNCTION (shared)
 // =============================================================================
 static inline char* utf8ToAscii(const char* src) {
-    static char buf[BUFLEN];
+    static char buf[STATION_FIELD_LENGTH];
     int outIdx = 0;
     const char* p = src;
-    while (*p && outIdx < BUFLEN - 1) {
+    while (*p && outIdx < STATION_FIELD_LENGTH - 1) {
       if ((uint8_t)*p < 0x80) { buf[outIdx++] = *p++; continue; }
       uint8_t first = (uint8_t)*p; uint8_t second = (uint8_t)*(p + 1);
       if (first >= 0xE0 && first <= 0xEF) {
         uint8_t third = (uint8_t)*(p + 2); bool processed = false;
-        if (first == 0xE2 && second == 0x80 && third == 0xA6) { if (outIdx + 3 <= BUFLEN - 1) { buf[outIdx++] = '.'; buf[outIdx++] = '.'; buf[outIdx++] = '.'; } processed = true; }
-        else if (first == 0xE2 && second == 0x84 && third == 0xA2) { if (outIdx + 2 <= BUFLEN - 1) { buf[outIdx++] = 'T'; buf[outIdx++] = 'M'; } processed = true; }
+        if (first == 0xE2 && second == 0x80 && third == 0xA6) { if (outIdx + 3 <= STATION_FIELD_LENGTH - 1) { buf[outIdx++] = '.'; buf[outIdx++] = '.'; buf[outIdx++] = '.'; } processed = true; }
+        else if (first == 0xE2 && second == 0x84 && third == 0xA2) { if (outIdx + 2 <= STATION_FIELD_LENGTH - 1) { buf[outIdx++] = 'T'; buf[outIdx++] = 'M'; } processed = true; }
         if (processed) { p += 3; } else { buf[outIdx++] = ' '; p += 3; } continue;
       }
       if (first >= 0xC2 && first <= 0xDF) {
         bool processed = false;
         if (shouldPreserveChar(first, second)) {
-        if (outIdx + 2 <= BUFLEN - 1) {
+        if (outIdx + 2 <= STATION_FIELD_LENGTH - 1) {
 #ifdef L10N_CP_CYRILLIC
           // Convert preserved lowercase Cyrillic (U+0430..U+044F) to uppercase
           // (U+0410..U+042F) so preserved glyphs render as uppercase on GLCD
@@ -144,13 +144,13 @@ static inline char* utf8ToAscii(const char* src) {
         #if defined(L10N_CP_CYRILLIC) || defined(L10N_CP_LATIN)
           if (!processed && (first == 0xD0 || first == 0xD1)) {
             char tr = transliterateCyrillic(first, second);
-            if (tr && outIdx < BUFLEN - 1) { buf[outIdx++] = (char)toupper((unsigned char)tr); processed = true; }
+            if (tr && outIdx < STATION_FIELD_LENGTH - 1) { buf[outIdx++] = (char)toupper((unsigned char)tr); processed = true; }
           }
         #endif
         if (!processed) {
           for (uint16_t i = 0; i < LATIN_MAP_SIZE; i++) {
             if (pgm_read_byte(&LATIN_MAP[i].first) == first && pgm_read_byte(&LATIN_MAP[i].second) == second) {
-              for (uint8_t j = 0; j < 4 && outIdx < BUFLEN - 1; j++) {
+              for (uint8_t j = 0; j < 4 && outIdx < STATION_FIELD_LENGTH - 1; j++) {
                 char ch = pgm_read_byte(&LATIN_MAP[i].output[j]); if (ch == 0) break; buf[outIdx++] = (char)toupper((unsigned char)ch); }
               processed = true; break;
             }

@@ -1,7 +1,7 @@
 #ifndef touchscreen_h
 #define touchscreen_h
 
-enum tsDirection_e { TSD_STAY, TSD_LEFT, TSD_RIGHT, TSD_UP, TSD_DOWN, TDS_REQUEST };
+enum tsDirection_e { TSD_STAY, TSD_LEFT, TSD_RIGHT, TSD_UP, TSD_DOWN, TSD_REQUEST };
 
 class TouchScreen {
   public:

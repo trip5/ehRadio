@@ -31,6 +31,7 @@ public:
   void init();
   void bootStatus();
   void loop();
+  void applyPowerPolicy();
   void recalcNow();
   const BatteryStatus& getStatus();
   bool isInitialized();
@@ -75,6 +76,12 @@ private:
   // Presence detection range (initialised in init())
   uint32_t presentMinMv = 0;
   uint32_t presentMaxMv = 0;
+  // Battery-driven brightness and sleep policy state
+  bool lowBatteryHandled = false;
+  bool criticalBatteryHandled = false;
+  bool criticalBatterySkipped = false;
+  uint8_t savedBrightness = 0;
+  bool savedBrightnessValid = false;
   // Private methods
   void dbgPrintf(const char* fmt, ...);
   void startChargingCandidate(unsigned long now, const char* dbg_fmt, int pct_diff);
@@ -94,6 +101,7 @@ public:
   void init() {}
   void bootStatus() {}
   void loop() {}
+  void applyPowerPolicy() {}
   void recalcNow() {}
   const BatteryStatus& getStatus() {
     static const BatteryStatus empty = {0, 0, false, false, 0, false, false, false, false, 0, false, false};

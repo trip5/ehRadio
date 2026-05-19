@@ -1,0 +1,24 @@
+[
+  {
+    "name": "ESP32-S3-N16R8 (16MB Flash 8MB PSRAM)",
+    "env": "esp32_s3_n16r8",
+    "board": "esp32-s3-devkitc-1",
+    "build_flags": "-DBOARD_HAS_PSRAM -DARDUINO_USB_MODE=1",
+    "board_build.arduino.memory_type": "qio_opi",
+    "board_build.flash_mode": "qio",
+    "board_build.psram_type": "opi",
+    "board_upload.flash_size": "16MB",
+    "board_upload.maximum_size": "16777216",
+    "default_pins": [{
+      "SPIA_SCK": 12 , "SPIA_MISO": 13, "SPIA_MOSI": 11,
+      "SPIB_SCK": 38 , "SPIB_MISO": 39, "SPIB_MOSI": 40,
+      "I2C_SDA": 42, "I2C_SCL": 41, "RGB_LED_PIN": 48
+    }],
+    "spi": [ "A", "B" ],
+    "valid_pins": [ -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 ],
+    "right_pins": [ "G", "3V3", "-1", "4", "5", "6", "7", "15", "16", "17", "18", "8", "19", "20", "3", "46", "9", "10", "11", "12", "3V3"],
+    "left_pins": [ "G", "1", "2", "43", "44", "42", "41", "40", "39", "38", "37", "36", "35", "0", "45", "48", "47", "21", "14", "13", "5V" ],
+    "image": "esp32-s3-wroom-1.jpg",
+    "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/index.html"
+  }
+]

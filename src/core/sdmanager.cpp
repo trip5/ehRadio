@@ -54,9 +54,9 @@ bool SDManager::cardPresent() {
 }
 
 bool SDManager::_checkNoMedia(const char* path) {
-  char nomedia[BUFLEN]= {0};
-  strlcat(nomedia, path, BUFLEN);
-  strlcat(nomedia, "/.nomedia", BUFLEN);
+  char nomedia[SD_PATH_LENGTH]= {0};
+  strlcat(nomedia, path, SD_PATH_LENGTH);
+  strlcat(nomedia, "/.nomedia", SD_PATH_LENGTH);
   bool nm = exists(nomedia);
   return nm;
 }

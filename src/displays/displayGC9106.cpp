@@ -19,7 +19,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ fillScreen(black?0:config.theme.background); }
 void DspCore::flip(){ setRotation(config.store.flipscreen?1:3); }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ sendCommand(GC9106_SLPIN); delay(150); sendCommand(GC9106_DISPOFF); delay(150); }
 void DspCore::wake(void){ sendCommand(GC9106_DISPON); delay(150); sendCommand(GC9106_SLPOUT); delay(150); }
 

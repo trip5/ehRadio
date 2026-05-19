@@ -1,0 +1,8 @@
+[ "Firmware File & Board",
+  {
+    "name": "Your ehRadio's Name",
+    "defines": [
+      { "define": "FIRMWARE_NAME", "type": "text", "optional": false, "comment": "your ehRadio's name" }
+    ]
+  }
+]

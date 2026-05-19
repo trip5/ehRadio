@@ -13,6 +13,8 @@ class Telnet {
     void stop();
     void cleanupClients();
     void loop();
+    void logLine(const char *buf);
+    void logRaw(const char *buf);
     void print(const char *buf);
     void print(uint8_t id, const char *buf);
     void printf(const char *format, ...);

@@ -9,6 +9,7 @@
 #include "../../core/locale.h"
 #include "../../core/network.h"   //  for Clock widget
 #include "../../core/player.h"    //  for VU widget
+#include "../../core/utility.h"
 
 /************************
       FILL WIDGET
@@ -927,43 +928,28 @@ void PlayListWidget::init(ScrollWidget* current){
 }
 
 uint8_t PlayListWidget::_fillPlMenu(int from, uint8_t count) {
-  int     ls      = from;
-  uint8_t c       = 0;
-  bool    finded  = false;
-  if (config.playlistLength() == 0) {
+  uint16_t stationsCount = utility.playlistLength();
+  if (stationsCount == 0) {
     return 0;
   }
-  File playlist = config.SDPLFS()->open(REAL_PLAYL, "r");
-  File index = config.SDPLFS()->open(REAL_INDEX, "r");
-  while (true) {
-    if (ls < 1) {
-      ls++;
+
+  for (uint8_t c = 0; c < count; ++c) {
+    int stationId = from + c;
+    if (stationId < 1 || stationId > stationsCount) {
       _printPLitem(c, "");
-      c++;
       continue;
     }
-    if (!finded) {
-      index.seek((ls - 1) * 4, SeekSet);
-      uint32_t pos;
-      index.readBytes((char *) &pos, 4);
-      finded = true;
-      index.close();
-      playlist.seek(pos, SeekSet);
+
+    const char* stationName = utility.stationByNum((uint16_t)stationId);
+    if (config.store.numplaylist && stationName[0] != '\0') {
+      String label = String(stationId) + " " + stationName;
+      _printPLitem(c, label.c_str());
+    } else {
+      _printPLitem(c, stationName);
     }
-    bool pla = true;
-    while (pla) {
-      pla = playlist.available();
-      String stationName = playlist.readStringUntil('\n');
-      stationName = stationName.substring(0, stationName.indexOf('\t'));
-      if(config.store.numplaylist && stationName.length()>0) stationName = String(from+c)+" "+stationName;
-      _printPLitem(c, stationName.c_str());
-      c++;
-      if (c >= count) break;
-    }
-    break;
   }
-  playlist.close();
-  return c;
+
+  return count;
 }
 
 #ifndef DSP_LCD
@@ -983,7 +969,9 @@ uint8_t PlayListWidget::_fillPlMenu(int from, uint8_t count) {
       dsp.setTextColor(config.theme.playlist[plColor], config.theme.background);
       dsp.setCursor(TFT_FRAMEWDT, _plYStart + pos * _plItemHeight);
       dsp.fillRect(0, _plYStart + pos * _plItemHeight - 1, dsp.width(), _plItemHeight - 2, config.theme.background);
-      FUNCTIONLOG("Widget.Playlist", "%s", item);
+      #ifdef WIDGET_DEBUG
+        FUNCTIONLOG("Widget.Playlist", "%s", item);
+      #endif
       dsp.print(utf8To(item, true));
     }
   }

@@ -23,9 +23,9 @@
 //#define ES3C28P                      // ESP32-S3 ES3C28P Dev Board (attached 240x320 screen and ES8311 + FM8002E Decoder)
 
 
-/* --- FIRMWARE FILENAME & BOARD --- */
+/* --- Firmware File & Board --- */
 
-//  This block is here to assist in debugging... and to show the format of this section which is processed by fix_web_assets_and_releases.py to create Releases
+//  This shows the format of this section which is processed by fix_web_assets_and_releases.py to create Releases
 //
 //  filename used for OTA update                 ESP Board family (all boards in the same family will share bootloader, partitions)      * If any of these 3 fields are missing
 //  prefix is contributor/builds folder name + _  |                ESP chip family (used by flasher)                                     * (or not formatted exactly like this),
@@ -56,210 +56,171 @@
 #endif
 
 
-/* --- LED --- */
+/* --- SPI Bus Pins --- */
 
-#if defined(SH1106_PCM_REMOTE)
-  #define USE_BUILTIN_LED     false
-  #define LED_BUILTIN_S3      8
-  #define LED_INVERT          true
-#elif defined(ES3C28P)
-  #define USE_BUILTIN_LED     false
-  #define RGB_LED_PIN         42       /* for Adafruit NeoPixel */
-#else
-  /* LED config for all others - keep LEDs off */
-  #define USE_BUILTIN_LED     false
-  #define LED_BUILTIN_S3      255
-#endif
-
-
-/* --- SPI BUS PINS --- */
-/* When using SPI Displays (always SPIA Bus), VS1053 should probably use SPIB */
+/* SPI Displays always use A, so if SPI Display + VS1053 then VS1053 should probably use B */
 #if defined(ST7735_PCM_1BUTTON)
-  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
-  #define SPIB_SCK        21      /* Bus B pins (SD) */
-  #define SPIB_MISO       13
-  #define SPIB_MOSI       14
+  #define SPIA_DEFAULT_XMISO           /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK           21        /* Bus B pins (SD) */
+  #define SPIB_MISO          13
+  #define SPIB_MOSI          14
 #elif defined(SH1106_VS1053_3BUTTONS)
-  #define SPIA_DEFAULT            /* SCK 12, MISO 13, MOSI 11 */
-  #define SPIB_SCK        21      /* Bus B pins (SD) */
-  #define SPIB_MISO       2
-  #define SPIB_MOSI       1
+  #define SPIA_DEFAULT                 /* SCK 12, MISO 13, MOSI 11 */
+  #define SPIB_SCK           21        /* Bus B pins (SD) */
+  #define SPIB_MISO          2
+  #define SPIB_MOSI          1
 #elif defined(ILI9488_PCM_1BUTTON)
-  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
-  #define SPIB_SCK        21      /* Bus B pins (SD) */
-  #define SPIB_MISO       2
-  #define SPIB_MOSI       1
+  #define SPIA_DEFAULT_XMISO           /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK           21        /* Bus B pins (SD) */
+  #define SPIB_MISO          2
+  #define SPIB_MOSI          1
 #elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
-  #define SPIA_SCK        21      /* Bus A pins (SD) - no Bus B device, no need for default pins */
-  #define SPIA_MISO       13
-  #define SPIA_MOSI       14
+  #define SPIA_SCK           21        /* Bus A pins (SD) - no Bus B device, no need for default pins */
+  #define SPIA_MISO          13
+  #define SPIA_MOSI          14
 #elif defined(ES3C28P)
-  #define SPIA_DEFAULT_XMISO      /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
-  #define SPIB_SCK        38      /* Bus B pins (SD) */
-  #define SPIB_MISO       39
-  #define SPIB_MOSI       40
+  #define SPIA_DEFAULT_XMISO           /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
+  #define SPIB_SCK           38        /* Bus B pins (SD) */
+  #define SPIB_MISO          39
+  #define SPIB_MOSI          40
 #endif
 
 
-/* --- DISPLAY --- */
+/* --- Display --- */
 
 /* Display config for I2C displays */
 #if defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON) ||\
     defined(SH1106_VS1053_3BUTTONS)
-  #define DSP_MODEL       DSP_SH1106      /* Regular OLED - platformio.ini */
-  #define I2C_SDA         42
-  #define I2C_SCL         41
+  #define DSP_MODEL          DSP_SH1106 /* Regular OLED */
+  #define I2C_SDA            42
+  #define I2C_SCL            41
 #endif
 
 /* Display config for SPI displays */
 #if defined(ILI9488_PCM_1BUTTON)
-  #define DSP_MODEL       DSP_ILI9488     /* Big Display */
+  #define DSP_MODEL          DSP_ILI9488 /* Big Display */
   #define BIG_BOOT_LOGO
-  #define SCREEN_INVERT   true
-  #define TFT_DC          10
-  #define TFT_CS          9
-  #define BRIGHTNESS_PIN  4
-  #define TFT_RST         -1      /* set to -1 if connected to ESP EN pin */
-  #define DOWN_LEVEL      63      /* Maleksm's mod: brightness level 0 to 255, default 2 */
-  #define DOWN_INTERVAL   120     /* Maleksm's mod: seconds to dim, default 60 = 60 seconds */
+  #define TFT_DC             10
+  #define TFT_CS             9
+  #define BRIGHTNESS_PIN     4
+  #define TFT_RST            -1        /* set to -1 if connected to ESP EN pin */
+  #define DSP_DIMMING_ENABLED true
+  #define DSP_INVERT_QUIRK   true
   /* modify src\displays\displayILI9488.cpp -- in section DspCore::initDisplay and add setRotation(3); to do 180 degree rotation */
 #elif defined(ST7735_PCM_1BUTTON)
-  #define DSP_MODEL       DSP_ST7735          /* Red board / 1.8" Black Tab, if problems try one of DTYPE */
+  #define DSP_MODEL          DSP_ST7735         /* Red board / 1.8" Black Tab, if problems try one of DTYPE */
   /* DSP_ST7735 DTYPES BELOW (add if needed but so far, not needed)*/
-  //#define DTYPE           INITR_GREENTAB      /* add for Green Tab */
-  //#define DTYPE           INITR_REDTAB        /* add for Red Tab */
-  //#define DTYPE           INITR_144GREENTAB   /* add for 1.44" Green Tab */
-  //#define DTYPE           INITR_MINI160x80    /* add for 0.96" Mini 160x80 */
-  #define TFT_DC          10
-  #define TFT_CS          9
-  #define BRIGHTNESS_PIN  4       /* Red Smaller TFT doesn't have brightness control so leave commented? use unused pin? or 255? */
-  #define TFT_RST         -1      /* set to -1 if connected to ESP EN pin */
+  //#define DTYPE            INITR_GREENTAB      /* add for Green Tab */
+  //#define DTYPE            INITR_REDTAB        /* add for Red Tab */
+  //#define DTYPE            INITR_144GREENTAB   /* add for 1.44" Green Tab */
+  //#define DTYPE            INITR_MINI160x80    /* add for 0.96" Mini 160x80 */
+  #define TFT_DC             10
+  #define TFT_CS             9
+  #define BRIGHTNESS_PIN     255       /* Red Smaller TFT doesn't have brightness control so 255 */
+  #define TFT_RST            -1        /* set to -1 if connected to ESP EN pin */
+  #define DSP_DIMMING_ENABLED false
+  #define DSP_INVERT_QUIRK   true
 #elif defined(ES3C28P)
-  #define DSP_MODEL       DSP_ILI9341
-  #define SCREEN_INVERT   true
-  #define TFT_CS          10
-  #define TFT_DC          46
-  #define TFT_RST         -1
-  #define BRIGHTNESS_PIN  45
+  #define DSP_MODEL          DSP_ILI9341
+  #define TFT_CS             10
+  #define TFT_DC             46
+  #define TFT_RST            -1
+  #define BRIGHTNESS_PIN     45
+  #define DSP_INVERT_QUIRK   true
+  #define DSP_DIMMING_ENABLED true
 #endif
 
 
-/* --- AUDIO DECODER --- */
+/* --- Audio Decoder --- */
 
 #if defined(SH1106_VS1053_3BUTTONS)
-  #define VS1053_SPI      'A'     /* assign VS1053 to Bus A */
-  #define VS1053_CS       9
-  #define VS1053_DCS      14
-  #define VS1053_DREQ     10
-  #define VS1053_RST      -1      /* set to -1 if connected to ESP EN pin */
-  #define VS_PATCH_ENABLE false   /* For the 2.5V boards with wrong voltage regulator.  See here: https://github.com/e2002/yoradio/issues/108 */
-                                  /* Probably works on all */
+  #define VS1053_SPI         'A'       /* assign VS1053 to Bus A */
+  #define VS1053_CS          9
+  #define VS1053_DCS         14
+  #define VS1053_DREQ        10
+  #define VS1053_RST         -1        /* set to -1 if connected to ESP EN pin */
+  #define VS_PATCH_ENABLE    false     /* For the 2.5V boards with wrong voltage regulator.  See here: https://github.com/e2002/yoradio/issues/108 */
+                                       /* Probably works on all */
 #elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
-  #define I2S_DOUT        15
-  #define I2S_BCLK        7
-  #define I2S_LRC         6
+  #define I2S_DOUT           15
+  #define I2S_BCLK           7
+  #define I2S_LRC            6
 #elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
-  #define I2S_DOUT        12
-  #define I2S_BCLK        11
-  #define I2S_LRC         10
+  #define I2S_DOUT           12
+  #define I2S_BCLK           11
+  #define I2S_LRC            10
 #elif defined(ES3C28P)
-  #define USE_ES8311                  /* a special define for a special decoder */
-  /* ES3C28P I2S pins (from LCDWiki / user) */
-  #define I2S_MCLK        4
-  #define I2S_BCLK        5
-  #define I2S_DIN         6       /* mic in */
-  #define I2S_LRC         7
-  #define I2S_DOUT        8       /* speaker out */
-  #define PA_ENABLE       1       /* enable on-board power amp */
-  #define I2C_SCL         15
-  #define I2C_SDA         16
+  #define USE_ES8311
+  #define I2S_MCLK           4
+  #define I2S_BCLK           5
+  #define I2S_DIN            6
+  #define I2S_LRC            7
+  #define I2S_DOUT           8
+  #define ES8311_I2C_SDA     16        /* May be not needed? */
+  #define ES8311_I2C_SCL     15
   /* Audio amplifier control (IO1 low -> enable). 
      Default: write MUTE_VAL (HIGH) while stopped, write !MUTE_VAL while playing.
      Set MUTE_PIN to enable control (for FM8002/ES8311, etc). */
-  #define MUTE_PIN        1
-  #define MUTE_VAL        HIGH
+  #define MUTE_PIN           1
+  #define MUTE_VAL           HIGH
   /* Maximum I2S value to allow when mapping to ES8311 codec (0..254). */
   #define ES8311_MAX_I2S 180
   #define PLAYER_FORCE_MONO true
 #endif
 
 
-/* --- TOUCH --- */
-
-#if defined(ES3C28P)
-  // For some ES3C28P boards the touch controller may be D-FT6336G family — set to TS_MODEL_FT6336 if required
-  #define TS_MODEL            TS_MODEL_FT6336
-  #define TS_SDA              16
-  #define TS_SCL              15
-  #define TS_INT              17
-  #define TS_RST              18
-#endif
-
-
-/* --- BUTTONS --- */
+/* --- Input --- */
 
 #if defined(SH1106_VS1053_3BUTTONS)
-  #define ONE_CLICK_SWITCH true
-  #define BTN_UP          17      /* Prev, Move Up */
-  #define BTN_DOWN        18      /* Next, Move Down */
-  #define BTN_MODE        16      /* MODE switcher  */
-  #define WAKE_PIN        16      /* Wake from Deepsleep (actually using existing pins kind of disables sleep) */
+  #define BTN_UP             17
+  #define BTN_DOWN           18
+  #define BTN_MODE           16
+  #define WAKE_PIN           16
 #elif defined(SH1106_PCM_1BUTTON)
-  #define ONE_CLICK_SWITCH true
-  #define BTN_DOWN        17      /* Next, Move Down */
+  #define BTN_DOWN           17
 #elif defined(SH1106_PCM_REMOTE)
-  #define ONE_CLICK_SWITCH true
-  #define VOLUME_STEPS 2
-  #define BTN_UP          17      /* Prev, Move Up */
-  #define BTN_DOWN        16      /* Next, Move Down */
-  #define BTN_CENTER      18      /* ENTER, Play/pause  */
-  #define BTN_LEFT        7       /* VolDown, Prev */
-  #define BTN_RIGHT       15      /* VolUp, Next */
-  #define WAKE_PIN        18      /* Wake from Deepsleep (actually using existing pins kind of disables sleep) */
+  #define VOLUME_STEPS       2
+  #define BTN_UP             17
+  #define BTN_DOWN           16
+  #define BTN_PLAY           18
+  #define BTN_PREV           7
+  #define BTN_NEXT           15
+  #define WAKE_PIN           18
 #elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
-  #define ONE_CLICK_SWITCH true
-  #define BTN_DOWN		42		/* Next, Move Down */
+  #define BTN_DOWN		       42
 #elif defined(ES3C28P)
-  #define ONE_CLICK_SWITCH true
-  #define BTN_DOWN        0       /* BOOT button - Next, Move Down */
+  #define TS_MODEL           TS_MODEL_FT6336
+  #define TS_SDA             16
+  #define TS_SCL             15
+  #define TS_INT             17
+  #define TS_RST             18
+  #define BTN_DOWN           0
 #endif
-
-/* Extras: unused in all */
-//#define BTN_INTERNALPULLUP          false   /* Enable the weak pull up resistors */
-//#define BTN_LONGPRESS_LOOP_DELAY    200     /* Delay between calling DuringLongPress event */
-//#define BTN_CLICK_TICKS             300     /* Event Timing https://github.com/mathertel/OneButton#event-timing */
-//#define BTN_PRESS_TICKS             500     /* Event Timing https://github.com/mathertel/OneButton#event-timing */
-
-
-/* --- ROTARY ENCODER(S) --- */
 
 #if defined(SH1106_VS1053_3BUTTONS) || defined(ST7735_PCM_1BUTTON) ||\
     defined(ILI9488_PCM_1BUTTON) || defined(SH1106_PCM_REMOTE)
-  #define ENC_BTNR        40
-  #define ENC_BTNL        39
-  #define ENC_BTNB        38
+  #define ENC_BTNR           40
+  #define ENC_BTNL           39
+  #define ENC_BTNB           38
 #elif defined(SH1106_PCM_1BUTTON)
-  #define ENC_BTNR        7
-  #define ENC_BTNL        15
-  #define ENC_BTNB        16
+  #define ENC_BTNR           7
+  #define ENC_BTNL           15
+  #define ENC_BTNB           16
 #endif
 
-/* Extras: unused in all */
-//#define ENC_INTERNALPULLUP  true
-//#define ENC_HALFQUARD       falsedisplayILI9488
 
-/* 2nd Rotary Encoder: ?? None yet */
-//#define ENC2_BTNR       40
-//#define ENC2_BTNL       39
-//#define ENC2_BTNB       38
-/* Extras: unused */
-//#define ENC2_INTERNALPULLUP     true
-//#define ENC2_HALFQUARD          false
+/* --- Peripherals and Build Options --- */
 
+#if defined(SH1106_PCM_REMOTE)
+  #define LED_PIN            8
+  #define LED_INVERT         true
+#elif defined(ES3C28P)
+  #define RGB_LED_PIN        42
+#else
+  /* LED config for all others - keep LEDs off */
+#endif
 
-/* --- SD CARD --- */
-
-#if defined(ST7735_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS ) ||\
+#if defined(ST7735_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS) ||\
    defined(ILI9488_PCM_1BUTTON) || defined(ES3C28P)
   #define SD_SPI          'B'     /* assign SD to Bus B */
   #define SD_CS           47
@@ -267,6 +228,10 @@
   #define SD_SPI          'A'     /* assign SD to Bus B */
   #define SD_CS           47
 #endif
+
+#define MQTT_ENABLE
+// #define CORE_MONITOR
+// #define ALL_DEBUG_LOGS
 
 
 /* --- Battery --- */
@@ -288,36 +253,33 @@
 #endif
 
 
-/* --- USER DEFAULTS --- */
+/* --- User Defaults --- */
 
-#define SMART_START true
-#define SD_SHUFFLE true
-#define SHOW_AUDIO_INFO true
-#define SHOW_VU_METER true
-#define SS_PLAYING true
-#define WIFI_SCAN_BEST_RSSI true
-#define TIMEZONE_NAME   "Canada/Atlantic"
-#define TIMEZONE_POSIX  "AST4ADT,M3.2.0,M11.1.0"
-#define SNTP_1          "ca.pool.ntp.org"
-#define SNTP_2          "pool.ntp.org"
-#define WEATHER_LAT     "44.64738"       /* latitude */
-#define WEATHER_LON     "-63.58029"      /* longitude */
-#define MQTT_ENABLE
+#define ONE_CLICK_SWITCH     true
+#define SMART_START          true
+#define SD_SHUFFLE           true
+#define SHOW_AUDIO_INFO      true
+#define SHOW_VU_METER        true
+#define SS_PLAYING           true
+#define WIFI_SCAN_BEST_RSSI  true
+#define SNTP_1               "ca.pool.ntp.org"
+#define SNTP_2               "pool.ntp.org"
+#define WEATHER_LAT          "44.64738" /* latitude */
+#define WEATHER_LON          "-63.58029" /* longitude */
 #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv" /* can be CSV or JSON */
 
 
-/* --- SYSTEM OVERRIDES --- */
+/* --- Time Zone --- */
 
-#if defined(ST7735_PCM_1BUTTON) || defined(SH1106_PCM_REMOTE) ||\
-    defined(SH1106_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS ) ||\
-    defined(ILI9488_PCM_1BUTTON) || defined(ES3C28P)
-  #define LOOP_TASK_STACK_SIZE 16  /* Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks / 8KB is safe when using a VS1053 decoder */
-  #define CONFIG_ASYNC_TCP_QUEUE_SIZE 64
-  #define SEARCHRESULTS_BUFFER 1024*32 // 32KB matches chunk sizes from radio-browser.info but likely only good for ESP32-S3
-  #define SEARCHRESULTS_YIELDINTERVAL 0 // With a large buffer, skipping is almost eliminated with 0
-#endif
+#define TIMEZONE_NAME   "Canada/Atlantic"
+#define TIMEZONE_POSIX  "AST4ADT,M3.2.0,M11.1.0"
 
-/* --- USEFUL OPTIONS --- */
+/* Congratulations on searching around!  This myoptions.h really shows why I build the way that I do. */
+/* It interacts with platformio.ini with a -D[define] to build a bunch of firmwares.  Cool, right? */
+
+
+/* --- Other Useful Options --- */
+/* options.h will list even more but it can be pretty tough... */
 
 /* --- Hate the idea of your device reporting to Radio Browser API which stations you like? --- */
 //#define RADIO_BROWSER_NO_SEND_CLICKS
@@ -341,8 +303,7 @@
 /* Disable automatic runtime downloads from GitHub (ESPFileUpdater) for this board only. */
 //#define DISABLE_UPDATER
 
-/* --- MORE, UNUSED, UNKNOWN, NOTES --- */
-
+/* --- Locales Notes --- */
 //#define DSP_LANGUAGE_de_DE // sets the display language - see the available options by checking `displayL10n_*.h` files in `locale` folder 
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 

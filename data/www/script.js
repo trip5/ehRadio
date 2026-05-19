@@ -284,7 +284,12 @@ function onMessage(event) {
       });
     }else{
       if(typeof data.current !== 'undefined') { setCurrentItem(data.current); return; }
-      if(typeof data.file !== 'undefined') { generatePlaylist(data.file+"?"+new Date().getTime()); websocket.send('submitplaylistdone=1'); return; }
+        if(typeof data.file !== 'undefined') {
+          generatePlaylist(data.file+"?"+new Date().getTime());
+          websocket.send('submitplaylistdone=1');
+          websocket.send('getindex=1');
+          return;
+        }
       if(typeof data.act !== 'undefined'){ data.act.forEach(showclass=> { classEach(showclass, function(el) { el.classList.remove("hidden"); }); }); return; }
       Object.keys(data).forEach(key=>{
         setupElement(key, data[key]);
@@ -376,6 +381,9 @@ function setupElement(id,value){
         const event = new Event('change');
         element.dispatchEvent(event);
       }
+    }
+    if(typeof window.afterSetupElement === 'function') {
+      window.afterSetupElement(id, value, element);
     }
   }
 }
@@ -1211,21 +1219,20 @@ function continueLoading(mode){
           case "confirm-reset": showDangerConfirm('dz_reset'); break;
           case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...'), 15, true); break;
           case "format": websocket.send("format=1"); rebootSystem(t('msg_format_reboot', 'Format SPIFFS. Rebooting...'), 0, false); break;
-          case "reset":  websocket.send("reset=1"); rebootSystem(t('msg_reset_reboot', 'Reset settings. Rebooting...'), 15, true); break;
+          case "reset":  websocket.send("reset=1"); getId("settingscontent").innerHTML=`<h2>${t('msg_reset_reboot', 'Settings reset.')}</h2>`; setTimeout(() => location.reload(), 2000); break;
           case "shuffle": toggleShuffle(); break;
           case "ehdpsave": websocket.send(`ehdpname=${getId('ehdpname').value}`); break;
-          case "rebootmdns": {
+          case "restartmdns": {
             const mdnsValue = (getId('mdns').value || '').trim();
             websocket.send(`mdnsname=${mdnsValue}`);
-            websocket.send("rebootmdns=1");
-            rebootSystem(t('msg_rebooting', 'Rebooting...'), 0, false);
-            if (typeof redirectWhenReady === 'function') {
-              const mdnsHost = mdnsValue ? `${mdnsValue}.local` : hostname;
+            if (mdnsValue && typeof redirectWhenReady === 'function') {
+              const mdnsHost = `${mdnsValue}.local`;
+              getId("mdnsnamerow").innerHTML=`<h3 style="line-height: 37px;color: #aaa; margin: 0 auto;">${t('msg_mdns_restarting', 'mDNS restarting...')}</h3>`;
               redirectWhenReady({
-                waitSeconds: 20,
+                waitSeconds: 8,
                 readyHost: mdnsHost,
                 redirectUrl: `http://${mdnsHost}/settings.html`,
-                afterReadyDelayMs: 1000
+                afterReadyDelayMs: 500
               });
             }
             break;

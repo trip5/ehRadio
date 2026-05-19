@@ -5,49 +5,58 @@
 #include <Arduino.h>
 #include <stdio.h>
 
-#ifndef LOG_BUF_LEN
-  #define LOG_BUF_LEN 256
+#ifdef ESPFILEUPDATER_DEBUG
+  #define ESPFILEUPDATER_VERBOSE true
+#else
+  #define ESPFILEUPDATER_VERBOSE false
+#endif
+
+#define LOG_BUF_LEN 256
+
+#if defined(__GNUC__)
+  #define LOG_PRINTF_ATTR(fmtIndex, firstArg) __attribute__((format(printf, fmtIndex, firstArg)))
+#else
+  #define LOG_PRINTF_ATTR(fmtIndex, firstArg)
 #endif
 
 void logToTelnetLine(const char* text);
 void logToTelnetRaw(const char* text);
+void serialLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
+void functionLog(const char* category, const char* fmt, ...) LOG_PRINTF_ATTR(2, 3);
+void bootLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
+void bootLogX(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
+void errorLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
+void serialLogDot();
+void audioLog(const char* category, const char* fmt, ...) LOG_PRINTF_ATTR(2, 3);
 
 #define SERIALLOG(fmt, ...) \
   do { \
-    char _log_buf[LOG_BUF_LEN]; \
-    snprintf(_log_buf, sizeof(_log_buf), fmt, ##__VA_ARGS__); \
-    logToTelnetLine(_log_buf); \
-    Serial.printf("%s\r\n", _log_buf); \
+    serialLog(fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define FUNCTIONLOG(category, fmt, ...) \
   do { \
-    SERIALLOG("[%s]\t" fmt, category, ##__VA_ARGS__); \
+    functionLog(category, fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define BOOTLOG(fmt, ...) \
   do { \
-    FUNCTIONLOG("BOOT", fmt, ##__VA_ARGS__); \
+    bootLog(fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define BOOTLOGX(fmt, ...) \
   do { \
-    char _boot_payload[LOG_BUF_LEN]; \
-    char _boot_msg[LOG_BUF_LEN]; \
-    snprintf(_boot_payload, sizeof(_boot_payload), fmt, ##__VA_ARGS__); \
-    snprintf(_boot_msg, sizeof(_boot_msg), "[BOOT]\t%s", _boot_payload); \
-    logToTelnetRaw(_boot_msg); \
-    Serial.printf("%s", _boot_msg); \
+    bootLogX(fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define ERRORLOG(fmt, ...) \
   do { \
-    FUNCTIONLOG("ERROR", fmt, ##__VA_ARGS__); \
+    errorLog(fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define SERIALLOGDOT() \
   do { \
-    Serial.print("."); \
+    serialLogDot(); \
   } while (0)
 
 #endif

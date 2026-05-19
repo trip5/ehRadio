@@ -13,25 +13,32 @@
 #include "logging.h"
 #include "../displays/widgets/widgetsconfig.h"
 
-#define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
-#ifdef ESPFILEUPDATER_DEBUG
-  #define ESPFILEUPDATER_VERBOSE true
-#else
-  #define ESPFILEUPDATER_VERBOSE false
-#endif
+#define PLAYLIST_FILE        "playlist.csv"
+#define SSIDS_FILE           "wifi.csv"
+#define VERSION_FILE         "ehradio.ver"
+#define LASTSTATION_URL_FILE "laststation.url"
+#define TMP_FILE             "tmpfile.txt"
+#define INDEX_FILE           "index.dat"
+#define PLAYLIST_SD_FILE     "playlistsd.csv"
+#define INDEX_SD_FILE        "indexsd.dat"
 
-#define PLAYLIST_PATH     "/data/playlist.csv"
-#define SSIDS_PATH        "/data/wifi.csv"
-#define TMP_PATH          "/data/tmpfile.txt"
-#define INDEX_PATH        "/data/index.dat"
-#define PLAYLIST_SD_PATH  "/data/playlistsd.csv"
-#define INDEX_SD_PATH     "/data/indexsd.dat"
+#define PLAYLIST_PATH        "/data/" PLAYLIST_FILE
+#define SSIDS_PATH           "/data/" SSIDS_FILE
+#define VERSION_PATH         "/data/" VERSION_FILE
+#define LASTSTATION_URL_PATH "/data/" LASTSTATION_URL_FILE
+#define TMP_PATH             "/data/" TMP_FILE
+#define INDEX_PATH           "/data/" INDEX_FILE
+#define PLAYLIST_SD_PATH     "/data/" PLAYLIST_SD_FILE
+#define INDEX_SD_PATH        "/data/" INDEX_SD_FILE
+
 #define REAL_PLAYL   config.getMode()==PM_WEB?PLAYLIST_PATH:PLAYLIST_SD_PATH
 #define REAL_INDEX   config.getMode()==PM_WEB?INDEX_PATH:INDEX_SD_PATH
 
-#define WEATHERKEY_LENGTH 58
-#define MDNS_LENGTH 24
-#define EHDPNAME_LENGTH 24
+#define WEATHERKEY_LENGTH 64
+#define MDNS_LENGTH 32
+#define EHDPNAME_LENGTH 32
+
+#define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   #define ESP_ARDUINO_3 1
@@ -41,11 +48,6 @@
 enum playMode_e      : uint8_t  { PM_WEB=0, PM_SDCARD=1 };
 
 void u8fix(char *src);
-void cleanStaleSearchResults();
-void fixPlaylistFileEnding();
-void getRequiredFiles();
-void checkNewVersionFile();
-void startupServicesAsync(void* param);
 
 struct theme_t {
   uint16_t background;
@@ -69,6 +71,7 @@ struct theme_t {
   uint16_t ip;
   uint16_t vol;
   uint16_t rssi;
+  uint16_t battery;
   uint16_t bitrate;
   uint16_t volbarout;
   uint16_t volbarin;
@@ -114,6 +117,9 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      screensaverPlayingEnabled = SS_PLAYING;
   bool      screensaverPlayingBlank = SS_PLAYING_BLANK;
   uint16_t  screensaverPlayingTimeout = SS_PLAYING_TIME;
+  bool      dimmingEnabled = DIMMING_ENABLED;
+  uint16_t  dimmingTimeout = DIMMING_TIMEOUT;
+  uint8_t   dimmingBrightness = DIMMING_BRIGHTNESS;
   uint8_t   volsteps = VOLUME_STEPS;
   bool      fliptouch = TOUCH_FLIP;
   bool      dbgtouch = TOUCH_DEBUG;
@@ -172,9 +178,9 @@ struct configKeyMap {
 
 struct station_t
 {
-  char name[BUFLEN];
-  char url[BUFLEN];
-  char title[BUFLEN];
+  char name[STATION_FIELD_LENGTH];
+  char url[STATION_FIELD_LENGTH];
+  char title[STATION_FIELD_LENGTH];
   uint16_t bitrate;
   int  ovol;
 };
@@ -187,6 +193,11 @@ struct neworkItem
 
 class Config {
   public:
+    static const char* const wwwFiles[];
+    static const size_t wwwFilesCount;
+    static const char* const dataFiles[];
+    static const size_t dataFilesCount;
+
     config_t store;
     station_t station;
     theme_t   theme;
@@ -200,25 +211,23 @@ class Config {
     BitrateFormat configFmt = BF_UNKNOWN;
     neworkItem ssids[5];
     uint8_t ssidsCount = 0;
-    uint16_t sleepfor = 0;
     uint32_t sdResumePos = 0;
     bool     wwwFilesExist = false;
     uint16_t vuThreshold = 0;
     uint16_t screensaverTicks = 0;
     uint16_t screensaverPlayingTicks = 0;
     bool     isScreensaver = false;
+    bool     displayIsInverted = false;
+    bool     displayWasInverted = false;
     int      newConfigMode = 0;
-    char       ipBuf[16] = {0};
 
     void init();
     void loadPreferences();
+    void loadLastStationUrl();
     void changeMode(int newmode=-1);
     void initSDPlaylist();
-    bool spiffsCleanup();
-    char * ipToStr(IPAddress ip);
     void initPlaylistMode();
     void loadTheme();
-    void reset();
     void saveIR();
     void defaultSettings(const char *val, uint8_t clientId);
     void processDeferredSaves();
@@ -229,33 +238,15 @@ class Config {
     uint8_t setLastSSID(uint8_t val);
     void setTitle(const char* title);
     void setStation(const char* station);
-    void indexPlaylist();
-    void initPlaylist();
-    uint16_t playlistLength();
-    bool loadStation(uint16_t station);
-    uint16_t findStationByUrl(const char* url);
-    char * stationByNum(uint16_t num);
-    void escapeQuotes(const char* input, char* output, size_t maxLen);
-    bool parseCSV(const char* line, char* name, char* url, int &ovol);
-    bool parseWsCommand(const char* line, char* cmd, char* val, uint8_t cSize);
-    bool parseSsid(const char* line, char* ssid, char* pass);
-    bool saveWifi(const char* post);
-    bool addSsid(const char* ssid, const char* password);
-    bool importWifi();
-    bool initNetwork();
     void setBrightness(bool dosave=false);
     void setDspOn(bool dspon, bool saveval = true);
-    void doSleepW();
-    void sleepForAfter(uint16_t sleepfor, uint16_t sa=0);
-    void purgeUnwantedFiles();
-    void deleteMainwwwFile();
-    void updateFile(void* param, const char* localFile, const char* onlineFile, const char* updatePeriod, const char* simpleName);
-    void startupServices();
-    void updateLocaleFile();
-    bool updateLocaleFileAsync(const char* localeCode, uint8_t clientId);
     void bootInfo();
     void deleteOldKeys();
+    void setLastStationUrl(const char* url, uint16_t waitMs = 5000);
+    void flushLastStationUrl();
     void setBitrateFormat(BitrateFormat fmt) { configFmt = fmt; }
+    const char* getLastStationUrl() const { return _lastStationUrl; }
+    bool hasLastStationUrl() const { return _lastStationUrl[0] != '\0'; }
     uint16_t lastStation() {
       return getMode()==PM_WEB?store.lastStation:store.lastSdStation;
     }
@@ -292,9 +283,9 @@ class Config {
         prefs.getBytes(entry->key, oldValue, size);
         needSave = memcmp(oldValue, value, size) != 0;
       } else {
-        // Key not in NVS: skip write if value matches current struct field (= struct/compile-time default)
-        const void* currentField = (const uint8_t*)&store + entry->fieldOffset;
-        needSave = memcmp(currentField, value, size) != 0;
+        // Key not in NVS: always write. Comparing against the in-memory field is unreliable
+        // because saveValueButWait updates *field before queuing, so currentField == value always.
+        needSave = true;
       }
       if (needSave) {
         prefs.putBytes(entry->key, value, size);
@@ -365,7 +356,9 @@ class Config {
     bool _bootDone = false;
     bool _rtcFound = false;
     FS* _SDplaylistFS = nullptr;
-    Ticker   _sleepTimer;
+    char _lastStationUrl[MQTT_URL_SIZE + 1] = {0};
+    bool _lastStationUrlDirty = false;
+    uint32_t _lastStationUrlDueMs = 0;
 
     static constexpr uint8_t DEFERRED_SAVE_SLOTS = 8;
     struct DeferredSave {
@@ -377,17 +370,15 @@ class Config {
 
     bool _wwwFilesExist();
     void _initHW();
-    bool _readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& ovol);
+    bool _writeLastStationUrlFile();
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
     void setDefaults();
-    static void doSleep();
 
     uint16_t _randomStation() {
       randomSeed(esp_random() ^ millis());
       uint16_t station = random(1, store.countStation);
       return station;
     }
-    char _stationBuf[BUFLEN/2];
 };
 
 extern Config config;

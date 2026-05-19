@@ -4,10 +4,12 @@
 #include <ctype.h>
 #include <WiFi.h>
 #include "commandhandler.h"
+#include "audiohandlers.h"
 #include "config.h"
 #include "logging.h"
 #include "mqtt.h"
 #include "player.h"
+#include "utility.h"
 
 namespace {
 
@@ -133,11 +135,13 @@ void Mqtt::publishStatus() {
   if (mqttClient.connected()) {
     zeroBuf();
     sprintf(topic, "%s%s", config.store.mqtttopic, "status");
-    char name[BUFLEN/2];
-    char title[BUFLEN/2];
-    config.escapeQuotes(config.station.name, name, sizeof(name)-10);
-    config.escapeQuotes(config.station.title, title, sizeof(title)-10);
-    snprintf(status, sizeof(status), "{\"status\": %d, \"station\": %d, \"name\": \"%s\", \"title\": \"%s\", \"on\": %d}", player.status()==PLAYING?1:0, config.lastStation(), name, title, config.store.dspon);
+    char name[statusNameSize] = {0};
+    char title[statusTitleSize] = {0};
+    char imageUrl[statusImageUrlSize] = {0};
+    utility.escapeQuotes(config.station.name, name, sizeof(name));
+    utility.escapeQuotes(config.station.title, title, sizeof(title));
+    utility.escapeQuotes(audioHandlers.getArtworkImageUrl(), imageUrl, sizeof(imageUrl));
+    snprintf(status, sizeof(status), "{\"status\": %d, \"station\": %d, \"name\": \"%s\", \"title\": \"%s\", \"image_url\": \"%s\", \"on\": %d}", player.status()==PLAYING?1:0, config.lastStation(), name, title, imageUrl, config.store.dspon);
     mqttClient.publish(topic, 0, true, status);
   }
 }
@@ -170,16 +174,16 @@ void Mqtt::_onDisconnect(AsyncMqttClientDisconnectReason reason) {
 
 void Mqtt::_onMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
   if (len == 0) return;
-  if (len > MQTT_BURL_SIZE) return;
+  if (len > MQTT_URL_SIZE) return;
 
-  char raw[MQTT_BURL_SIZE + 1];
+  char raw[MQTT_URL_SIZE + 1];
   memcpy(raw, payload, len);
   raw[len] = '\0';
   trimInPlace(raw);
   if (raw[0] == '\0') return;
 
   char command[65] = {0};
-  char value[MQTT_BURL_SIZE + 1] = {0};
+  char value[MQTT_URL_SIZE + 1] = {0};
   if (!parsePayloadToCommand(raw, command, sizeof(command), value, sizeof(value))) {
     FUNCTIONLOG("MQTT", "Ignored unparsed payload: %s", raw);
     return;

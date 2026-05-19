@@ -8,12 +8,15 @@
 
 #if (defined(BATTERY_PIN) && (BATTERY_PIN!=255)) || (defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255))
 #include <stdarg.h>
+#include "backlightcontrols.h"
 #include "common.h"
 #include "config.h"
 #include "display.h"
 #include "logging.h"
 #include "netserver.h"
+#include "player.h"
 #include "telnet.h"
+#include "utility.h"
 
 /* File-level compile-time constants (instance state is in Battery class members — see battery.h) */
 static const int pctSampleMax = 64;
@@ -26,18 +29,18 @@ static const uint32_t dividerRatioX100 = (uint32_t)(BATTERY_DIVIDER_RATIO * 100.
 // Debug helper (wrap telnet printf to avoid code duplication)
 void Battery::dbgPrintf(const char* fmt, ...) {
   #ifdef BATTERY_DEBUG
-  char dbgBuf[160];
-  va_list ap; va_start(ap, fmt);
-  vsnprintf(dbgBuf, sizeof(dbgBuf), fmt, ap);
-  va_end(ap);
-  // Callers may include trailing CR/LF in format strings; strip them before FUNCTIONLOG.
-  size_t len = strlen(dbgBuf);
-  while (len > 0 && (dbgBuf[len - 1] == '\r' || dbgBuf[len - 1] == '\n')) {
-    dbgBuf[--len] = '\0';
-  }
-  FUNCTIONLOG("Battery", "%s", dbgBuf);
+    char dbgBuf[160];
+    va_list ap; va_start(ap, fmt);
+    vsnprintf(dbgBuf, sizeof(dbgBuf), fmt, ap);
+    va_end(ap);
+    // Callers may include trailing CR/LF in format strings; strip them before FUNCTIONLOG.
+    size_t len = strlen(dbgBuf);
+    while (len > 0 && (dbgBuf[len - 1] == '\r' || dbgBuf[len - 1] == '\n')) {
+      dbgBuf[--len] = '\0';
+    }
+    FUNCTIONLOG("Battery", "%s", dbgBuf);
   #else
-  (void)fmt;
+    (void)fmt;
   #endif
 }
 
@@ -788,14 +791,12 @@ void Battery::readAndUpdate() {
     char status_line[256];  // Increased buffer for extended charging info with peak/trough/rate
     formatStatusLine(battStatus, status_line, sizeof(status_line), false);
     FUNCTIONLOG("Battery", "%s", status_line);
-
   #endif
 } 
 
 void Battery::loop() {
   // If neither ADC nor charge pin is present, nothing to do
   if (!inited && !chargePinPresent) return;
-
   unsigned long now = millis();
 
   // If no ADC but charge pin is present, just poll the charge pin for changes
@@ -813,13 +814,98 @@ void Battery::loop() {
     }
     return;
   }
-  
   // Update at configured interval
   if (now - lastRead < BATTERY_UPDATE_INTERVAL) return;
   lastRead = now;
-  
   readAndUpdate();
 } 
+
+void Battery::applyPowerPolicy() {
+  #if BRIGHTNESS_PIN==255
+    return;
+  #else
+    BatteryStatus bat = getStatus();
+    bool isChargingPresent = bat.charging || bat.charging_inferred;
+
+    if (bat.critical_battery && !criticalBatteryHandled && millis() > 300000) {
+      if (isChargingPresent) {
+        if (!criticalBatterySkipped) {
+          criticalBatterySkipped = true;
+          FUNCTIONLOG("Battery", "Critical (%d%%) but charging - skipping deep sleep", bat.percentage);
+        }
+      } else {
+        criticalBatterySkipped = false;
+        criticalBatteryHandled = true;
+        FUNCTIONLOG("Battery", "Critical (%d%%) - entering deep sleep", bat.percentage);
+        player.sendCommand({PR_STOP, 0});
+        display.putRequest(NEWMODE, SCREENBLANK);
+        delay(200);
+        display.deepsleep();
+
+        BatteryStatus finalCheck = getStatus();
+        if (finalCheck.charging) {
+          FUNCTIONLOG("Battery", "Charging detected before sleep - aborting deep sleep");
+          criticalBatteryHandled = false;
+          return;
+        }
+        utility.doSleepW();
+      }
+    }
+
+    if (bat.low_battery && !lowBatteryHandled) {
+      if (isChargingPresent) {
+        #ifdef BATTERY_DEBUG
+          FUNCTIONLOG("Battery", "Low (%d%%) but charging/trend detected - skipping forced brightness", bat.percentage);
+        #endif
+      } else {
+        lowBatteryHandled = true;
+        if (!savedBrightnessValid) {
+          savedBrightness = config.store.brightness;
+          savedBrightnessValid = true;
+        }
+        uint8_t targetPct = (uint8_t)BATTERY_DIM_BRIGHTNESS;
+        if (targetPct > 100) targetPct = 100;
+        FUNCTIONLOG("Battery", "Low (%d%%) - forcing brightness to %d%%", bat.percentage, targetPct);
+        config.store.brightness = targetPct;
+        #if BRIGHTNESS_PIN!=255 && DSP_DIMMING_ENABLED
+          backlightControls.restart();
+        #else
+          config.setBrightness(false);
+        #endif
+      }
+    }
+
+    int recover = (int)BATTERY_LOW_THRESHOLD + (int)BATTERY_RECOVER_HYSTERESIS_PCT;
+    if (recover > 100) recover = 100;
+    uint8_t recoverPct = (uint8_t)recover;
+    bool recoveredByPct = (bat.percentage >= recoverPct) && !bat.critical_battery;
+
+    if ((lowBatteryHandled && recoveredByPct) || (criticalBatteryHandled && !bat.critical_battery) || isChargingPresent) {
+      if (lowBatteryHandled) {
+        lowBatteryHandled = false;
+        if (savedBrightnessValid) {
+          config.store.brightness = savedBrightness;
+          savedBrightnessValid = false;
+          FUNCTIONLOG("Battery", "Recovered - restoring brightness to %d%%", config.store.brightness);
+        }
+        #if BRIGHTNESS_PIN!=255 && DSP_DIMMING_ENABLED
+          backlightControls.restart();
+        #else
+          config.setBrightness(false);
+        #endif
+      }
+
+      if (criticalBatteryHandled && !bat.critical_battery) {
+        criticalBatteryHandled = false;
+        #if BRIGHTNESS_PIN!=255 && DSP_DIMMING_ENABLED
+          backlightControls.restart();
+        #else
+          config.setBrightness(false);
+        #endif
+      }
+    }
+  #endif
+}
 
 // Force immediate recalculation and update status (used by CLI after calibration)
 void Battery::recalcNow() {

@@ -1,43 +1,30 @@
 #include "options.h"
 #include <Arduino.h>
 #include "config.h"
+#include "backlightcontrols.h"
 #include "controls.h"
 #include "display.h"
 #include "logging.h"
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "utility.h"
 
 
-#define ISPUSHBUTTONS BTN_LEFT!=255 || BTN_CENTER!=255 || BTN_RIGHT!=255 || ENC_BTNB!=255 || BTN_UP!=255 || BTN_DOWN!=255 || ENC2_BTNB!=255 || BTN_MODE!=255
+#define ISPUSHBUTTONS BTN_PREV!=255 || BTN_PLAY!=255 || BTN_NEXT!=255 || ENC_BTNB!=255 || BTN_UP!=255 || BTN_DOWN!=255 || ENC2_BTNB!=255 || BTN_MODE!=255
 #if ISPUSHBUTTONS
   #include <OneButton.h>
-  OneButton button[] {OneButton(BTN_LEFT, true, BTN_INTERNALPULLUP), OneButton(BTN_CENTER, true, BTN_INTERNALPULLUP), OneButton(BTN_RIGHT, true, BTN_INTERNALPULLUP), OneButton(ENC_BTNB, true, ENC_INTERNALPULLUP), OneButton(BTN_UP, true, BTN_INTERNALPULLUP), OneButton(BTN_DOWN, true, BTN_INTERNALPULLUP), OneButton(ENC2_BTNB, true, ENC2_INTERNALPULLUP), OneButton(BTN_MODE, true, BTN_INTERNALPULLUP)};
+  OneButton button[] {OneButton(BTN_PREV, true, BTN_PREV_PULLUP), OneButton(BTN_PLAY, true, BTN_PLAY_PULLUP), OneButton(BTN_NEXT, true, BTN_NEXT_PULLUP), OneButton(ENC_BTNB, true, ENC_BTNB_PULLUP), OneButton(BTN_UP, true, BTN_UP_PULLUP), OneButton(BTN_DOWN, true, BTN_DOWN_PULLUP), OneButton(ENC2_BTNB, true, ENC2_BTNB_PULLUP), OneButton(BTN_MODE, true, BTN_MODE_PULLUP)};
   constexpr uint8_t nrOfButtons = sizeof(button) / sizeof(button[0]);
-#endif
-
-#if ENC_HALFQUARD==false
-  #define ENCODER_STEPS 4
-#elif ENC_HALFQUARD==true
-  #define ENCODER_STEPS 2
-#elif ENC_HALFQUARD==255
-  #define ENCODER_STEPS 1
-#endif
-#if ENC2_HALFQUARD==false
-  #define ENCODER2_STEPS 4
-#elif ENC2_HALFQUARD==true
-  #define ENCODER2_STEPS 2
-#elif ENC2_HALFQUARD==255
-  #define ENCODER2_STEPS 1
 #endif
 
 #if (ENC_BTNL!=255 && ENC_BTNR!=255) || (ENC2_BTNL!=255 && ENC2_BTNR!=255)
   #include <AiEsp32RotaryEncoder.h>
   #if (ENC_BTNL!=255 && ENC_BTNR!=255)
-    AiEsp32RotaryEncoder encoder = AiEsp32RotaryEncoder(ENC_BTNL, ENC_BTNR, ENCODER_STEPS, ENC_INTERNALPULLUP);
+    AiEsp32RotaryEncoder encoder = AiEsp32RotaryEncoder(ENC_BTNL, ENC_BTNR, ENC_STEPS, ENC_PULLUP);
   #endif
   #if (ENC2_BTNL!=255 && ENC2_BTNR!=255)
-    AiEsp32RotaryEncoder encoder2 = AiEsp32RotaryEncoder(ENC2_BTNL, ENC2_BTNR, ENCODER2_STEPS, ENC2_INTERNALPULLUP);
+    AiEsp32RotaryEncoder encoder2 = AiEsp32RotaryEncoder(ENC2_BTNL, ENC2_BTNR, ENC_STEPS, ENC2_PULLUP);
   #endif
 #endif
 
@@ -96,7 +83,7 @@ void Controls::init() {
 
   #if ISPUSHBUTTONS
     for (int i = 0; i < nrOfButtons; i++) {
-      if ((i == 0 && BTN_LEFT == 255) || (i == 1 && BTN_CENTER == 255) || (i == 2 && BTN_RIGHT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) || (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255)) continue;
+      if ((i == 0 && BTN_PREV == 255) || (i == 1 && BTN_PLAY == 255) || (i == 2 && BTN_NEXT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) || (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255)) continue;
       button[i].attachClick(btnClickCb, (void*)i);
       button[i].attachDoubleClick(btnDoubleClickCb, (void*)i);
       button[i].attachLongPressStart(btnLongPressStartCb, (void*)i);
@@ -123,7 +110,7 @@ void Controls::init() {
 void Controls::loop() {
   if (display.mode()==UPDATING || display.mode()==SDCHANGE) return;
   if (SD_CS==255 && display.mode()==LOST) return;
-  if (ctrls_on_loop) ctrls_on_loop();
+  backlightControls.controlsLoop();
   #if ENC_BTNL!=255
     encoder1Loop();
   #endif
@@ -132,7 +119,7 @@ void Controls::loop() {
   #endif
   #if ISPUSHBUTTONS
     for (unsigned i = 0; i < nrOfButtons; i++) {
-      if ((i == 0 && BTN_LEFT == 255) || (i == 1 && BTN_CENTER == 255) || (i == 2 && BTN_RIGHT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) || (i == 6 && ENC2_BTNB == 255)) continue;
+      if ((i == 0 && BTN_PREV == 255) || (i == 1 && BTN_PLAY == 255) || (i == 2 && BTN_NEXT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) || (i == 6 && ENC2_BTNB == 255)) continue;
       button[i].tick();
       if (lpId >= 0) {
         if (DSP_MODEL == DSP_DUMMY && (lpId == 4 || lpId == 5)) continue;
@@ -175,7 +162,8 @@ void Controls::loop() {
             return;
           }
           display.putRequest(NEWMODE, STATIONS);
-          while(display.mode() != STATIONS) {delay(10);}
+          unsigned long _modeWaitStart = millis();
+          while(display.mode() != STATIONS && millis()-_modeWaitStart<2000) {delay(10);}
         }
         controlsEvent(encoderDelta > 0, encoderDelta);
       }
@@ -198,10 +186,10 @@ void Controls::encoder2Loop() {
 
 void Controls::irBlink() {
   #if IR_PIN!=255
-    if (REAL_LEDBUILTIN==255) return;
+    if (LED_PIN==255) return;
     if (player.status() == STOPPED) {
       for (uint8_t i = 0; i < 7; i++) {
-        digitalWrite(REAL_LEDBUILTIN, !digitalRead(REAL_LEDBUILTIN));
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         delay(100);
       }
     }
@@ -215,7 +203,7 @@ void Controls::irNumber(uint8_t num) {
     display.putRequest(NEWMODE, NUMBERS);
     if (display.numOfNextStation > UINT16_MAX / 10) return;
     s = display.numOfNextStation * 10 + num;
-    if (s > config.playlistLength()) return;
+    if (s > utility.playlistLength()) return;
     display.numOfNextStation = s;
     display.putRequest(NEXTSTATION, s);
   #endif
@@ -374,7 +362,7 @@ void Controls::onBtnLongPressStart(int id) {
         break;
       }
     case EVT_BTNMODE: {
-        //config.doSleepW();
+        //utility.doSleepW();
         display.putRequest(NEWMODE, SLEEPING);
         break;
       }
@@ -392,7 +380,7 @@ void Controls::onBtnLongPressStop(int id) {
         break;
       }
     case EVT_BTNMODE: {
-        config.doSleepW();
+        utility.doSleepW();
         break;
       }
     default:
@@ -464,7 +452,7 @@ void Controls::controlsEvent(bool toRight, int8_t volDelta) {
   if (display.mode() == STATIONS) {
     display.resetQueue();
     int p = toRight ? display.currentPlItem + 1 : display.currentPlItem - 1;
-    uint16_t cs = config.playlistLength();
+    uint16_t cs = utility.playlistLength();
     if (p < 1) p = cs;
     if (p > cs) p = 1;
     display.currentPlItem = p;

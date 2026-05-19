@@ -15,12 +15,12 @@
 // uppercase GLCD glyph index so that `uppercase` display behavior is consistent.
 
 char* utf8Latin(const char* str, bool uppercase) {
-  static char out[BUFLEN];
+  static char out[STATION_FIELD_LENGTH];
   
   // Stream-based conversion: process directly from input
   // Read from str[r], write to out[w] to avoid double buffer copy
   int r = 0, w = 0;
-  while (str[r] && w < BUFLEN - 1) {
+  while (str[r] && w < STATION_FIELD_LENGTH - 1) {
     uint8_t b1 = (uint8_t)str[r];
 
     // ASCII pass-through (uppercase if requested)
@@ -60,7 +60,7 @@ char* utf8Latin(const char* str, bool uppercase) {
         case 0x9E: case 0xBE: code = 0x96; break; // Þ / þ -> 0x96
         default: code = 0; break;
       }
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = (char)code;
         r += 2;
         continue;
@@ -92,7 +92,7 @@ char* utf8Latin(const char* str, bool uppercase) {
         case 0xBD: case 0xBE: code = 0xA8; break; // Ľ / ľ -> 0xA8
         default: code = 0; break;
       }
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = (char)code;
         r += 2;
         continue;
@@ -124,7 +124,7 @@ char* utf8Latin(const char* str, bool uppercase) {
         case 0xBD: case 0xBE: code = 0xBA; break; // Ž / ž -> 0xBA
         default: code = 0; break;
       }
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = (char)code;
         r += 2;
         continue;
@@ -140,7 +140,7 @@ char* utf8Latin(const char* str, bool uppercase) {
         case 0x9A: case 0x9B: code = 0xBC; break; // Ț / ț -> 0xBC
         default: code = 0; break;
       }
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = (char)code;
         r += 2;
         continue;
@@ -166,7 +166,7 @@ char* utf8Latin(const char* str, bool uppercase) {
         case 0xA6: case 0x86: code = 0xBF; break; // Φ / φ -> 0xBF (U+03A6)
         default: code = 0; break;
       }
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = (char)code;
         r += 2;
         continue;
@@ -178,7 +178,7 @@ char* utf8Latin(const char* str, bool uppercase) {
     if ((b1 == 0xD0 || b1 == 0xD1) && str[r + 1]) {
       uint8_t b2 = (uint8_t)str[r + 1];
       char ascii = transliterateCyrillic(b1, b2);
-      if (ascii && w < BUFLEN - 1) {
+      if (ascii && w < STATION_FIELD_LENGTH - 1) {
         out[w++] = ascii;
         r += 2;
         continue;
@@ -191,7 +191,7 @@ char* utf8Latin(const char* str, bool uppercase) {
       uint8_t b2 = (uint8_t)str[r + 1];
       char seq[3] = {(char)b1, (char)b2, 0};
       char* tr = utf8ToAscii(seq);
-      for (char* p = tr; *p && w < BUFLEN - 1; ++p) {
+      for (char* p = tr; *p && w < STATION_FIELD_LENGTH - 1; ++p) {
         out[w++] = uppercase ? toupper((unsigned char)*p) : *p;
       }
       r += 2;

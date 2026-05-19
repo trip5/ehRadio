@@ -1,19 +1,26 @@
 #include "options.h"
 #include "player.h"
+#include "audiohandlers.h"
 #include "config.h"
 #include "logging.h"
 #include "telnet.h"
 #include "display.h"
 #include "sdmanager.h"
+#include "backlightcontrols.h"
 #include "netserver.h"
 #include "network.h"
 #include "locale.h"
+#include "rgbled.h"
+#include "utility.h"
+
 #ifdef USE_ES8311
   #include "../libraries/ES8311_Audio/es8311.h"
 #endif
 #ifdef USE_NEXTION
   #include "../displays/nextion.h"
 #endif
+
+#define NETWORK_TASK_STACK_BYTES (NETWORK_TASK_STACK_SIZE * 1024)
 
 Player player;
 QueueHandle_t playerQueue;
@@ -35,7 +42,6 @@ QueueHandle_t playerQueue;
   #endif
 #endif
 
-
 void Player::init() {
   BOOTLOGX("player.init\t");
   playerQueue=NULL;
@@ -44,9 +50,7 @@ void Player::init() {
   setOutputPins(false);
   delay(50);
   memset(_plError, 0, PLERR_LN);
-  #ifdef MQTT_ENABLE
-    if (config.store.mqttenable) memset(burl, 0, MQTT_BURL_SIZE);
-  #endif
+  memset(burl, 0, sizeof(burl));
   if (MUTE_PIN!=255) pinMode(MUTE_PIN, OUTPUT);
   #if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
     #ifndef USE_AUDIO_ESP32_DAC
@@ -57,8 +61,10 @@ void Player::init() {
     if (VS1053_RST>0) ResetChip();
     begin();
   #endif
-  #ifdef USE_ES8311
-    if (es.begin(I2C_SDA, I2C_SCL, 400000UL)) es.setVolume(0); /* Start codec muted (or low) to avoid very loud output before saved volume is applied */
+  setAudioTaskCore(AUDIO_CORE);
+  #if defined(USE_ES8311) && defined(ES8311_I2C_SDA) && defined(ES8311_I2C_SCL)
+    // leaving this here but it seems not needed?  (this is the only operation that uses I2C on ES8311)
+    if (es.begin(ES8311_I2C_SDA, ES8311_I2C_SCL, 400000UL)) es.setVolume(0); /* Start codec muted (or low) to avoid very loud output before saved volume is applied */
   #endif
   setBalance(config.store.balance);
   setTone(config.store.bass, config.store.middle, config.store.treble);
@@ -78,12 +84,15 @@ void Player::init() {
   #ifdef CONNECT_HTTP_HTTPS_TIMEOUT // macro must be two numbers separated by a comma, ie: 1700, 3700
     setConnectionTimeout(CONNECT_HTTP_HTTPS_TIMEOUT);
   #endif
+  if (rgbled.isInitialized()) rgbled.stopped();
   SERIALLOG("done");
 }
 
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
-  xQueueSend(playerQueue, &request, PLQ_SEND_DELAY);
+  if (xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) != pdTRUE) {
+    FUNCTIONLOG("Queue", "playerQueue overflow, dropped cmd=%d", request.type);
+  }
 }
 
 void Player::resetQueue() {
@@ -108,6 +117,7 @@ void Player::_stop(bool alreadyStopped) {
   if (config.getMode()==PM_SDCARD && !alreadyStopped) config.sdResumePos = player.getFilePos();
   _status = STOPPED;
   setOutputPins(false);
+  if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   if (!hasError()) config.setTitle((display.mode()==LOST || display.mode()==UPDATING)?"":LANG::const_PlStopped);
   config.station.bitrate = 0;
   config.setBitrateFormat(BF_UNKNOWN);
@@ -120,7 +130,8 @@ void Player::_stop(bool alreadyStopped) {
   setDefaults();
   if (!alreadyStopped) stopSong();
   if (!lockOutput) stopInfo();
-  if (player_on_stop_play) player_on_stop_play();
+  rgbled.stopped();
+  backlightControls.restart();
 }
 
 void Player::initHeaders(const char *file) {
@@ -149,7 +160,6 @@ void Player::loop() {
           config.setLastStation((uint16_t)requestP.payload);
         }
         _play((uint16_t)abs(requestP.payload)); 
-        if (player_on_station_change) player_on_station_change(); 
         break;
       }
       case PR_TOGGLE: {
@@ -182,9 +192,7 @@ void Player::loop() {
         break;
       }
       case PR_BURL: {
-        #ifdef MQTT_ENABLE
-          if ((config.store.mqttenable) && (strlen(burl)>0)) browseUrl();
-        #endif
+        if (strlen(burl) > 0) browseUrl();
         break;
       }
       default: break;
@@ -198,18 +206,42 @@ void Player::loop() {
       network.lostPlaying = true;
       // Launch retry task if not already running
       if (streamRetryTaskHandle == NULL) {
-        xTaskCreatePinnedToCore(retryStreamConnection, "streamRetry", 1024 * 4, NULL, 1, &streamRetryTaskHandle, 0);
+        xTaskCreatePinnedToCore(retryStreamConnection, "streamRetry", NETWORK_TASK_STACK_BYTES, NULL, NET_TASK_PRIORITY, &streamRetryTaskHandle, NETWORK_CORE);
       }
     }
     _stop(true);
   }
-  #ifdef MQTT_ENABLE
-    if ((config.store.mqttenable) && (strlen(burl)>0)) browseUrl();
-  #endif
+  if (strlen(burl) > 0) browseUrl();
+}
+
+bool Player::queueResolvedUrl(const char* url) {
+  if (url == nullptr || url[0] == '\0') return false;
+  if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) return false;
+
+  uint16_t foundIdx = utility.findStationByUrl(url);
+  if (foundIdx > 0) {
+    sendCommand({PR_PLAY, foundIdx});
+    return true;
+  }
+
+  if (strlen(url) >= sizeof(burl)) return false;
+  strlcpy(burl, url, sizeof(burl));
+  sendCommand({PR_BURL, 0});
+  return true;
+}
+
+bool Player::resumeLastWebSource() {
+  if (config.hasLastStationUrl() && queueResolvedUrl(config.getLastStationUrl())) return true;
+
+  uint16_t stationId = config.lastStation();
+  if (stationId == 0) return false;
+
+  sendCommand({PR_PLAY, stationId});
+  return true;
 }
 
 void Player::setOutputPins(bool isPlaying) {
-  if (REAL_LEDBUILTIN!=255) digitalWrite(REAL_LEDBUILTIN, LED_INVERT?!isPlaying:isPlaying);
+  if (LED_PIN!=255) digitalWrite(LED_PIN, LED_INVERT?!isPlaying:isPlaying);
   bool _ml = MUTE_LOCK?!MUTE_VAL:(isPlaying?!MUTE_VAL:MUTE_VAL);
   if (MUTE_PIN!=255) digitalWrite(MUTE_PIN, _ml);
 }
@@ -219,6 +251,7 @@ void Player::_play(uint16_t stationId) {
   setError("");
   setDefaults();
   remoteStationName = false;
+  if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   config.setDspOn(1);
   config.vuThreshold = 0;
   //display.putRequest(PSTOP);
@@ -229,7 +262,7 @@ void Player::_play(uint16_t stationId) {
   }
   setOutputPins(false);
   //config.setTitle(config.getMode()==PM_WEB?const_PlConnect:"");
-  if (!config.loadStation(stationId)) return;
+  if (!utility.loadStation(stationId)) return;
   config.setTitle(config.getMode()==PM_WEB?LANG::const_PlConnect:"[next track]");
   config.station.bitrate=0;
   config.setBitrateFormat(BF_UNKNOWN);
@@ -238,7 +271,6 @@ void Player::_play(uint16_t stationId) {
   display.putRequest(DBITRATE);
   display.putRequest(NEWSTATION);
   netserver.requestOnChange(STATION, 0);
-  netserver.loop();
   bool isConnected = false;
   if (config.getMode()==PM_SDCARD && SD_CS!=255) {
     isConnected=connecttoFS(sdman,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min);
@@ -257,6 +289,8 @@ void Player::_play(uint16_t stationId) {
     if (config.getMode()==PM_SDCARD) {
       config.sdResumePos = 0;
       config.saveValue(&config.store.lastSdStation, stationId);
+    } else {
+      config.setLastStationUrl(config.station.url);
     }
     //config.setTitle("");
     netserver.requestOnChange(MODE, 0);
@@ -267,7 +301,8 @@ void Player::_play(uint16_t stationId) {
     #ifdef RADIO_BROWSER_SEND_CLICKS
       if (config.getMode()==PM_WEB) radioBrowserSendClick(config.station.url);
     #endif
-    if (player_on_start_play) player_on_start_play();
+    rgbled.playing();
+    backlightControls.restart();
   } else {
     ERRORLOG("Error connecting to %s", config.station.url);
     SET_PLAY_ERROR("Error connecting to %s", config.station.url);
@@ -276,15 +311,15 @@ void Player::_play(uint16_t stationId) {
 }
 
 void Player::browseUrl() {
-  #ifdef MQTT_ENABLE
-    playUrl(burl);
-    memset(burl, 0, MQTT_BURL_SIZE);
-  #endif
+  if (burl[0] == '\0') return;
+  playUrl(burl);
+  memset(burl, 0, sizeof(burl));
 }
 
 void Player::playUrl(const char* url) {
   setError("");
   remoteStationName = true;
+  if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   config.setDspOn(1);
   resumeAfterUrl = _status==PLAYING;
   display.putRequest(PSTOP);
@@ -292,6 +327,7 @@ void Player::playUrl(const char* url) {
   config.setTitle(LANG::const_PlConnect);
   if (connecttohost(url)) {
     _status = PLAYING;
+    config.setLastStationUrl(url);
     config.setTitle("");
     netserver.requestOnChange(MODE, 0);
     setOutputPins(true);
@@ -299,7 +335,8 @@ void Player::playUrl(const char* url) {
     #ifdef RADIO_BROWSER_SEND_CLICKS
       radioBrowserSendClick(url);
     #endif
-    if (player_on_start_play) player_on_start_play();
+    rgbled.playing();
+    backlightControls.restart();
   } else {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);
@@ -310,7 +347,7 @@ void Player::playUrl(const char* url) {
 void Player::prev() {
   uint16_t lastStation = config.lastStation();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
-    if (lastStation == 1) config.lastStation(config.playlistLength()); else config.lastStation(lastStation-1);
+    if (lastStation == 1) config.lastStation(utility.playlistLength()); else config.lastStation(lastStation-1);
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }
@@ -318,9 +355,9 @@ void Player::prev() {
 void Player::next() {
   uint16_t lastStation = config.lastStation();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
-    if (lastStation == config.playlistLength()) config.lastStation(1); else config.lastStation(lastStation+1);
+    if (lastStation == utility.playlistLength()) config.lastStation(1); else config.lastStation(lastStation+1);
   } else {
-    config.lastStation(random(1, config.playlistLength()));
+    config.lastStation(random(1, utility.playlistLength()));
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }
@@ -329,7 +366,11 @@ void Player::toggle() {
   if (_status == PLAYING) {
     sendCommand({PR_STOP, 0});
   } else {
-    sendCommand({PR_PLAY, config.lastStation()});
+    if (config.getMode() == PM_WEB) {
+      resumeLastWebSource();
+    } else {
+      sendCommand({PR_PLAY, config.lastStation()});
+    }
   }
 }
 

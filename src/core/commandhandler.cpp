@@ -1,5 +1,6 @@
 #include "options.h"
 #include <Arduino.h>
+#include "backlightcontrols.h"
 #include "battery.h"
 #include "commandhandler.h"
 #include "config.h"
@@ -10,6 +11,7 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "utility.h"
 
 CommandHandler cmd;
 
@@ -54,15 +56,10 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "middle"))      { int v = atoi(value); v = (v < -16) ? -16 : (v > 16 ? 16 : v); config.setTone(config.store.bass, (int8_t)v, config.store.treble); return true; }
   if (cmdIs(command, "bass"))        { int v = atoi(value); v = (v < -16) ? -16 : (v > 16 ? 16 : v); config.setTone((int8_t)v, config.store.middle, config.store.treble); return true; }
   if (cmdIs(command, "volume", "vol")) { int v = atoi(value); config.store.volume = v < 0 ? 0 : (v > 254 ? 254 : v); player.setVol(v); return true; }
-  if (cmdIs(command, "turnoff"))     { bool sst = config.store.smartstart; config.setDspOn(false); player.sendCommand({PR_STOP, 0}); delay(100); config.saveValue(&config.store.smartstart, sst); return true; }
-  if (cmdIs(command, "turnon"))      { config.setDspOn(true); if (config.store.smartstart) player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
+  if (cmdIs(command, "turnoff"))     { bool sst = config.store.smartstart; config.setDspOn(false); backlightControls.restart(); player.sendCommand({PR_STOP, 0}); delay(100); config.saveValue(&config.store.smartstart, sst); return true; }
+  if (cmdIs(command, "turnon"))      { config.setDspOn(true); backlightControls.restart(); if (config.store.smartstart) { if (config.getMode() == PM_WEB) player.resumeLastWebSource(); else player.sendCommand({PR_PLAY, config.lastStation()}); } return true; }
   if (cmdIs(command, "burl", "playurl")) {
-    if (value[0] == '\0') return false;
-    if (strlen(value) > MQTT_BURL_SIZE) return false;
-    if (strncmp(value, "http://", 7) != 0 && strncmp(value, "https://", 8) != 0) return false;
-    strlcpy(player.burl, value, MQTT_BURL_SIZE + 1);
-    player.sendCommand({PR_BURL, 0});
-    return true;
+    return player.queueResolvedUrl(value);
   }
   if (cmdIs(command, "sdpos")) {
     if (config.getMode()==PM_SDCARD) {
@@ -72,9 +69,9 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     }
     return true;
   }
-  if (cmdIs(command, "playstation", "play")) { uint16_t id = atoi(value); uint16_t cs = config.playlistLength(); id = (id < 1) ? 1 : (id > cs ? cs : id); player.sendCommand({PR_PLAY, id}); return true; }
+  if (cmdIs(command, "playstation", "play")) { uint16_t id = atoi(value); uint16_t cs = utility.playlistLength(); id = (id < 1) ? 1 : (id > cs ? cs : id); player.sendCommand({PR_PLAY, id}); return true; }
   if (cmdIs(command, "shuffle"))         { config.saveValue(&config.store.sdshuffle, static_cast<bool>(atoi(value))); if (config.store.sdshuffle) player.next(); return true; }
-  if (cmdIs(command, "start"))           { player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
+  if (cmdIs(command, "start"))           { if (config.getMode() == PM_WEB) return player.resumeLastWebSource(); player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
   if (cmdIs(command, "stop"))            { player.sendCommand({PR_STOP, 0}); return true; }
   if (cmdIs(command, "sleep")) {
     int sfor = 0;
@@ -84,22 +81,21 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
       safter = 0;
     }
     if (sfor <= 0 || safter < 0) return false;
-    config.sleepForAfter(static_cast<uint16_t>(sfor), static_cast<uint16_t>(safter));
+    utility.sleepForAfter(static_cast<uint16_t>(sfor), static_cast<uint16_t>(safter));
     return true;
   }
   if (cmdIs(command, "mode"))            { config.changeMode(atoi(value)); return true; }
-  if (cmdIs(command, "reset") && cid==0) { config.reset(); return true; }
   if (cmdIs(command, "submitplaylist"))  { player.sendCommand({PR_STOP, 0}); return true; }
   if (cmdIs(command, "submitplaylistdone")) {
-    char currentUrl[BUFLEN];
-    strncpy(currentUrl, config.station.url, BUFLEN);
-    uint16_t newLen = config.playlistLength();
-    uint16_t foundIdx = config.findStationByUrl(currentUrl);
+    char currentUrl[STATION_FIELD_LENGTH];
+    strncpy(currentUrl, config.station.url, STATION_FIELD_LENGTH);
+    uint16_t newLen = utility.playlistLength();
+    uint16_t foundIdx = utility.findStationByUrl(currentUrl);
     if (foundIdx > 0) {
-      config.loadStation(foundIdx);
+      utility.loadStation(foundIdx);
     } else if (newLen > 0) {
       player.sendCommand({PR_STOP, 0});
-      config.loadStation(1);
+      utility.loadStation(1);
     } else {
       player.sendCommand({PR_STOP, 0});
       config.setLastStation(0);
@@ -111,7 +107,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   /* Hidden Websockets */
   if (cmdIs(command, "getindex"))    { netserver.requestOnChange(GETINDEX, cid); return true; }
   if (cmdIs(command, "getactive"))   { netserver.requestOnChange(GETACTIVE, cid); return true; }
-  if (cmdIs(command, "clearspiffs")) { config.spiffsCleanup(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
+  if (cmdIs(command, "clearspiffs")) { utility.cleanupSpiffs(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
 
   /* Options: Load Settings */
   if (cmdIs(command, "getsystem"))   { netserver.requestOnChange(GETSYSTEM, cid); return true; }
@@ -131,8 +127,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "ehdpname"))    { config.saveValue(config.store.ehdpname, value); network.ehDPinit(); return true; }
   if (cmdIs(command, "softap"))      { config.saveValue(&config.store.softapdelay, static_cast<uint8_t>(atoi(value))); return true; }
-  if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); return true; }
-  if (cmdIs(command, "rebootmdns"))  { delay(1500); ESP.restart(); return true; }
+  if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); netserver.restartMdns(); return true; }
 
   /* Options: Battery */
   if (cmdIs(command, "battref"))     { if (battery.calibrate(atoi(value))) netserver.requestOnChange(GETBATTERY, cid); return true; }
@@ -140,12 +135,23 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
 
   /* Options: Screen */
   if (cmdIs(command, "flipscreen"))    { config.saveValue(&config.store.flipscreen, static_cast<bool>(atoi(value))); display.flip(); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "invertdisplay")) { config.saveValue(&config.store.invertdisplay, static_cast<bool>(atoi(value))); display.invert(); return true; }
+  if (cmdIs(command, "invertdisplay")) { config.saveValue(&config.store.invertdisplay, static_cast<bool>(atoi(value))); return true; } //display.invert();
   if (cmdIs(command, "numplaylist"))   { config.saveValue(&config.store.numplaylist, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "clock12"))       { config.saveValue(&config.store.clock12, static_cast<bool>(atoi(value))); display.putRequest(CLOCK); return true; }
   if (cmdIs(command, "volumepage"))    { config.saveValue(&config.store.volumepage, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "brightness", "dim"))    { if (!config.store.dspon) netserver.requestOnChange(DSPON, 0); int bri=atoi(value); config.store.brightness = (uint8_t)(bri < 0 ? 0 : (bri > 100 ? 100 : bri)); config.setBrightness(true); return true; }
-  if (cmdIs(command, "screenon", "dspon"))    { config.setDspOn(static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "brightness", "dim")) {
+    if (!config.store.dspon) netserver.requestOnChange(DSPON, 0);
+    int bri=atoi(value);
+    config.store.brightness = (uint8_t)(bri < 0 ? 0 : (bri > 100 ? 100 : bri));
+    if (config.store.dimmingBrightness > config.store.brightness) {
+      config.store.dimmingBrightness = config.store.brightness;
+      config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 4000);
+    }
+    config.setBrightness(true);
+    backlightControls.restart();
+    return true;
+  }
+  if (cmdIs(command, "screenon", "dspon"))    { config.setDspOn(static_cast<bool>(atoi(value))); backlightControls.restart(); return true; }
   if (cmdIs(command, "contrast"))      { int con=atoi(value); config.saveValueButWait(&config.store.contrast, (uint8_t)(con < 0 ? 0 : (con > 100 ? 100 : con)), 4000); display.setContrast(); return true; }
   /* De-deplicated helper for screensaver / No-op for LCDs */
   auto screensaverHelper = []() {
@@ -159,6 +165,17 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "screensaverplayingenabled")) { config.saveValue(&config.store.screensaverPlayingEnabled, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
   if (cmdIs(command, "screensaverplayingtimeout")) { config.saveValue(&config.store.screensaverPlayingTimeout, static_cast<uint16_t>(constrain(atoi(value), 1, 1080))); screensaverHelper(); return true; }
   if (cmdIs(command, "screensaverplayingblank"))   { config.saveValue(&config.store.screensaverPlayingBlank, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
+  if (cmdIs(command, "dimmingenabled"))            { config.saveValue(&config.store.dimmingEnabled, static_cast<bool>(atoi(value))); backlightControls.restart(); return true; }
+  if (cmdIs(command, "dimmingbrightness"))         {
+    int dimbr=atoi(value);
+    const uint8_t clampedBrightness = static_cast<uint8_t>(dimbr < 0 ? 0 : (dimbr > 100 ? 100 : dimbr));
+    const uint8_t effectiveBrightness = (clampedBrightness > config.store.brightness) ? config.store.brightness : clampedBrightness;
+    config.store.dimmingBrightness = effectiveBrightness;
+    config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 4000);
+    backlightControls.restart();
+    return true;
+  }
+  if (cmdIs(command, "dimmingtimeout"))            { config.saveValue(&config.store.dimmingTimeout, static_cast<uint16_t>(constrain(atoi(value), 5, 65520))); backlightControls.restart(); return true; }
 
   /* Options: Controls */
   if (cmdIs(command, "volsteps"))          { config.saveValue(&config.store.volsteps, static_cast<uint8_t>(atoi(value))); return true; }
@@ -169,7 +186,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "irtlp"))             { controls.setIRTolerance(static_cast<uint8_t>(atoi(value))); return true; }
 
   /* Options: Locale */
-  if (cmdIs(command, "locale_webui")) { config.updateLocaleFileAsync(value, cid); return true; }
+  if (cmdIs(command, "locale_webui")) { utility.updateLocaleFileAsync(value, cid); return true; }
   if (cmdIs(command, "tz_name"))      { config.saveValue(config.store.tz_name, value); return true; }
   if (cmdIs(command, "tzposix"))      { config.saveValue(config.store.tzposix, value); network.forceTimeSync = true; network.requestTimeSync(true); return true; }
   if (cmdIs(command, "sntp1"))        { config.saveValue(config.store.sntp1, value); network.forceTimeSync = true; network.requestTimeSync(true); return true; }
@@ -177,7 +194,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "timeinterval")) { config.saveValue(&config.store.timesyncinterval, static_cast<uint8_t>(atoi(value))); return true; }
 
   /* Options: Weather */
-  if (cmdIs(command, "wenable"))       { config.saveValue(&config.store.showweather, static_cast<bool>(atoi(value))); network.trueWeather=false; network.forceWeather=true; display.putRequest(SHOWWEATHER); return true; }
+  if (cmdIs(command, "wenable"))       { config.saveValue(&config.store.showweather, static_cast<bool>(atoi(value))); network.forceWeather=true; display.putRequest(SHOWWEATHER); return true; }
   if (cmdIs(command, "wen_feelslike")) { config.saveValue(&config.store.weatherfeels, (atoi(value) != 0)); network.buildWeatherString(); return true; }
   if (cmdIs(command, "wen_humidity"))  { config.saveValue(&config.store.weatherhumidity, (atoi(value) != 0)); network.buildWeatherString(); return true; }
   if (cmdIs(command, "wen_pressure"))  { config.saveValue(&config.store.weatherpressure, (atoi(value) != 0)); network.buildWeatherString(); return true; }
@@ -187,7 +204,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "wspeedunit"))    { config.saveValue(config.store.weatherwindspeed, value); network.buildWeatherString(); return true; }
   if (cmdIs(command, "wapi"))          { config.saveValue(config.store.weatherapi, value); network.forceWeather = true; return true; }
   if (cmdIs(command, "wlang"))         { config.saveValue(config.store.weatherlang, value); network.forceWeather = true; return true; }
-  if (cmdIs(command, "wkey"))          { config.saveValue(config.store.weatherkey, value); network.trueWeather=false; display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "wkey"))          { config.saveValue(config.store.weatherkey, value); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "winterval"))     { config.saveValue(&config.store.weathersyncinterval, static_cast<uint8_t>(atoi(value))); return true; }
   if (cmdIs(command, "wlat"))          { config.saveValue(config.store.weatherlat, value); config.store.weatherelevation = 0; config.saveValue(&config.store.weatherelevation, static_cast<int16_t>(0)); network.forceWeather = true; return true; }
   if (cmdIs(command, "wlon"))          { config.saveValue(config.store.weatherlon, value); config.store.weatherelevation = 0; config.saveValue(&config.store.weatherelevation, static_cast<int16_t>(0)); network.forceWeather = true; return true; }
@@ -205,7 +222,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   /* Options: Danger Zone */
   if (cmdIs(command, "reboot", "boot"))  { ESP.restart(); return true; }
   if (cmdIs(command, "format"))  { player.sendCommand({PR_STOP, 0}); SPIFFS.format(); ESP.restart(); return true; }
-  if (cmdIs(command, "reset"))   { config.defaultSettings(value, cid); return true; }
+  if (cmdIs(command, "reset"))   { config.defaultSettings(value, cid); return true; } // also used by Section resets
 
   /* IR Recorder */
   #if IR_PIN!=255
@@ -216,18 +233,32 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
 
   /* Curated Playlists */
   if (cmdIs(command, "loadindex")) {
-    extern TaskHandle_t g_curatedTaskHandle;
-    if (g_curatedTaskHandle == NULL) {
-      xTaskCreate(vTaskFetchCuratedIndex, "curatedIndex", 8192, NULL, 5, &g_curatedTaskHandle);
+    extern volatile TaskHandle_t g_curatedTaskHandle;
+    extern portMUX_TYPE taskSpawnMux;
+    if (ESP.getFreeHeap() > MIN_MALLOC) {
+      taskENTER_CRITICAL(&taskSpawnMux);
+      if (g_curatedTaskHandle == NULL) {
+        xTaskCreatePinnedToCore(vTaskFetchCuratedIndex, "curatedIndex", 8192, NULL, LOW_TASK_PRIORITY, (TaskHandle_t*)&g_curatedTaskHandle, NETWORK_CORE);
+      }
+      taskEXIT_CRITICAL(&taskSpawnMux);
     }
     return true;
   }
   if (cmdIs(command, "loadplaylist")) {
-    extern TaskHandle_t g_curatedTaskHandle;
-    if (g_curatedTaskHandle == NULL) {
-      char* filename = new char[strlen(value) + 1];
-      strcpy(filename, value);
-      xTaskCreate(vTaskFetchCuratedPlaylist, "curatedPlaylist", 8192, filename, 5, &g_curatedTaskHandle);
+    extern volatile TaskHandle_t g_curatedTaskHandle;
+    extern portMUX_TYPE taskSpawnMux;
+    if (ESP.getFreeHeap() > MIN_MALLOC) {
+      taskENTER_CRITICAL(&taskSpawnMux);
+      if (g_curatedTaskHandle == NULL) {
+        char* filename = new char[strlen(value) + 1];
+        if (filename) {
+          strcpy(filename, value);
+          if (xTaskCreatePinnedToCore(vTaskFetchCuratedPlaylist, "curatedPlaylist", 8192, filename, LOW_TASK_PRIORITY, (TaskHandle_t*)&g_curatedTaskHandle, NETWORK_CORE) != pdPASS) {
+            delete[] filename;
+          }
+        }
+      }
+      taskEXIT_CRITICAL(&taskSpawnMux);
     }
     return true;
   }

@@ -46,7 +46,7 @@ void DspCore::flip(){
   setRotation(config.store.flipscreen?2:0);
 #endif
 }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ oled_command(SH110X_DISPLAYOFF); }
 void DspCore::wake(void){ oled_command(SH110X_DISPLAYON); }
 

@@ -1,0 +1,37 @@
+[ "Audio Decoder",
+  {
+    "name": "VS1053 (SPI Audio Decoder)",
+    "pins": [ "VS1053_CS", "VS1053_DCS", "VS1053_DREQ" ],
+    "defines": [
+      { "define": "VS1053_SPI", "type": "spi", "comment": "assign VS1053 to SPI bus (if SPI display, don't put on Bus A / if no SPI display, put VS1053 alone on Bus A)" },
+      { "define": "VS1053_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 for EN pin"},
+      { "define": "VS_PATCH_ENABLE", "type": "boolean", "default": false, "comment": "for the 2.5V boards with wrong voltage regulator. See: https://github.com/e2002/yoradio/issues/108}" }
+    ],
+    "lib_deps": "",
+    "build_src_filter": "+<libraries/VS1053_Audio/*>"
+  },
+  {
+    "name": "I2S (PCM I2S Decoder)",
+    "pins": [ "I2S_DOUT", "I2S_BCLK", "I2S_LRC" ],
+    "defines": [
+      { "define": "MUTE_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin MUTE is attached to (255 for unused)" }
+    ],
+    "lib_deps": "",
+    "build_src_filter": "+<libraries/I2S_Audio/*>"
+  },
+  {
+    "name": "ES8311 (PCM I2S Mono Decoder)",
+    "define": "USE_ES8311",
+    "pins": [ "I2S_MCLK", "I2S_BCLK", "I2S_LRC", "I2S_DOUT", "I2S_DIN" ],
+    "defines": [
+      { "define": "MUTE_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin MUTE is attached to (255 for unused)"},
+      { "define": "ES8311_I2C_SDA", "type": "pin", "default": 255, "optional": true, "comment": "may fix volume control on boot"},
+      { "define": "ES8311_I2C_SCL", "type": "pin", "default": 255, "optional": true, "comment": "may fix volume control on boot"},
+      { "define": "MUTE_VAL", "type": "enum", "options": ["HIGH", "LOW"], "default": "HIGH", "optional": false, "comment": "enables turning off audio amplifier" },
+      { "define": "ES8311_MAX_I2S", "type": "numeric", "min": 0, "max": 255, "default": 180, "optional": false, "comment": "maximum I2S value to allow when mapping to ES8311 codec (0..254)"},
+      { "define": "PLAYER_FORCE_MONO", "type": "boolean", "default": true, "optional": false, "comment": "forces VU meter to mono mode"}
+    ],
+    "lib_deps": "",
+    "build_src_filter": "+<libraries/I2S_Audio/*>+<libraries/ES8311_Audio/*>"
+  }
+]

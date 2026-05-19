@@ -1,4 +1,5 @@
 #include "options.h"
+#include <ctype.h>
 #include <cstddef>
 #include <ESPFileUpdater.h>
 #include <nvs_flash.h>
@@ -6,6 +7,7 @@
   #include <driver/rtc_io.h>
 #endif
 #include "config.h"
+#include "backlightcontrols.h"
 #include "controls.h"
 #include "display.h"
 #include "logging.h"
@@ -13,7 +15,9 @@
 #include "network.h"
 #include "player.h"
 #include "rtcsupport.h"
+#include "startup.h"
 #include "telnet.h"
+#include "utility.h"
 #include "../displays/tools/utf8_common.h"
 #ifdef USE_SD
   #include "sdmanager.h"
@@ -23,16 +27,14 @@
 #endif
 
 
-// List of required web asset files
-static const char* wwwFiles[] = {"curated.js", "dragpl.js", "locale.js", "options.js", "script.js", "script2.js", "search.js",
-                                 "logo.svg", "icon.png", "locales.json", "rb_srvrs.json", "timezones.json", "style.css", "theme.css",
-                                 "curated.html", "irrecord.html", "options.html", "search.html", "updform.html",
-                                 "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
-static const size_t wwwFilesCount = sizeof(wwwFiles) / sizeof(wwwFiles[0]);
+const char* const Config::wwwFiles[] = {"curated.js", "dragpl.js", "locale.js", "options.js", "script.js", "script2.js", "search.js",
+                                        "logo.svg", "icon.png", "locales.json", "rb_srvrs.json", "timezones.json", "style.css", "theme.css",
+                                        "curated.html", "irrecord.html", "options.html", "search.html", "updform.html",
+                                        "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
+const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 
-// List of optional data files
-static const char* dataFiles[] = {"playlist.csv", "wifi.csv"};
-static const size_t dataFilesCount = sizeof(dataFiles) / sizeof(dataFiles[0]);
+const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, LASTSTATION_URL_FILE};
+const size_t Config::dataFilesCount = sizeof(Config::dataFiles) / sizeof(Config::dataFiles[0]);
 
 #if defined(SPI_BUS_SECONDARY)
   SPIClass SPIB(SPI_BUS_SECONDARY);
@@ -42,6 +44,14 @@ Config config;
 
 bool wasUpdated(ESPFileUpdater::UpdateStatus status) { return status == ESPFileUpdater::UPDATED; }
 
+namespace {
+
+bool isHttpUrl(const char* url) {
+  return url != nullptr && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+}
+
+} // namespace
+
 void u8fix(char *src) {
   if (strlen(src) == 0) return;
   char last = src[strlen(src)-1]; 
@@ -50,8 +60,8 @@ void u8fix(char *src) {
 
 bool Config::_wwwFilesExist() {
   char fullpath[64];
-  for (size_t i = 0; i < wwwFilesCount; i++) {
-    sprintf(fullpath, "/www/%s", wwwFiles[i]);
+  for (size_t i = 0; i < Config::wwwFilesCount; i++) {
+    sprintf(fullpath, "/www/%s", Config::wwwFiles[i]);
     String gzPath = String(fullpath) + ".gz";
     bool plainExists = SPIFFS.exists(fullpath);
     bool gzExists = SPIFFS.exists(gzPath);
@@ -90,53 +100,14 @@ void Config::init() {
     return;
   }
   BOOTLOG("SPIFFS mounted");
-  
-  // Check version file and determine if files need updating
-  const char* versionPath = "/data/ehradio.ver";
-  String storedVersion = "";
-  if (SPIFFS.exists(versionPath)) {
-    File verFile = SPIFFS.open(versionPath, "r");
-    if (verFile) {
-      storedVersion = verFile.readStringUntil('\n');
-      storedVersion.trim();
-      verFile.close();
-    }
-  }
-  // if version is correct or file doesn't exist (which may indiciate SPIFFS files installed via flash), check files
-  if (storedVersion == String(RADIOVERSION)) {
-    wwwFilesExist = _wwwFilesExist();
-  } else if (!SPIFFS.exists(versionPath)) {
-    BOOTLOG("New install detected.");
-    wwwFilesExist = _wwwFilesExist();
-  } else {
-    BOOTLOG("Version mismatch detected (stored: %s, current: %s)", storedVersion.c_str(), RADIOVERSION);
-    wwwFilesExist = false;
-  }
-  // if version is incorrect or version file doesn't exist, need to clean SPIFFS and make the version file
-  if (!wwwFilesExist || !SPIFFS.exists(versionPath)) {
-    purgeUnwantedFiles();
-    File verFile = SPIFFS.open(versionPath, "w");
-    if (verFile) {
-        verFile.println(RADIOVERSION);
-        verFile.close();
-        BOOTLOG("Version file updated to %s", RADIOVERSION);
-    }
-  }
-  if (!wwwFilesExist) {
-    deleteMainwwwFile(); // Forces update process or (kind of) makes SPIFFS unusable
-    #ifndef UPDATEURL
-      BOOTLOG("SPIFFS is missing files!");
-    #else
-      BOOTLOG("SPIFFS is missing files.  Will attempt to get files from online...");
-    #endif
-  }
-  // Note: Locale file mismatch will be handled async in startupServices() after WiFi connects
+  startup.checkVerAndSpiffs();
 
   #ifdef USE_SD
     _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&SPIFFS:_SDplaylistFS);
   #else
     _SDplaylistFS = &SPIFFS;
   #endif
+  loadLastStationUrl();
 }
 
 void Config::loadPreferences() {
@@ -144,15 +115,14 @@ void Config::loadPreferences() {
   // Check config_set first
   uint16_t configSetValue = 0;
   size_t configSetRead = prefs.getBytes("cfgset", &configSetValue, sizeof(configSetValue));
-  if (configSetRead != sizeof(configSetValue)) {
-    // Preferences is empty, save config_set and version
-    FUNCTIONLOG("Prefs", "Empty NVS detected, initializing config_set...");
-    saveValue(&store.config_set, store.config_set);
-  } else if (configSetValue != 4262) {
-    // config_set present but not valid, reset config
-    FUNCTIONLOG("Prefs", "Invalid config_set (%u), resetting config...", configSetValue);
+  if (configSetRead != sizeof(configSetValue) || configSetValue != 4262) {
+    if (configSetRead != sizeof(configSetValue)) {
+      FUNCTIONLOG("Prefs", "NVS Sentinel absent (NVS uninitialized or corrupt), resetting to defaults...");
+    } else {
+      FUNCTIONLOG("Prefs", "Invalid config_set (%u), resetting config...", configSetValue);
+    }
     prefs.end();
-    reset();
+    setDefaults();
     return;
   }
   // Load all fields in keyMap
@@ -163,6 +133,70 @@ void Config::loadPreferences() {
   }
   deleteOldKeys();
   prefs.end();
+}
+
+void Config::loadLastStationUrl() {
+  memset(_lastStationUrl, 0, sizeof(_lastStationUrl));
+  _lastStationUrlDirty = false;
+  _lastStationUrlDueMs = 0;
+
+  if (!SPIFFS.exists(LASTSTATION_URL_PATH)) return;
+
+  File file = SPIFFS.open(LASTSTATION_URL_PATH, "r");
+  if (!file) return;
+
+  String url = file.readStringUntil('\n');
+  file.close();
+  url.trim();
+  if (!isHttpUrl(url.c_str())) {
+    FUNCTIONLOG("Config.lasturl", "Ignoring invalid laststation.url contents");
+    return;
+  }
+
+  strlcpy(_lastStationUrl, url.c_str(), sizeof(_lastStationUrl));
+}
+
+void Config::setLastStationUrl(const char* url, uint16_t waitMs) {
+  char normalizedUrl[MQTT_URL_SIZE + 1] = {0};
+  if (url != nullptr) strlcpy(normalizedUrl, url, sizeof(normalizedUrl));
+  utility.stripWhitespace(normalizedUrl);
+
+  if (normalizedUrl[0] != '\0' && !isHttpUrl(normalizedUrl)) return;
+
+  bool changed = strcmp(_lastStationUrl, normalizedUrl) != 0;
+  if (changed) {
+    strlcpy(_lastStationUrl, normalizedUrl, sizeof(_lastStationUrl));
+  }
+
+  if (changed || _lastStationUrlDirty) {
+    _lastStationUrlDirty = true;
+    _lastStationUrlDueMs = millis() + waitMs;
+  }
+}
+
+bool Config::_writeLastStationUrlFile() {
+  if (_lastStationUrl[0] == '\0') {
+    if (!SPIFFS.exists(LASTSTATION_URL_PATH)) return true;
+    return SPIFFS.remove(LASTSTATION_URL_PATH);
+  }
+
+  File file = SPIFFS.open(LASTSTATION_URL_PATH, "w");
+  if (!file) return false;
+
+  bool wroteAll = file.print(_lastStationUrl) == strlen(_lastStationUrl);
+  file.close();
+  return wroteAll;
+}
+
+void Config::flushLastStationUrl() {
+  if (!_lastStationUrlDirty) return;
+
+  if (_writeLastStationUrlFile()) {
+    _lastStationUrlDirty = false;
+    return;
+  }
+
+  _lastStationUrlDueMs = millis() + 1000;
 }
 
 void Config::changeMode(int newmode) {
@@ -204,7 +238,8 @@ void Config::changeMode(int newmode) {
     if (getMode()==PM_SDCARD) {
       if (pir) player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, SDCHANGE);
-      while(display.mode()!=SDCHANGE)
+      unsigned long _modeWaitStart = millis();
+      while(display.mode()!=SDCHANGE && millis()-_modeWaitStart<2000)
         delay(10);
       delay(50);
     }
@@ -226,7 +261,6 @@ void Config::changeMode(int newmode) {
   #endif //#ifdef USE_SD
 }
 
-
 void Config::initSDPlaylist() {
   #ifdef USE_SD
     //store.countStation = 0;
@@ -245,22 +279,9 @@ void Config::initSDPlaylist() {
   #endif //#ifdef USE_SD
 }
 
-bool Config::spiffsCleanup() {
-  bool ret = (SPIFFS.exists(PLAYLIST_SD_PATH)) || (SPIFFS.exists(INDEX_SD_PATH)) || (SPIFFS.exists(INDEX_PATH));
-  if (SPIFFS.exists(PLAYLIST_SD_PATH)) SPIFFS.remove(PLAYLIST_SD_PATH);
-  if (SPIFFS.exists(INDEX_SD_PATH)) SPIFFS.remove(INDEX_SD_PATH);
-  if (SPIFFS.exists(INDEX_PATH)) SPIFFS.remove(INDEX_PATH);
-  return ret;
-}
-
-char * Config::ipToStr(IPAddress ip) {
-  snprintf(ipBuf, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-  return ipBuf;
-}
-
 void Config::initPlaylistMode() {
   uint16_t _lastStation = 0;
-  uint16_t cs = playlistLength();
+  uint16_t cs = utility.playlistLength();
   #ifdef USE_SD
     if (getMode()==PM_SDCARD) {
       #if SD_CARD_DETECT_PIN!=255
@@ -298,7 +319,7 @@ void Config::initPlaylistMode() {
     store.play_mode=PM_WEB;
     _lastStation = store.lastStation;
   #endif //ifdef USE_SD
-  if (getMode()==PM_WEB && _wwwFilesExist()) initPlaylist();
+  if (getMode()==PM_WEB && _wwwFilesExist()) utility.initPlaylist();
   log_i("%d" ,_lastStation);
   // Validate station number is within range
   if (cs == 0) {
@@ -311,7 +332,7 @@ void Config::initPlaylistMode() {
   lastStation(_lastStation);
   saveValue(&store.play_mode, store.play_mode);
   _bootDone = true;
-  loadStation(_lastStation);
+  utility.loadStation(_lastStation);
 }
 
 void Config::_initHW() {
@@ -363,6 +384,7 @@ void Config::loadTheme() {
   theme.ip            = color565(COLOR_IP);
   theme.vol           = color565(COLOR_VOLUME_VALUE);
   theme.rssi          = color565(COLOR_RSSI);
+  theme.battery       = color565(COLOR_BATTERY);
   theme.bitrate       = color565(COLOR_BITRATE);
   theme.volbarout     = color565(COLOR_VOLBAR_OUT);
   theme.volbarin      = color565(COLOR_VOLBAR_IN);
@@ -377,22 +399,13 @@ void Config::loadTheme() {
   #include "../displays/tools/tftinverttitle.h"
 }
 
-void Config::reset() {
-  FUNCTIONLOG("Prefs", "Reset requested, resetting config...");
-  //prefs.begin("ehradio", false);
-  //prefs.clear();
-  //prefs.end();
-  setDefaults();
-  delay(500);
-  ESP.restart();
-}
-
 void Config::defaultSettings(const char *val, uint8_t clientId) {
   if (strcmp(val, "system") == 0) {
     saveValue(&store.smartstart, (bool)SMART_START);
     saveValue(&store.audioinfo, (bool)SHOW_AUDIO_INFO);
     saveValue(&store.vumeter, (bool)SHOW_VU_METER);
     saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
+    saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
     saveValue(store.ehdpname, "");
     saveValue(&store.softapdelay, (uint8_t)SOFTAP_REBOOT_DELAY);
@@ -419,6 +432,10 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.screensaverPlayingEnabled, (bool)SS_PLAYING);
     saveValue(&store.screensaverPlayingTimeout, (uint16_t)SS_PLAYING_TIME);
     saveValue(&store.screensaverPlayingBlank, (bool)SS_PLAYING_BLANK);
+    saveValue(&store.dimmingEnabled, (bool)DIMMING_ENABLED);
+    saveValue(&store.dimmingTimeout, (uint16_t)DIMMING_TIMEOUT);
+    saveValue(&store.dimmingBrightness, (uint8_t)DIMMING_BRIGHTNESS);
+    backlightControls.restart();
     display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
     netserver.requestOnChange(GETSCREEN, clientId);
     return;
@@ -452,7 +469,6 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(store.weatherapi, WEATHER_API);
     saveValue(&store.weatherelevation, (int16_t)0);
     //saveValue(store.weatherkey, ""); // don't reset API key
-    network.trueWeather=false;
     display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
     netserver.requestOnChange(GETWEATHER, clientId);
     return;
@@ -478,13 +494,17 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     netserver.requestOnChange(GETCONTROLS, clientId);
     return;
   }
-  if (strcmp(val, "1") == 0) {
-    config.reset();
+  if (strcmp(val, "1") == 0 || strcmp(val, "") == 0) {
+    setDefaults();
+    defaultSettings("system", clientId);
+    defaultSettings("screen", clientId);
+    defaultSettings("controls", clientId);
+    defaultSettings("locale", clientId);
+    defaultSettings("weather", clientId);
+    defaultSettings("mqtt", clientId);
     return;
   }
 }
-
-
 
 void Config::setDefaults() {
   SERIALLOG("setDefaults called");
@@ -492,6 +512,11 @@ void Config::setDefaults() {
   nvs_flash_init();
   // defaults set by struct, except one
   snprintf(store.mdnsname, MDNS_LENGTH, "ehradio-%x", getChipId());
+  // Write the sentinel immediately after erase so the next boot finds a valid cfgset
+  // and does not loop back into reset() again
+  prefs.begin("ehradio", false);
+  prefs.putBytes("cfgset", &store.config_set, sizeof(store.config_set));
+  prefs.end();
 }
 
 void Config::saveIR() {
@@ -510,6 +535,10 @@ void Config::processDeferredSaves() {
       saveRawValue(e, _deferredSaves[i].data, e->size);
       _deferredSaves[i].entry = nullptr;
     }
+  }
+
+  if (_lastStationUrlDirty && (int32_t)(millis() - _lastStationUrlDueMs) >= 0) {
+    flushLastStationUrl();
   }
 }
 
@@ -543,279 +572,23 @@ uint8_t Config::setLastSSID(uint8_t val) {
   return store.lastSSID;
 }
 
-// Helper: remove trailing CR/LF and trim leading/trailing whitespace from a C string
-static void strip_whitespace(char *s) {
-  if (!s) return;
-  // Trim trailing CR/LF and any trailing whitespace
-  size_t len = strlen(s);
-  while (len > 0 && (s[len-1] == '\r' || s[len-1] == '\n' || isspace((unsigned char)s[len-1]))) {
-    s[--len] = '\0';
-  }
-  // Trim leading whitespace
-  char *start = s;
-  while (*start && isspace((unsigned char)*start)) start++;
-  if (start != s) memmove(s, start, strlen(start) + 1);
-}
-
 void Config::setTitle(const char* title) {
   vuThreshold = 0;
   // Keep native UTF-8 title (single source of truth for WebUI/CLI)
-  memset(config.station.title, 0, BUFLEN);
-  strlcpy(config.station.title, title, BUFLEN);
+  memset(config.station.title, 0, STATION_FIELD_LENGTH);
+  strlcpy(config.station.title, title, STATION_FIELD_LENGTH);
   u8fix(config.station.title);
-  strip_whitespace(config.station.title);
+  utility.stripWhitespace(config.station.title);
   netserver.requestOnChange(TITLE, 0);
-  netserver.loop();
   display.putRequest(NEWTITLE);
 }
 
 void Config::setStation(const char* station) {
-  memset(config.station.name, 0, BUFLEN);
-  strlcpy(config.station.name, station, BUFLEN);
+  memset(config.station.name, 0, STATION_FIELD_LENGTH);
+  strlcpy(config.station.name, station, STATION_FIELD_LENGTH);
   u8fix(config.station.name);
-  strip_whitespace(config.station.name);
+  utility.stripWhitespace(config.station.name);
 }  
-
-void Config::indexPlaylist() {
-  File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
-  if (!playlist) {
-    return;
-  }
-  char sName[BUFLEN], sUrl[BUFLEN];
-  int sOvol;
-  File index = SPIFFS.open(INDEX_PATH, "w");
-  while (playlist.available()) {
-    uint32_t pos = playlist.position();
-    if (parseCSV(playlist.readStringUntil('\n').c_str(), sName, sUrl, sOvol)) {
-      index.write((uint8_t *) &pos, 4);
-    }
-  }
-  index.close();
-  playlist.close();
-}
-
-void Config::initPlaylist() {
-  //store.countStation = 0;
-  if (!SPIFFS.exists(INDEX_PATH)) indexPlaylist();
-
-  /*if (SPIFFS.exists(INDEX_PATH)) {
-    File index = SPIFFS.open(INDEX_PATH, "r");
-    store.countStation = index.size() / 4;
-    index.close();
-    saveValue(&store.countStation, store.countStation);
-  }*/
-}
-uint16_t Config::playlistLength() {
-  uint16_t out = 0;
-  if (SDPLFS()->exists(REAL_INDEX)) {
-    File index = SDPLFS()->open(REAL_INDEX, "r");
-    out = index.size() / 4;
-    index.close();
-  }
-  return out;
-}
-bool Config::loadStation(uint16_t ls) {
-  uint16_t cs = playlistLength();
-  if (cs == 0) {
-    memset(station.url, 0, BUFLEN);
-    memset(station.name, 0, BUFLEN);
-    strncpy(station.name, "ehRadio", BUFLEN);
-    station.ovol = 0;
-    return false;
-  }
-  if (ls > cs) ls = 1;
-  char sName[BUFLEN], sUrl[BUFLEN];
-  int sOvol;
-  File playlist = SDPLFS()->open(REAL_PLAYL, "r");
-  File index = SDPLFS()->open(REAL_INDEX, "r");
-  if (_readStationEntry(playlist, index, ls, sName, sUrl, sOvol)) {
-    memset(station.url, 0, BUFLEN);
-    memset(station.name, 0, BUFLEN);
-    strncpy(station.name, sName, BUFLEN);
-    strncpy(station.url, sUrl, BUFLEN);
-    station.ovol = sOvol;
-    setLastStation(ls);
-  }
-  playlist.close();
-  index.close();
-  return true;
-}
-
-bool Config::_readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& ovol) {
-  index.seek((idx - 1) * 4, SeekSet);
-  uint32_t pos;
-  index.readBytes((char*)&pos, 4);
-  playlist.seek(pos, SeekSet);
-  return parseCSV(playlist.readStringUntil('\n').c_str(), name, url, ovol);
-}
-
-uint16_t Config::findStationByUrl(const char* url) {
-  uint16_t cs = playlistLength();
-  if (cs == 0 || url == nullptr || url[0] == '\0') return 0;
-  char sName[BUFLEN], sUrl[BUFLEN];
-  int sOvol;
-  File playlist = SDPLFS()->open(REAL_PLAYL, "r");
-  File index = SDPLFS()->open(REAL_INDEX, "r");
-  if (!playlist || !index) { if (playlist) playlist.close(); if (index) index.close(); return 0; }
-  for (uint16_t i = 1; i <= cs; i++) {
-    if (_readStationEntry(playlist, index, i, sName, sUrl, sOvol) && strcmp(sUrl, url) == 0) {
-      playlist.close();
-      index.close();
-      return i;
-    }
-    if (i % 20 == 0) yield();
-  }
-  playlist.close();
-  index.close();
-  return 0;
-}
-
-char * Config::stationByNum(uint16_t num) {
-  File playlist = SDPLFS()->open(REAL_PLAYL, "r");
-  File index = SDPLFS()->open(REAL_INDEX, "r");
-  index.seek((num - 1) * 4, SeekSet);
-  uint32_t pos;
-  memset(_stationBuf, 0, BUFLEN/2);
-  index.readBytes((char *) &pos, 4);
-  index.close();
-  playlist.seek(pos, SeekSet);
-  strncpy(_stationBuf, playlist.readStringUntil('\t').c_str(), BUFLEN/2);
-  playlist.close();
-  return _stationBuf;
-}
-
-void Config::escapeQuotes(const char* input, char* output, size_t maxLen) {
-  size_t j = 0;
-  for (size_t i = 0; input[i] != '\0' && j < maxLen - 1; ++i) {
-    if (input[i] == '"') {
-      if (j >= maxLen - 2) break; // not enough room for \ and " — truncate cleanly
-      output[j++] = '\\';
-      output[j++] = '"';
-    } else {
-      output[j++] = input[i];
-    }
-  }
-  output[j] = '\0';
-}
-
-bool Config::parseCSV(const char* line, char* name, char* url, int &ovol) {
-  char *tmpe;
-  const char* cursor = line;
-  char buf[5];
-  tmpe = strstr(cursor, "\t");
-  if (tmpe == NULL) return false;
-  strlcpy(name, cursor, tmpe - cursor + 1);
-  if (strlen(name) == 0) return false;
-  cursor = tmpe + 1;
-  tmpe = strstr(cursor, "\t");
-  if (tmpe == NULL) return false;
-  strlcpy(url, cursor, tmpe - cursor + 1);
-  if (strlen(url) == 0) return false;
-  cursor = tmpe + 1;
-  if (strlen(cursor) == 0) return false;
-  strlcpy(buf, cursor, 4);
-  ovol = atoi(buf);
-  return true;
-}
-
-bool Config::parseWsCommand(const char* line, char* cmd, char* val, uint8_t cSize) {
-  char *tmpe;
-  tmpe = strstr(line, "=");
-  if (tmpe == NULL) return false;
-  memset(cmd, 0, cSize);
-  strlcpy(cmd, line, tmpe - line + 1);
-  //if (strlen(tmpe + 1) == 0) return false;
-  memset(val, 0, cSize);
-  strlcpy(val, tmpe + 1, strlen(line) - strlen(cmd) + 1);
-  return true;
-}
-
-bool Config::parseSsid(const char* line, char* ssid, char* pass) {
-  char *tmpe;
-  tmpe = strstr(line, "\t");
-  if (tmpe == NULL) return false;
-  uint16_t pos = tmpe - line;
-  if (pos >= sizeof(ssids[0].ssid)) return false;
-  if (strlen(line + pos + 1) >= sizeof(ssids[0].password)) return false;
-  memset(ssid, 0, sizeof(ssids[0].ssid));
-  strlcpy(ssid, line, pos + 1);
-  memset(pass, 0, sizeof(ssids[0].password));
-  strlcpy(pass, line + pos + 1, sizeof(ssids[0].password));
-  return true;
-}
-
-bool Config::saveWifi(const char* post) {
-  char ssidval[sizeof(ssids[0].ssid)], passval[sizeof(ssids[0].password)];
-  if (parseSsid(post, ssidval, passval)) {
-    if (addSsid(ssidval, passval)) {
-      ESP.restart();
-      return true;
-    }
-  }
-  return false;
-}
-
-bool Config::addSsid(const char* ssid, const char* password) {
-  int slot = -1;
-  for (int i = 0; i < ssidsCount; i++) {
-    if (strcmp(ssids[i].ssid, ssid) == 0) {
-      slot = i;
-      break;
-    }
-  }
-  
-  if (slot == -1) {
-    slot = (ssidsCount < 5) ? ssidsCount : 4;
-    if (slot == ssidsCount && ssidsCount < 5) {
-      ssidsCount++;
-    }
-  }
-  
-  strlcpy(ssids[slot].ssid, ssid, sizeof(ssids[0].ssid));
-  strlcpy(ssids[slot].password, password, sizeof(ssids[0].password));
-  setLastSSID(slot + 1);
-
-  File file = SPIFFS.open(TMP_PATH, "w");
-  if (!file) return false;
-  for (int i = 0; i < ssidsCount; i++) {
-    if (strlen(ssids[i].ssid) > 0) {
-      file.printf("%s\t%s\n", ssids[i].ssid, ssids[i].password);
-    }
-  }
-  file.close();
-  
-  if (SPIFFS.exists(TMP_PATH)) {
-    SPIFFS.remove(SSIDS_PATH);
-    return SPIFFS.rename(TMP_PATH, SSIDS_PATH);
-  }
-  return false;
-}
-
-bool Config::importWifi() {
-  if (!SPIFFS.exists(TMP_PATH)) return false;
-  SPIFFS.remove(SSIDS_PATH);
-  SPIFFS.rename(TMP_PATH, SSIDS_PATH);
-  ESP.restart();
-  return true;
-}
-
-bool Config::initNetwork() {
-  File file = SPIFFS.open(SSIDS_PATH, "r");
-  if (!file || file.isDirectory()) {
-    return false;
-  }
-  ssidsCount = 0;
-  char ssidval[sizeof(ssids[0].ssid)], passval[sizeof(ssids[0].password)];
-  while (file.available() && ssidsCount < 5) {
-    if (parseSsid(file.readStringUntil('\n').c_str(), ssidval, passval)) {
-      strlcpy(ssids[ssidsCount].ssid, ssidval, sizeof(ssids[0].ssid));
-      strlcpy(ssids[ssidsCount].password, passval, sizeof(ssids[0].password));
-      ssidsCount++;
-    }
-  }
-  file.close();
-  return true;
-}
 
 void Config::setBrightness(bool dosave) {
   #if BRIGHTNESS_PIN!=255
@@ -864,446 +637,6 @@ void Config::setDspOn(bool dspon, bool saveval) {
   }
 }
 
-static void sleepCore() {
-  if (BRIGHTNESS_PIN!=255) analogWrite(BRIGHTNESS_PIN, 0);
-  display.deepsleep();
-  #ifdef USE_NEXTION
-    nextion.sleep();
-  #endif
-  #if defined(ARDUINO_ESP32C3_DEV)
-    if (WAKE_PIN!=255) esp_deep_sleep_enable_gpio_wakeup((1ULL << WAKE_PIN), WAKE_PIN_STATE ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW);
-  #else
-    if (WAKE_PIN!=255) {
-      // Digital GPIO pull resistors power off during deep sleep — configure the RTC domain pull instead
-      if (WAKE_PIN_STATE == HIGH) {
-        rtc_gpio_pulldown_en((gpio_num_t)WAKE_PIN);
-        rtc_gpio_pullup_dis((gpio_num_t)WAKE_PIN);
-      } else {
-        rtc_gpio_pullup_en((gpio_num_t)WAKE_PIN);
-        rtc_gpio_pulldown_dis((gpio_num_t)WAKE_PIN);
-
-      }
-      esp_sleep_enable_ext0_wakeup((gpio_num_t)WAKE_PIN, WAKE_PIN_STATE);
-    }
-  #endif
-}
-
-void Config::doSleep() {
-  sleepCore();
-  esp_sleep_enable_timer_wakeup(config.sleepfor * 60 * 1000000ULL);
-  esp_deep_sleep_start();
-}
-
-void Config::doSleepW() {
-  sleepCore();
-  esp_deep_sleep_start();
-}
-
-void Config::sleepForAfter(uint16_t sf, uint16_t sa) {
-  sleepfor = sf;
-  if (sa > 0) _sleepTimer.attach(sa * 60, doSleep);
-  else doSleep();
-}
-
-void Config::purgeUnwantedFiles() {
-  BOOTLOG("Scanning SPIFFS for unwanted files...");
-  File root = SPIFFS.open("/");
-  if (!root || !root.isDirectory()) return;
-  File file = root.openNextFile();
-  while (file) {
-    if (file.isDirectory()) {
-      file = root.openNextFile();
-      continue;
-    }
-    String path = file.path();
-    bool keep = false;
-    if (path.startsWith("/www/")) {
-      String name = path.substring(5);
-      // Keep the current locale file (which depends...)
-      char currentLocaleGz[64], currentLocale[64];
-      #ifdef UPDATEURL
-        snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", config.store.locale_webui);
-        snprintf(currentLocale, sizeof(currentLocale), "%s.json", config.store.locale_webui);
-      #else
-        snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", WEBUI_LOCALE);
-        snprintf(currentLocale, sizeof(currentLocale), "%s.json", WEBUI_LOCALE);
-      #endif
-      if (name == currentLocaleGz || name == currentLocale) {
-        keep = true;
-      } else {
-        for (size_t i = 0; i < wwwFilesCount; i++) {
-          if (name == String(wwwFiles[i]) || name == String(wwwFiles[i]) + ".gz") {
-            keep = true;
-            break;
-          }
-        }
-      }
-      // If we're keeping this file but it's uncompressed, check if .gz exists
-      if (keep && !name.endsWith(".gz")) {
-        String gzPath = "/www/" + name + ".gz";
-        if (SPIFFS.exists(gzPath)) {
-          SPIFFS.remove(path);
-          BOOTLOG("Removed duplicate (compressed version exists): %s", path.c_str());
-          file = root.openNextFile();
-          continue;
-        }
-      }
-    } else if (path.startsWith("/data/")) {
-      String name = path.substring(6);
-      for (size_t i = 0; i < dataFilesCount; i++) {
-        if (name == String(dataFiles[i])) {
-          keep = true;
-          break;
-        }
-      }
-    }
-    if (!keep) {
-      SPIFFS.remove(path);
-      BOOTLOG("Removed: %s", path.c_str());
-    }
-    file = root.openNextFile();
-  }
-  BOOTLOG("Purge complete.");
-}
-
-void Config::deleteMainwwwFile() {
-  if (wwwFilesCount > 0) {
-    const char* lastFile = wwwFiles[wwwFilesCount - 1];
-    char mainfile[64];
-    // Try both uncompressed and compressed versions
-    for (const char* suffix : {"", ".gz"}) {
-      snprintf(mainfile, sizeof(mainfile), "/www/%s%s", lastFile, suffix);
-      if (SPIFFS.exists(mainfile)) {
-        SPIFFS.remove(mainfile);
-        FUNCTIONLOG("Config", "Deleted main www file: %s", mainfile);
-      }
-    }
-  }
-}
-
-void cleanStaleSearchResults() {
-  const char* metaPath = "/www/searchresults.json.meta";
-  if (SPIFFS.exists(metaPath)) {
-    File metaFile = SPIFFS.open(metaPath, "r");
-    metaFile.readStringUntil('\n'); // 1st line query
-    String timeStr = metaFile.readStringUntil('\n'); //2nd line is time
-    metaFile.close();
-    if (timeStr.length() > 0) {
-      time_t fileTime = atol(timeStr.c_str());
-      time_t now = time(nullptr);
-      if (now < 100000000 || (now - fileTime) > 86400) {
-        SERIALLOG("Cleaning stale search results.");
-        SPIFFS.remove(metaPath);
-        SPIFFS.remove("/www/searchresults.json");
-        SPIFFS.remove("/www/search.txt");
-      }
-    }
-  }
-}
-
-void fixPlaylistFileEnding() {
-  const char* playlistPath = PLAYLIST_PATH;
-  if (!SPIFFS.exists(playlistPath)) return;
-  File playlistfile = SPIFFS.open(playlistPath, "r+");
-  if (!playlistfile) return;
-  size_t sz = playlistfile.size();
-  if (sz < 2) { playlistfile.close(); return; }
-  playlistfile.seek(sz - 2, SeekSet);
-  char last2[3] = {0};
-  playlistfile.read((uint8_t*)last2, 2);
-  if (!(last2[0] == '\r' && last2[1] == '\n')) {
-    playlistfile.seek(sz, SeekSet);
-    playlistfile.write((const uint8_t*)"\r\n", 2);
-  }
-  playlistfile.close();
-}
-
-void getRequiredFiles() {
-  #ifdef UPDATEURL
-    player.sendCommand({PR_STOP, 0});
-    ESPFileUpdater* getRequiredFile = new ESPFileUpdater(SPIFFS);
-    getRequiredFile->setMaxSize(1024);
-    getRequiredFile->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    char localFileGz[64];
-    char localFile[64];
-    char tryFile[64];
-    char tryUrl[128];
-    display.putRequest(NEWMODE, UPDATING);
-    for (size_t i = 0; i < wwwFilesCount; i++) {
-      display.updateProgress(LANG::updFiles, (float)(i + 1) / (float)wwwFilesCount);
-      const char* fname = wwwFiles[i];
-      snprintf(localFileGz, sizeof(localFileGz), "/www/%s.gz", fname);
-      snprintf(localFile, sizeof(localFile), "/www/%s", fname);
-      if (SPIFFS.exists(localFileGz)) SPIFFS.remove(localFileGz);
-      if (SPIFFS.exists(localFile)) SPIFFS.remove(localFile);
-      bool success = false;
-      for (size_t j = 0; j < 2; j++) {
-        if (j == 0) { // Try compressed first
-          snprintf(tryFile, sizeof(tryFile), "%s", localFileGz);
-          snprintf(tryUrl, sizeof(tryUrl), "%s%s.gz", FILESURL, fname);
-        } else { // Fallback to uncompressed
-          snprintf(tryFile, sizeof(tryFile), "%s", localFile);
-          snprintf(tryUrl, sizeof(tryUrl), "%s%s", FILESURL, fname);
-        }
-        FUNCTIONLOG("ESPFileUpdater", "%s - updating required file...", tryFile);
-        ESPFileUpdater::UpdateStatus result = getRequiredFile->checkAndUpdate(
-            tryFile,
-            tryUrl,
-            "",
-            ESPFILEUPDATER_VERBOSE
-       );
-        if (result == ESPFileUpdater::UPDATED) {
-          FUNCTIONLOG("ESPFileUpdater", "%s - download complete", tryFile);
-          success = true;
-          break;
-        } else {
-          if (j == 0) FUNCTIONLOG("ESPFileUpdater", "%s - download failed - will try for uncompressed file...", tryFile);
-          if (j == 1) FUNCTIONLOG("ESPFileUpdater", "%s - download failed because no online file available. Are you running a custom version?", tryFile);
-        }
-      }
-      if (!success) {
-        // give up and show update‑failed message briefly before returning to lost dialog
-        display.updateProgress(LANG::updFailed, 0.0f);
-        delay(3000);
-        display.putRequest(NEWMODE, LOST);
-        return;
-      }
-    }
-    delete getRequiredFile;
-    config.purgeUnwantedFiles();
-    delay(200);
-    ESP.restart();
-  #endif //#ifdef UPDATEURL
-}
-
-void checkNewVersionFile() {
-  #ifdef UPDATEURL
-    const char* newVersionPath = "/data/new_ver.txt";
-    netserver.newVersion = String(RADIOVERSION);
-    if (SPIFFS.exists(newVersionPath)) {
-      File newVerFile = SPIFFS.open(newVersionPath, "r");
-      if (newVerFile) {
-        String line = newVerFile.readStringUntil('\n');
-        line.trim();
-        int vsPos = line.indexOf(VERSIONSTRING);
-        if (vsPos >= 0) {
-          String extractedVersion = line.substring(vsPos + strlen(VERSIONSTRING));
-          extractedVersion.trim();
-          if (extractedVersion.length() > 0) {
-            netserver.newVersion = extractedVersion;
-          }
-        }
-        newVerFile.close();
-      }
-    }
-    if (netserver.newVersion != String(RADIOVERSION)) {
-      netserver.newVersionAvailable = true;
-    } else {
-      netserver.newVersionAvailable =  false;
-    }
-  #endif //#ifdef UPDATEURL
-}
-
-void Config::updateFile(void* param, const char* localFile, const char* onlineFile, const char* updatePeriod, const char* simpleName) {
-  FUNCTIONLOG("ESPFileUpdater", "%s - started update", simpleName);
-  ESPFileUpdater* updatefile = (ESPFileUpdater*)param;
-  ESPFileUpdater::UpdateStatus result = updatefile->checkAndUpdate(
-      localFile,
-      onlineFile,
-      updatePeriod,
-      ESPFILEUPDATER_VERBOSE
- );
-  if (result == ESPFileUpdater::UPDATED) {
-    FUNCTIONLOG("ESPFileUpdater", "%s - update completed", simpleName);
-  } else if (result == ESPFileUpdater::NOT_MODIFIED||result == ESPFileUpdater::MAX_AGE_NOT_REACHED) {
-    FUNCTIONLOG("ESPFileUpdater", "%s - no update needed", simpleName);
-  } else {
-    FUNCTIONLOG("ESPFileUpdater", "%s - update failed", simpleName);
-  }
-}
-
-// Struct to pass parameters to async locale update task
-struct LocaleUpdateParams {
-  ESPFileUpdater* updater;
-  uint8_t clientId;
-  char localeCode[16];
-};
-
-bool updateLocaleFileCore(ESPFileUpdater* updater, const char* localeCode) {
-  // called by updateLocaleFileAsync or updateLocaleFile
-  // Returns true on success, false on failure
-  #ifdef UPDATEURL
-    // Special case: hardcoded locale uses default, no file needed
-    if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
-      FUNCTIONLOG("Locale", "Updating locale: %s - no need to download, hardcoded locale uses default.", HARDCODED_WEBUI_LOCALE);
-      return true;
-    }
-    char tryFile[64] = "/www/locale.new";
-    char finalFile[64];
-    char tryUrl[128];
-    bool success = false;
-    FUNCTIONLOG("Locale Update", "Downloading file for %s...", localeCode);
-    for (size_t j = 0; j < 2; j++) {
-      SPIFFS.remove(tryFile);
-      if (j == 0) {
-        snprintf(finalFile, sizeof(finalFile), "/www/%s.json.gz", localeCode);
-        snprintf(tryUrl, sizeof(tryUrl), "%s%s.json.gz", FILESURL, localeCode);
-      } else {
-        snprintf(finalFile, sizeof(finalFile), "/www/%s.json", localeCode);
-        snprintf(tryUrl, sizeof(tryUrl), "%s%s.json", FILESURL, localeCode);
-      }
-      ESPFileUpdater::UpdateStatus result = updater->checkAndUpdate(
-          tryFile,
-          tryUrl,
-          "",
-          ESPFILEUPDATER_VERBOSE
-      );
-      if (result == ESPFileUpdater::UPDATED) {
-        FUNCTIONLOG("Locale Update", "Download for %s successful, saving as %s", localeCode, finalFile);
-        SPIFFS.remove(finalFile);
-        if (SPIFFS.rename(tryFile, finalFile)) {
-          success = true;
-          break;
-        }
-      }
-    }
-    if (!success) {
-      FUNCTIONLOG("Locale Update", "Failed to fetch file from either .gz or uncompressed URL");
-    }
-    return success;
-  #else
-    return false;
-  #endif //#ifdef UPDATEURL
-}
-
-void updateLocaleFileAsyncWrapper(void* param) {
-  LocaleUpdateParams* params = (LocaleUpdateParams*)param;
-  // Attempt to download and install the locale file
-  bool success = updateLocaleFileCore(params->updater, params->localeCode);
-  if (success) {
-    // Remove old locale files before updating config
-    char oldLocaleGz[64], oldLocale[64];
-    snprintf(oldLocaleGz, sizeof(oldLocaleGz), "/www/%s.json.gz", config.store.locale_webui);
-    snprintf(oldLocale, sizeof(oldLocale), "/www/%s.json", config.store.locale_webui);
-    SPIFFS.remove(oldLocaleGz);
-    SPIFFS.remove(oldLocale);
-    // Download successful - commit the locale code to config
-    config.saveValue(config.store.locale_webui, params->localeCode);
-    FUNCTIONLOG("Locale Update", "Successfully updated to %s", params->localeCode);
-    // Send success message to frontend
-    char msg[64];
-    snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", params->localeCode);
-    websocket.text(params->clientId, msg);
-  } else {
-    // Download failed - don't modify config, send error message
-    FUNCTIONLOG("Locale Update", "Failed to update to %s", params->localeCode);
-    websocket.text(params->clientId, "{\"locale_update_failed\":true}");
-  }
-  delete params->updater;
-  delete params;
-  vTaskDelete(NULL);
-}
-
-void Config::updateLocaleFile() {
-  #ifdef UPDATEURL
-    ESPFileUpdater* updater = new ESPFileUpdater(SPIFFS);
-    updater->setMaxSize(1024);
-    updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    bool success = updateLocaleFileCore(updater, config.store.locale_webui);
-    if (success) {
-      FUNCTIONLOG("Locale Update", "Successfully updated to %s", config.store.locale_webui);
-    } else {
-      FUNCTIONLOG("Locale Update", "Failed to update to %s", config.store.locale_webui);
-    }
-    delete updater;
-  #endif
-}
-
-bool Config::updateLocaleFileAsync(const char* localeCode, uint8_t clientId) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  #ifdef UPDATEURL
-    // If switching WebUI Locales, need to download a file
-    LocaleUpdateParams* params = new LocaleUpdateParams();
-    params->updater = new ESPFileUpdater(SPIFFS);
-    params->updater->setMaxSize(1024);
-    params->updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    params->clientId = clientId;
-    strlcpy(params->localeCode, localeCode, sizeof(params->localeCode));
-    xTaskCreate(updateLocaleFileAsyncWrapper, "updateLocaleFileAsyncWrapper", 8192, params, 2, NULL);
-    return true; // Task created successfully (NOT download result)
-  #else
-    // If not, then just need to switch
-    config.saveValue(config.store.locale_webui, localeCode);
-    FUNCTIONLOG("Locale Switch", "Changed to %s", localeCode);
-    char msg[64];
-    snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", localeCode);
-    websocket.text(clientId, msg);
-    return true;
-  #endif
-}
-
-bool checkLocaleFile() {
-  // Special case: hardcoded locale uses default, no file needed
-  if (strcmp(config.store.locale_webui, HARDCODED_WEBUI_LOCALE) == 0) {
-    FUNCTIONLOG("Locale Check", "%s uses hardcoded default, no file needed", HARDCODED_WEBUI_LOCALE);
-    return true;
-  }
-  char localeFileGz[64], localeFile[64];
-  snprintf(localeFileGz, sizeof(localeFileGz), "/www/%s.json.gz", config.store.locale_webui);
-  snprintf(localeFile, sizeof(localeFile), "/www/%s.json", config.store.locale_webui);
-  if (SPIFFS.exists(localeFileGz)) {
-    FUNCTIONLOG("Locale Check", "Found %s.json.gz", config.store.locale_webui);
-    return true;
-  }
-  if (SPIFFS.exists(localeFile)) {
-    FUNCTIONLOG("Locale Check", "Found %s.json", config.store.locale_webui);
-    return true;
-  }
-  FUNCTIONLOG("Locale Check", "Locale file not found for %s", config.store.locale_webui);
-  return false;
-}
-
-void startupServicesAsync(void* param) {
-  fixPlaylistFileEnding(); // playlist.csv MUST have a line-feed at end (can happen easily by uploading a file)
-  #ifdef UPDATEURL
-    if (!checkLocaleFile()) {
-      FUNCTIONLOG("Locale Check", "Locale file verification failed, updating to %s...", config.store.locale_webui);
-      config.updateLocaleFile();
-    }
-    config.updateFile(param, "/data/new_ver.txt", CHECKUPDATEURL, CHECKUPDATEURL_TIME, "New version number");
-    checkNewVersionFile();
-    if (config.store.autoupdate && netserver.newVersionAvailable) {
-      FUNCTIONLOG("AutoUpdate", "New version detected - starting online update");
-      startOnlineUpdate();
-    }
-  #endif
-  #ifdef PLAYLIST_DEFAULT_URL
-    if (!SPIFFS.exists("/data/playlist.csv")) {
-      config.updateFile(param, "/data/playlist.csv", PLAYLIST_DEFAULT_URL, "", "Default playlist");
-      if (SPIFFS.exists("/data/playlist.csv")) netserver.requestOnChange(PLAYLISTSAVED, 0);
-    }
-  #endif
-  config.updateFile(param, "/www/timezones.json.gz", TIMEZONES_JSON_URL, TIMEZONES_JSON_CHECKTIME, "Timezones database file");
-  config.updateFile(param, "/www/rb_srvrs.json", RADIO_BROWSER_SERVERS_URL, RB_SERVERS_CHECKTIME, "Radio Browser servers list");
-  cleanStaleSearchResults();
-  vTaskDelete(NULL);
-}
-
-void Config::startupServices() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  #ifdef UPDATEURL
-    ESPFileUpdater* updater = nullptr;
-    updater = new ESPFileUpdater(SPIFFS);
-    updater->setMaxSize(1024);
-    updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    if (!wwwFilesExist) {
-      getRequiredFiles();
-    } else {
-      xTaskCreate(startupServicesAsync, "startupServicesAsync", 8192, updater, 2, NULL);
-    }
-  #endif
-}
-
 void Config::bootInfo() {
   BOOTLOG("************************************************");
   BOOTLOG("*               ehRadio %s             *", RADIOVERSION);
@@ -1337,9 +670,9 @@ void Config::bootInfo() {
   BOOTLOG("wifiscanbest:\t%s", store.wifiscanbest?"true":"false");
   BOOTLOG("mqttenable:\t%s", store.mqttenable?"true":"false");
   BOOTLOG("buttons:\tleft=%d, center=%d, right=%d, up=%d, down=%d, mode=%d, pullup=%s", 
-          BTN_LEFT, BTN_CENTER, BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_MODE, BTN_INTERNALPULLUP?"true":"false");
+          BTN_PREV, BTN_PLAY, BTN_NEXT, BTN_UP, BTN_DOWN, BTN_MODE);
   BOOTLOG("encoders:\tl1=%d, b1=%d, r1=%d, pullup=%s, l2=%d, b2=%d, r2=%d, pullup=%s", 
-          ENC_BTNL, ENC_BTNB, ENC_BTNR, ENC_INTERNALPULLUP?"true":"false", ENC2_BTNL, ENC2_BTNB, ENC2_BTNR, ENC2_INTERNALPULLUP?"true":"false");
+          ENC_BTNL, ENC_BTNB, ENC_BTNR, ENC_PULLUP?"true":"false", ENC2_BTNL, ENC2_BTNB, ENC2_BTNR, ENC2_PULLUP?"true":"false");
   BOOTLOG("ir:\t\t%d", IR_PIN);
   if (SD_CS!=255) BOOTLOG("SD:\t%d", SD_CS);
   #ifdef FIRMWARE
@@ -1390,6 +723,9 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(screensaverPlayingEnabled, "scrnsvrplen"),
   CONFIG_KEY_ENTRY(screensaverPlayingTimeout, "scrnsvrplto"),
   CONFIG_KEY_ENTRY(screensaverPlayingBlank, "scrnsvrplbl"),
+  CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
+  CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
+  CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
   CONFIG_KEY_ENTRY(volsteps, "vsteps"),
   CONFIG_KEY_ENTRY(fliptouch, "fliptouch"),
   CONFIG_KEY_ENTRY(dbgtouch, "dbgtouch"),

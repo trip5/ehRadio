@@ -86,7 +86,7 @@ tsDirection_e TouchScreen::_tsDirection(uint16_t x, uint16_t y) {
       }
     }
   } else {
-    return TDS_REQUEST;
+    return TSD_REQUEST;
   }
 }
 
@@ -135,7 +135,7 @@ void TouchScreen::loop() {
       _oldTouchY = touchY;
       touchVol = touchX;
       touchStation = touchY;
-      direct = TDS_REQUEST;
+      direct = TSD_REQUEST;
       touchLongPress=millis();
     } else { /*     SWIPE TOUCH     */
       direct = _tsDirection(touchX, touchY);
@@ -175,7 +175,7 @@ void TouchScreen::loop() {
     }
   } else {
     if (wastouched) {/*     END TOUCH     */
-      if (direct == TDS_REQUEST) {
+      if (direct == TSD_REQUEST) {
         uint32_t pressTicks = millis()-touchLongPress;
         if (pressTicks < BTN_PRESS_TICKS*2) {
           if (pressTicks > 50) controls.onBtnClick(EVT_BTNCENTER);

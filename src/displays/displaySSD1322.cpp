@@ -54,7 +54,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ clearDisplay(); }
 void DspCore::flip(){ setRotation(config.store.flipscreen?2:0); }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ oled_command(SSD1322_DISPLAYOFF); }
 void DspCore::wake(void){ oled_command(SSD1322_DISPLAYON); }
 

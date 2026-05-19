@@ -1,18 +1,12 @@
 #ifndef player_h
 #define player_h
 
+#include "options.h"
+
 #if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
  #include "../libraries/I2S_Audio/Audio.h"
 #else
   #include "../libraries/VS1053_Audio/audioVS1053Ex.h"
-#endif
-
-#ifndef MQTT_BURL_SIZE
-  #define MQTT_BURL_SIZE  512
-#endif
-
-#ifndef PLQ_SEND_DELAY
-	#define PLQ_SEND_DELAY pdMS_TO_TICKS(1000)
 #endif
 
 #define PLERR_LN        64
@@ -33,7 +27,7 @@ class Player: public Audio {
     bool resumeAfterUrl = false;
     uint32_t sd_min, sd_max;
     bool remoteStationName = false;
-    char burl[MQTT_BURL_SIZE];  /* buffer for browseUrl  */
+    char burl[MQTT_URL_SIZE + 1];  /* buffer for browseUrl  */
   public:
     Player();
     void init();
@@ -43,6 +37,8 @@ class Player: public Audio {
     void setError(const char *e);
     void initHeaders(const char *file);
     void loop();
+    bool queueResolvedUrl(const char* url);
+    bool resumeLastWebSource();
     void setOutputPins(bool isPlaying);
     void browseUrl();
     void playUrl(const char* url);
@@ -67,10 +63,5 @@ class Player: public Audio {
 };
 
 extern Player player;
-
-extern __attribute__((weak)) void player_on_start_play();
-extern __attribute__((weak)) void player_on_stop_play();
-extern __attribute__((weak)) void player_on_track_change();
-extern __attribute__((weak)) void player_on_station_change();
 
 #endif

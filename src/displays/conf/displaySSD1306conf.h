@@ -18,7 +18,7 @@
 
 #define bootLogoTop     8
 
-/* SROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+/* SCROLLS  */                            /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
 const ScrollConfig metaConf       PROGMEM = {{ TFT_FRAMEWDT, 0, 2, WA_LEFT }, 140, true, MAX_WIDTH, 5000, 3, 15 };
 const ScrollConfig title1Conf     PROGMEM = {{ 0, 17, 1, WA_LEFT }, 140, true, DSP_WIDTH-6*4, 5000, 2, 35 };
 const ScrollConfig title2Conf     PROGMEM = {{ 0, 26, 1, WA_LEFT }, 140, true, DSP_WIDTH, 5000, 2, 35 };

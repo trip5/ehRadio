@@ -1,0 +1,54 @@
+[ "User Defaults",
+  {
+    "name": "One Click Switch",
+    "define": "ONE_CLICK_SWITCH", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Screen Saver When Playing",
+    "define": "SS_PLAYING", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Screen Flip",
+    "define": "SCREEN_FLIP", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Show Audio Info",
+    "define": "SHOW_AUDIO_INFO", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Show VU Meter",
+    "define": "SHOW_VU_METER", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Smart Start",
+    "define": "SMART_START", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "SNTP Time Server 1",
+    "define": "SNTP_1", "type": "text", "optional": true, "default": "0.pool.ntp.org"
+  },
+  {
+    "name": "SNTP Time Server 2",
+    "define": "SNTP_2", "type": "text", "optional": true, "default": "pool.ntp.org"
+  },
+  {
+    "name": "Volume Steps",
+    "define": "VOLUME_STEPS", "type": "numeric", "default": 1, "min": 1, "max": 25, "optional": true
+  },
+  {
+    "name": "Weather Metric",
+    "define": "WEATHER_METRIC", "type": "boolean", "default": false, "optional": true
+  },
+  {
+    "name": "Weather - Latitude",
+    "define": "WEATHER_LAT", "type": "text", "optional": true, "comment": "latitude"
+  },
+  {
+    "name": "Weather - Longitude",
+    "define": "WEATHER_LON", "type": "text", "optional": true, "comment": "longitude"
+  },
+{
+    "name": "Wifi Scan for Best RSSI",
+    "define": "WIFI_SCAN_BEST_RSSI", "type": "boolean", "default": false, "optional": true
+  }
+]

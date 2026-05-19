@@ -10,6 +10,9 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "utility.h"
+#include "backlightcontrols.h"
+#include "rgbled.h"
 #include "../displays/dspcore.h"
 #include "../displays/widgets/pages.h"
 #include "../displays/widgets/widgets.h"
@@ -25,50 +28,30 @@ Display display;
   Nextion nextion;
 #endif
 
-#ifndef CORE_STACK_SIZE
-  #define CORE_STACK_SIZE  1024*4
-#endif
-#ifndef DSP_TASK_PRIORITY
-  #define DSP_TASK_PRIORITY  2
-#endif
-#ifndef DSP_TASK_CORE_ID
-  #define DSP_TASK_CORE_ID  0
-#endif
-#ifndef DSP_TASK_DELAY
-  #define DSP_TASK_DELAY pdMS_TO_TICKS(10) // cap for 50 fps
-#endif
-
-#define DSP_QUEUE_TICKS 0
-
-#ifndef DSQ_SEND_DELAY
-  #define DSQ_SEND_DELAY  pdMS_TO_TICKS(200)
-#endif
-
 QueueHandle_t displayQueue;
+
+#ifdef CORE_MONITOR
+  volatile uint32_t cmDspLoopCount = 0;
+#endif
+
+TaskHandle_t dspTaskHandle = NULL;
 
 static void loopDspTask(void * pvParameters) {
   while(true) {
-  #ifndef DUMMYDISPLAY
-    if (displayQueue==NULL) break;
-
+    #ifndef DUMMYDISPLAY
+      if (displayQueue==NULL) break;
       display.loop();
-    #ifndef NETSERVER_LOOP1
-      netserver.loop();
     #endif
-
-  #else
-
-    #ifndef NETSERVER_LOOP1
-      netserver.loop();
+    #ifdef CORE_MONITOR
+      cmDspLoopCount++;
     #endif
-  #endif
-    vTaskDelay(DSP_TASK_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(DSP_TASK_DELAY));
   }
   vTaskDelete(NULL);
 }
 
 void Display::_createDspTask() {
-  xTaskCreatePinnedToCore(loopDspTask, "DspTask", CORE_STACK_SIZE,  NULL,  DSP_TASK_PRIORITY, NULL, DSP_TASK_CORE_ID);
+  xTaskCreatePinnedToCore(loopDspTask, "DspTask", (DSP_TASK_STACK_SIZE * 1024), NULL, DSP_TASK_PRIORITY, &dspTaskHandle, DSP_TASK_CORE_ID);
 }
 
 #ifndef DUMMYDISPLAY // ============================== DUMMYDISPLAY Below ==============================
@@ -110,7 +93,7 @@ void Display::init() {
   dsp.initDisplay();
   displayQueue=NULL;
   displayQueue = xQueueCreate(5, sizeof(requestParams_t));
-  while(displayQueue==NULL) {;}
+  if (displayQueue==NULL) { log_e("[display] displayQueue alloc failed — rebooting"); ESP.restart(); }
   _pager = new Pager();
   _createDspTask();
   while(_bootStep==0) { delay(10); }
@@ -201,7 +184,7 @@ void Display::_buildPager() {
     _rssi = new TextWidget(rssiConf, 20, false, config.theme.rssi, config.theme.background);
   #endif
   #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-    _battery = new TextWidget(batteryConf, 10, false, config.theme.ip, config.theme.background);
+    _battery = new TextWidget(batteryConf, 10, false, config.theme.battery, config.theme.background);
   #endif
   _nums->init(numConf, 10, false, config.theme.digit, config.theme.background);
   #ifndef HIDE_WEATHER
@@ -292,9 +275,9 @@ void Display::_apScreen() {
     _boot = new Page();
     #if DSP_MODEL!=DSP_NOKIA5110
       #if DSP_INVERT_TITLE || defined(DSP_OLED)
-      _boot->addWidget(new FillWidget(metaBGConf, config.theme.metafill));
+        _boot->addWidget(new FillWidget(metaBGConf, config.theme.metafill));
       #else
-      _boot->addWidget(new FillWidget(metaBGConfInv, config.theme.metafill));
+        _boot->addWidget(new FillWidget(metaBGConfInv, config.theme.metafill));
       #endif
     #endif
     ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", apTitleConf, config.theme.meta, config.theme.metabg));
@@ -310,7 +293,7 @@ void Display::_apScreen() {
       appass2->setText(AP_PASSWORD);
     #endif
     ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", apSettConf, config.theme.title2, config.theme.background));
-    bootSett->setText(config.ipToStr(WiFi.softAPIP()), LANG::apSettFmt);
+    bootSett->setText(utility.ipToStr(WiFi.softAPIP()), LANG::apSettFmt);
     _pager->addPage(_boot);
     _pager->setPage(_boot);
   #else
@@ -328,7 +311,7 @@ void Display::_start() {
     #ifdef USE_NEXTION
       nextion.apScreen();
     #endif
-    _bootStep = 2;
+      _bootStep = 2;
     return;
   }
   #ifdef USE_NEXTION
@@ -347,7 +330,7 @@ void Display::_start() {
   if (_vuwidget) _vuwidget->lock();
   if (_rssi)     _setRSSI(WiFi.RSSI());
   #ifndef HIDE_IP
-    if (_volip) _volip->setText(config.ipToStr(WiFi.localIP()), iptxtFmt);
+    if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
   #endif
   #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
     if(_battery) _updateBattery();
@@ -419,7 +402,7 @@ void Display::_swichMode(displayMode_e newmode) {
       #ifndef HIDE_IP
         _showDialog(LANG::const_DlgVolume);
       #else
-        _showDialog(config.ipToStr(WiFi.localIP()));
+        _showDialog(utility.ipToStr(WiFi.localIP()));
       #endif
     }
     _nums->setText(config.store.volume, numtxtFmt);
@@ -448,6 +431,11 @@ void Display::resetQueue() {
 }
 
 void Display::_drawPlaylist() {
+  uint16_t count = utility.playlistLength();
+  if (count == 0) currentPlItem = 0;
+  else if (currentPlItem < 1) currentPlItem = 1;
+  else if (currentPlItem > count) currentPlItem = count;
+
   //dsp.drawPlaylist(currentPlItem);
   _plwidget->drawPlaylist(currentPlItem);
   _setReturnTicker(30);
@@ -455,7 +443,7 @@ void Display::_drawPlaylist() {
 
 void Display::_drawNextStationNum(uint16_t num) {
   _setReturnTicker(30);
-  _meta->setText(config.stationByNum(num));
+  _meta->setText(utility.stationByNum(num));
   _nums->setText(num, "%d");
 }
 
@@ -464,7 +452,7 @@ void Display::putRequest(displayRequestType_e type, int payload) {
   requestParams_t request;
   request.type = type;
   request.payload = payload;
-  xQueueSend(displayQueue, &request, DSQ_SEND_DELAY);
+  xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY));
   #ifdef USE_NEXTION
     nextion.putRequest(request);
   #endif
@@ -546,6 +534,19 @@ void Display::loop() {
     _bootScreen();
     return;
   }
+  if (_bootStep==2) {
+    if (config.isScreensaver) {
+      if (DSP_INVERT_QUIRK && config.displayIsInverted) {
+        config.displayIsInverted = false;
+        display.invert();
+      }
+    } else {
+      if (config.store.invertdisplay != config.displayIsInverted) {
+        config.displayIsInverted = config.store.invertdisplay;
+        display.invert();
+      }
+    }
+  }
   if (displayQueue==NULL || _locked) return;
   _pager->loop();
   #ifdef USE_NEXTION
@@ -591,7 +592,7 @@ void Display::loop() {
           if (!config.store.showweather) {
             if (_weather) _weather->setText("");
             #ifndef HIDE_IP
-              if (_volip) _volip->setText(config.ipToStr(WiFi.localIP()), iptxtFmt);
+              if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
             #endif
           } else {
             network.buildWeatherString();
@@ -631,7 +632,7 @@ void Display::loop() {
         case DSP_START: _start();  break;
         case NEWIP: {
           #ifndef HIDE_IP
-            if (_volip) _volip->setText(config.ipToStr(WiFi.localIP()), iptxtFmt);
+            if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
           #endif
           break;
         }
@@ -766,7 +767,8 @@ void Display::_title() {
     _title1->setText("");
     if (_title2) _title2->setText("");
   }
-  if (player_on_track_change) player_on_track_change();
+  rgbled.trackChange();
+  backlightControls.restart();
 }
 
 void Display::_time(bool redraw) {

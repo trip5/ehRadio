@@ -1,0 +1,292 @@
+[ "Display",
+  {
+    "name": "Dummy (no physical display)",
+    "type": "",
+    "define": "DSP_MODEL DSP_DUMMY"
+  },
+  {
+    "name": "1602 (16x2 LCD)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_1602",
+    "pins": [ "LCD_RS", "LCD_E", "LCD_D4", "LCD_D5", "LCD_D6", "LCD_D7" ],
+    "build_src_filter": "+<libraries/LiquidCrystalI2C/*> ; not needed?"
+  },
+  {
+    "name": "1602 (I2C 16x2 LCD)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_1602I2C",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "build_src_filter": "+<libraries/LiquidCrystalI2C/*>"
+  },
+  {
+    "name": "2004 (20x4 LCD)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_2004",
+    "pins": [ "LCD_RS", "LCD_E", "LCD_D4", "LCD_D5", "LCD_D6", "LCD_D7" ],
+    "build_src_filter": "+<libraries/LiquidCrystalI2C/*> ; not needed?"
+  },
+  {
+    "name": "2004 (I2C 20x4 LCD)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_2004I2C",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "build_src_filter": "+<libraries/LiquidCrystalI2C/*>"
+  },
+  {
+    "name": "GC9A01A (SPI 240x240 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_GC9A01A",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.gc9a01a}"
+  },
+  {
+    "name": "GC9106 (SPI 160x80 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_GC9106",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "build_src_filter": "+<libraries/Adafruit_GC9106Ex/*>"
+  },
+  {
+    "name": "ILI9225 (SPI 220x176 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ILI9225",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "optional": true, "comment": "enable screen dimming (depends on brightness pin)" },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "build_src_filter": "+<libraries/ILI9225Fix/*>"
+  },
+  {
+    "name": "ILI9341 (SPI 320x240 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ILI9341",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "optional": true, "comment": "enable screen dimming (depends on brightness pin)" },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.ili9341}"
+  },
+  {
+    "name": "ILI9488 (SPI 480x320 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ILI9488",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "BIG_BOOT_LOGO", "type": "flag", "default": false, "optional": true },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "build_src_filter": "+<libraries/ILI9488/*>"
+  },
+  {
+    "name": "NOKIA5110 (I2C 84x48 LCD)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_NOKIA5110",
+    "pins": [ "TFT_DC", "TFT_CS" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.n5110}"
+  },
+  {
+    "name": "SH1106 (I2C 128x64 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SH1106",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.sh110x}"
+  },
+  {
+    "name": "SH1107 (I2C 128x64 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SH1107",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.sh110x}"
+  },
+  {
+    "name": "SSD1305 (I2C 128x64 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SSD1305I2C",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.ssd1305}"
+  },
+  {
+    "name": "SSD1305 (SPI 128x64 OLED)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_SSD1305",
+    "pins": [ "TFT_DC", "TFT_CS" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.ssd1305}"
+  },
+  {
+    "name": "SSD1306 (I2C 128x64 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SSD1306",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.ssd1306}"
+  },
+  {
+    "name": "SSD1306x32 (I2C 128x32 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SSD1306x32",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.ssd1306}"
+  },
+  {
+    "name": "SSD1322 (I2C 256x64 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SSD1322",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "build_src_filter": "+<libraries/SSD1322/*>"
+  },
+  {
+    "name": "SSD1327 (I2C 128x128 OLED)",
+    "type": "I2C",
+    "define": "DSP_MODEL DSP_SSD1327",
+    "pins": [ "I2C_SDA", "I2C_SCL" ],
+    "defines": [
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+    ],
+    "lib_deps": "${library.ssd1327}"
+  },
+  {
+    "name": "ST7735 BLACKTAB (SPI 160x128 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7735",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "DTYPE INITR_BLACKTAB", "type": "flag", "optional": false },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7735}"
+  },
+  {
+    "name": "ST7735 GREENTAB (SPI 160x128 TFT)",
+    "info": "",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7735",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "DTYPE INITR_GREENTAB", "type": "flag", "optional": false },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7735}"
+  },
+  {
+    "name": "ST7735 144GREENTAB (SPI 128x128 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7735",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "DTYPE INITR_144GREENTAB", "type": "flag", "optional": false },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7735}"
+  },
+  {
+    "name": "ST7735 MINI160x80 (SPI 160x80 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7735",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "DTYPE INITR_MINI160x80", "type": "flag", "optional": false },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7735}"
+  },
+  {
+    "name": "ST7735 REDTAB (SPI 160x128 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7735",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "DTYPE INITR_REDTAB", "type": "flag", "optional": false },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7735}"
+  },
+  {
+    "name": "ST7789 (SPI 320x240 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7789",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7789}"
+  },
+  {
+    "name": "ST7789_76 (SPI 284x76 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7789",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "lib_deps": "${library.st7789}"
+  },
+  {
+    "name": "ST7796 (SPI 480x320 TFT)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7796",
+    "pins": [ "TFT_CS", "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "BIG_BOOT_LOGO", "type": "flag", "default": false, "optional": true },
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "build_src_filter": "+<libraries/Adafruit_ST7796S/*>"
+  },
+  {
+    "name": "ST7920 (SPI 128x64 LCD)",
+    "type": "SPI",
+    "define": "DSP_MODEL DSP_ST7920",
+    "pins": [ "TFT_CS" ],
+    "build_src_filter": "+<libraries/ST7920/*>"
+  }
+]

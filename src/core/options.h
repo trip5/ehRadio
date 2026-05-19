@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.05.08"
+#define RADIOVERSION "2026.05.19"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
@@ -33,58 +33,57 @@ that file if you need non-English language options.
   #error define error in platformio.ini: only ARDUINO_ESP32_DEV, ARDUINO_ESP32S3_DEV, or ARDUINO_ESP32C3_DEV boards are supported
 #endif
 
+
 /*******************************************************
 Use this tool to setup connections:
-https://trip5.github.io/ehRadio_myoptions/generator.html
+https://trip5.github.io/ehRadio/myoptions/generator.html
 (a basic tool and not definitive for all possible configurations)
 ********************************************************/
 
-#define DSP_DUMMY       0    // without display
-#define DSP_ST7735      1    // 160x128  1.8"  or 128x128  1.44"  or 160x80   0.96"  https://aliexpress.com/item/1005002822797745.html
-#define DSP_SSD1306     2    // 128x64   0.96" https://aliexpress.com/item/1005001621806398.html
-#define DSP_NOKIA5110   3    // 84x48    1.6"  https://aliexpress.com/item/1005001621837569.html
-#define DSP_ST7789      4    // 320x240  2.4"  https://aliexpress.com/item/32960241206.html 
-#define DSP_SH1106      5    // 128x64   1.3"  https://aliexpress.com/item/32683094040.html
-#define DSP_1602I2C     6    // 16x2           https://aliexpress.com/item/32305776560.html
-#define DSP_SSD1306x32  7    // 128x32   0.91" https://aliexpress.com/item/32798439084.html
-#define DSP_SSD1327     8    // 128x128  1.5"  https://aliexpress.com/item/1005001414175498.html
-#define DSP_ILI9341     9    // 320x240  3.2"  https://aliexpress.com/item/33048191074.html
-#define DSP_SSD1305     10   // 128x64   2.4"  SSD1305 and SSD1309 SPI https://aliexpress.com/item/32950307344.html
-#define DSP_SH1107      11   // 128x64   1.3"  https://aliexpress.com/item/4000551696674.html
-#define DSP_1602        12   // 16x2           https://aliexpress.com/item/32685016568.html
-#define DSP_GC9106      13   // 160x80   0.96" (looks like ST7735S, but it"s not him) https://aliexpress.com/item/32947890530.html
-#define DSP_2004I2C     14   // 20x4           https://aliexpress.com/item/32783128355.html
-#define DSP_2004        15   // 20x4           https://aliexpress.com/item/32783128355.html
-#define DSP_SSD1305I2C  16   // 128x64   2.4"  SSD1305 and SSD1309 I2C https://aliexpress.com/item/32950307344.html
-#define DSP_ILI9225     17   // 220x176  2.0"  https://aliexpress.com/item/32952021835.html
-#define DSP_ST7789_240  18   // 240x240  1.3"  https://aliexpress.com/item/32996979276.html
-/* !!! DSP_ST7789_240 requires further development when used in conjunction with the VS1053 module !!! See the link https://www.instructables.com/Adding-CS-Pin-to-13-LCD/ */
-#define DSP_ST7796      19   // 480x320  3.5"  https://aliexpress.com/item/1005004632953455.html?sku_id=12000029911293172
-#define DSP_GC9A01A     20   // 240x240  1.28" https://aliexpress.com/item/1005004069703494.html?sku_id=12000029869654615
-#define DSP_ILI9488     21   // 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356570
-#define DSP_ILI9486     22   // (Testing mode) 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356568
-#define DSP_SSD1322     23   // 256x64   2.8"  https://aliexpress.com/item/1005003480981568.html
-#define DSP_ST7920      24   // 128x64   2.6"  https://aliexpress.com/item/32699482638.html
-#define DSP_ST7789_76   25   // 284x76 2.25"   https://aliexpress.ru/item/1005009016973081.html
-#define DSP_CUSTOM      101  // your display
 
+/* ============================== DISPLAY ============================== */
+
+/* --- DISPLAYS ENUM --- */
+
+#define DSP_DUMMY       0 // without display
+#define DSP_ST7735      1 // 160x128  1.8"  or 128x128  1.44"  or 160x80   0.96"  https://aliexpress.com/item/1005002822797745.html
+#define DSP_SSD1306     2 // 128x64   0.96" https://aliexpress.com/item/1005001621806398.html
+#define DSP_NOKIA5110   3 // 84x48    1.6"  https://aliexpress.com/item/1005001621837569.html
+#define DSP_ST7789      4 // 320x240  2.4"  https://aliexpress.com/item/32960241206.html 
+#define DSP_SH1106      5 // 128x64   1.3"  https://aliexpress.com/item/32683094040.html
+#define DSP_1602I2C     6 // 16x2           https://aliexpress.com/item/32305776560.html
+#define DSP_SSD1306x32  7 // 128x32   0.91" https://aliexpress.com/item/32798439084.html
+#define DSP_SSD1327     8 // 128x128  1.5"  https://aliexpress.com/item/1005001414175498.html
+#define DSP_ILI9341     9 // 320x240  3.2"  https://aliexpress.com/item/33048191074.html
+#define DSP_SSD1305     10 // 128x64   2.4"  SSD1305 and SSD1309 SPI https://aliexpress.com/item/32950307344.html
+#define DSP_SH1107      11 // 128x64   1.3"  https://aliexpress.com/item/4000551696674.html
+#define DSP_1602        12 // 16x2           https://aliexpress.com/item/32685016568.html
+#define DSP_GC9106      13 // 160x80   0.96" (looks like ST7735S, but it"s not him) https://aliexpress.com/item/32947890530.html
+#define DSP_2004I2C     14 // 20x4           https://aliexpress.com/item/32783128355.html
+#define DSP_2004        15 // 20x4           https://aliexpress.com/item/32783128355.html
+#define DSP_SSD1305I2C  16 // 128x64   2.4"  SSD1305 and SSD1309 I2C https://aliexpress.com/item/32950307344.html
+#define DSP_ILI9225     17 // 220x176  2.0"  https://aliexpress.com/item/32952021835.html
+#define DSP_ST7789_240  18 // 240x240  1.3"  https://aliexpress.com/item/32996979276.html
+/* !!! DSP_ST7789_240 requires further development when used in conjunction with the VS1053 module !!! See the link https://www.instructables.com/Adding-CS-Pin-to-13-LCD/ */
+#define DSP_ST7796      19 // 480x320  3.5"  https://aliexpress.com/item/1005004632953455.html?sku_id=12000029911293172
+#define DSP_GC9A01A     20 // 240x240  1.28" https://aliexpress.com/item/1005004069703494.html?sku_id=12000029869654615
+#define DSP_ILI9488     21 // 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356570
+#define DSP_ILI9486     22 // (Testing mode) 480x320  3.5"  https://aliexpress.com/item/1005001999296476.html?sku_id=12000018365356568
+#define DSP_SSD1322     23 // 256x64   2.8"  https://aliexpress.com/item/1005003480981568.html
+#define DSP_ST7920      24 // 128x64   2.6"  https://aliexpress.com/item/32699482638.html
+#define DSP_ST7789_76   25 // 284x76 2.25"   https://aliexpress.ru/item/1005009016973081.html
+#define DSP_CUSTOM      101 // your display
+
+/* Define your display as #define DSP_MODEL DSP_ILI9488 */
 #ifndef DSP_MODEL
   #define DSP_MODEL DSP_DUMMY
 #endif
-
 #if DSP_MODEL==DSP_DUMMY
   #define DUMMYDISPLAY
 #endif
 
-/* Use #define #BIG_BOOT_LOGO with 480x320 displays if you want a bigger boot logo */
-#ifdef BIG_BOOT_LOGO
-  #if (DSP_MODEL!=DSP_ST7796 && DSP_MODEL!=DSP_ILI9488 && DSP_MODEL!=DSP_ILI9486)
-    #undef BIG_BOOT_LOGO
-  #endif
-#endif
-
-/*          TFT DISPLAY            */
-// SPI displays always use SPIA bus by default (see below for more)
+/* --- TFT DISPLAY --- */
+/* SPI displays always use SPIA bus by default (see below for more) */
 #ifndef TFT_CS
   #define TFT_CS 255
 #endif
@@ -101,28 +100,124 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define FULL_SCR_CLOCK true
 #endif
 
-/*    ST7735 display submodel     */
-// INITR_BLACKTAB       // 1.8" https://aliexpress.ru/item/1005002822797745.html
+/* ST7735 display submodel */
+// INITR_BLACKTAB // 1.8" https://aliexpress.ru/item/1005002822797745.html
 //     See this note If INITR_BLACKTAB have a noisy line on one side of the screen https://github.com/e2002/yoradio#note-if-initr_blacktab-dsp-have-a-noisy-line-on-one-side-of-the-screen-then-in-adafruit_st7735cpp
-// INITR_144GREENTAB    // 1.44" https://aliexpress.ru/item/1005002822797745.html
-// INITR_MINI160x80     // 0.96" 160x80 ST7735S   https://????
+// INITR_144GREENTAB // 1.44" https://aliexpress.ru/item/1005002822797745.html
+// INITR_MINI160x80 // 0.96" 160x80 ST7735S   https://????
 // INITR_GREENTAB
 // INITR_REDTAB
 #ifndef DTYPE
   #define DTYPE INITR_BLACKTAB
 #endif
 
-/*       SPI BUSES AND PINS       */
+/* --- I2C DISPLAY PINS --- */
+#ifndef I2C_SDA
+  #define I2C_SDA 255 // Defaults: ESP32 21, ESP32-S3 8
+#endif
+#ifndef I2C_SCL
+  #define I2C_SCL 255 // Defaults: ESP32 22, ESP32-S3 9
+#endif
+#ifndef I2C_RST
+  #define I2C_RST -1 // -1 means not used
+#endif
+
+/* --- LCD DISPLAY PINS --- */
+#ifndef LCD_RS
+  #define LCD_RS 255
+#endif
+#ifndef LCD_E
+  #define LCD_E 255
+#endif
+#ifndef LCD_D4
+  #define LCD_D4 255
+#endif
+#ifndef LCD_D5
+  #define LCD_D5 255
+#endif
+#ifndef LCD_D6
+  #define LCD_D6 255
+#endif
+#ifndef LCD_D7
+  #define LCD_D7 255
+#endif
+
+/* --- DISPLAY OPTIONS --- */
+#ifndef ROTATE_90
+  #define ROTATE_90 false // Optional 90 degree rotation for square displays
+#endif
+#ifndef BRIGHTNESS_PIN
+  #define BRIGHTNESS_PIN 255 // BRIGHTNESS Pin
+#endif
+
+/* Can the display be dimmed? If it is set to true but the Brightness Pin is not set... */
+/* This enables / disables the ability, not the default option DIMMING_ENABLED */
+
+#if defined(DSP_DIMMING_ENABLED) && DSP_DIMMING_ENABLED && BRIGHTNESS_PIN==255
+  #warning DSP_DIMMING_ENABLED is true but BRIGHTNESS_PIN is not set so setting DSP_DIMMING_ENABLED false
+  #undef DSP_DIMMING_ENABLED
+#endif
+#ifndef DSP_DIMMING_ENABLED
+    #define DSP_DIMMING_ENABLED false
+#endif  
+
+#ifndef LIGHT_SENSOR
+  #define LIGHT_SENSOR 255 // Light sensor
+#endif
+#ifndef AUTOBACKLIGHT // Auto-dimming with the light sensor (not related to DSP_DIMMING_ENABLED)
+  #ifndef AUTOBACKLIGHT_MAX
+    #define AUTOBACKLIGHT_MAX 2500
+  #endif
+  #ifndef AUTOBACKLIGHT_MIN
+    #define AUTOBACKLIGHT_MIN 12
+  #endif
+  #define AUTOBACKLIGHT(x) ({uint16_t _lh=(x>AUTOBACKLIGHT_MAX?AUTOBACKLIGHT_MAX:x); map(_lh, AUTOBACKLIGHT_MAX, 0, AUTOBACKLIGHT_MIN, 100);}) // autobacklight function
+#endif
+
+/* --- DISPLAY TRANSFORM --- */
+
+#ifndef DSP_INVERT_QUIRK
+  #define DSP_INVERT_QUIRK false // if a display shows inverted colors by default, override it by setting this to true
+#endif
+#ifndef DSP_INVERT_TITLE
+  #define DSP_INVERT_TITLE true // Invert title colors for displays
+#endif
+#ifndef RSSI_DIGIT
+  #define RSSI_DIGIT false // display RSSI as number
+#endif
+#ifndef RSSI_STEPS
+  #define RSSI_STEPS -50,-60,-70,-80
+#endif
+#ifndef CLOCKFONT_MONO
+  #define CLOCKFONT_MONO true // monospace clock font
+#endif
+#ifndef BITRATE_FULL
+  #define BITRATE_FULL true // display bitrate badge
+#endif
+
+/* Use #define #BIG_BOOT_LOGO with 480x320 displays if you want a bigger boot logo */
+#ifdef BIG_BOOT_LOGO
+  #if (DSP_MODEL!=DSP_ST7796 && DSP_MODEL!=DSP_ILI9488 && DSP_MODEL!=DSP_ILI9486)
+    #warning Your display may handle BIG_BOOT_LOGO badly!
+  #endif
+#endif
+
+
+/* ============================== SPI BUSES AND PINS ============================== */
+
+/* To allow multiple devices to use the same/different SPI buses, we name them */
+/* VSPI is patched to FSPI for third-party library compatibility on ESP32-S3/C3 (Adafruit etc.) */
 #include <SPI.h>
 #if !defined(CONFIG_IDF_TARGET_ESP32)
-  #define VSPI FSPI // VSPI is patched to FSPI for third-party library compatibility on ESP32-S3/C3 (Adafruit etc.)
+  #define VSPI FSPI
 #endif
-/*        Named SPI Buses         */
-// Two hardware SPI buses are available (Bus A = &SPI default, Bus B = secondary).
- 
-// Bus A/Primary SPI Bus (&SPI default) is important to use default pins (but can be overridden if needed)
-// Define all manually or use shorthand #define SPIA_DEFAULT to use defaults
-// For displays that do not use MISO, use shorthand #define SPIA_DEFAULT_XMISO
+
+/* --- NAMED SPI BUSES --- */
+/* Two hardware SPI buses are available (Bus A = &SPI default, Bus B = secondary). */
+
+/* Bus A/Primary SPI Bus (&SPI default) is important to use default pins (but can be overridden if needed) */
+/* Define all manually or use shorthand #define SPIA_DEFAULT to use defaults */
+/* For displays that do not use MISO, use shorthand #define SPIA_DEFAULT_XMISO */
 #if defined(SPIA_DEFAULT) || defined(SPIA_DEFAULT_XMISO)
   #if !defined(SPIA_SCK) && !defined(SPIA_MISO) && !defined(SPIA_MOSI)
     #if defined(CONFIG_IDF_TARGET_ESP32) // ESP32 default VSPI/SPI3
@@ -145,8 +240,8 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #endif
 #endif
 
-// Bus B / Secondary SPI Bus is less-important to use default pins (and may not be needed at all)
-// Nevertheless, shorthand #define SPIB_DEFAULT may be used to set defaults
+/* Bus B / Secondary SPI Bus is less-important to use default pins (and may not be needed at all) */
+/* Nevertheless, shorthand #define SPIB_DEFAULT may be used to set defaults */
 #if defined(SPIB_DEFAULT)
   #if !defined(SPIB_SCK) && !defined(SPIB_MISO) && !defined(SPIB_MOSI)
     #if defined(CONFIG_IDF_TARGET_ESP32) // ESP32 default VSPI/SPI3
@@ -164,50 +259,31 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 // Display (if SPI) will always use SPIA / Primary bus.
 // Define other peripheral SPI bus assignments in myoptions.h as so:
-//       #define VS1053_SPI 'A'    // VS1053 decoder on Bus A (if no SPI Display)
-//       #define SD_SPI     'B'    // SD card on Bus B
-//       #define TS_SPI     'B'    // Touchscreen on Bus B
+//       #define VS1053_SPI 'A' // VS1053 decoder on Bus A (if no SPI Display)
+//       #define SD_SPI     'B' // SD card on Bus B
+//       #define TS_SPI     'B' // Touchscreen on Bus B
 //
 // Internal macros SPIA, SPI_BUS_SECONDARY, VS1053_SPIBUS are auto-derived below - do not set them in myoptions.h
-#define SPIA SPI   // Bus A alias — always the default &SPI instance
+#define SPIA SPI // Bus A alias — always the default &SPI instance
 /* Auto-derive Bus B controller number when Bus B pins are set. DO NOT SET THIS IN myoptions.h */
 #if defined(SPIB_SCK)
   #if defined(CONFIG_IDF_TARGET_ESP32)
-    #define SPI_BUS_SECONDARY 2   // peripheral formerly called HSPI on ESP32
+    #define SPI_BUS_SECONDARY 2 // peripheral formerly called HSPI on ESP32
   #else
-    #define SPI_BUS_SECONDARY 1   // peripheral called HSPI on ESP32-S3/C3
+    #define SPI_BUS_SECONDARY 1 // peripheral called HSPI on ESP32-S3/C3
   #endif
 #endif
 
 /* Override SPI, I2C Speeds and Addresses with myoptions.h */
 // may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL
-// #define DEF_SPI_FREQ 8000000UL  // defaults usually OK; may range from 8000000UL (8 MHz) to 80000000UL (80 MHz); check your datasheet before changing! set to 0 
-// #define I2CFREQ_HZ   400000UL   // OLED driver default is 4000000UL (4 MHz); lower e.g. to 400000UL (400 kHz) if display is glitchy; range: 100000UL (100 kHz) to 4000000UL (4 MHz)
-// #define SCREEN_ADDRESS 0x3C     // see datasheet for address or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
+// #define DEF_SPI_FREQ 8000000UL // defaults usually OK; may range from 8000000UL (8 MHz) to 80000000UL (80 MHz); check your datasheet before changing! set to 0 
+// #define I2CFREQ_HZ   400000UL // OLED driver default is 4000000UL (4 MHz); lower e.g. to 400000UL (400 kHz) if display is glitchy; range: 100000UL (100 kHz) to 4000000UL (4 MHz)
+// #define SCREEN_ADDRESS 0x3C // see datasheet for address or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
 
-/*            NEXTION             */
-#ifndef NEXTION_RX
-  #define NEXTION_RX 255
-#endif
-#ifndef NEXTION_TX
-  #define NEXTION_TX 255
-#endif
-#if NEXTION_RX!=255 && NEXTION_TX!=255
-  #define USE_NEXTION
-#endif
 
-/*     OLED I2C DISPLAY Pins      */
-#ifndef I2C_SDA
-  #define I2C_SDA 255 // Defaults: ESP32 21, ESP32-S3 8
-#endif
-#ifndef I2C_SCL
-  #define I2C_SCL 255 // Defaults: ESP32 22, ESP32-S3 9
-#endif
-#ifndef I2C_RST
-  #define I2C_RST -1 // -1 means not used
-#endif
+/* ============================== AUDIO ============================== */
 
-/*          VS1053 Pins           */
+/* --- VS1053 PINS --- */
 #ifndef VS1053_CS
   #define VS1053_CS 255
 #endif
@@ -221,10 +297,13 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define VS1053_RST -1 // set to -1 if connected to Esp EN pin
 #endif
 // myoptions.h should also define which SPI bus will be used:
-// #define VS1053_SPI 'A'    // VS1053 decoder on Bus A (no display on A)
-// #define VS1053_SPI 'B'    // VS1053 decoder on Bus B
-
+// #define VS1053_SPI 'A' // VS1053 decoder on Bus A (no display on A)
+// #define VS1053_SPI 'B' // VS1053 decoder on Bus B
+#if VS1053_CS!=255 && !defined(VS1053_SPI)
+  #error VS1053_SPI not defined in myoptions.h
+#endif
 /* VS1053 bus assignment: auto-derived from which bus VS1053_SCK belongs to. */
+/* Helper for VS1053 library */
 #if defined(VS1053_SPI) && !defined(VS1053_SCK)
   #if VS1053_SPI == 'A' && defined(SPIA_SCK)
     #define VS1053_SCK  SPIA_SCK
@@ -242,14 +321,15 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #if !defined(VS1053_SCK)
     #error define error in myoptions.h: VS1053 enabled (VS1053_CS != 255) but VS1053_SCK not defined. Set VS1053_SPI 'A' or 'B' with matching SPIA_/SPIB_ bus pins, or define VS1053_SCK/MISO/MOSI directly.
   #elif defined(SPIB_SCK) && (VS1053_SCK == SPIB_SCK)
-    #define VS1053_SPIBUS SPIB  // VS1053 on Bus B
+    #define VS1053_SPIBUS SPIB // VS1053 on Bus B
   #else
-    #define VS1053_SPIBUS SPIA  // VS1053 on Bus A
+    #define VS1053_SPIBUS SPIA // VS1053 on Bus A
   #endif
 #endif
 
-/*       ESP32 INTERNAL DAC       */
-// The ESP32 has an internal DAC - these are the pins needed to use it
+/* --- ESP32 INTERNAL DAC --- */
+/* The ESP32 has an internal DAC - these are the pins needed to use it */
+/* It is NOT recommended to use and not officially supported */
 #ifdef USE_AUDIO_ESP32_DAC
   #ifndef I2S_BCLK
     #define I2S_BCLK 26
@@ -259,7 +339,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #endif
 #endif
 
-/*            I2S DAC             */
+/* --- I2S PCM DAC --- */
 #ifndef I2S_DOUT
   #define I2S_DOUT 255 // DIN connection
 #endif
@@ -276,16 +356,52 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define I2S_MCLK 255 // optional MCLK (not wired by default)
 #endif
 
-/* Check Audio Decoder */
+/* --- I2S ES8311 DECODER --- */
+
+/* a special define for a special decoder */
+/* #define USE_ES8311 activates the ES8311 mono decoder */
+/* requires I2S DOUT BCLK LRC (and MCLK probably too) pins defined */
+#ifdef USE_ES8311
+  #ifndef ES8311_MAX_I2S
+    #define ES8311_MAX_I2S 180 // Maximum I2S value to allow when mapping to ES8311 codec (0..254)
+  #endif
+  #ifndef PLAYER_FORCE_MONO
+    #define PLAYER_FORCE_MONO true // forces the VU meter mono (setting false doesn't change hardware capability)
+  #endif
+  #if defined(ES8311_I2C_SCL) && ES8311_I2C_SCL != 255 && defined(ES8311_I2C_SDA) && ES8311_I2C_SCL != 255
+    // may fix volume on boot issues (if defined and not 255)
+    // #define ES8311_I2C_SCL  15
+    // #define ES8311_I2C_SDA  16
+  #else
+    #undef ES8311_I2C_SCL
+    #undef ES8311_I2C_SDA
+  #endif
+#endif
+
+/* --- DECODER OPTIONS --- */
+#ifndef MUTE_PIN
+  #define MUTE_PIN 255 // MUTE Pin
+#endif
+#ifndef MUTE_VAL
+  #define MUTE_VAL HIGH // Write this to MUTE_PIN when player is stopped
+#endif
+#ifndef MUTE_LOCK
+  #define MUTE_LOCK false // for vs1053 Shield rev2 - lock MUTE_PIN to !MUTE_VAL
+#endif
+#ifndef PLAYER_FORCE_MONO
+  #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono (also add for mono I2S decoders for the VU)
+#endif
+
+/* --- CHECK DECODER OPTIONS --- */
 #if (I2S_DOUT!=255) && (VS1053_CS!=255)
   #error define error in myoptions.h: both I2S_DOUT and VS1053_CS are active - set I2S_DOUT 255 or VS1053_CS 255 to disable one
 #endif
 
-// Derived audio decoder gates - do NOT define these directly in myoptions.h.
-// USE_AUDIO_VS1053 is defined when all six required VS1053 pins are present.
-// USE_AUDIO_I2S is defined when the three required I2S pins are present.
-// These replace the old I2S_DOUT==255 / VS1053_CS==255 gate pattern throughout the codebase.
-#if (VS1053_CS != 255) && (VS1053_DCS!=255) && (VS1053_DREQ!=255) && (VS1053_MOSI!=255) && (VS1053_MISO!=255) && (VS1053_SCK!=255)
+/* Derived audio decoder gates - do NOT define these directly in myoptions.h. */
+/* USE_AUDIO_VS1053 is defined when all six required VS1053 pins are present. */
+/* USE_AUDIO_I2S is defined when the three required I2S pins are present. */
+/* These replace the old I2S_DOUT==255 / VS1053_CS==255 gate pattern used in yoRadio */
+#if (VS1053_CS!=255) && (VS1053_DCS!=255) && (VS1053_DREQ!=255) && (VS1053_MOSI!=255) && (VS1053_MISO!=255) && (VS1053_SCK!=255)
   #define USE_AUDIO_VS1053
 #endif
 #if (I2S_DOUT != 255) && (I2S_BCLK!=255) && (I2S_LRC!=255)
@@ -307,15 +423,20 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #error No audio decoder active. Define VS1053 SPI pins or I2S pins in myoptions.h.
 #endif
 
-/*             SDCARD             */
+
+/* ============================== SD CARD ============================== */
 #ifndef SD_CS
   #define SD_CS 255 // SDCARD CS pin: 255 = disabled
 #endif
 // myoptions.h should also define which SPI bus will be used:
-// #define SD_SPI 'A'    // SD card on Bus A
-// #define SD_SPI 'B'    // SD card on Bus B
+// #define SD_SPI 'A' // SD card on Bus A
+// #define SD_SPI 'B' // SD card on Bus B
 #if SD_CS!=255
-  #define USE_SD
+  #if !defined(SD_SPI)
+    #error SD_SPI not defined in myoptions.h
+  #else
+    #define USE_SD
+  #endif
 #endif
 #ifndef SDSPISPEED
   #if defined(ARDUINO_ESP32_DEV)
@@ -330,7 +451,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define SD_CARD_DETECT_PIN 255 // GPIO pin for mechanical SD card-detect switch (LOW=card present, HIGH=slot empty). 255 = disabled.
 #endif
 #ifndef SD_AUTOPLAY
-  #define SD_AUTOPLAY false // auto-switch to SD card mode when card is inserted (hot-insert detection). Requires SD_CARD_DETECT_PIN != 255
+  #define SD_AUTOPLAY false // auto-switch to SD card mode when card is inserted (requires SD_CARD_DETECT_PIN != 255)
 #endif
 #ifndef SD_MAX_LEVELS
   #define SD_MAX_LEVELS 5 // search depth for files on the SD card
@@ -339,7 +460,10 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #error define error in myoptions.h: SD_MAX_LEVELS must be between 1 and 10
 #endif
 
-/*            ENCODER             */
+
+/* ============================== INPUT ============================== */
+
+/* --- ROTARY ENCODER --- */
 #ifndef ENC_BTNL
   #define ENC_BTNL 255
 #endif
@@ -349,11 +473,18 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef ENC_BTNR
   #define ENC_BTNR 255
 #endif
-#ifndef ENC_INTERNALPULLUP // Thanks for Buska1968. See this topic: https://4pda.to/forum/index.php?s=&showtopic=1010378&view=findpost&p=113385448
-  #define ENC_INTERNALPULLUP true
+#ifndef ENC_PULLUP // use internal pullup on rotary Credit: Buska1968 https://4pda.to/forum/index.php?s=&showtopic=1010378&view=findpost&p=113385448
+  #define ENC_PULLUP true
 #endif
-#ifndef ENC_HALFQUARD
-  #define ENC_HALFQUARD false
+#ifndef ENC_BTNB_PULLUP // use internal pullup on button
+  #define ENC_BTNB_PULLUP true
+#endif
+#ifdef ENC_STEPS
+  #if !(ENC_STEPS == 1  ENC_STEPS == 2 | ENC_STEPS == 4 // 1 is acceptable but 2 for more accuracy
+    #error ENC_STEPS 1 or 2 or 4 only please
+  #endif
+#else
+  #define ENC_STEPS 1
 #endif
 
 #ifndef ENC2_BTNL
@@ -365,34 +496,76 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifndef ENC2_BTNR
   #define ENC2_BTNR 255
 #endif
-#ifndef ENC2_INTERNALPULLUP
-  #define ENC2_INTERNALPULLUP true
+#ifndef ENC2_PULLUP // use internal pullup on rotary
+  #define ENC2_PULLUP true
 #endif
-#ifndef ENC2_HALFQUARD
-  #define ENC2_HALFQUARD false
+#ifndef ENC2_BTNB_PULLUP // use internal pullup on button
+  #define ENC2_BTNB_PULLUP true
+#endif
+#ifdef ENC2_STEPS
+  #if !(ENC2_STEPS==1  ENC2_STEPS==2 | ENC2_STEPS==4 // 1 is acceptable but 2 for more accuracy
+    #error ENC2_STEPS 1 or 2 or 4 only please
+  #endif
+#else
+  #define ENC2_STEPS 1
 #endif
 
-/*            BUTTONS             */
-#ifndef BTN_LEFT
-  #define BTN_LEFT 255
+/* --- BUTTONS --- */
+/* First, compatibility with yoRadio defines */
+#ifdef BTN_LEFT
+  #define BTN_PREV BTN_LEFT
 #endif
-#ifndef BTN_CENTER
-  #define BTN_CENTER 255
+#ifdef BTN_CENTER
+  #define BTN_PLAY BTN_CENTER
 #endif
-#ifndef BTN_RIGHT
-  #define BTN_RIGHT 255
+#ifdef BTN_RIGHT
+  #define BTN_NEXT BTN_RIGHT
+#endif
+/* Useful if you want to apply false to all pullups with one define (otherwise true) */
+#ifdef BTN_INTERNALPULLUP
+  #define BTN_PREV_PULLUP BTN_INTERNALPULLUP
+  #define BTN_PLAY_PULLUP BTN_INTERNALPULLUP
+  #define BTN_NEXT_PULLUP BTN_INTERNALPULLUP
+  #define BTN_UP_PULLUP BTN_INTERNALPULLUP
+  #define BTN_DOWN_PULLUP BTN_INTERNALPULLUP
+  #define BTN_MODE_PULLUP BTN_INTERNALPULLUP
+#endif
+/* ehRadio Buttons */
+#ifndef BTN_PREV
+  #define BTN_PREV 255
+#endif
+#ifndef BTN_PREV_PULLUP
+  #define BTN_PREV_PULLUP true
+#endif
+#ifndef BTN_PLAY
+  #define BTN_PLAY 255
+#endif
+#ifndef BTN_PLAY_PULLUP
+  #define BTN_PLAY_PULLUP true
+#endif
+#ifndef BTN_NEXT
+  #define BTN_NEXT 255
+#endif
+#ifndef BTN_NEXT_PULLUP
+  #define BTN_NEXT_PULLUP true
 #endif
 #ifndef BTN_UP
   #define BTN_UP 255
 #endif
+#ifndef BTN_UP_PULLUP
+  #define BTN_UP_PULLUP true
+#endif
 #ifndef BTN_DOWN
   #define BTN_DOWN 255
+#endif
+#ifndef BTN_DOWN_PULLUP
+  #define BTN_DOWN_PULLUP true
 #endif
 #ifndef BTN_MODE
   #define BTN_MODE 255
 #endif
-#ifndef BTN_INTERNALPULLUP
-  #define BTN_INTERNALPULLUP true
+#ifndef BTN_MODE_PULLUP
+  #define BTN_MODE_PULLUP true
 #endif
 #ifndef BTN_LONGPRESS_LOOP_DELAY
   #define BTN_LONGPRESS_LOOP_DELAY 200 // delay between calling DuringLongPress event
@@ -406,8 +579,31 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #if BTN_PRESS_TICKS <= BTN_CLICK_TICKS
   #error define error in myoptions.h: BTN_PRESS_TICKS must be greater than BTN_CLICK_TICKS
 #endif
+/* Use this button to wake from deep sleep (other buttons can be reused) */
+#ifndef WAKE_PIN
+  #define WAKE_PIN 255 // Wake Pin (manual wakeup from deep sleep. can match with BTN_XXXX, ENC_BTNB, ENC2_BTNB)
+                // ESP32: RTC-capable GPIOs only: 0,2,4,12-15,25-27,32-39
+                // ESP32-S3: RTC-capable GPIOs only: 0-21
+                // ESP32-C3: RTC-capable GPIOs only: 0-5
+#endif
+// WAKE_PIN polarity default: LOW = active-low button (pin held HIGH by pull-up; wakes when button pulls to GND)
+// #define WAKE_PIN_STATE HIGH for active-high circuits (pin held LOW by pull-down; wakes when button pulls to VCC)
+#ifndef WAKE_PIN_STATE
+  #define WAKE_PIN_STATE LOW
+#endif
 
-/*          TOUCH SCREEN          */
+/* --- NEXTION --- */
+#ifndef NEXTION_RX
+  #define NEXTION_RX 255
+#endif
+#ifndef NEXTION_TX
+  #define NEXTION_TX 255
+#endif
+#if NEXTION_RX!=255 && NEXTION_TX!=255
+  #define USE_NEXTION
+#endif
+
+/* --- TOUCH SCREEN --- */
 #define TS_MODEL_UNDEFINED 0
 #define TS_MODEL_XPT2046 1
 #define TS_MODEL_GT911 2
@@ -436,30 +632,23 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define TS_RST 255
 #endif
 // myoptions.h should also define which SPI bus will be used (if an SPI Touchscreen):
-// #define TS_SPI 'A'    // Touchscreen on Bus A
-// #define TS_SPI 'B'    // Touchscreen on Bus B
-
-/*          LCD DISPLAY           */
-#ifndef LCD_RS
-  #define LCD_RS 255
-#endif
-#ifndef LCD_E
-  #define LCD_E 255
-#endif
-#ifndef LCD_D4
-  #define LCD_D4 255
-#endif
-#ifndef LCD_D5
-  #define LCD_D5 255
-#endif
-#ifndef LCD_D6
-  #define LCD_D6 255
-#endif
-#ifndef LCD_D7
-  #define LCD_D7 255
+// #define TS_SPI 'A' // Touchscreen on Bus A
+// #define TS_SPI 'B' // Touchscreen on Bus B
+#if TS_CS!=255 && !defined(TS_SPI)
+  #error TS_SPI not defined in myoptions.h
 #endif
 
-/*              RTC               */
+/* --- IR --- */
+#ifndef IR_PIN
+  #define IR_PIN 255
+#endif
+#ifndef IR_TIMEOUT
+  #define IR_TIMEOUT 80 // kTimeout, see IRremoteESP8266 documentation
+#endif
+
+
+/* ============================== RTC ============================== */
+
 #define RTC_MODULE_UNDEFINED 0
 #define DS3231 1
 #define DS1307 2
@@ -477,91 +666,47 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define RTC_SCL 255
 #endif
 
-/*          ESP DEVBOARD          */
-/*           LED stuff            */
-#if defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV)
-    #define ESP_S3C3       1
-    #ifndef USE_BUILTIN_LED
-      #define USE_BUILTIN_LED true
-    #endif
-    #ifndef LED_BUILTIN_S3 // Define a pin number for standard RGB LED behavior
-      #define LED_BUILTIN_S3 255
-    #endif
-    #if USE_BUILTIN_LED
-      #define REAL_LEDBUILTIN LED_BUILTIN
-    #else
-      #define REAL_LEDBUILTIN LED_BUILTIN_S3
-    #endif
+
+/* ============================== LED ============================== */
+
+/* You can try using #define LED_PIN LED_BUILTIN but it is better to define the actual pin */
+#ifdef LED_PIN
+ //#define LED_PIN 8
 #else
-    #ifndef LED_BUILTIN // LED's pin number
-      #define LED_BUILTIN 255
-    #endif
-    #define REAL_LEDBUILTIN LED_BUILTIN
+  #define LED_PIN 255 // unused
 #endif
 #ifndef LED_INVERT // can define as true in myoptions.h: inverts behavior of above LED
   #define LED_INVERT false
 #endif
 #ifdef RGB_LED_PIN // will use Neopixel library to control RGB LED with something like:
- // #define RGB_LED_PIN 42
-  #if RGB_LED_PIN==255
-    #undef RGB_LED_PIN
-  #endif
+ //#define RGB_LED_PIN 42
+#else
+  #define RGB_LED_PIN 255 // unused
 #endif
 #ifdef RGB_LED_ORDER // Most WS2812 LEDs are actually GRB but can be over-ridden
  // #define RGB_LED_ORDER NEO_GRB
 #endif
 
-/* PREVENT BOARD-DEFINED PIN RE-USE */
-/* Board-assigned LED pins may float high/low and conflict with peripherals that share a reset pin. */
-#if REAL_LEDBUILTIN==TFT_RST
-  #error define error in myoptions.h: LED_BUILTIN is the same as TFT_RST
-#endif
-#if REAL_LEDBUILTIN==VS1053_RST
-  #error define error in myoptions.h: LED_BUILTIN is the same as VS1053_RST
-#endif
-#if (REAL_LEDBUILTIN != 255) && (I2C_RST != -1) && (REAL_LEDBUILTIN == I2C_RST)
-  #error define error in myoptions.h: LED_BUILTIN is the same as I2C_RST
-#endif
-#ifdef ESP_S3C3
-  #if (LED_BUILTIN_S3 != 255) && (LED_BUILTIN_S3 == TFT_RST)
-    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as TFT_RST
-  #endif
-  #if (LED_BUILTIN_S3 != 255) && (LED_BUILTIN_S3 == VS1053_RST)
-    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as VS1053_RST
-  #endif
-  #if (LED_BUILTIN_S3 != 255) && (I2C_RST != -1) && (LED_BUILTIN_S3 == I2C_RST)
-    #error define error in myoptions.h: LED_BUILTIN_S3 is the same as I2C_RST
-  #endif
-#endif
 
-/*       LIBRARY OVERRIDES        */
-/*      DO NOT CHANGE THESE       */
-#ifndef CONFIG_ASYNC_TCP_RUNNING_CORE
-  #define CONFIG_ASYNC_TCP_RUNNING_CORE 0 // -1 = any available core
-#endif
-#ifndef CONFIG_ASYNC_TCP_USE_WDT
-  #define CONFIG_ASYNC_TCP_USE_WDT 0 // 1 = watchdog enabled (adds between 33us and 200us per event)
-#endif
+/* ============================== SYSTEM OVERRIDES ============================== */
 
-/*        SYSTEM OVERRIDES        */
-/*      THESE MAY BE TWEAKED      */
+/* --- SYSTEM TWEAKS --- */
 #ifndef WIFI_ATTEMPTS
   #define WIFI_ATTEMPTS 16
 #endif
 #if WIFI_ATTEMPTS < 1
   #error define error in myoptions.h: WIFI_ATTEMPTS must be at least 1
 #endif
-#ifndef LOOP_TASK_STACK_SIZE    // sets the stack size for the FreeRTOS task that runs the main loop
-  #define LOOP_TASK_STACK_SIZE 8 // Compiler default is 8KB but seems safe on ESP32-S3 to increase to 16KB for audio decoding + concurrent tasks
-#endif
-#if (LOOP_TASK_STACK_SIZE < 4) || (LOOP_TASK_STACK_SIZE > 64)
-  #error define error in myoptions.h: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
-#endif
-#ifndef CONFIG_ASYNC_TCP_QUEUE_SIZE
-  #define CONFIG_ASYNC_TCP_QUEUE_SIZE 64 // maybe 32 for ESP32?
-#endif
 #ifndef SEARCHRESULTS_BUFFER
-  #define SEARCHRESULTS_BUFFER 1024*4 // 32KB matches chunk sizes from radio-browser.info but likely only good for ESP32-S3
+ // Buffer for chunked HTTP transfers from radio-browser.info. Defined in KB; conversion to bytes done in netserver.cpp.
+ // ESP32-C3 has less RAM than base ESP32 — keep conservative at 4KB like base ESP32.
+  #if defined(ARDUINO_ESP32S3_DEV)
+    #define SEARCHRESULTS_BUFFER 32 // KB; matches radio-browser.info chunk size
+  #else // ESP32 and ESP32-C3
+    #define SEARCHRESULTS_BUFFER 4 // KB
+  #endif
+#elif (SEARCHRESULTS_BUFFER < 4) || (SEARCHRESULTS_BUFFER > 64)
+  #error define error in myoptions.h: SEARCHRESULTS_BUFFER must be between 4 and 64 (value in KB)
 #endif
 #ifndef SEARCHRESULTS_YIELDINTERVAL
   #define SEARCHRESULTS_YIELDINTERVAL 0 // With a large buffer, skipping is almost eliminated with 0
@@ -569,15 +714,23 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #ifdef MAX_PL_READ_BYTES
  //#define MAX_PL_READ_BYTES 65536 // Makes chunked HTML transfers... possibly enable if experiencing slowdowns when sending web UI to client. Untested.
 #endif
-/* Below defines maximum lengths of character buffers */
+/* Maximum lengths of character buffers */
 /* Notes have been made regarding old yoRadio values */
 #ifndef WEATHER_STRING_L
   #define WEATHER_STRING_L 512 // size of weather string, formerly 254
 #endif
 #ifndef WEBSOCKET_BUFFER
-  #define WEBSOCKET_BUFFER 384 // formerly BUFLEN * 2 = 340
+  #define WEBSOCKET_BUFFER 512 // formerly 340
 #endif
-
+#ifndef MQTT_URL_SIZE
+  #define MQTT_URL_SIZE 512 // shared URL buffer cap for MQTT commands, artwork URLs, and browse URLs
+#endif
+#ifndef STATION_FIELD_LENGTH
+  #define STATION_FIELD_LENGTH 170 // max length for station name, URL, and title fields
+#endif
+#if STATION_FIELD_LENGTH < 64
+  #error define error in myoptions.h: STATION_FIELD_LENGTH is too small (minimum 64, default 170)
+#endif
 #ifndef CONNECT_HTTP_HTTPS_TIMEOUT
  // Connection timeout in milliseconds: HTTP, HTTPS(SSL)
  // Library defaults: 250ms HTTP, 2700ms SSL
@@ -586,77 +739,178 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
  // undefined means using library defaults (preferred)
 #endif
 
-/*        Other settings. You can overwrite them in the myoptions.h file        */
-#ifndef MUTE_PIN
-  #define MUTE_PIN 255 // MUTE Pin
-#endif
-#ifndef MUTE_VAL
-  #define MUTE_VAL HIGH // Write this to MUTE_PIN when player is stopped
-#endif
-#ifndef MUTE_LOCK
-  #define MUTE_LOCK false // for vs1053 Shield rev2 - lock MUTE_PIN to !MUTE_VAL
-#endif
-#ifndef BRIGHTNESS_PIN
-  #define BRIGHTNESS_PIN 255 // BRIGHTNESS Pin
-#endif
-#ifndef PLAYER_FORCE_MONO
-  #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono
-#endif
-#ifndef ROTATE_90
-  #define ROTATE_90 false // Optional 90 degree rotation for square displays
-#endif
-#ifndef WAKE_PIN
-  #define WAKE_PIN 255 // Wake Pin (manual wakeup from deep sleep. can match with BTN_XXXX, ENC_BTNB, ENC2_BTNB)
-                      // ESP32:   RTC-capable GPIOs only: 0,2,4,12-15,25-27,32-39
-                      // ESP32-S3: RTC-capable GPIOs only: 0-21
-                      // ESP32-C3: RTC-capable GPIOs only: 0-5
-#endif
-// WAKE_PIN polarity default: LOW = active-low button (pin held HIGH by pull-up; wakes when button pulls to GND)
-// #define WAKE_PIN_STATE HIGH for active-high circuits (pin held LOW by pull-down; wakes when button pulls to VCC)
-#ifndef WAKE_PIN_STATE
-  #define WAKE_PIN_STATE LOW
-#endif
-
-#ifndef LIGHT_SENSOR
-  #define LIGHT_SENSOR 255 // Light sensor
-#endif
-#ifndef AUTOBACKLIGHT
-  #ifndef AUTOBACKLIGHT_MAX
-    #define AUTOBACKLIGHT_MAX 2500
+/* --- CPU CORES --- */
+/* ESP32 and ESP32-S3 have 2 cores. Core 0 will handle audio processes. */
+/* Core 1 will handle everything else. Overrides are possible with these but be careful. */
+#if defined(CONFIG_FREERTOS_UNICORE) // will automatically activate on compiling for ESP32-C3 or other single-core ESPs
+  #ifdef AUDIO_CORE
+    #error Do not try to define AUDIO_CORE on a single-core ESP - it will be handled automatically!
+  #else
+    #define AUDIO_CORE 0
   #endif
-  #ifndef AUTOBACKLIGHT_MIN
-    #define AUTOBACKLIGHT_MIN 12
+#else // If not 1 Core, then define core processes
+  #ifndef AUDIO_CORE
+    #define AUDIO_CORE 0
+  #else
+    #if (AUDIO_CORE!=1)
+	    #error Only add #define AUDIO_CORE 1 to options.h to move Audio to CPU core 1. Leave it undefined for core 0.
+    #endif
   #endif
-  #define AUTOBACKLIGHT(x) ({uint16_t _lh=(x>AUTOBACKLIGHT_MAX?AUTOBACKLIGHT_MAX:x); map(_lh, AUTOBACKLIGHT_MAX, 0, AUTOBACKLIGHT_MIN, 100);}) // autobacklight function
 #endif
-#ifndef DSP_INVERT_TITLE
-  #define DSP_INVERT_TITLE true // Invert title colors for displays ?
+#if defined(CONFIG_FREERTOS_UNICORE)
+  #ifdef NETWORK_CORE
+    #error Do not try to define NETWORK_CORE on a single-core ESP - it will be handled automatically!
+  #else
+    #define NETWORK_CORE 0
+  #endif
+#else
+  #ifndef NETWORK_CORE
+    #define NETWORK_CORE 1
+  #else
+    #if (NETWORK_CORE!=0)
+	    #error Only add #define NETWORK_CORE 0 to options.h to move Netserver to CPU core 0. Leave it undefined for core 1.
+    #endif
+  #endif
 #endif
-#ifndef RSSI_DIGIT
-  #define RSSI_DIGIT false // display RSSI as number
-#endif
-#ifndef RSSI_STEPS
-  #define RSSI_STEPS -50,-60,-70,-80
-#endif
-#ifndef CLOCKFONT_MONO
-  #define CLOCKFONT_MONO true // monospace clock font
-#endif
-#ifndef MAX_AUDIO_SOCKET_TIMEOUT
-  #define MAX_AUDIO_SOCKET_TIMEOUT false // max audio socket timeout?
-#endif
-#ifndef BITRATE_FULL
-  #define BITRATE_FULL true // display bitrate badge
+#if defined(CONFIG_FREERTOS_UNICORE)
+  #ifdef DSP_TASK_CORE_ID
+    #error Do not try to define DSP_TASK_CORE_ID on a single-core ESP - it will be handled automatically!
+  #else
+    #define DSP_TASK_CORE_ID 0
+  #endif
+#else
+  #ifndef DSP_TASK_CORE_ID
+    #define DSP_TASK_CORE_ID 1
+  #else
+    #if (DSP_TASK_CORE_ID!=0)
+	    #error Only add #define DSP_TASK_CORE_ID 0 to options.h to move Netserver to CPU core 0. Leave it undefined for core 1.
+    #endif
+  #endif
 #endif
 
-/*               IR               */
-#ifndef IR_PIN
-  #define IR_PIN 255
+
+/* --- TWEAKS FOR CORE PROCESSES --- */
+/* Board-scaled stack size multiplier */
+/* Applied automatically to FreeRTOS task stack defaults based on board SRAM capacity */
+/* Override in myoptions.h only if needed: #define STACK_MULTIPLIER 1 to disable scaling on S3 */
+/* Note: ESP32-C3 has LESS RAM than base ESP32 and defaults to 1x — same as base ESP32 */
+#ifndef STACK_MULTIPLIER
+  #if defined(ARDUINO_ESP32S3_DEV)
+    #define STACK_MULTIPLIER 2 // ESP32-S3: double stack sizes (most SRAM available)
+  #else
+    #define STACK_MULTIPLIER 1 // ESP32 and ESP32-C3: conservative defaults
+  #endif
 #endif
-#ifndef IR_TIMEOUT
-  #define IR_TIMEOUT 80 // kTimeout, see IRremoteESP8266 documentation
+#if (STACK_MULTIPLIER != 1 && STACK_MULTIPLIER != 2)
+  #error define error in myoptions.h: STACK_MULTIPLIER must be 1 or 2
 #endif
 
-/* ehRadio Color Theme: over-ridden by mytheme.h */
+/* Stack sizes are in KB; conversion to bytes is done locally in each .cpp file via a _BYTES macro */
+/* Delay values are in ms; pdMS_TO_TICKS() conversion is done locally in each .cpp file via a SET_ macro */
+/* The straight number without multiplier is from yoRadio ESP32 defaults - ESP32-S3 uses the multiplier */
+/* If working on an ESP32 or ESP32-C3 be warned that these numbers are actually untested and feedback is welcome! */
+
+/* Arduino loop() task (main.cpp) — SET_LOOP_TASK_STACK_SIZE() uses this directly in bytes */
+#ifndef LOOP_TASK_STACK_SIZE
+  #define LOOP_TASK_STACK_SIZE (8 * STACK_MULTIPLIER) // KB; 8 (ESP32/C3) or 16 (S3)
+#elif (LOOP_TASK_STACK_SIZE < 4) || (LOOP_TASK_STACK_SIZE > 64)
+  #error define error in myoptions.h: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
+#endif
+
+/* DspTask (display.cpp): render loop task */
+#ifndef DSP_TASK_STACK_SIZE
+  #define DSP_TASK_STACK_SIZE  (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+#elif (DSP_TASK_STACK_SIZE < 2) || (DSP_TASK_STACK_SIZE > 32)
+  #error define error in myoptions.h: DSP_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+#endif
+#ifndef DSP_TASK_PRIORITY
+  #define DSP_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), below audio-critical tasks (3)
+#endif
+#ifndef DSP_TASK_DELAY
+  #define DSP_TASK_DELAY 10 // ms; minimum sleep between display iterations. Actual frame rate depends on display SPI write time — typically ~50fps at slow SPI speeds, up to 100fps on faster displays
+#endif
+#ifndef DSP_QUEUE_TICKS
+  #define DSP_QUEUE_TICKS 0 // ticks; xQueueReceive timeout inside display.loop(). 0 = non-blocking poll. Higher values (e.g. 5) reduce latency when queue is empty but are rarely needed; per-display conf files may override
+#endif
+#ifndef DSQ_SEND_DELAY
+  #define DSQ_SEND_DELAY 200 // ms; xQueueSend timeout in display.putRequest(). If queue full, calling task blocks up to this long before dropping the request silently — preferable to blocking the audio task
+#endif
+#ifndef PLQ_SEND_DELAY
+  #define PLQ_SEND_DELAY 100 // ms; xQueueSend timeout in player.sendCommand(). Short timeout prevents blocking audio decode while still absorbing brief queue pressure
+#endif
+#if defined(ARDUINO_ESP32S3_DEV) // Minimum allocation bytes; min free heap before spawning a background task (search, curated, playback, rb_click)
+  #define MIN_MALLOC 24112 // ESP32-S3: known to be good, generous
+#else
+  #define MIN_MALLOC 12056 // ESP32 and ESP32-C3: tight...? good luck!
+#endif
+
+/* netserverLoopTask (netserver.cpp): runs netserver.loop() on its own pinned task */
+#ifndef NETSERVER_TASK_STACK_SIZE
+  #define NETSERVER_TASK_STACK_SIZE  (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+#elif (NETSERVER_TASK_STACK_SIZE < 2) || (NETSERVER_TASK_STACK_SIZE > 32)
+  #error define error in myoptions.h: NETSERVER_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+#endif
+#ifndef NETSERVER_TASK_PRIORITY
+  #define NETSERVER_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), same tier as display
+#endif
+#ifndef NETSERVER_TASK_DELAY
+  #define NETSERVER_TASK_DELAY 1 // ms; yield between netserver.loop() iterations
+#endif
+#ifndef NSQ_SEND_DELAY
+  #define NSQ_SEND_DELAY 300 // ms; xQueueSend timeout for nsQueue (requestOnChange). Use portMAX_DELAY to block indefinitely
+#endif
+#ifndef NS_QUEUE_DELAY
+  #define NS_QUEUE_DELAY 0 // ms; xQueueReceive timeout for nsQueue (processQueue). 0 = non-blocking poll
+#endif
+
+/* nextionCore0 (nextion.cpp): Nextion display task */
+#ifndef NEXTION_TASK_STACK_SIZE
+  #define NEXTION_TASK_STACK_SIZE (3 * STACK_MULTIPLIER) // KB; 3 (ESP32/C3) or 6 (S3)
+#elif (NEXTION_TASK_STACK_SIZE < 2) || (NEXTION_TASK_STACK_SIZE > 16)
+  #error define error in myoptions.h: NEXTION_TASK_STACK_SIZE must be between 2 and 16 (value in KB)
+#endif
+#ifndef NEXTION_TASK_PRIORITY
+  #define NEXTION_TASK_PRIORITY 2 // 2 = same tier as display
+#endif
+
+/* Network utility tasks (network.cpp, player.cpp): doSync, searchWiFi, retryStreamConnection */
+#ifndef NETWORK_TASK_STACK_SIZE
+  #define NETWORK_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+#elif (NETWORK_TASK_STACK_SIZE < 2) || (NETWORK_TASK_STACK_SIZE > 32)
+  #error define error in myoptions.h: NETWORK_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+#endif
+
+/* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
+/* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
+#ifndef PLAYBACK_TASK_PRIORITY
+  #define PLAYBACK_TASK_PRIORITY 3 // highest: stream connection / playback start
+#endif
+#ifndef NET_TASK_PRIORITY
+  #define NET_TASK_PRIORITY 3 // highest: WiFi search, stream retry, OTA download
+#endif
+#ifndef LOW_TASK_PRIORITY
+  #define LOW_TASK_PRIORITY 1 // lowest: background/deferrable tasks (round-robin with loop())
+#endif
+
+
+/* --- LIBRARY OVERRIDES --- */
+/* These are overrides for external libraries */
+#ifndef CONFIG_ASYNC_TCP_QUEUE_SIZE
+  #if defined(ARDUINO_ESP32S3_DEV)
+    #define CONFIG_ASYNC_TCP_QUEUE_SIZE 64 // ESP32-S3: larger queue for higher network throughput
+  #else
+    #define CONFIG_ASYNC_TCP_QUEUE_SIZE 32 // ESP32 and ESP32-C3
+  #endif
+#endif
+#ifndef CONFIG_ASYNC_TCP_RUNNING_CORE
+  #define CONFIG_ASYNC_TCP_RUNNING_CORE NETWORK_CORE // -1 = any available core (NETWORK_CORE is default)
+#endif
+#ifndef CONFIG_ASYNC_TCP_USE_WDT
+  #define CONFIG_ASYNC_TCP_USE_WDT 0 // 1 = watchdog enabled (adds between 33us and 200us per event)
+#endif
+
+/* ============================== COLOR ============================== */
+/* ehRadio Color Theme: over-ridden by mytheme.h (if it exists) */
 /*        color name                R,   G,   B  */
 #ifndef COLOR_BACKGROUND // background
   #define COLOR_BACKGROUND          0,   0,   0
@@ -677,7 +931,7 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define COLOR_SNG_TITLE_2       220, 220, 220
 #endif
 #ifndef COLOR_WEATHER // weather string
-  #define COLOR_WEATHER             0, 255,   0
+  #define COLOR_WEATHER           224, 124,  16
 #endif
 #ifndef COLOR_VU_MAX // max of VU meter "FireBrick"
   #define COLOR_VU_MAX            178,  34,  34
@@ -701,19 +955,22 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define COLOR_DATE              255, 255, 255
 #endif
 #ifndef COLOR_HEAP // heap string
-  #define COLOR_HEAP              231, 115,   0
+  #define COLOR_HEAP              224, 124,  16
 #endif
 #ifndef COLOR_BUFFER // buffer line
-  #define COLOR_BUFFER            220, 220,  90
+  #define COLOR_BUFFER            224, 64,  192
 #endif
 #ifndef COLOR_IP // IP address
-  #define COLOR_IP                200, 20,  240
+  #define COLOR_IP                  0, 200, 220
 #endif
 #ifndef COLOR_VOLUME_VALUE // volume number
   #define COLOR_VOLUME_VALUE      15,  180,  15
 #endif
 #ifndef COLOR_RSSI // rssi
-  #define COLOR_RSSI              200,  20, 240
+  #define COLOR_RSSI                0, 200, 220
+#endif
+#ifndef COLOR_BATTERY // battery
+  #define COLOR_BATTERY           224, 124,  16
 #endif
 #ifndef COLOR_VOLBAR_OUT // border of volume bar
   #define COLOR_VOLBAR_OUT        30,  200,  30
@@ -755,21 +1012,120 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
   #define COLOR_BITRATE           220, 220,  90
 #endif
 
-/*        SYSTEM DEFAULTS         */
-#ifndef SCREENSAVERSTARTUPDELAY
+
+/* ============================== SYSTEM DEFAULTS ============================== */
+
+/* --- SOURCE OF UPDATE FILES --- */
+/* only used if FIRMWARE is defined as it is in Trip5's automatic Github builds */
+#ifndef GITHUBURL
+  #define GITHUBURL "https://github.com/trip5/ehradio" // used by the ESPFileUpdater in BrowserClient (and in URLs below)
+#endif
+#ifdef FIRMWARE // this is the filename.bin online
+ // #define FIRMWARE_NAME "Trip5's Big Screen Radio" optional name of the firmware (appears only in eh Device Protocol and will appear as the filename (without .bin) by default if not defined)
+  #ifndef FILESURL
+    #define FILESURL GITHUBURL "/releases/download/" RADIOVERSION "/" // + FILE for SPIFFS files (this version)
+  #endif
+  #ifndef UPDATEURL
+    #define UPDATEURL GITHUBURL "/releases/latest/download/" // + FIRMWARE for the file
+  #endif
+  #ifndef CHECKUPDATEURL
+    #define CHECKUPDATEURL GITHUBURL "/releases/latest/download/version.txt" // automatically extracted from options.h during Github workflow
+  #endif
+  #ifndef VERSIONSTRING
+    #define VERSIONSTRING "ehRadio Version" // the file above should have a line that starts with this followed by a version number
+  #endif
+  #ifndef CHECKUPDATEURL_TIME
+    #define CHECKUPDATEURL_TIME "1 day"
+  #endif
+#else
+  #undef FILESURL
+  #undef UPDATEURL
+  #undef CHECKUPDATEURL
+  #undef VERSIONSTRING
+  #undef CHECKUPDATEURL_TIME
+#endif
+#ifdef DISABLE_UPDATER // if this is defined, disables online updates
+  #undef FILESURL
+  #undef UPDATEURL
+  #undef CHECKUPDATEURL
+  #undef VERSIONSTRING
+  #undef CHECKUPDATEURL_TIME
+#endif
+
+/* --- SOURCE OF JSON FILES --- */
+#ifndef TIMEZONES_JSON_URL
+  #define TIMEZONES_JSON_URL "https://raw.githubusercontent.com/trip5/timezones.json/master/timezones.json.gz"
+#endif
+#ifndef TIMEZONES_JSON_CHECKTIME
+  #define TIMEZONES_JSON_CHECKTIME "4 weeks"
+#endif
+#ifndef RADIO_BROWSER_SERVERS_URL 
+  #define RADIO_BROWSER_SERVERS_URL "https://all.api.radio-browser.info/json/servers"
+#endif
+#ifndef RB_SERVERS_CHECKTIME
+  #define RB_SERVERS_CHECKTIME "1 day"
+#endif
+
+/* --- SOURCE OF CURATED PLAYLISTS --- */
+#ifndef CURATED_LISTS
+  #define CURATED_LISTS "Trip5's webstations"
+  #ifndef CURATED_LISTS_LINK
+    #define CURATED_LISTS_LINK "https://github.com/trip5/webstations"
+  #endif
+  #ifndef CURATED_LISTS_URL
+    #define CURATED_LISTS_URL "https://github.com/trip5/webstations/releases/latest/download/"
+  #endif
+  #ifndef CURATED_LISTS_INDEX
+    #define CURATED_LISTS_INDEX "index.json"
+  #endif
+#else
+  #if !defined(CURATED_LISTS_LINK) || !defined(CURATED_LISTS_URL) || !defined(CURATED_LISTS_INDEX)
+    #undef CURATED_LISTS
+    #undef CURATED_LISTS_LINK
+    #undef CURATED_LISTS_URL
+    #undef CURATED_LISTS_INDEX
+  #endif
+#endif
+
+/* --- RADIO BROWSER API SERVER --- */
+/* Used as fallback for search and primary for sending clicks */
+#ifndef RADIO_BROWSER_SERVER
+  #define RADIO_BROWSER_SERVER "all.api.radio-browser.info"
+#endif
+/* Opt-out sending clicks to Radio-browser API with #define RADIO_BROWSER_NO_SEND_CLICKS */
+#ifndef RADIO_BROWSER_NO_SEND_CLICKS
+  #ifndef RADIO_BROWSER_SEND_CLICKS
+    #define RADIO_BROWSER_SEND_CLICKS
+  #endif
+  #ifndef RADIO_BROWSER_SEND_CLICK_DELAY
+    #define RADIO_BROWSER_SEND_CLICK_DELAY 10000 // wait 10 seconds before sending the click
+  #endif
+#else
+  #undef RADIO_BROWSER_SEND_CLICKS
+#endif
+
+/* --- OTHER COMPILE OPTIONS --- */
+/*  Here are other #defines that may be added to myoptions.h   */
+#ifdef MQTT_ENABLE
+ // This enables MQTT. A nice option to have but not available in the code without this #define in myoptions.h
+#endif
+#ifdef PLAYLIST_DEFAULT_URL
+ // This will download a playlist when first-booting and no playlist is present on SPIFFS.  Can be CSV or JSON format.  Example:
+ // #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
+#endif
+#ifndef SCREENSAVERSTARTUPDELAY // initial delay
   #define SCREENSAVERSTARTUPDELAY 5
 #endif
 #ifndef HEADER_TIMEOUT
   #define HEADER_TIMEOUT 5000
 #endif
-#ifndef USE_OTA
-  #define USE_OTA false // define true to enable Arduino OTA
+#ifndef USE_OTA // define true to enable Arduino OTA
+  #define USE_OTA false
 #endif
 #ifdef OTA_PASS
- // #define OTA_PASS "myotapassword12345" // you can also define an OTA password like this
+  //#define OTA_PASS "myotapassword12345"
 #endif
-
-#ifndef AP_SSID
+#ifndef AP_SSID // name of hotspot in AP Mode
   #define AP_SSID "ehRadio"
 #endif
 #ifdef AP_PASSWORD
@@ -777,27 +1133,82 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
     #undef AP_PASSWORD
   #endif
 #endif
-#ifndef BUFLEN
-  #define BUFLEN 170 // 170 seems safe... a lot of multipliers exist in the code...
-#endif
-#if BUFLEN < 64
-  #error define error in myoptions.h: BUFLEN is too small (minimum 64, default 170)
-#endif
 
 /* This bit will actually do something but needs to be handled a different way - configurable would be better */
 /* But I'm very concerned that a forgotten password means needing a way to factory-reset using hardware... */
 /* So this may never actually be implemented in a proper way */
 //#define HTTP_USER "user"
 //#define HTTP_PASS "password"
+/* It was left here by e2002 for yoRadio and just never moved */
+/* Thank you for reading, by the way */
+/* And thank you to e2002 for making yoRadio */
 
-/*           BATTERY              */
+
+/* ============================== DUBUG ============================== */
+
+/* Enable all the debug logs with #define ALL_DEBUG_LOGS */
+/* BATTERY_DEBUG is included elsewhere */
+#ifdef ALL_DEBUG_LOGS
+  #ifndef ESPFILEUPDATER_DEBUG
+    #define ESPFILEUPDATER_DEBUG // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
+  #endif
+  #ifndef NETSERVER_DEBUG
+   #define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
+  #endif
+  #ifndef CORE_MONITOR
+    #define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s)
+  #endif
+  #ifdef WIDGET_DEBUG
+    #define WIDGET_DEBUG // This shows the Widget's Text in logging.  It's extremely noisy.
+  #endif
+#endif
+#ifdef CORS_DEBUG
+ // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
+#endif
+
+/* CPU CORE NAMES: Name the Cores For What They Do */
+/* Do not use any of these macros directly in myoptions.h! */
+/* Use #define CORE_MONITOR to show how busy the cores are... this gives them friendly names */
+#if (!CONFIG_FREERTOS_UNICORE && defined(CORE_MONITOR))
+  #if (AUDIO_CORE==0)
+    #define CORE_0A "+Audio"
+    #define CORE_1A ""
+  #elif (AUDIO_CORE==1)
+    #define CORE_0A ""
+    #define CORE_1A "+Audio"
+  #endif
+  #if (NETWORK_CORE==0)
+    #define CORE_0B "+Net"
+    #define CORE_1B ""
+  #elif (NETWORK_CORE==1)
+    #define CORE_0B ""
+    #define CORE_1B "+Net"
+  #endif
+  #if (CONFIG_ASYNC_TCP_RUNNING_CORE==0)
+    #define CORE_0C "+TCP"
+    #define CORE_1C ""
+  #elif (CONFIG_ASYNC_TCP_RUNNING_CORE==1)
+    #define CORE_0C ""
+    #define CORE_1C "+TCP"
+  #endif
+  #if (DSP_TASK_CORE_ID==0)
+    #define CORE_0D "+Disp"
+    #define CORE_1D ""
+  #elif (DSP_TASK_CORE_ID==1)
+    #define CORE_0D ""
+    #define CORE_1D "+Disp"
+  #endif
+  #define CORE_0 "(" CORE_0A CORE_0B CORE_0C CORE_0D ")"
+  #define CORE_1 "(Main" CORE_1A CORE_1B CORE_1C CORE_1D ")"
+#endif
+
+/* ============================== BATTERY ============================== */
 #ifndef BATTERY_PIN
   #define BATTERY_PIN 255 // GPIO pin for battery voltage ADC reading
 #endif
 #ifndef BATTERY_CHARGE_PIN
   #define BATTERY_CHARGE_PIN 255 // GPIO pin for charging status (TP4054 CHRG pin, active LOW)
 #endif
-
 #ifndef BATTERY_DIVIDER_RATIO
   #define BATTERY_DIVIDER_RATIO 2.0 // Voltage divider ratio (battery voltage / ADC voltage)
 #endif
@@ -865,120 +1276,9 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
  // if defined enables full information about battery in serial log
 #endif
 
-/*     SOURCE OF UPDATE FILES     */
-/* only used if FIRMWARE is defined as it is in Trip5's automatic Github builds */
-#ifndef GITHUBURL
-  #define GITHUBURL "https://github.com/trip5/ehradio" // used by the ESPFileUpdater in BrowserClient (and in URLs below)
-#endif
-#ifdef FIRMWARE // this is the filename.bin online
-  // #define FIRMWARE_NAME "Trip5's Big Screen Radio" optional name of the firmware (appears only in eh Device Protocol and will appear as the filename (without .bin) by default if not defined)
-  #ifndef FILESURL
-    #define FILESURL GITHUBURL "/releases/download/" RADIOVERSION "/" // + FILE for SPIFFS files (this version)
-  #endif
-  #ifndef UPDATEURL
-    #define UPDATEURL GITHUBURL "/releases/latest/download/" // + FIRMWARE for the file
-  #endif
-  #ifndef CHECKUPDATEURL
-    #define CHECKUPDATEURL GITHUBURL "/releases/latest/download/version.txt" // automatically extracted from options.h during Github workflow
-  #endif
-  #ifndef VERSIONSTRING
-    #define VERSIONSTRING "ehRadio Version" // the file above should have a line that starts with this followed by a version number
-  #endif
-  #ifndef CHECKUPDATEURL_TIME
-    #define CHECKUPDATEURL_TIME "1 day"
-  #endif
-#else
-  #undef FILESURL
-  #undef UPDATEURL
-  #undef CHECKUPDATEURL
-  #undef VERSIONSTRING
-  #undef CHECKUPDATEURL_TIME
-#endif
-#ifdef DISABLE_UPDATER // if this is defined, disables online updates
-  #undef FILESURL
-  #undef UPDATEURL
-  #undef CHECKUPDATEURL
-  #undef VERSIONSTRING
-  #undef CHECKUPDATEURL_TIME
-#endif
 
-/*      SOURCE OF JSON FILES      */
-#ifndef TIMEZONES_JSON_URL
-  #define TIMEZONES_JSON_URL "https://raw.githubusercontent.com/trip5/timezones.json/master/timezones.json.gz"
-#endif
-#ifndef TIMEZONES_JSON_CHECKTIME
-  #define TIMEZONES_JSON_CHECKTIME "4 weeks"
-#endif
-#ifndef RADIO_BROWSER_SERVERS_URL 
-  #define RADIO_BROWSER_SERVERS_URL "https://all.api.radio-browser.info/json/servers"
-#endif
-#ifndef RB_SERVERS_CHECKTIME
-  #define RB_SERVERS_CHECKTIME "1 day"
-#endif
-
-/*  SOURCE OF CURATED PLAYLISTS   */
-#ifndef CURATED_LISTS
-  #define CURATED_LISTS "Trip5's webstations"
-  #ifndef CURATED_LISTS_LINK
-    #define CURATED_LISTS_LINK "https://github.com/trip5/webstations"
-  #endif
-  #ifndef CURATED_LISTS_URL
-    #define CURATED_LISTS_URL "https://github.com/trip5/webstations/releases/latest/download/"
-  #endif
-  #ifndef CURATED_LISTS_INDEX
-    #define CURATED_LISTS_INDEX "index.json"
-  #endif
-#else
-  #if !defined(CURATED_LISTS_LINK) || !defined(CURATED_LISTS_URL) || !defined(CURATED_LISTS_INDEX)
-    #undef CURATED_LISTS
-    #undef CURATED_LISTS_LINK
-    #undef CURATED_LISTS_URL
-    #undef CURATED_LISTS_INDEX
-  #endif
-#endif
-
-/*    RADIO BROWSER API SERVER    */
-/* Used as fallback for search and primary for sending clicks */
-#ifndef RADIO_BROWSER_SERVER
-  #define RADIO_BROWSER_SERVER "all.api.radio-browser.info"
-#endif
-
-/* OPT-OUT SENDING CLICKS TO RADIO-BROWSER API */
-#ifndef RADIO_BROWSER_NO_SEND_CLICKS
-  #ifndef RADIO_BROWSER_SEND_CLICKS
-    #define RADIO_BROWSER_SEND_CLICKS
-  #endif
-  #ifndef RADIO_BROWSER_SEND_CLICK_DELAY
-    #define RADIO_BROWSER_SEND_CLICK_DELAY 10000 // wait 10 seconds before sending the click
-  #endif
-#else
-  #undef RADIO_BROWSER_SEND_CLICKS
-#endif
-
-/*     OTHER COMPILE OPTIONS      */
-/*  Here are other #defines that  */
-/*  may be added to myoptions.h   */
-#ifdef MQTT_ENABLE
- // This enables MQTT. A nice option to have but not available in the code without this #define in myoptions.h
-#endif
-#ifdef PLAYLIST_DEFAULT_URL
- // This will download a playlist when first-booting and no playlist is present on SPIFFS.  Can be CSV or JSON format.  Example:
- // #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
-#endif
-/* Debug Options not mentioned elsewhere */
-#ifdef ESPFILEUPDATER_DEBUG
- // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
-#endif
-#ifdef DEBUG_V
- // This enables Netserver logging: GET client requests and sending files in chunks
-#endif
-#ifdef CORS_DEBUG
- // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
-#endif
-
-/*         USER DEFAULTS          */
-/*   sets defaults in config.h    */
-/*    still editable in WebUI     */
+/* ============================== USER DEFAULTS ============================== */
+/* Sets defaults but still editable in WebUI */
 #if defined(SOUND_VOLUME) && ((SOUND_VOLUME < 0) || (SOUND_VOLUME > 254))
   #warning "define warning in myoptions.h: SOUND_VOLUME is out of range (0-254), reverting to default 12"
   #undef SOUND_VOLUME
@@ -1093,6 +1393,28 @@ https://trip5.github.io/ehRadio_myoptions/generator.html
 #endif
 #ifndef SS_PLAYING_TIME
   #define SS_PLAYING_TIME 5
+#endif
+#ifndef DIMMING_ENABLED
+    #define DIMMING_ENABLED false
+#endif  
+#if defined(DIMMING_TIMEOUT) && ((DIMMING_TIMEOUT < 5) || (DIMMING_TIMEOUT > 65520))
+  #warning "define warning in myoptions.h: DIMMING_TIMEOUT is out of range (5-65520), reverting to default 120"
+  #undef DIMMING_TIMEOUT
+#endif
+#ifndef DIMMING_TIMEOUT
+  #define DIMMING_TIMEOUT 120
+#endif
+#if defined(DIMMING_BRIGHTNESS) && ((DIMMING_BRIGHTNESS < 0) || (DIMMING_BRIGHTNESS > 100))
+  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is out of range (0-100), reverting to default 50"
+  #undef DIMMING_BRIGHTNESS
+#elif defined(DIMMING_BRIGHTNESS) && (DIMMING_BRIGHTNESS < SCREEN_BRIGHTNESS)
+  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is less than SCREEN_BRIGHTNESS, reverting to default 50 and 100"
+  #undef SCREEN_BRIGHTNESS
+  #undef DIMMING_BRIGHTNESS
+  #define SCREEN_BRIGHTNESS 100
+#endif
+#ifndef DIMMING_BRIGHTNESS
+  #define DIMMING_BRIGHTNESS 50
 #endif
 #if defined(VOLUME_STEPS) && ((VOLUME_STEPS < 1) || (VOLUME_STEPS > 10))
   #warning "define warning in myoptions.h: VOLUME_STEPS is out of range (1-10), reverting to default 1"

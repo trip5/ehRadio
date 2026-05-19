@@ -68,7 +68,7 @@
               <span class="inputtitle" data-i18n="lbl_mdns_name_no_local">mDNS Name (do not add '.local')</span>
               <input type="text" id="mdns" class="text" name="mdnsname" value="" maxlength="24" />
             </div>
-            <div class="fb hl local" data-command="rebootmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
+            <div class="fb hl local" data-command="restartmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
           </div>
           <div class="row-title"><span data-i18n="ttl_update">Update</span></div>
           <div class="flex-row last">
@@ -175,6 +175,24 @@
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_timeout_min">Timeout (min)</span>
               <input type="number" id="scrpt" data-command="screensaverplayingtimeout" value="" maxlength="3" min="1" max="1080" />
+            </div>
+          </div>
+          <div class="row-title group group_dimming hidden"><span data-i18n="ttl_auto_dimming">Auto Dimming</span></div>
+          <div class="flex-row group group_dimming hidden">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_enable_dimming">Enable Dimming</span>
+              <div class="checkbox ssoption" id="dimmingenabled" data-command="dimmingenabled"><div class="knob"></div></div>
+            </div>
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_timeout_sec">Timeout (sec)</span>
+              <input type="number" id="dimmingtimeout" data-command="dimmingtimeout" value="" maxlength="3" min="5" max="65520" />
+            </div>
+          </div>
+          <div class="flex-row group group_dimming hidden">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_dimmed_brightness">Dimmed Brightness</span>
+              <span class="inputinfo" id="sldimbrightnessinfo">0</span>
+              <input type="range" id="dimmingbrightness" data-slaveid="sldimbrightnessinfo" data-command="dimmingbrightness" min="0" max="100" value="100">
             </div>
           </div>
         </section>

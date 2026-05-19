@@ -46,6 +46,4 @@ private:
 
 extern Controls controls;
 
-extern __attribute__((weak)) void ctrls_on_loop();
-
 #endif

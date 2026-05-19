@@ -32,7 +32,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ fillScreen(TFT_BG); }
 void DspCore::flip(){ setRotation(config.store.flipscreen?2:0); }
-void DspCore::invert(){ invertDisplay(config.store.invertdisplay); }
+void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ ssd1306_command(SSD1306_DISPLAYOFF); }
 void DspCore::wake(void){ ssd1306_command(SSD1306_DISPLAYON); }
 

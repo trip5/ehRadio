@@ -1,6 +1,8 @@
 #ifndef sdmanager_h
 #define sdmanager_h
 
+#define SD_PATH_LENGTH 256 // max length for SD filesystem path buffers
+
 class SDManager : public SDFS {
   public:
     bool ready = false;

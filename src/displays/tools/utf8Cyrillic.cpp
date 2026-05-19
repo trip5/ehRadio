@@ -50,12 +50,12 @@ static uint8_t map_cyrillic_cp_to_glyph(uint16_t cp) {
 }
 
 char* utf8Cyrillic(const char* str, bool uppercase) {
-  static char out[BUFLEN];
+  static char out[STATION_FIELD_LENGTH];
   
   // Stream-based conversion: process directly from input
   // Read from str[r], write to out[w] to avoid double buffer copy
   int r = 0, w = 0;
-  while (str[r] && w < BUFLEN - 1) {
+  while (str[r] && w < STATION_FIELD_LENGTH - 1) {
     uint8_t b1 = (uint8_t)str[r];
 
     // ASCII pass-through (uppercase if requested)
@@ -70,7 +70,7 @@ char* utf8Cyrillic(const char* str, bool uppercase) {
       uint8_t b2 = (uint8_t)str[r + 1];
       uint16_t cp = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
       uint8_t code = map_cyrillic_cp_to_glyph(cp);
-      if (code && w < BUFLEN - 1) {
+      if (code && w < STATION_FIELD_LENGTH - 1) {
         // Replace two-byte sequence with single byte glyph index
         out[w++] = (char)code;
         r += 2;
@@ -83,7 +83,7 @@ char* utf8Cyrillic(const char* str, bool uppercase) {
       if (b1 >= 0xC2 && b1 <= 0xDF) {
         char seq[3] = {(char)b1, (char)b2, 0};
         char* tr = utf8ToAscii(seq);
-        for (char* p = tr; *p && w < BUFLEN - 1; ++p) out[w++] = *p;
+        for (char* p = tr; *p && w < STATION_FIELD_LENGTH - 1; ++p) out[w++] = *p;
         r += 2;
         continue;
       }
@@ -98,7 +98,7 @@ char* utf8Cyrillic(const char* str, bool uppercase) {
       char seq[3] = {(char)f, (char)s, 0};
       char* tr = utf8ToAscii(seq);
       if (tr && *tr && *tr != ' ') {
-        for (char* p = tr; *p && w < BUFLEN - 1; ++p) out[w++] = *p;
+        for (char* p = tr; *p && w < STATION_FIELD_LENGTH - 1; ++p) out[w++] = *p;
       } else {
         out[w++] = ' ';
       }

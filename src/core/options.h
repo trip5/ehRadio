@@ -726,6 +726,13 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #error TS_SPI not defined in myoptions.h
 #endif
 
+// Minimum px movement before swipe direction is detected (default: 20 for XPT2046 resistive, 12 for GT911/FT6336 capacitive)
+// #define TS_SWIPE_THRESHOLD_PX 20
+// Converts screen dimensions to steps (default: 40) ie. higher = more sensitive, lower = less sensitive
+// #define TS_STEPS 40
+// Post-release debounce in ms (default 150)
+// #define TS_COOLDOWN_MS 150
+
 /* --- SD OFFLINE MODE BUTTON --- */
 // SD Offline Mode is activated by holding the Mode Switch Button or a Rotary Encoder Switch at boot.
 // Use this if your build does not include these or if using all 3 interferes with boot:

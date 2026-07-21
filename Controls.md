@@ -77,11 +77,15 @@ Repeat for other buttons.
 
 ### Touchscreen
 
+Touch gestures are detected live (actions fire during swipe).
+
 - Swipe horizontally: volume control
 - Swipe vertically: station selection
-- Tap, in player mode: start/stop playback
-- Tap, in playlist mode: select
-- Long tap, in playlist mode: cancel
+- Tap (< 1 second, minimal movement): in player mode, start/stop playback; in playlist mode, select
+- Long press (> 1 second, no movement): toggle between player and playlist mode
+- Swipe direction locks after the initial movement; reversing within the same touch adjusts in the opposite direction on the same axis
+
+Check options.h for tuning options.
 
 ---
 

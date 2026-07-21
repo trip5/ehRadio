@@ -23,6 +23,16 @@
 #ifndef TS_STEPS
   #define TS_STEPS              40
 #endif
+#ifndef TS_SWIPE_THRESHOLD_PX
+  #if TS_MODEL == TS_MODEL_XPT2046
+    #define TS_SWIPE_THRESHOLD_PX  20   // resistive: needs jitter filtering
+  #else
+    #define TS_SWIPE_THRESHOLD_PX  12   // capacitive (GT911, FT6336): clean signal
+  #endif
+#endif
+#ifndef TS_COOLDOWN_MS
+  #define TS_COOLDOWN_MS         150
+#endif
 
 #if TS_MODEL==TS_MODEL_XPT2046
   #include <XPT2046_Touchscreen.h>
@@ -71,7 +81,7 @@ void TouchScreen::init(uint16_t w, uint16_t h) {
 tsDirection_e TouchScreen::_tsDirection(uint16_t x, uint16_t y) {
   int16_t dX = x - _oldTouchX;
   int16_t dY = y - _oldTouchY;
-  if (abs(dX) > 20 || abs(dY) > 20) {
+  if (abs(dX) > TS_SWIPE_THRESHOLD_PX || abs(dY) > TS_SWIPE_THRESHOLD_PX) {
     if (abs(dX) > abs(dY)) {
       if (dX > 0) {
         return TSD_RIGHT;
@@ -117,6 +127,8 @@ void TouchScreen::loop() {
 #endif
   bool istouched = _istouched();
   if (istouched) {
+    if (_touchCooldown && (millis() - _touchCooldown < TS_COOLDOWN_MS)) return;
+    _touchCooldown = 0;
   #if TS_MODEL==TS_MODEL_XPT2046
     TSPoint p = ts.getPoint();
     touchX = map(p.x, TS_X_MIN, TS_X_MAX, 0, _width);
@@ -138,7 +150,9 @@ void TouchScreen::loop() {
       direct = TSD_REQUEST;
       touchLongPress=millis();
     } else { /*     SWIPE TOUCH     */
-      direct = _tsDirection(touchX, touchY);
+      if (direct == TSD_REQUEST) {
+        direct = _tsDirection(touchX, touchY);
+      }
       switch (direct) {
         case TSD_LEFT:
         case TSD_RIGHT: {
@@ -184,6 +198,7 @@ void TouchScreen::loop() {
         }
       }
       direct = TSD_STAY;
+      _touchCooldown = millis();
     }
   }
   wastouched = istouched;

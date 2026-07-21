@@ -122,9 +122,9 @@ class  psFrameBuffer : public Adafruit_GFX {
   private:
     void _writeGlyph(uint16_t cp) {
       const GFXfont *f = &DisplayFont;
-      if (cp == '\n') { cursor_x = 0; cursor_y += (int16_t)textsize_y * (uint8_t)pgm_read_byte(&f->yAdvance); return; }
-      if (cp == '\r') return;
-      // Icon codepoints (0x01-0x1F)
+      // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE.
+      // Must precede \n / \r checks so that \015 (BATTERY_HIGH, 0x0D = CR)
+      // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
         const uint8_t* const *table = ICON_TABLE;
         if (cp < 32) {
@@ -143,10 +143,13 @@ class  psFrameBuffer : public Adafruit_GFX {
               }
             }
             cursor_x += 6 * textsize_x;
+            return;
           }
         }
-        return;
+        // NULL icon (e.g. \012 / LF): fall through to normal handling below
       }
+      if (cp == '\n') { cursor_x = 0; cursor_y += (int16_t)textsize_y * (uint8_t)pgm_read_byte(&f->yAdvance); return; }
+      if (cp == '\r') return;
       // Space (0x20) — advance cursor by one character cell.
       if (cp == ' ') {
         uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);

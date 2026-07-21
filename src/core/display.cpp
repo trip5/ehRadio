@@ -368,7 +368,7 @@ void Display::_setReturnTicker(uint8_t time_s) {
 }
 
 void Display::_swichMode(displayMode_e newmode) {
-  if (newmode == CLEAR) { dsp.fillScreen(config.theme.background); return; }
+  if (newmode == CLEAR) { dsp.fillScreen(config.theme.background); _mode = CLEAR; return; }
   if (newmode == _mode || (network.status != CONNECTED && network.status != SDOFFLINE)) return;
   _mode = newmode;
   dsp.setScrollId(NULL);
@@ -784,8 +784,8 @@ void Display::_setRSSI(int rssi) {
              - decimal 25 (octal \031) => discharging icon
            Use inferred flags when a charge pin isn't present. */
         const char *chg_prefix = NULL;
-        //if (bat.charging || bat.charging_inferred) chg_prefix = "\030"; /* dec24 */
-        //else if (bat.discharging_inferred) chg_prefix = "\031"; /* dec25 */
+        if (bat.charging || bat.charging_inferred) chg_prefix = "\030"; /* dec24 */
+        else if (bat.discharging_inferred) chg_prefix = "\031"; /* dec25 */
         if (chg_prefix) {
           /* Insert prefix glyph then a 2-pixel spacer control char (0x1E) before the battery text. */
           size_t len = strlen(buf);

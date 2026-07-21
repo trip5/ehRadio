@@ -7,6 +7,9 @@
 #include "battery.h"
 
 #if (defined(BATTERY_PIN) && (BATTERY_PIN!=255)) || (defined(BATTERY_CHARGE_PIN) && (BATTERY_CHARGE_PIN!=255))
+
+#define BATTERY_UPDATE_INTERVAL_MS ((unsigned long)BATTERY_UPDATE_INTERVAL * 1000UL)
+
 #include <stdarg.h>
 #include "backlightcontrols.h"
 #include "common.h"
@@ -271,9 +274,9 @@ void Battery::init() {
   }
 
   // Compute the hold window in milliseconds from configured number of measurements
-  chargeInferHoldMs = (unsigned long)BATTERY_CHARGE_INFER_HOLD_SAMPLES * (unsigned long)BATTERY_UPDATE_INTERVAL;
+  chargeInferHoldMs = (unsigned long)BATTERY_CHARGE_INFER_HOLD_SAMPLES * BATTERY_UPDATE_INTERVAL_MS;
   if (chargeInferHoldMs == 0) {
-    chargeInferHoldMs = (unsigned long)BATTERY_UPDATE_INTERVAL * 3; // fallback
+    chargeInferHoldMs = BATTERY_UPDATE_INTERVAL_MS * 3; // fallback
   }
 
 } // end battery_init
@@ -815,7 +818,7 @@ void Battery::loop() {
     return;
   }
   // Update at configured interval
-  if (now - lastRead < BATTERY_UPDATE_INTERVAL) return;
+  if (now - lastRead < BATTERY_UPDATE_INTERVAL_MS) return;
   lastRead = now;
   readAndUpdate();
 } 

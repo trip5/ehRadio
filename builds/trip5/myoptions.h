@@ -268,11 +268,11 @@
 
   #define BATTERY_DIVIDER_RATIO 2.0   /* 100k + 100k voltage divider = 1:2 ratio */
   #define BATTERY_ADC_REF_MV 3438     /* ESP32-S3 ADC reference voltage (calibrated EL103565 3000mAh 11.1Wh) */
-  #define BATTERY_UPDATE_INTERVAL 60000 /* Update every 60 seconds */
-  //#define BATTERY_DEBUG               /* Uncomment to enable debug output */
+  #define BATTERY_UPDATE_INTERVAL 60  /* Update interval in seconds */
+  #define BATTERY_DEBUG               /* Uncomment to enable debug output */
 
   #define BATTERY_CHARGE_INFER_HOLD_SAMPLES 3 /* number of measurements (samples) to hold (e.g., 3 readings at BATTERY_UPDATE_INTERVAL) */
-  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 20 /* percent */
+  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 3 /* percent */
   #define BATTERY_CANDIDATE_PERCENT_DELTA 1 /* percent */
   #define BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD 0 /* percent over hold window */
 #endif
@@ -340,6 +340,7 @@
 /* --- Debug? --- */
 //#define CORE_MONITOR
 //#define ALL_DEBUG_LOGS
+#define BATTERY_DEBUG
 
 /* --- Fonts --- */
 // Display Text:

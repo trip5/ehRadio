@@ -732,24 +732,25 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 // #define TS_STEPS 40
 // Post-release debounce in ms (default 150)
 // #define TS_COOLDOWN_MS 150
+// Window for double-tap detection in ms (default 400)
+// #define TS_DOUBLETAP_MS 400
+// Stationary hold duration before deep sleep in ms (default 5000)
+// #define TS_DEEPSLEEP_MS 5000
 
 /* --- SD OFFLINE MODE BUTTON --- */
 // SD Offline Mode is activated by holding the Mode Switch Button or a Rotary Encoder Switch at boot.
-// Use this if your build does not include these or if using all 3 interferes with boot:
+// Use this if your build does not include these or if using all buttons interferes with boot
+// ...although this actually likely means you should be pulling up the pin.
 // #define SDOFFLINE_BTN BTN_MODE
 // Use this to deactivate this method of booting to SD Offline Mode:
 // #define SDOFFLINE_BTN 255
-// If this is defined, the other button methods will be deactivated.
 
 // You can also use a GPIO directly with this
-// #define SDOFFLINE_PIN 2
+// #define SDOFFLINE_BTN 2
 // ...and you can manually override how the pin is treated (defaults below)
-#ifndef SDOFFLINE_PIN_ACTIVE_LOW
-  #define SDOFFLINE_PIN_ACTIVE_LOW true
-#endif
-#ifndef SDOFFLINE_PIN_PULLUP
-  #define SDOFFLINE_PIN_PULLUP true
-#endif
+// #define SDOFFLINE_BTN_ACTIVE_LOW true
+// #define SDOFFLINE_BTN_PULLUP true
+
 
 /* --- IR --- */
 #ifndef IR_PIN

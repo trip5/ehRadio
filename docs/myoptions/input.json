@@ -93,7 +93,7 @@
   },
   {
     "name": "SD Offline Mode Button",
-    "info": "SD Offline Mode is normally activated by holding the Mode Switch Button or a Rotary Encoder Switch at boot.\nUse this if your build does not include these or if using all 3 interferes with boot.\nIf this is defined, the other button methods will be deactivated.\nUse 255 to deactivate this boot method.\nIf no SD Card is defined, this mode is not available.",
+    "info": "SD Offline Mode is normally activated by holding any defined Button or Rotary Encoder Switch at boot.\nUse this if your build does not include these or if using all 3 interferes with boot.\nIf this is defined, only 1 button can be used to boot this mode.\nUse 255 to deactivate this boot method completely.\nIf no SD Card is defined, this mode is not available.",
     "defines": [
       { "define": "SDOFFLINE_BTN", "type": "enum", "options": ["255", "BTN_MODE", "ENC_SW", "ENC2_SW", "BTN_PLAY", "BTN_PREV", "BTN_NEXT", "BTN_UP", "BTN_DOWN", "TS_INT"], "optional": false, "comment": "button used to activate SD Offline Mode" }
     ]

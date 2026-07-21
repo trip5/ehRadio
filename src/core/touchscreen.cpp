@@ -5,6 +5,8 @@
 #include "controls.h"
 #include "display.h"
 #include "logging.h"
+#include "network.h"
+#include "utility.h"
 #include "player.h"
 #include "touchscreen.h"
 
@@ -32,6 +34,12 @@
 #endif
 #ifndef TS_COOLDOWN_MS
   #define TS_COOLDOWN_MS         150
+#endif
+#ifndef TS_DEEPSLEEP_MS
+  #define TS_DEEPSLEEP_MS        5000
+#endif
+#ifndef TS_DOUBLETAP_MS
+  #define TS_DOUBLETAP_MS        400
 #endif
 
 #if TS_MODEL==TS_MODEL_XPT2046
@@ -127,7 +135,7 @@ void TouchScreen::loop() {
 #endif
   bool istouched = _istouched();
   if (istouched) {
-    if (_touchCooldown && (millis() - _touchCooldown < TS_COOLDOWN_MS)) return;
+    if (!_tapPending && _touchCooldown && (millis() - _touchCooldown < TS_COOLDOWN_MS)) return;
     _touchCooldown = 0;
   #if TS_MODEL==TS_MODEL_XPT2046
     TSPoint p = ts.getPoint();
@@ -143,6 +151,12 @@ void TouchScreen::loop() {
     touchY = p.y;
   #endif
   if (!wastouched) { /*     START TOUCH     */
+      if (_tapPending && (millis() - _tapPendingTime < TS_DOUBLETAP_MS)) {
+        _isDoubleTap = true;
+        _tapPending = false;
+      } else {
+        _tapPending = false;
+      }
       _oldTouchX = touchX;
       _oldTouchY = touchY;
       touchVol = touchX;
@@ -152,6 +166,17 @@ void TouchScreen::loop() {
     } else { /*     SWIPE TOUCH     */
       if (direct == TSD_REQUEST) {
         direct = _tsDirection(touchX, touchY);
+        if (direct != TSD_REQUEST) {
+          _tapPending = false;
+          _isDoubleTap = false;
+        }
+      }
+      if (direct == TSD_REQUEST && (millis() - touchLongPress >= TS_DEEPSLEEP_MS)) {
+        if (network.status != SDOFFLINE) {
+          #ifndef DEEP_SLEEP_DISABLE
+            display.putRequest(NEWMODE, SLEEPING);
+          #endif
+        }
       }
       switch (direct) {
         case TSD_LEFT:
@@ -191,14 +216,26 @@ void TouchScreen::loop() {
     if (wastouched) {/*     END TOUCH     */
       if (direct == TSD_REQUEST) {
         uint32_t pressTicks = millis()-touchLongPress;
-        if (pressTicks < BTN_PRESS_TICKS*2) {
-          if (pressTicks > 50) controls.onBtnClick(EVT_BTN_PLAY);
-        } else {
-          display.putRequest(NEWMODE, display.mode() == PLAYER ? STATIONS : PLAYER);
+        if (pressTicks >= TS_DEEPSLEEP_MS) {
+          #ifndef DEEP_SLEEP_DISABLE
+            utility.doSleepW();
+          #endif
+        } else if (pressTicks > 50) {
+          if (_isDoubleTap) {
+            controls.onBtnClick(EVT_BTN_MODE);
+            _isDoubleTap = false;
+          } else {
+            _tapPending = true;
+            _tapPendingTime = millis();
+          }
         }
       }
       direct = TSD_STAY;
       _touchCooldown = millis();
+    }
+    if (_tapPending && (millis() - _tapPendingTime >= TS_DOUBLETAP_MS)) {
+      controls.onBtnClick(EVT_BTN_PLAY);
+      _tapPending = false;
     }
   }
   wastouched = istouched;

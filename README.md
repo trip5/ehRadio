@@ -149,13 +149,15 @@ The settings for smart start and auto update will appear as off but they will re
 
 ### SD Offline Mode <img src="images/Booticon_SD.png">
 
-To enter a special SD-card only mode (with network functionality disabled), hold down an encoder button or the mode button when powering on (until the display shows something).
-You can also enter this mode by pressing the mode button or double-clicking a rotary encoder button in AP/Improv Mode or when you see `* LOST *`, which will trigger a reboot.
+To enter a special SD-card only mode (with network functionality disabled), hold down any button (including encoder switches) shortly after powering-up (until the display shows something).
+It is not necessary to hold these buttons while powering-up, and actually could cause issues if the builder put a button on a strapping pin.
 
-The radio will fast-boot into a bare SD-card playing mode with network functionality completely disabled.
+You can also enter this mode by pressing the play button, clicking a rotary encoder button, or tapping the touch screen
+in AP/Improv Mode or when you see `* LOST *`, which will trigger a reboot.
+
 If no RTC is connected, the clock will not display.
-
-Most settings, as set in the WebUI, are preserved in this mode. These are disabled: Safe mode, Deep Sleep, Mode switch.
+Most settings, as set in the WebUI, are preserved in this mode.
+These are disabled: Safe mode, Deep Sleep, Mode switch.
 
 SD Shuffle (which makes the "previous" button do nothing) will be read from preferences and changeable using Mode switch (the mode button or double-click of a rotary encoder).
 It is not saved to preferences in this mode.  All other buttons will have expected behaviour.

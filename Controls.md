@@ -81,11 +81,12 @@ Touch gestures are detected live (actions fire during swipe).
 
 - Swipe horizontally: volume control
 - Swipe vertically: station selection
-- Tap (< 1 second, minimal movement): in player mode, start/stop playback; in playlist mode, select
-- Long press (> 1 second, no movement): toggle between player and playlist mode
+- Tap: start/stop playback
+- Double-tap: toggle between stations/SD mode
+- Hold 5 seconds then release: enter deep sleep (wakes on next touch)
 - Swipe direction locks after the initial movement; reversing within the same touch adjusts in the opposite direction on the same axis
 
-Check options.h for tuning options.
+Check options.h for tuning options (TS_STEPS, TS_SWIPE_THRESHOLD_PX, TS_COOLDOWN_MS, TS_DOUBLETAP_MS, TS_DEEPSLEEP_MS).
 
 ---
 

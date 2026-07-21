@@ -17,6 +17,10 @@
 //
 //#undef SH1106_PCM_REMOTE
 //
+// Uncomment the next line for safety (pio does weird things otherwise)...
+//
+//#error YOU FORGOT TO COMMENT THE TOP OF MYOPTIONS.H AGAIN!
+//
 // Then uncomment the build to debug:
 //
 //#define SH1106_PCM_REMOTE            // Self-contained OLED with PCM, Remote
@@ -256,7 +260,6 @@
   #define SD_CS           47
 #endif
 
-
 #define MQTT_ENABLE
 
 /* --- Battery --- */
@@ -340,7 +343,7 @@
 /* --- Debug? --- */
 //#define CORE_MONITOR
 //#define ALL_DEBUG_LOGS
-#define BATTERY_DEBUG
+//#define BATTERY_DEBUG
 
 /* --- Fonts --- */
 // Display Text:

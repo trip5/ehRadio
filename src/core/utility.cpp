@@ -343,7 +343,10 @@ bool Utility::importWifi() {
 
 void Utility::indexPlaylist() {
   File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
-  if (!playlist) return;
+  if (!playlist) {
+    FUNCTIONLOG("Playlist", "indexPlaylist: playlist.csv not found, cannot build index");
+    return;
+  }
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
@@ -357,19 +360,34 @@ void Utility::indexPlaylist() {
   }
   index.close();
   playlist.close();
+  size_t idxSize = 0;
+  if (SPIFFS.exists(INDEX_PATH)) {
+    File idxRead = SPIFFS.open(INDEX_PATH, "r");
+    if (idxRead) {
+      idxSize = idxRead.size();
+      idxRead.close();
+    }
+  }
+  FUNCTIONLOG("Playlist", "indexPlaylist: built index.dat, %u bytes (%u entries)", idxSize, idxSize / 4);
 }
 
 void Utility::initPlaylist() {
   if (!SPIFFS.exists(INDEX_PATH)) {
+    FUNCTIONLOG("Playlist", "initPlaylist: index missing, running clean and index");
     cleanPlaylist();
     indexPlaylist();
+  } else {
+    FUNCTIONLOG("Playlist", "initPlaylist: index exists, no action needed");
   }
 }
 
 bool Utility::cleanPlaylist() {
   // Phase 1: Quick scan for blank lines or bare-LF (non-CRLF) line endings
   File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
-  if (!playlist) return false;
+  if (!playlist) {
+    FUNCTIONLOG("Playlist", "cleanPlaylist: playlist.csv not found, nothing to clean");
+    return false;
+  }
 
   bool needsClean = false;
   while (playlist.available()) {
@@ -390,14 +408,16 @@ bool Utility::cleanPlaylist() {
   playlist.close();
 
   if (!needsClean) {
-    BOOTLOG("Playlist verified");
+    FUNCTIONLOG("Playlist", "cleanPlaylist: verified, no cleaning needed");
     return false;  // File is already clean
   }
 
   // Phase 2: Rewrite clean version with CRLF line endings
+  FUNCTIONLOG("Playlist", "cleanPlaylist: issues found, rewriting with CRLF endings...");
   playlist = SPIFFS.open(PLAYLIST_PATH, "r");
   File tmpFile = SPIFFS.open(TMP_PATH, "w");
   if (!playlist || !tmpFile) {
+    FUNCTIONLOG("Playlist", "cleanPlaylist: failed to open file for rewrite (playlist=%d tmp=%d)", playlist ? 1 : 0, tmpFile ? 1 : 0);
     if (playlist) playlist.close();
     if (tmpFile) tmpFile.close();
     return false;
@@ -430,7 +450,7 @@ bool Utility::cleanPlaylist() {
   // Replace original with cleaned version
   SPIFFS.remove(PLAYLIST_PATH);
   if (!SPIFFS.rename(TMP_PATH, PLAYLIST_PATH)) {
-    BOOTLOG("Failed to rename cleaned playlist");
+    FUNCTIONLOG("Playlist", "cleanPlaylist: failed to rename cleaned playlist");
     SPIFFS.remove(TMP_PATH);
     return false;
   }
@@ -439,7 +459,7 @@ bool Utility::cleanPlaylist() {
   SPIFFS.remove(INDEX_PATH);
   indexPlaylist();
 
-  BOOTLOG("Cleaned playlist.csv (blank lines removed, bare LF converted to CRLF)");
+  FUNCTIONLOG("Playlist", "cleanPlaylist: rewrite complete, index rebuilt");
   return true;
 }
 

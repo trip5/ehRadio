@@ -341,8 +341,8 @@
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */
+#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
-//#define ALL_DEBUG_LOGS
 //#define BATTERY_DEBUG
 
 /* --- Fonts --- */

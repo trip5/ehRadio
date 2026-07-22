@@ -1275,7 +1275,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define SCREENSAVERSTARTUPDELAY 5
 #endif
 #ifndef SCREENSAVERMOVE // how often to move the screensaver (in seconds)
-  #define SCREENSAVERMOVE 60
+  #define SCREENSAVERMOVE 15
 #endif
 #ifndef HEADER_TIMEOUT
   #define HEADER_TIMEOUT 5000
@@ -1392,7 +1392,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define BATTERY_ADC_REF_MV 3300 // ADC reference voltage in millivolts
 #endif
 #ifndef BATTERY_UPDATE_INTERVAL
-  #define BATTERY_UPDATE_INTERVAL 60 // Update interval in seconds (multiply by 1000 for ms)
+  #define BATTERY_UPDATE_INTERVAL 5 // Update interval in seconds
 #endif
 #ifndef BATTERY_SAMPLES
   #define BATTERY_SAMPLES 10 // Number of ADC samples to average

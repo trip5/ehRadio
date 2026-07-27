@@ -21,6 +21,7 @@
 #include "telnet.h"
 #include "utility.h"
 #include "../displays/dspcore.h"
+#include "../displays/themes.h"
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
@@ -371,50 +372,10 @@ void Config::_initHW() {
   #endif
 }
 
-uint16_t Config::color565(uint8_t r, uint8_t g, uint8_t b)
-{
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-
 void Config::loadTheme() {
-  theme.background    = color565(COLOR_BACKGROUND);
-  theme.meta          = color565(COLOR_STATION_NAME);
-  theme.metabg        = color565(COLOR_STATION_BG);
-  theme.metafill      = color565(COLOR_STATION_FILL);
-  theme.title1        = color565(COLOR_SNG_TITLE_1);
-  theme.title2        = color565(COLOR_SNG_TITLE_2);
-  theme.digit         = color565(COLOR_DIGITS);
-  theme.div           = color565(COLOR_DIVIDER);
-  theme.weather       = color565(COLOR_WEATHER);
-  theme.vumax         = color565(COLOR_VU_MAX);
-  theme.vumin         = color565(COLOR_VU_MIN);
-  theme.clock         = color565(COLOR_CLOCK);
-  theme.clockbg       = color565(COLOR_CLOCK_BG);
-  theme.seconds       = color565(COLOR_SECONDS);
-  theme.dow           = color565(COLOR_DAY_OF_W);
-  theme.date          = color565(COLOR_DATE);
-  theme.clockss       = color565(COLOR_CLOCK_SS);
-  theme.clockbgss     = color565(COLOR_CLOCK_BG_SS);
-  theme.secondsss     = color565(COLOR_SECONDS_SS);
-  theme.dowss         = color565(COLOR_DAY_OF_W_SS);
-  theme.datess        = color565(COLOR_DATE_SS);
-  theme.buffer        = color565(COLOR_BUFFER);
-  theme.ip            = color565(COLOR_IP);
-  theme.vol           = color565(COLOR_VOLUME_VALUE);
-  theme.rssi          = color565(COLOR_RSSI);
-  theme.battery       = color565(COLOR_BATTERY);
-  theme.bitrate       = color565(COLOR_BITRATE);
-  theme.volbarout     = color565(COLOR_VOLBAR_OUT);
-  theme.volbarin      = color565(COLOR_VOLBAR_IN);
-  theme.plcurrent     = color565(COLOR_PL_CURRENT);
-  theme.plcurrentbg   = color565(COLOR_PL_CURRENT_BG);
-  theme.plcurrentfill = color565(COLOR_PL_CURRENT_FILL);
-  theme.playlist[0]   = color565(COLOR_PLAYLIST_0);
-  theme.playlist[1]   = color565(COLOR_PLAYLIST_1);
-  theme.playlist[2]   = color565(COLOR_PLAYLIST_2);
-  theme.playlist[3]   = color565(COLOR_PLAYLIST_3);
-  theme.playlist[4]   = color565(COLOR_PLAYLIST_4);
-  #include "../displays/tools/tftinverttitle.h"
+  uint8_t count = sizeof(_themes) / sizeof(_themes[0]);
+  if (config.store.themeId >= count) config.store.themeId = 0;
+  memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData));
 }
 
 void Config::defaultSettings(const char *val, uint8_t clientId) {
@@ -438,18 +399,23 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
   }
   if (strcmp(val, "screen") == 0) {
     saveValue(&store.flipscreen, (bool)SCREEN_FLIP);
-    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
-    saveValue(&store.clock12, (bool)CLOCK_TWELVE);
-    saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
-    saveValue(&store.vumeter, (bool)SHOW_VU_METER);
     display.flip();
     saveValue(&store.invertdisplay, (bool)SCREEN_INVERT);
     display.invert();
+    saveValue(&store.inverttitle, INVERT_TITLE);
+    saveValue(&store.themeId, (uint8_t)0);
+    display.applyTheme(0);
+    saveValue(&store.layoutId, (uint8_t)0);
+    display.applyLayout(0);
+    saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
+    saveValue(&store.clock12, (bool)CLOCK_TWELVE);
+    saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
+    saveValue(&store.vumeter, (bool)SHOW_VU_METER);
+    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.dspon, true);
     store.brightness = (uint8_t)SCREEN_BRIGHTNESS; setBrightness(false);
     saveValue(&store.contrast, (uint8_t)SCREEN_CONTRAST);
     display.setContrast();
-    saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
     saveValue(&store.screensaverEnabled, (bool)SS_NOTPLAYING);
     saveValue(&store.screensaverBlank, (bool)SS_NOTPLAYING_BLANK);
     saveValue(&store.screensaverTimeout, (uint16_t)SS_NOTPLAYING_TIME);
@@ -836,6 +802,9 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(mdnsname, "mdnsname"),
   CONFIG_KEY_ENTRY(flipscreen, "flipscr"),
   CONFIG_KEY_ENTRY(invertdisplay, "invdisp"),
+  CONFIG_KEY_ENTRY(inverttitle, "inverttitle"),
+  CONFIG_KEY_ENTRY(layoutId, "layoutid"),
+  CONFIG_KEY_ENTRY(themeId, "themeid"),
   CONFIG_KEY_ENTRY(dspon, "dspon"),
   CONFIG_KEY_ENTRY(numplaylist, "numplaylist"),
   CONFIG_KEY_ENTRY(clock12, "clock12"),
@@ -893,9 +862,7 @@ const configKeyMap Config::keyMap[] = {
 
 void Config::deleteOldKeys() {
   // List any old/legacy keys to remove here (they will be deleted from prefs if found)
-  prefs.remove("laststa"); // previous numeric, replaced by lastStationUrl
-  prefs.remove("encacc"); // previous encoder acceleration was scale 0 to 700
-  prefs.remove("smartstart"); // previous smartstart was numeric 0, 1, 2
-  prefs.remove("vsteps"); // volume steps was needed when volume was 0 to 254
+  // prefs.remove("laststa"); // previous numeric, replaced by lastStationUrl
+  // none yet
 }
 

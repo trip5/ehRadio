@@ -341,7 +341,7 @@
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */
-#define ALL_DEBUG_LOGS
+//#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
 //#define BATTERY_DEBUG
 
@@ -362,5 +362,11 @@
 //#define CLOCKGLOW false
 
 //#define DEEP_SLEEP_DISABLE
+
+//#define BOOMBOX_STYLE
+
+//#define PLAYLIST_MODE_PAGED false
+
+//#define BATTERY_PIN     2
 
 #endif // myoptions_h

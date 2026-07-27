@@ -108,6 +108,9 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   char      mdnsname[MDNS_LENGTH] = "";
   bool      flipscreen = SCREEN_FLIP;
   bool      invertdisplay = SCREEN_INVERT;
+  bool      inverttitle = INVERT_TITLE;
+  uint8_t   layoutId = 0;
+  uint8_t   themeId = 0;
   bool      dspon = true;
   bool      numplaylist = NUMBERED_PLAYLIST;
   bool      clock12 = CLOCK_TWELVE;
@@ -371,7 +374,6 @@ class Config {
 
     bool _wwwFilesExist();
     void _initHW();
-    uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
     void setDefaults();
 
     uint16_t _randomStation() {

@@ -479,7 +479,7 @@ void NetServer::chunkedHtmlPage(const String& contentType, AsyncWebServerRequest
 #else
   #define DSP_CAN_FLIPPED false
 #endif
-#if !defined(HIDE_WEATHER) && (!defined(DUMMYDISPLAY) )
+#if !defined(DUMMYDISPLAY)
   #define SHOW_WEATHER  true
 #else
   #define SHOW_WEATHER  false
@@ -518,42 +518,45 @@ void NetServer::processQueue() {
         getPlaylist(clientId); break;
       }
       case GETACTIVE: {
-          bool dbgact = false, nxtn=false;
+          #define DBGWUI false // set true to debug WebUI
           String act = F("\"group_wifi\",");
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
-            if (battery.isInitialized() || dbgact)              act += F("\"group_battery\",");
-                                                              #ifdef MQTT_ENABLE
+            if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
+                                                              #if defined(MQTT_ENABLE) || DBGWUI
                                                                 act += F("\"group_mqtt\",");
                                                               #endif
-            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DSP_MODEL == DSP_NOKIA5110 || dbgact)    act += F("\"group_display\",");
-                                                              #if defined(LCD_I2C) || defined(DSP_OLED)
+            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DSP_MODEL == DSP_NOKIA5110 || DBGWUI)
+                                                                act += F("\"group_display\",");
+                                                              #if defined(LCD_I2C) || defined(DSP_OLED) || DBGWUI
                                                                 act += F("\"group_oled\",");
                                                               #endif
-                                                              #ifndef HIDE_VU
-                                                                #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true))
-                                                                  act += F("\"group_vu\",");
-                                                                #endif
+                                                              #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
+            if (vuConf_ptr->textsize > 0 || DBGWUI) act += F("\"group_vu\",");
                                                               #endif
-                                                              #ifndef HIDE_BUFFERBAR
-                                                                act += F("\"group_buffer\",");
+            if (bufferbarConf_ptr->height > 0 || DBGWUI)        act += F("\"group_buffer\",");
+            if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
+            if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
+            if (DSP_CAN_FLIPPED || DBGWUI)                      act += F("\"group_tft\",");
+                                                              #if (!defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110) || DBGWUI
+                                                                act += F("\"group_inverttitle\",");
+                                                              #endif 
+            if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
+                                                              #if defined(DSP_TFT) || DBGWUI
+            if (display.getThemeCount() > 1|| DBGWUI)           act += F("\"group_theme\",");
                                                               #endif
-
-            if (BRIGHTNESS_PIN != 255 || nxtn || dbgact)        act += F("\"group_brightness\",");
-            if (DSP_DIMMING_ENABLED || dbgact)                  act += F("\"group_dimming\",");
-            if (DSP_CAN_FLIPPED || dbgact)                      act += F("\"group_tft\",");
-            if (TIME_SIZE !=35 || dbgact)                       act += F("\"group_full_time\",");
-            if (TS_MODEL != TS_MODEL_UNDEFINED || dbgact)       act += F("\"group_touch\",");
-            if (DSP_MODEL == DSP_NOKIA5110)                     act += F("\"group_nokia\",");
+            if (TIME_SIZE !=35 || DBGWUI)                       act += F("\"group_full_time\",");
+            if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
+            if (DSP_MODEL == DSP_NOKIA5110 || DBGWUI)           act += F("\"group_nokia\",");
                                                                 act += F("\"group_locale\",");
-            if (SHOW_WEATHER || dbgact)                         act += F("\"group_weather\",");
+            if (SHOW_WEATHER || DBGWUI)                         act += F("\"group_weather\",");
                                                                 act += F("\"group_controls\",");
-            if (BTN_UP != 255 || BTN_DOWN != 255 || dbgact)     act += F("\"group_volbuttons\",");
-            if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || dbgact)
+            if (BTN_UP != 255 || BTN_DOWN != 255 || DBGWUI)     act += F("\"group_volbuttons\",");
+            if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)
                                                                 act += F("\"group_stnbuttons\",");
-            if (ENC_DT != 255 || ENC2_DT != 255 || dbgact)      act += F("\"group_encoder\",");
-            if (IR_PIN != 255 || dbgact)                        act += F("\"group_ir\",");
-                                                              #ifdef UPDATEURL
+            if (ENC_DT != 255 || ENC2_DT != 255 || DBGWUI)      act += F("\"group_encoder\",");
+            if (IR_PIN != 255 || DBGWUI)                        act += F("\"group_ir\",");
+                                                              #if defined(UPDATEURL) || DBGWUI
                                                                 act += F("\"group_update\",");
                                                               #endif
           }
@@ -586,7 +589,7 @@ void NetServer::processQueue() {
                                   config.store.autoupdate,
                                   config.store.mdnsname);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layout\":%d,\"theme\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -608,7 +611,10 @@ void NetServer::processQueue() {
                                   config.store.dimmingTimeout,
                                   config.store.dimmingBrightness,
                                   config.store.volumepage,
-                                  config.store.clock12);
+                                  config.store.clock12,
+                                  config.store.inverttitle,
+                                  config.store.layoutId,
+                                  config.store.themeId);
                                   break;
       case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,
@@ -1685,6 +1691,20 @@ void handleNotFound(AsyncWebServerRequest * request) {
     response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     response->addHeader("Pragma", "no-cache");
     response->addHeader("Expires", "0");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themes.json") {
+    String json = display.getThemeListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/layouts.json") {
+    String json = display.getLayoutListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
     request->send(response);
     return;
   }

@@ -16,6 +16,7 @@
 #include "rgbled.h"
 #include "../locale/dsplocale.h"
 #include "../displays/dspcore.h"
+#include "../displays/themes.h"
 #include "../displays/widgets/pages.h"
 #include "../displays/widgets/widgets.h"
 #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
@@ -27,6 +28,43 @@
 #endif
 
 Display display;
+
+// Layout switching — pointers initially point to PROGMEM defaults
+LayoutData activeLayout;
+const ScrollConfig*   metaConf_ptr        = &_layouts[0].metaConf;
+const ScrollConfig*   title1Conf_ptr      = &_layouts[0].title1Conf;
+const ScrollConfig*   title2Conf_ptr      = &_layouts[0].title2Conf;
+const ScrollConfig*   playlistConf_ptr    = &_layouts[0].playlistConf;
+const ScrollConfig*   apTitleConf_ptr     = &_layouts[0].apTitleConf;
+const ScrollConfig*   apSettConf_ptr      = &_layouts[0].apSettConf;
+const ScrollConfig*   weatherConf_ptr     = &_layouts[0].weatherConf;
+const FillConfig*     metaBGConf_ptr      = &_layouts[0].metaBGConf;
+const FillConfig*     metaBGConfInv_ptr   = &_layouts[0].metaBGConfInv;
+const FillConfig*     volbarConf_ptr      = &_layouts[0].volbarConf;
+const FillConfig*     playlBGConf_ptr     = &_layouts[0].playlBGConf;
+const FillConfig*     bufferbarConf_ptr   = &_layouts[0].bufferbarConf;
+const WidgetConfig*   bootstrConf_ptr     = &_layouts[0].bootstrConf;
+const WidgetConfig*   bitrateConf_ptr     = &_layouts[0].bitrateConf;
+const WidgetConfig*   voltxtConf_ptr      = &_layouts[0].voltxtConf;
+const WidgetConfig*   batteryConf_ptr     = &_layouts[0].batteryConf;
+const WidgetConfig*   iptxtConf_ptr       = &_layouts[0].iptxtConf;
+const WidgetConfig*   rssiConf_ptr        = &_layouts[0].rssiConf;
+const WidgetConfig*   numConf_ptr         = &_layouts[0].numConf;
+const WidgetConfig*   apNameConf_ptr      = &_layouts[0].apNameConf;
+const WidgetConfig*   apName2Conf_ptr     = &_layouts[0].apName2Conf;
+const WidgetConfig*   apPassConf_ptr      = &_layouts[0].apPassConf;
+const WidgetConfig*   apPass2Conf_ptr     = &_layouts[0].apPass2Conf;
+const WidgetConfig*   clockConf_ptr       = &_layouts[0].clockConf;
+const WidgetConfig*   vuConf_ptr          = &_layouts[0].vuConf;
+const WidgetConfig*   bootWdtConf_ptr     = &_layouts[0].bootWdtConf;
+const ProgressConfig* bootPrgConf_ptr     = &_layouts[0].bootPrgConf;
+const BitrateConfig*  fullbitrateConf_ptr = &_layouts[0].fullbitrateConf;
+const VUBandsConfig*  bandsConf_ptr       = &_layouts[0].bandsConf;
+const MoveConfig*     clockMove_ptr       = &_layouts[0].clockMove;
+const MoveConfig*     weatherMove_ptr     = &_layouts[0].weatherMove;
+const MoveConfig*     weatherMoveVU_ptr   = &_layouts[0].weatherMoveVU;
+const bool*           boomboxStyle_ptr    = &activeLayout.boomboxStyle;
+uint8_t layoutCount = (sizeof(_layoutNames) / sizeof(_layoutNames[0]));
 
 QueueHandle_t displayQueue;
 
@@ -59,11 +97,6 @@ void Display::_createDspTask() {
 DspCore dsp;
 
 Page *pages[] = { new Page(), new Page(), new Page(), new Page() };
-
-#if !((DSP_MODEL==DSP_ST7735 && DTYPE==INITR_BLACKTAB) || DSP_MODEL==DSP_ST7789 || DSP_MODEL==DSP_ST7796 || DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ILI9341 || DSP_MODEL==DSP_ILI9225)
-  #undef  BITRATE_FULL
-  #define BITRATE_FULL     false
-#endif
 
 static uint32_t normalizeBufferbarValue(uint32_t rawValue, uint32_t maxValue) {
   // Raw audio buffer fill vs the KB threshold where the bar looks "full"
@@ -111,6 +144,8 @@ void Display::init() {
   _meta = new ScrollWidget();
   _title1 = new ScrollWidget();
   _plcurrent = new ScrollWidget();
+  memcpy_P(&activeLayout, &_layouts[config.store.layoutId], sizeof(LayoutData));
+  _setLayoutPointers();
   SERIALLOG("done");
 }
 
@@ -119,8 +154,8 @@ uint16_t Display::height() { return dsp.height(); }
 
 void Display::_bootScreen() {
   _boot = new Page();
-  _boot->addWidget(new ProgressWidget(bootWdtConf, bootPrgConf, BOOT_PRG_COLOR, 0));
-  _bootstring = (TextWidget*) &_boot->addWidget(new TextWidget(bootstrConf, 50, true, BOOT_TXT_COLOR, 0));
+  _boot->addWidget(new ProgressWidget(*bootWdtConf_ptr, *bootPrgConf_ptr, BOOT_PRG_COLOR, 0));
+  _bootstring = (TextWidget*) &_boot->addWidget(new TextWidget(*bootstrConf_ptr, 50, true, BOOT_TXT_COLOR, 0));
   const char* icon;
   if ((network.offlineMode || config.store.SDoffline))
                                          icon = "\016\017";  // SD_A + SD_B
@@ -137,60 +172,45 @@ void Display::_bootScreen() {
 }
 
 void Display::_buildPager() {
-  _meta->init("*", metaConf, config.theme.meta, config.theme.metabg);
-  _title1->init("*", title1Conf, config.theme.title1, config.theme.background);
-  _clock->init(clockConf, 0, 0);
-  #if DSP_MODEL==DSP_NOKIA5110
-    _plcurrent->init("*", playlistConf, 0, 1);
-  #else
-    _plcurrent->init("*", playlistConf, config.theme.plcurrent, config.theme.plcurrentbg);
-  #endif
-  _plwidget->init(_plcurrent);
-  #if !defined(DSP_LCD)
-    _plcurrent->moveTo({TFT_FRAMEWDT, (uint16_t)(_plwidget->currentTop()), (int16_t)playlistConf.width});
-  #endif
-  #ifndef HIDE_TITLE2
-    _title2 = new ScrollWidget("*", title2Conf, config.theme.title2, config.theme.background);
-  #endif
+  if (title2Conf_ptr->buffsize > 0) {
+    _title2 = new ScrollWidget("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+  }
   #if !defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110
-    _plbackground = new FillWidget(playlBGConf, config.theme.plcurrentfill);
-    #if DSP_INVERT_TITLE || defined(DSP_OLED)
-      _metabackground = new FillWidget(metaBGConf, config.theme.metafill);
-    #else
-      _metabackground = new FillWidget(metaBGConfInv, config.theme.metafill);
-    #endif
+    _plbackground = new FillWidget(*playlBGConf_ptr, config.theme.plcurrentfill);
+    _metabackground = new FillWidget(*metaBGConf_ptr, config.theme.metafill);
   #endif
   #if DSP_MODEL==DSP_NOKIA5110
-    _plbackground = new FillWidget(playlBGConf, 1);
-    //_metabackground = new FillWidget(metaBGConf, 1);
+    _plbackground = new FillWidget(*playlBGConf_ptr, 1);
+    //_metabackground = new FillWidget(*metaBGConf_ptr, 1);
   #endif
-  #ifndef HIDE_VU
-    _vuwidget = new VuWidget(vuConf, bandsConf, config.theme.vumax, config.theme.vumin, config.theme.background);
-  #endif
-  #ifndef HIDE_VOLBAR
-    _volbar = new SliderWidget(volbarConf, config.theme.volbarin, config.theme.background, VOLUME_SCALE, config.theme.volbarout);
-  #endif
-  #ifndef HIDE_BUFFERBAR
+  if (vuConf_ptr->textsize > 0) {
+    _vuwidget = new VuWidget(*vuConf_ptr, *bandsConf_ptr, config.theme.vumax, config.theme.vumin, config.theme.background);
+  }
+  if (volbarConf_ptr->height > 0) {
+    _volbar = new SliderWidget(*volbarConf_ptr, config.theme.volbarin, config.theme.background, VOLUME_SCALE, config.theme.volbarout);
+  }
+  if (bufferbarConf_ptr->height > 0) {
     _bufferbarMax = 1024 * BUFFERBAR_VISUAL_FULL_KB;
-    _bufferbar = new SliderWidget(bufferbarConf, config.theme.buffer, config.theme.background, _bufferbarMax);
+    _bufferbar = new SliderWidget(*bufferbarConf_ptr, config.theme.buffer, config.theme.background, _bufferbarMax);
+  }
+  if (voltxtConf_ptr->textsize > 0) {
+    _voltxt = new TextWidget(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
+  }
+  if (iptxtConf_ptr->textsize > 0) {
+    _volip = new TextWidget(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);  // 48 bytes = 15 code points × 3 bytes (CJK) + 2 icons + null
+  }
+  if (rssiConf_ptr->textsize > 0) {
+    _rssi = new TextWidget(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
+  }
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
+    if (batteryConf_ptr->textsize > 0) {
+      _battery = new TextWidget(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
+    }
   #endif
-  #ifndef HIDE_VOL
-    _voltxt = new TextWidget(voltxtConf, 10, false, config.theme.vol, config.theme.background);
-  #endif
-  #ifndef HIDE_IP
-    _volip = new TextWidget(iptxtConf, 48, false, config.theme.ip, config.theme.background);  // 48 bytes = 15 code points × 3 bytes (CJK) + 2 icons + null
-  #endif
-  #ifndef HIDE_RSSI
-    _rssi = new TextWidget(rssiConf, 20, false, config.theme.rssi, config.theme.background);
-  #endif
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
-    _battery = new TextWidget(batteryConf, 10, false, config.theme.battery, config.theme.background);
-  #endif
-  _nums->init(numConf, 10, false, config.theme.digit, config.theme.background);
-  #ifndef HIDE_WEATHER
-    _weather = new ScrollWidget("\007", weatherConf, config.theme.weather, config.theme.background);
-  #endif
-  
+  if (weatherConf_ptr->buffsize > 0) {
+    _weather = new ScrollWidget("\007", *weatherConf_ptr, config.theme.weather, config.theme.background);
+  }
+
   if (_volbar)   _footer->addWidget(_volbar);
   if (_voltxt)   _footer->addWidget(_voltxt);
   if (_volip)    _footer->addWidget(_volip);
@@ -203,13 +223,13 @@ void Display::_buildPager() {
   pages[PG_PLAYER]->addWidget(_title1);
   if (_title2) pages[PG_PLAYER]->addWidget(_title2);
   if (_weather) pages[PG_PLAYER]->addWidget(_weather);
-  #if BITRATE_FULL
-    _fullbitrate = new BitrateWidget(fullbitrateConf, config.theme.bitrate, config.theme.background);
+  if (fullbitrateConf_ptr->dimension > 0) {
+    _fullbitrate = new BitrateWidget(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
     pages[PG_PLAYER]->addWidget(_fullbitrate);
-  #else
-    _bitrate = new TextWidget(bitrateConf, 30, false, config.theme.bitrate, config.theme.background);
+  } else {
+    _bitrate = new TextWidget(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
     pages[PG_PLAYER]->addWidget(_bitrate);
-  #endif
+  }
   if (_vuwidget) pages[PG_PLAYER]->addWidget(_vuwidget);
   pages[PG_PLAYER]->addWidget(_clock);
   pages[PG_SCREENSAVER]->addWidget(_clock);
@@ -220,7 +240,7 @@ void Display::_buildPager() {
   pages[PG_DIALOG]->addWidget(_nums);
   #ifdef UPDATEURL
     // configure centred update label and progress bar with appropriate gap
-    WidgetConfig updConf = apNameConf;
+    WidgetConfig updConf = *apNameConf_ptr;
     updConf.left = 0;
     updConf.align = WA_CENTER;
     updConf.top = (dsp.height() - (updConf.textsize * CHARHEIGHT)) / 2;
@@ -235,15 +255,15 @@ void Display::_buildPager() {
 
     // compute bar width once
     {
-      uint8_t ts = apPassConf.textsize > 0 ? apPassConf.textsize : 1;
-      uint16_t widgetPx = dsp.width() - apPassConf.left;
+      uint8_t ts = apPassConf_ptr->textsize > 0 ? apPassConf_ptr->textsize : 1;
+      uint16_t widgetPx = dsp.width() - apPassConf_ptr->left;
       int chars = (int)(widgetPx / (CHARWIDTH * ts));
       _updBarWidth = (chars < 2) ? 2 : (chars > 64) ? 64 : chars;
     }
 
     // place progress widget under the label maintaining original spacing
-    WidgetConfig valConf = apPassConf;
-    int16_t origGap = apPassConf.top - apNameConf.top;
+    WidgetConfig valConf = *apPassConf_ptr;
+    int16_t origGap = apPassConf_ptr->top - apNameConf_ptr->top;
     if (origGap < 0) origGap = updConf.textsize * CHARHEIGHT + 2; // fallback
     valConf.top = updConf.top + origGap;
     _updValue = new TextWidget(valConf, (uint16_t)(_updBarWidth + 2), false,
@@ -261,7 +281,7 @@ void Display::_buildPager() {
     if (_plbackground) {
       pages[PG_PLAYLIST]->addWidget(_plbackground);
       _plbackground->setHeight(_plwidget->itemHeight());
-      _plbackground->moveTo({0,(uint16_t)(_plwidget->currentTop()-playlistConf.widget.textsize*2), (int16_t)playlBGConf.width});
+      _plbackground->moveTo({0,(uint16_t)(_plwidget->currentTop()-playlistConf_ptr->widget.textsize*2), (int16_t)playlBGConf_ptr->width});
     }
     pages[PG_PLAYLIST]->addWidget(_plcurrent);
   #endif
@@ -274,29 +294,32 @@ void Display::_apScreen() {
   #ifndef DSP_LCD
     _boot = new Page();
     #if DSP_MODEL!=DSP_NOKIA5110
-      #if DSP_INVERT_TITLE || defined(DSP_OLED)
-        _boot->addWidget(new FillWidget(metaBGConf, config.theme.metafill));
-      #else
-        _boot->addWidget(new FillWidget(metaBGConfInv, config.theme.metafill));
-      #endif
+      _boot->addWidget(new FillWidget(*metaBGConf_ptr, config.theme.metafill));
     #endif
-    ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", apTitleConf, config.theme.meta, config.theme.metabg));
+    uint16_t mfg = config.store.inverttitle ? config.theme.metabg : config.theme.meta;
+    uint16_t mbg;
+    #ifdef DSP_TFT
+      mbg = config.store.inverttitle ? config.theme.background : config.theme.metabg;
+    #else
+      mbg = config.store.inverttitle ? config.theme.metafill : config.theme.metabg;
+    #endif
+    ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", *apTitleConf_ptr, mfg, mbg));
     bootTitle->setText("AP/Improv Mode");
-    TextWidget *apname = (TextWidget*) &_boot->addWidget(new TextWidget(apNameConf, 30, false, config.theme.title1, config.theme.background));
+    TextWidget *apname = (TextWidget*) &_boot->addWidget(new TextWidget(*apNameConf_ptr, 30, false, config.theme.title1, config.theme.background));
     apname->setText(l10n(L10N_LBL_APNAME));
-    TextWidget *apname2 = (TextWidget*) &_boot->addWidget(new TextWidget(apName2Conf, 30, false, config.theme.clock, config.theme.background));
+    TextWidget *apname2 = (TextWidget*) &_boot->addWidget(new TextWidget(*apName2Conf_ptr, 30, false, config.theme.clock, config.theme.background));
     apname2->setText(AP_SSID);
-    TextWidget *appass = (TextWidget*) &_boot->addWidget(new TextWidget(apPassConf, 30, false, config.theme.title1, config.theme.background));
+    TextWidget *appass = (TextWidget*) &_boot->addWidget(new TextWidget(*apPassConf_ptr, 30, false, config.theme.title1, config.theme.background));
     #ifdef AP_PASSWORD
       appass->setText(l10n(L10N_LBL_APPASS));
     #else 
       appass->setText(l10n(L10N_LBL_APNOPASS));
     #endif
-    TextWidget *appass2 = (TextWidget*) &_boot->addWidget(new TextWidget(apPass2Conf, 30, false, config.theme.clock, config.theme.background));
+    TextWidget *appass2 = (TextWidget*) &_boot->addWidget(new TextWidget(*apPass2Conf_ptr, 30, false, config.theme.clock, config.theme.background));
     #ifdef AP_PASSWORD
       appass2->setText(AP_PASSWORD);
     #endif
-    ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", apSettConf, config.theme.title2, config.theme.background));
+    ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", *apSettConf_ptr, config.theme.title2, config.theme.background));
     bootSett->setText(utility.ipToStr(WiFi.softAPIP()), l10n(L10N_MSG_CONNECT_OPEN));
     _pager->addPage(_boot);
     _pager->setPage(_boot);
@@ -314,6 +337,7 @@ void Display::_start() {
   }
   _buildPager();
   _mode = PLAYER;
+  _applyState();
   config.setTitle(network.status == SDOFFLINE && !sdman.ready ? l10n(L10N_MSG_NO_SD_CARD) : l10n(L10N_MSG_READY));
   
   if (_bufferbar)  _bufferbar->lock(!config.store.bufferbar);
@@ -328,7 +352,7 @@ void Display::_start() {
 
   if (_vuwidget) _vuwidget->lock();
   if (_rssi) { if (network.status == SDOFFLINE) _setRSSI(0); else _setRSSI(WiFi.RSSI()); }
-  #ifndef HIDE_IP
+  if (iptxtConf_ptr->textsize > 0) {
     if (_volip) {
       if (network.status == SDOFFLINE) {
         _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
@@ -341,9 +365,11 @@ void Display::_start() {
         #endif
       }
     }
-  #endif
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
-    if(_battery) _updateBattery();
+  }
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
+    if (batteryConf_ptr->textsize > 0) {
+      if(_battery) _updateBattery();
+    }
   #endif
   _pager->setPage(pages[PG_PLAYER]);
   _volume();
@@ -374,7 +400,7 @@ void Display::_swichMode(displayMode_e newmode) {
   dsp.setScrollId(NULL);
   if (newmode == PLAYER) {
     if (player.isRunning())
-      if (clockMove.width<0) _clock->moveBack(); else _clock->moveTo(clockMove);
+      if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
     else
       _clock->moveBack();
     #ifdef DSP_LCD
@@ -384,13 +410,12 @@ void Display::_swichMode(displayMode_e newmode) {
     #ifdef META_MOVE
       _meta->moveBack();
     #endif
-    _meta->setAlign(metaConf.widget.align);
+    _meta->setAlign(metaConf_ptr->widget.align);
     _meta->setText(config.station.name);
     _nums->setText("");
     config.isScreensaver = false;
     _pager->setPage(pages[PG_PLAYER]);
-    #ifndef HIDE_IP
-      if (_volip) {
+    if (_volip) {
         if (network.status == SDOFFLINE) {
           _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
         } else {
@@ -402,7 +427,6 @@ void Display::_swichMode(displayMode_e newmode) {
           #endif
         }
       }
-    #endif
     #if IP_WEATHER_SHARED // force weather repaint on return to PLAYER; larger displays repaint naturally
       if (config.store.showweather && _weather) {
         _weather->lock(false);
@@ -438,12 +462,10 @@ void Display::_swichMode(displayMode_e newmode) {
     if (config.store.volumepage) {
       _showDialog(l10n(L10N_LBL_VOLUME));
     }
-    #ifndef HIDE_IP
-      if (_volip) {
+    if (_volip) {
         if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
         else _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
       }
-    #endif
     _nums->setText(config.store.volume, numtxtFmt);
   }
   if (newmode == LOST)      _showDialog(l10n(L10N_LBL_LOST));
@@ -543,9 +565,9 @@ void Display::_layoutChange(bool played) {
   if (config.store.vumeter && _vuwidget) {
     if (played) {
       if (_vuwidget) _vuwidget->unlock();
-      //_clock->moveTo(clockMove);
-      if (clockMove.width<0) _clock->moveBack(); else _clock->moveTo(clockMove);
-      if (_weather) _weather->moveTo(weatherMoveVU);
+      //_clock->moveTo(*clockMove_ptr);
+      if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
+      if (_weather) _weather->moveTo(*weatherMoveVU_ptr);
     } else {
       if (_vuwidget) if (!_vuwidget->locked()) _vuwidget->lock();
       _clock->moveBack();
@@ -553,8 +575,8 @@ void Display::_layoutChange(bool played) {
     }
   } else {
     if (played) {
-      if (clockMove.width<0) _clock->moveBack(); else _clock->moveTo(clockMove);
-      if (_weather) _weather->moveTo(weatherMove);
+      if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
+      if (_weather) _weather->moveTo(*weatherMove_ptr);
       //_clock->moveBack();
     } else {
       if (_weather) _weather->moveBack();
@@ -629,17 +651,13 @@ void Display::loop() {
           #endif
           if (!config.store.showweather) {
             if (_weather) _weather->setText("");
-            #ifndef HIDE_IP
-              if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
-            #endif
+            if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
           } else {
             #if IP_WEATHER_SHARED // weather and IP share a row; suppress weather text and IP together based on mode
               if (_mode == VOL) {
                 if (_weather) _weather->setText("");
               } else {
-                #ifndef HIDE_IP
-                  if (_volip) _volip->setText("");
-                #endif
+                if (_volip) _volip->setText("");
                 network.buildWeatherString();
               }
 	          #else // larger displays have separate rows; just update weather, leave IP alone
@@ -684,8 +702,7 @@ void Display::loop() {
         case PSTOP:  _layoutChange(false);  break;
         case DSP_START: _start();  break;
         case NEWIP: {
-          #ifndef HIDE_IP
-            if (_volip) {
+          if (_volip) {
               if (network.status == SDOFFLINE) {
                 _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
               } else {
@@ -697,7 +714,6 @@ void Display::loop() {
                 #endif
               }
             }
-          #endif
           break;
         }
         default: break;
@@ -806,7 +822,7 @@ void Display::_setRSSI(int rssi) {
 #endif
 
 void Display::_station() {
-  _meta->setAlign(metaConf.widget.align);
+  _meta->setAlign(metaConf_ptr->widget.align);
   _meta->setText(config.station.name);
 }
 
@@ -855,10 +871,10 @@ void Display::_time(bool redraw) {
     int32_t minLeft = TFT_FRAMEWDT;
     int32_t maxLeft = dsp.width() - _clock->clockWidth() - TFT_FRAMEWDT;
     int32_t left = (maxLeft > minLeft) ? random(minLeft, maxLeft + 1) : minLeft;
-    if (clockConf.align == WA_CENTER) left -= (dsp.width() - _clock->clockWidth()) / 2;
+    if (clockConf_ptr->align == WA_CENTER) left -= (dsp.width() - _clock->clockWidth()) / 2;
     if (left < 0) left = 0;
     uint16_t lt = static_cast<uint16_t>(left);
-    //_clock->moveTo({clockConf.left, ft, 0});
+    //_clock->moveTo({clockConf_ptr->left, ft, 0});
     _clock->moveTo({lt, ft, 0});
   }
   if (redraw) _clock->forceDraw(); else _clock->draw();
@@ -866,9 +882,7 @@ void Display::_time(bool redraw) {
 
 void Display::_volume() {
   if (_volbar) _volbar->setValue(config.store.volume);
-  #ifndef HIDE_VOL
-    if (_voltxt) _voltxt->setText(config.store.volume, voltxtFmt);
-  #endif
+  if (_voltxt) _voltxt->setText(config.store.volume, voltxtFmt);
   if (_mode==VOL) {
     _setReturnTicker(3);
     _nums->setText(config.store.volume, numtxtFmt);
@@ -876,6 +890,166 @@ void Display::_volume() {
 }
 
 void Display::flip() { dsp.flip(); }
+
+// Re-init all widgets with current pointer values (called after layout switch)
+void Display::_reinitWidgets() {
+  {
+    uint16_t mfg = config.store.inverttitle ? config.theme.metabg : config.theme.meta;
+    uint16_t mbg;
+    #ifdef DSP_TFT
+      mbg = config.store.inverttitle ? config.theme.background : config.theme.metabg;
+    #else
+      mbg = config.store.inverttitle ? config.theme.metafill : config.theme.metabg;
+    #endif
+      _meta->init("*", *metaConf_ptr, mfg, mbg);
+  }
+  _title1->init("*", *title1Conf_ptr, config.theme.title1, config.theme.background);
+  _clock->init(*clockConf_ptr, 0, 0);
+  #if DSP_MODEL==DSP_NOKIA5110
+    _plcurrent->init("*", *playlistConf_ptr, 0, 1);
+  #else
+    _plcurrent->init("*", *playlistConf_ptr, config.theme.plcurrent, config.theme.plcurrentbg);
+  #endif
+  _plwidget->init(_plcurrent);
+  #if !defined(DSP_LCD)
+    _plcurrent->moveTo({TFT_FRAMEWDT, (uint16_t)(_plwidget->currentTop()), (int16_t)playlistConf_ptr->width});
+  #endif
+  if (_title2) _title2->init("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+  if (_vuwidget) _vuwidget->init(*vuConf_ptr, *bandsConf_ptr, config.theme.vumax, config.theme.vumin, config.theme.background);
+  if (_volbar) _volbar->init(*volbarConf_ptr, config.theme.volbarin, config.theme.background, VOLUME_SCALE, config.theme.volbarout);
+  if (_bufferbar) { _bufferbarMax = 1024 * BUFFERBAR_VISUAL_FULL_KB; _bufferbar->init(*bufferbarConf_ptr, config.theme.buffer, config.theme.background, _bufferbarMax); }
+  if (_voltxt) _voltxt->init(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
+  if (_volip) _volip->init(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);
+  if (_rssi) _rssi->init(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
+    if (_battery) _battery->init(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
+  #endif
+  _nums->init(*numConf_ptr, 10, false, config.theme.digit, config.theme.background);
+  if (_weather) _weather->init("\007", *weatherConf_ptr, config.theme.weather, config.theme.background);
+  if (_fullbitrate) _fullbitrate->init(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
+  if (_bitrate) _bitrate->init(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
+  // Background fills
+  #if !defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110
+    if (_plbackground) _plbackground->init(*playlBGConf_ptr, config.theme.plcurrentfill);
+    if (_metabackground) _metabackground->init(*metaBGConf_ptr, config.theme.metafill);
+  #endif
+  #if DSP_MODEL==DSP_NOKIA5110
+    if (_plbackground) _plbackground->init(*playlBGConf_ptr, 1);
+  #endif
+}
+
+void Display::_setLayoutPointers() {
+  metaConf_ptr       = &activeLayout.metaConf;
+  title1Conf_ptr     = &activeLayout.title1Conf;
+  title2Conf_ptr     = &activeLayout.title2Conf;
+  playlistConf_ptr   = &activeLayout.playlistConf;
+  apTitleConf_ptr    = &activeLayout.apTitleConf;
+  apSettConf_ptr     = &activeLayout.apSettConf;
+  weatherConf_ptr    = &activeLayout.weatherConf;
+  metaBGConf_ptr     = &activeLayout.metaBGConf;
+  metaBGConfInv_ptr  = &activeLayout.metaBGConfInv;
+  volbarConf_ptr     = &activeLayout.volbarConf;
+  playlBGConf_ptr    = &activeLayout.playlBGConf;
+  bufferbarConf_ptr  = &activeLayout.bufferbarConf;
+  bootstrConf_ptr    = &activeLayout.bootstrConf;
+  bitrateConf_ptr    = &activeLayout.bitrateConf;
+  voltxtConf_ptr     = &activeLayout.voltxtConf;
+  batteryConf_ptr    = &activeLayout.batteryConf;
+  iptxtConf_ptr      = &activeLayout.iptxtConf;
+  rssiConf_ptr       = &activeLayout.rssiConf;
+  numConf_ptr        = &activeLayout.numConf;
+  apNameConf_ptr     = &activeLayout.apNameConf;
+  apName2Conf_ptr    = &activeLayout.apName2Conf;
+  apPassConf_ptr     = &activeLayout.apPassConf;
+  apPass2Conf_ptr    = &activeLayout.apPass2Conf;
+  clockConf_ptr      = &activeLayout.clockConf;
+  vuConf_ptr         = &activeLayout.vuConf;
+  bootWdtConf_ptr    = &activeLayout.bootWdtConf;
+  bootPrgConf_ptr    = &activeLayout.bootPrgConf;
+  fullbitrateConf_ptr= &activeLayout.fullbitrateConf;
+  bandsConf_ptr      = &activeLayout.bandsConf;
+  clockMove_ptr      = &activeLayout.clockMove;
+  weatherMove_ptr    = &activeLayout.weatherMove;
+  weatherMoveVU_ptr  = &activeLayout.weatherMoveVU;
+}
+
+void Display::_applyState() {
+  memcpy_P(&activeLayout, &_layouts[config.store.layoutId], sizeof(LayoutData));
+  _setLayoutPointers();
+  #ifdef DSP_TFT
+    memcpy_P(&config.theme, &_themes[config.store.themeId], sizeof(ThemeData));
+  #endif
+  #if !defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110
+    if (config.store.inverttitle) {
+      #ifdef DSP_TFT
+        config.theme.metafill = config.theme.div;
+      #endif
+      metaBGConf_ptr = (activeLayout.metaBGConfInv.height > 0) ? &activeLayout.metaBGConfInv : &activeLayout.metaBGConf;
+    } else {
+      metaBGConf_ptr = &activeLayout.metaBGConf;
+    }
+  #endif
+  _reinitWidgets();
+  _volume();
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
+    if (_battery) _updateBattery();
+  #endif
+  if (_weather && config.store.showweather && network.weatherBuf) _weather->setText(network.weatherBuf);
+  _station();
+  _title();
+  putRequest(NEWMODE, CLEAR);
+  putRequest(NEWMODE, PLAYER);
+}
+
+void Display::applyLayout(uint8_t id) {
+  if (id >= layoutCount) return;
+  config.store.layoutId = id;
+  _applyState();
+}
+
+uint8_t Display::getLayoutCount() { return layoutCount; }
+
+void Display::applyTheme(uint8_t id) {
+  if (id >= sizeof(_themes)/sizeof(_themes[0])) return;
+  config.store.themeId = id;
+  _applyState();
+}
+
+uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
+
+String Display::getThemeListJson() {
+  String json = "{";
+  for (uint8_t i = 0; i < sizeof(_themes)/sizeof(_themes[0]); i++) {
+    if (i > 0) json += ',';
+    json += '"' + String(i) + "\":\"";
+    char buf[33];
+    strncpy_P(buf, _themeNames[i], 32);
+    buf[32] = 0;
+    json += buf;
+    json += '"';
+  }
+  json += '}';
+  return json;
+}
+
+String Display::getLayoutListJson() {
+  String json = "{";
+  for (uint8_t i = 0; i < layoutCount; i++) {
+    if (i > 0) json += ',';
+    json += '"' + String(i) + "\":\"";
+    char buf[33];
+    strncpy_P(buf, _layoutNames[i], 32);
+    buf[32] = 0;
+    json += buf;
+    json += '"';
+  }
+  json += '}';
+  return json;
+}
+
+void Display::applyInvertTitle() {
+  _applyState();
+}
 
 void Display::invert() { dsp.invert(); }
 

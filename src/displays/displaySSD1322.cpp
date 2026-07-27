@@ -17,15 +17,9 @@ void DspCore::initDisplay() {
   #include "tools/oledcolorfix.h"
 #else
     config.theme.background = TFT_BG;
-  #if DSP_INVERT_TITLE
-    config.theme.meta       = TFT_BG;
-    config.theme.metabg     = GRAY_9;
-    config.theme.metafill   = GRAY_9;
-  #else
     config.theme.meta       = GRAY_9;
     config.theme.metabg     = TFT_BG;
     config.theme.metafill   = TFT_BG;
-  #endif  
     config.theme.clock      = TFT_FG;
     config.theme.clockbg    = GRAY_1;
     config.theme.weather    = GRAY_2;

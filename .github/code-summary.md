@@ -85,7 +85,7 @@ Grouped (not one-by-one deep explained) areas:
 
 ### `src/core/options.h`
 - Canonical fallback defaults and compile flags.
-- Includes `myoptions.h`, `mytheme.h`, `mqttoptions.h` when present.
+- Includes `myoptions.h` when present.
 - **Owns all compile-time guardrails** inline, right next to each respective define.
 - Owns shared buffer sizing macros under `/* Maximum lengths of character buffers */`, including `MQTT_URL_SIZE` for stream/artwork URL buffers used by `player`, `audiohandlers`, and MQTT status payload sizing.
 - Defines:
@@ -227,10 +227,13 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 
 ## `src/core/options.h`
 - See earlier build section.
+- `DSP_INVERT_TITLE` macro removed — replaced by runtime `config.store.inverttitle` boolean.
+- `DSP_TFT` added to `dspcore.h` for all TFT display models — used to gate color-theme reloading (monochrome displays skip it).
 
 ## `src/core/config.h`
 - Defines persistent struct `config_t store`.
 - `theme_t` no longer includes `theme.heap`; runtime input-buffer rendering uses `theme.buffer`.
+- New fields: `uint8_t themeId`, `bool inverttitle`. `color565()` method removed.
 - Defines station/theme structs and config API.
 - Defines key constants for SPIFFS paths and data file locations.
 - `theme_t` now includes screensaver-specific clock palette fields (`clockss`, `clockbgss`, `secondsss`, `dowss`, `datess`) so screensaver clock/date elements can use colors independent from normal PLAYER-mode clock colors.
@@ -265,7 +268,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Key interaction:
   - almost every module reads/writes through `config`.
 - Theme loading note:
-  - `Config::loadTheme()` now initializes both normal clock colors and screensaver-specific clock colors from `options.h` macros (`COLOR_CLOCK_SS`, `COLOR_CLOCK_BG_SS`, `COLOR_SECONDS_SS`, `COLOR_DAY_OF_W_SS`, `COLOR_DATE_SS`).
+  - `Config::loadTheme()` now uses `memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData))` — loads from PROGMEM `_themes[]` array at runtime. No longer uses compile-time `COLOR_*` macros.
+  - `applyInvertTitle()` removed from Config (moved to Display).
 
 ## `src/core/startup.h` / `startup.cpp`
 - Boot-only orchestration module following the standard core `class + global instance` pattern (`Startup startup;`).
@@ -361,6 +365,16 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 ## `src/core/display.h` / `display.cpp`
 - `display.h` declares Display class and display mode/change API.
 - Render queue + display task + widget/page orchestration.
+- **Theme/layout/invert runtime switching** — major refactor:
+  - `_applyState()` — central state function: loads layout from PROGMEM, loads theme from PROGMEM (TFT only), applies invert (color swap + `metaBGConf_ptr` switch), reinitializes widgets, redraws. Called by all three commands (`theme`, `layout`, `inverttitle`).
+  - `_setLayoutPointers()` — extracted 30-pointer setup shared by init and runtime paths.
+  - `applyLayout()`, `applyTheme()`, `applyInvertTitle()` — thin wrappers that set config then call `_applyState()`.
+  - `inverttitle` is runtime boolean (`config.store.inverttitle`). On TFT: swaps meta↔metabg colors + switches to `metaBGConfInv` layout. On OLED: color swap only. Uses conditional rendering at widget init time — no theme mutation.
+  - `getThemeListJson()` / `getLayoutListJson()` — serve dropdown data to WebUI from PROGMEM `_themeNames[]` / `_layoutNames[]`.
+  - `#ifndef HIDE_*` compile guards removed from `_reinitWidgets()` and `_buildPager()` — all widget init now uses runtime null-checks.
+  - `_buildPager()` no longer calls `_reinitWidgets()` — state application is handled by `_applyState()`.
+  - `_start()` calls `_buildPager()` then `_applyState()` — widgets created then initialized with correct state.
+  - `DSP_INVERT_TITLE` compile-time macro eliminated.
 - Buffer bar terminology was aligned to actual behavior:
   - `_heapbar` -> `_bufferbar`
   - `HIDE_HEAPBAR` -> `HIDE_BUFFERBAR`
@@ -405,7 +419,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Coupling:
   - uses `cmd.exec(...)` from commandhandler
   - emits JSON consumed by `data/www/script.js`
-  - `GETSCREEN` carries both display state and persisted dimming fields used by `data/www/settings.html`
+  - `GETSCREEN` now also carries `invtitle`, `layout`, `theme` fields for WebUI dropdown state
+  - Virtual endpoints `/themes.json` and `/layouts.json` serve dropdown data from PROGMEM arrays
 - Readiness detail:
   - `/ready` returns `{"ready":true}` only when `netserver.bootReady` is true, required web files exist, and network state is stable (`CONNECTED` + `WL_CONNECTED`, or `SDREADY`).
 - OTA note:
@@ -425,6 +440,23 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - trigger curated operations and locale update tasks
   - cancel the stream retry task (`cancelStreamRetry()`) before executing user-initiated playback commands (`stop`, `playstation`, `prev`, `next`, `toggle`, `turnoff`, `burl`, `mode`, `submitplaylist`) so explicit user actions always interrupt automatic reconnection loops
 - Critical coupling file for setting changes.
+- New commands: `theme` (theme switching), `layout` (layout switching), `inverttitle` (invert title toggle). All persist via `saveValue` and trigger `display._applyState()`.
+
+## `src/displays/themes.h`
+- **NEW FILE** — Runtime theme switching data.
+- `ThemeData` struct: 33 `uint16_t` color fields + `playlist[5]` — mirrors `config.h` `theme_t`.
+- `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported).
+- `const char _themeNames[][32] PROGMEM` — display names for WebUI dropdown.
+- `RGB(r,g,b)` macro packs 8-bit RGB into RGB565 `uint16_t`.
+- Populated by `importtheme.py` script.
+
+## `src/displays/importtheme.py`
+- **NEW SCRIPT** — imports old-style `#define COLOR_*` theme files into `themes.h`.
+- Handles `#ifdef`/`#ifndef` branching to generate multiple theme variants (permutation).
+- Smart fallbacks for missing colors (e.g., `.dow` ← `.date`, `.battery` ← `.rssi`).
+- Meta fallback for everything else (uses `.meta` color instead of zeros).
+- Name truncation at 31 chars for `_themeNames[][32]`.
+- `--dry-run` writes to `.new.h`.
 
 ## `src/core/controls.h` / `controls.cpp`
 - `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`, `setIRTolerance()`, `flipTS()`, `controlsEvent()`.
@@ -590,12 +622,14 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - consolidated with `data/www/dragpl.js`
   - Playlist drag-and-drop reorder behavior.
 
-## `data/www/settings.js`
+## `data/www/options.js`
 - Settings page behavior.
 - Responsibilities:
   - timezone JSON loading and dropdown population
   - locale list loading and locale switch logic
   - weather provider field visibility logic
+  - **theme/layout dropdown loading** — fetches `/themes.json` and `/layouts.json`, populates `#themeId`/`#layoutId` dropdowns, sends `websocket.send("theme=N")` / `websocket.send("layout=N")` on change
+  - `afterSetupElement` hook restores current `themeId`/`layoutId` from WebSocket data
   - apply handlers for locale/weather/mqtt/wifi
   - reboot/reset/format status screen with per-action behavior:
     - reboot/reset use ready-aware return-to-root with shorter fallback (15s)
@@ -684,6 +718,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `displayTFT320x240conf.h` for ILI9341/ST7789 class.
 - The canonical files are intentionally deduplicated masters without per-model `#if DSP_MODEL...` branches; model-specific legacy deltas were removed in favor of one shared layout baseline per family.
 - Display driver headers now include conf files directly; custom fallback include blocks using `__has_include("conf/*_custom.h")` were removed.
+- `metaBGConf` / `metaBGConfInv` — runtime-switchable station-name background (full bar vs thin line on TFT; bar vs no-bar on OLED). Controlled by `config.store.inverttitle`.
+- OLED configs: `metaBGConf` may be `{ }` (normal mode no bar), `metaBGConfInv` has the bar (inverted mode). `importlayout.py` auto-swaps when importing into OLED targets.
 - Buffer bar layout/visibility symbols were renamed:
   - `heapbarConf` -> `bufferbarConf`
   - `HIDE_HEAPBAR` -> `HIDE_BUFFERBAR`
@@ -696,8 +732,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - `src/displays/tools/utf8Cyrillic.*`
 - `src/displays/tools/commongfx.h`
 - `src/displays/tools/psframebuffer.h`
-- `src/displays/tools/oledcolorfix.h`
-- `src/displays/tools/tftinverttitle.h`
+- `src/displays/tools/oledcolorfix.h` — OLED monochrome color initialization. `DSP_INVERT_TITLE` ifdef removed; `metafill` corrected to `TFT_FG` (was `TFT_BG` — invisible on black screen).
+- `src/displays/tools/tftinverttitle.h` — **DEPRECATED**, no longer included. Replaced by runtime `inverttitle` in `_applyState()`.
 
 Purpose:
 - text normalization/transliteration and glyph handling

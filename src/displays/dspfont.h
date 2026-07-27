@@ -27,9 +27,9 @@
   #include "fonts/UnixX11_6x9.h"
   #define DisplayFont Fixed
 #else
-  #warning "DISPLAYFONT value not recognized, defaulting to X11"
-  #include "fonts/UnixX11_6x9.h"
-  #define DisplayFont X11
+  #warning "DISPLAYFONT value not recognized, defaulting to MatrixChunky8x6"
+  #include "fonts/MatrixChunky8x6.h"
+  #define DisplayFont MatrixChunky8x6
 #endif
 
 // ── TIME_SIZE ───────────────────────────────────────────────────────────

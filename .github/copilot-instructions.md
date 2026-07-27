@@ -61,7 +61,7 @@
   5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first (Rule #5)
 
 ## Project Structure
-- **Config Cascade**: `platformio.ini` (env #define) → `myoptions.h` (hardware profile, user defaults) → `mytheme.h` (UI theme) → `options.h` (fallback defaults for anything undefined) → `optionschecker.h` (forces compile failure when certain defines are incorrect).
+- **Config Cascade**: `platformio.ini` (env #define) → `myoptions.h` (hardware profile, user defaults) → `options.h` (fallback defaults for anything undefined)
 - **Core logic**: `src/core/` (Player, Display, Network, Config, Controls).
 - **Libraries path**: Software codecs: `libraries/I2S_Audio/`, `libraries/ES8311_Audio` / Hardware decoder: `libraries/VS1053_Audio/` (Hardware chip), other folders are custom drivers for other display, touchscreen, and other hardware.
 - **UI**: Widgets in `src/displays/widgets/`, drivers in `src/displays/`.

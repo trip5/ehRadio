@@ -97,16 +97,36 @@
         <section class="group group_display group_oled hidden" id="group_display">
           <div class="title"><span data-i18n="ttl_screen">Screen</span></div>
           <div class="reset" data-name="screen" title="reset"></div>
-          <div class="flex-row group_tft hidden">
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_flip_screen">Flip screen</span>
+          <div class="flex-row">
+            <div class="inputwrap center group_tft hidden">
+              <span class="inputtitle" data-i18n="lbl_flip_screen">Flip Screen</span>
               <div class="checkbox" id="flip" data-command="flipscreen"><div class="knob"></div></div>
             </div>
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_invert_screen">Invert screen</span>
+            <div class="inputwrap center group_tft hidden">
+              <span class="inputtitle" data-i18n="lbl_invert_screen">Invert Screen</span>
               <div class="checkbox" id="inv" data-command="invertdisplay"><div class="knob"></div></div>
             </div>
+            <div class="inputwrap center group_inverttitle hidden">
+              <span class="inputtitle" data-i18n="lbl_invert_title">Invert Title</span>
+              <div class="checkbox" id="invertttitle" data-command="inverttitle"><div class="knob"></div></div>
+            </div>
           </div>
+
+          <div class="flex-row">
+            <div class="inputwrap group_layout hidden">
+              <span class="inputtitle" data-i18n="lbl_webui_layout">Display Layout</span>
+              <select type="text" id="layoutId" name="layoutId">
+                <option value="">Layouts Load Here</option>
+              </select>
+            </div>
+            <div class="inputwrap group_theme hidden">
+              <span class="inputtitle" data-i18n="lbl_display_theme">Display Theme</span>
+              <select type="text" id="themeId" name="themeId">
+                <option value="">Themes Load Here</option>
+              </select>
+            </div>
+          </div>
+
           <div class="flex-row group_tft hidden">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_numbered_playlist">Numbered Playlist</span>

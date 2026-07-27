@@ -2,6 +2,7 @@
 #if DSP_MODEL!=DSP_DUMMY
 #include <Arduino.h>
 #include "../dspcore.h"
+#include "../../core/display.h"
 #include "../tools/psframebuffer.h"
 #include "widgets.h"
 #include "../../locale/dsplocale.h"
@@ -470,16 +471,16 @@ void VuWidget::_draw(){
   for(int i=0; i<dimension; i++){
     if(i%(dimension/_bands.perheight)==0){
       if(_config.align){
-        #ifndef BOOMBOX_STYLE
+        if (!*boomboxStyle_ptr) {
           bandColor = (i>_bands.width-(_bands.width/_bands.perheight)*4)?_vumaxcolor:_vumincolor;
           _canvas->fillRect(i, 0, h, _bands.height, bandColor);
           _canvas->fillRect(i + _bands.width + _bands.space, 0, h, _bands.height, bandColor);
-        #else
+        } else {
           bandColor = (i>(_bands.width/_bands.perheight))?_vumincolor:_vumaxcolor;
           _canvas->fillRect(i, 0, h, _bands.height, bandColor);
           bandColor = (i>_bands.width-(_bands.width/_bands.perheight)*3)?_vumaxcolor:_vumincolor;
           _canvas->fillRect(i + _bands.width + _bands.space, 0, h, _bands.height, bandColor);
-        #endif
+        }
       }else{
         bandColor = (i<(_bands.height/_bands.perheight)*3)?_vumaxcolor:_vumincolor;
         _canvas->fillRect(0, i, _bands.width, h, bandColor);
@@ -488,18 +489,18 @@ void VuWidget::_draw(){
     }
   }
   if(_config.align){
-    #ifndef BOOMBOX_STYLE
+    if (!*boomboxStyle_ptr) {
       _canvas->fillRect(_bands.width-measL, 0, measL, _bands.width, _bgcolor);
       _canvas->fillRect(_bands.width * 2 + _bands.space - measR, 0, measR, _bands.width, _bgcolor);
       dsp.drawRGBBitmap(_config.left, _config.top, _canvas->getBuffer(), _bands.width * 2 + _bands.space, _bands.height);
-    #else
+    } else {
       _canvas->fillRect(0, 0, _bands.width-(_bands.width-measL), _bands.width, _bgcolor);
       _canvas->fillRect(_bands.width * 2 + _bands.space - measR, 0, measR, _bands.width, _bgcolor);
       dsp.startWrite();
       dsp.setAddrWindow(_config.left, _config.top, _bands.width * 2 + _bands.space, _bands.height);
       dsp.writePixels((uint16_t*)_canvas->getBuffer(), (_bands.width * 2 + _bands.space)*_bands.height);
       dsp.endWrite();
-    #endif
+    }
   }else{
     _canvas->fillRect(0, 0, _bands.width, measL, _bgcolor);
     _canvas->fillRect(_bands.width + _bands.space, 0, _bands.width, measR, _bgcolor);
@@ -974,7 +975,7 @@ void PlayListWidget::init(ScrollWidget* current){
   _plTtemsCount = PLMITEMS;
   _plCurrentPos = 1;
 #elif PLAYLIST_MODE_PAGED
-  _plItemHeight = playlistConf.widget.textsize*(CHARHEIGHT-1)+playlistConf.widget.textsize*4;
+  _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
   _plPlaylistTop = TFT_FRAMEWDT;
   _plPlaylistBottom = dsp.height() - TFT_FRAMEWDT;
   uint16_t available = _plPlaylistBottom - _plPlaylistTop;
@@ -985,11 +986,11 @@ void PlayListWidget::init(ScrollWidget* current){
   _plPageStart = 0;
   _plPrevItem = 0;
 #else
-  _plItemHeight = playlistConf.widget.textsize*(CHARHEIGHT-1)+playlistConf.widget.textsize*4;
+  _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
   _plTtemsCount = round((float)dsp.height()/_plItemHeight);
   if(_plTtemsCount%2==0) _plTtemsCount++;
   _plCurrentPos = _plTtemsCount/2;
-  _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf.widget.textsize*2;
+  _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf_ptr->widget.textsize*2;
 #endif
 }
 
@@ -1031,7 +1032,7 @@ void PlayListWidget::_drawFade(uint16_t currentItem) {
 }
 
 void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
-  dsp.setTextSize(playlistConf.widget.textsize);
+  dsp.setTextSize(playlistConf_ptr->widget.textsize);
   if (pos == _plCurrentPos) {
     _current->setText(item);
   } else {
@@ -1088,9 +1089,9 @@ void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
 #if PLAYLIST_MODE_PAGED && !DSP_LCD
 
 void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name){
-  dsp.setTextSize(playlistConf.widget.textsize);
-  uint8_t charH = CHARHEIGHT * playlistConf.widget.textsize;
-  int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf.widget.textsize;
+  dsp.setTextSize(playlistConf_ptr->widget.textsize);
+  uint8_t charH = CHARHEIGHT * playlistConf_ptr->widget.textsize;
+  int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize;
   if (selected) {
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentfill);
     dsp.fillRect(TFT_FRAMEWDT, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);

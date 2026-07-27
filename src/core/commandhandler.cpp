@@ -134,8 +134,6 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
 
   /* Options: System */
   if (cmdIs(command, "smartstart"))  { config.saveValue(&config.store.smartstart, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "bufferbar"))   { config.saveValue(&config.store.bufferbar, static_cast<bool>(atoi(value))); display.putRequest(SHOWBUFFERBAR); return true; }
-  if (cmdIs(command, "vumeter"))     { config.saveValue(&config.store.vumeter, static_cast<bool>(atoi(value))); display.putRequest(SHOWVUMETER); return true; }
   if (cmdIs(command, "wifiscan"))    { config.saveValue(&config.store.wifiscanbest, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "autoupdate"))  { config.saveValue(&config.store.autoupdate, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
@@ -148,25 +146,30 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "battrecalc"))  { battery.recalcNow(); netserver.requestOnChange(GETBATTERY, cid); return true; }
 
   /* Options: Screen */
-  if (cmdIs(command, "flipscreen"))    { config.saveValue(&config.store.flipscreen, static_cast<bool>(atoi(value))); display.flip(); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "invertdisplay")) { config.saveValue(&config.store.invertdisplay, static_cast<bool>(atoi(value))); return true; } //display.invert();
-  if (cmdIs(command, "numplaylist"))   { config.saveValue(&config.store.numplaylist, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "clock12"))       { config.saveValue(&config.store.clock12, static_cast<bool>(atoi(value))); display.putRequest(CLOCK); return true; }
-  if (cmdIs(command, "volumepage"))    { config.saveValue(&config.store.volumepage, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "flipscreen"))    { config.saveValueButWait(&config.store.flipscreen, static_cast<bool>(atoi(value)), 5000); display.flip(); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "invertdisplay")) { config.saveValueButWait(&config.store.invertdisplay, static_cast<bool>(atoi(value)), 5000); return true; } //display.invert();
+  if (cmdIs(command, "inverttitle"))   { config.saveValueButWait(&config.store.inverttitle, static_cast<bool>(atoi(value)), 5000); display.applyTheme(config.store.themeId); return true; }
+  if (cmdIs(command, "layout"))        { uint8_t id = constrain(atoi(value), 0, display.getLayoutCount() - 1); config.saveValueButWait(&config.store.layoutId, id, 5000); display.applyLayout(id); return true; }
+  if (cmdIs(command, "theme"))         { uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1); config.saveValueButWait(&config.store.themeId, id, 5000); display.applyTheme(id); return true; }
+  if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "clock12"))       { config.saveValueButWait(&config.store.clock12, static_cast<bool>(atoi(value)), 5000); display.putRequest(CLOCK); return true; }
+  if (cmdIs(command, "bufferbar"))     { config.saveValue(&config.store.bufferbar, static_cast<bool>(atoi(value))); display.putRequest(SHOWBUFFERBAR); return true; }
+  if (cmdIs(command, "vumeter"))       { config.saveValue(&config.store.vumeter, static_cast<bool>(atoi(value))); display.putRequest(SHOWVUMETER); return true; }
+  if (cmdIs(command, "volumepage"))    { config.saveValueButWait(&config.store.volumepage, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "brightness", "dim")) {
     if (!config.store.dspon) netserver.requestOnChange(DSPON, 0);
     int bri=atoi(value);
     config.store.brightness = (uint8_t)(bri < 0 ? 0 : (bri > 100 ? 100 : bri));
     if (config.store.dimmingBrightness > config.store.brightness) {
       config.store.dimmingBrightness = config.store.brightness;
-      config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 4000);
+      config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 5000);
     }
     config.setBrightness(true);
     backlightControls.restart();
     return true;
   }
   if (cmdIs(command, "screenon", "dspon"))    { config.setDspOn(static_cast<bool>(atoi(value))); backlightControls.restart(); return true; }
-  if (cmdIs(command, "contrast"))             { int con=atoi(value); config.saveValueButWait(&config.store.contrast, (uint8_t)(con < 0 ? 0 : (con > 100 ? 100 : con)), 4000); display.setContrast(); return true; }
+  if (cmdIs(command, "contrast"))             { int con=atoi(value); config.saveValueButWait(&config.store.contrast, (uint8_t)(con < 0 ? 0 : (con > 100 ? 100 : con)), 5000); display.setContrast(); return true; }
   /* De-deplicated helper for screensaver / No-op for LCDs */
   auto screensaverHelper = []() {
     #ifndef DSP_LCD

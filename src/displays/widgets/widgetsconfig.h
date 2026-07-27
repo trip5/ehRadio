@@ -56,4 +56,78 @@ struct BitrateConfig {
   uint16_t dimension;
 };
 
+struct LayoutData {
+    ScrollConfig metaConf;
+    ScrollConfig title1Conf;
+    ScrollConfig title2Conf;
+    ScrollConfig playlistConf;
+    ScrollConfig apTitleConf;
+    ScrollConfig apSettConf;
+    ScrollConfig weatherConf;
+    FillConfig   metaBGConf;
+    FillConfig   metaBGConfInv;
+    FillConfig   volbarConf;
+    FillConfig   playlBGConf;
+    FillConfig   bufferbarConf;
+    WidgetConfig bootstrConf;
+    WidgetConfig bitrateConf;
+    WidgetConfig voltxtConf;
+    WidgetConfig batteryConf;
+    WidgetConfig iptxtConf;
+    WidgetConfig rssiConf;
+    WidgetConfig numConf;
+    WidgetConfig apNameConf;
+    WidgetConfig apName2Conf;
+    WidgetConfig apPassConf;
+    WidgetConfig apPass2Conf;
+    WidgetConfig clockConf;
+    WidgetConfig vuConf;
+    WidgetConfig bootWdtConf;
+    ProgressConfig bootPrgConf;
+    BitrateConfig fullbitrateConf;
+    VUBandsConfig bandsConf;
+    MoveConfig   clockMove;
+    MoveConfig   weatherMove;
+    MoveConfig   weatherMoveVU;
+    bool         boomboxStyle;
+};
+
+// Layout switching — extern pointer declarations, defined in display.cpp
+extern const ScrollConfig* metaConf_ptr;
+extern const ScrollConfig* title1Conf_ptr;
+extern const ScrollConfig* title2Conf_ptr;
+extern const ScrollConfig* playlistConf_ptr;
+extern const ScrollConfig* apTitleConf_ptr;
+extern const ScrollConfig* apSettConf_ptr;
+extern const ScrollConfig* weatherConf_ptr;
+extern const FillConfig*   metaBGConf_ptr;
+extern const FillConfig*   metaBGConfInv_ptr;
+extern const FillConfig*   volbarConf_ptr;
+extern const FillConfig*   playlBGConf_ptr;
+extern const FillConfig*   bufferbarConf_ptr;
+extern const WidgetConfig* bootstrConf_ptr;
+extern const WidgetConfig* bitrateConf_ptr;
+extern const WidgetConfig* voltxtConf_ptr;
+extern const WidgetConfig* batteryConf_ptr;
+extern const WidgetConfig* iptxtConf_ptr;
+extern const WidgetConfig* rssiConf_ptr;
+extern const WidgetConfig* numConf_ptr;
+extern const WidgetConfig* apNameConf_ptr;
+extern const WidgetConfig* apName2Conf_ptr;
+extern const WidgetConfig* apPassConf_ptr;
+extern const WidgetConfig* apPass2Conf_ptr;
+extern const WidgetConfig* clockConf_ptr;
+extern const WidgetConfig* vuConf_ptr;
+extern const WidgetConfig* bootWdtConf_ptr;
+extern const ProgressConfig* bootPrgConf_ptr;
+extern const BitrateConfig*  fullbitrateConf_ptr;
+extern const VUBandsConfig*   bandsConf_ptr;
+extern const MoveConfig*    clockMove_ptr;
+extern const MoveConfig*    weatherMove_ptr;
+extern const MoveConfig*    weatherMoveVU_ptr;
+extern const bool*          boomboxStyle_ptr;
+
+extern LayoutData activeLayout;
+extern uint8_t layoutCount;
+
 #endif

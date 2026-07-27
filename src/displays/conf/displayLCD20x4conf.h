@@ -8,12 +8,6 @@
 #define TFT_FRAMEWDT    0
 #define MAX_WIDTH       20
 #define PLMITEMS        4
-#define HIDE_IP
-#define HIDE_VOLBAR
-#define HIDE_BUFFERBAR
-#define HIDE_RSSI
-#define HIDE_VU
-#define HIDE_BATTERY
 #define META_MOVE
 #define BOOTLOGOTOP     0
 

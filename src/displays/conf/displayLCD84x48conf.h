@@ -7,12 +7,6 @@
 
 #define TFT_FRAMEWDT    0
 #define MAX_WIDTH       DSP_WIDTH
-#define HIDE_TITLE2
-#define HIDE_BUFFERBAR
-#define HIDE_IP
-#define HIDE_BATTERY
-#define HIDE_RSSI
-#define HIDE_VU
 #define BOOTLOGOTOP     0
 
 const char _layoutNames[][32] PROGMEM = {"Default"};

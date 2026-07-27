@@ -755,7 +755,7 @@ void Display::_setRSSI(int rssi) {
   _rssi->setText(rssiG);
 }
 
-#if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
+#if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
   void Display::_updateBattery() {
     if(_battery) {
       BatteryStatus bat = battery.getStatus();
@@ -921,7 +921,7 @@ void Display::_reinitWidgets() {
   if (_voltxt) _voltxt->init(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
   if (_volip) _volip->init(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);
   if (_rssi) _rssi->init(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
     if (_battery) _battery->init(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
   #endif
   _nums->init(*numConf_ptr, 10, false, config.theme.digit, config.theme.background);
@@ -991,7 +991,7 @@ void Display::_applyState() {
   #endif
   _reinitWidgets();
   _volume();
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
+  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
     if (_battery) _updateBattery();
   #endif
   if (_weather && config.store.showweather && network.weatherBuf) _weather->setText(network.weatherBuf);

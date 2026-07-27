@@ -9,7 +9,6 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define RSSI_DIGIT      true
 #define BOOTLOGOTOP     68
-#define HIDE_TITLE2
 #define BOOMBOX_STYLE
 
 const char _layoutNames[][32] PROGMEM = {"Default"};

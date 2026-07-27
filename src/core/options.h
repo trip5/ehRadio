@@ -294,22 +294,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 /* If using PRETEXT_ALLCAPS, why not do the same to your WebUI? */
 // #define WWW_CASETRANSFORM
 
-/* Other Transforms */
-// Frankly speaking, most of these go beyond regular display transforms.
-// They may hide the option in the WebUI completely.
-// It is not recommended to build without these options but here they are anyways.
-//#define HIDE_TITLE2
-//#define DSP_INVERT_TITLE
-//#define HIDE_VU
-//#define HIDE_VOLBAR
-//#define HIDE_BUFFERBAR
-//#define HIDE_VOL
-//#define HIDE_IP
-//#define HIDE_RSSI
-//#define HIDE_BATTERY
-//#define HIDE_WEATHER
-
-
 /* ============================== SPI BUSES AND PINS ============================== */
 
 /* To allow multiple devices to use the same/different SPI buses, we name them */

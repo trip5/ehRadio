@@ -479,12 +479,6 @@ void NetServer::chunkedHtmlPage(const String& contentType, AsyncWebServerRequest
 #else
   #define DSP_CAN_FLIPPED false
 #endif
-#if !defined(DUMMYDISPLAY)
-  #define SHOW_WEATHER  true
-#else
-  #define SHOW_WEATHER  false
-#endif
-
 const char *getFormat(BitrateFormat _format) {
   switch (_format) {
     case BF_MP3:  return "MP3";
@@ -549,7 +543,7 @@ void NetServer::processQueue() {
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
             if (DSP_MODEL == DSP_NOKIA5110 || DBGWUI)           act += F("\"group_nokia\",");
                                                                 act += F("\"group_locale\",");
-            if (SHOW_WEATHER || DBGWUI)                         act += F("\"group_weather\",");
+            if (weatherConf_ptr->buffsize > 0 || DBGWUI)        act += F("\"group_weather\",");
                                                                 act += F("\"group_controls\",");
             if (BTN_UP != 255 || BTN_DOWN != 255 || DBGWUI)     act += F("\"group_volbuttons\",");
             if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)

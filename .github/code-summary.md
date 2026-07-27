@@ -377,10 +377,9 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `DSP_INVERT_TITLE` compile-time macro eliminated.
 - Buffer bar terminology was aligned to actual behavior:
   - `_heapbar` -> `_bufferbar`
-  - `HIDE_HEAPBAR` -> `HIDE_BUFFERBAR`
   - `heapbarConf` -> `bufferbarConf`
 - Input-buffer bar values still come from `player.inBufferFilled()`; only visual normalization changed via `BUFFERBAR_VISUAL_FULL_PERCENT`.
-- Battery widget support now follows the same config-file contract: feasible display configs define `batteryConf` plus `batteryRangeLowFmt` / `batteryRangeMidFmt` / `batteryRangeHighFmt`, while tiny or LCD-only layouts use `HIDE_BATTERY` to keep `display.cpp` compile-safe.
+- Battery widget support is runtime-guarded: `_battery` null-check at every call site. Display configs that don't support battery leave `batteryConf` zeroed (height=0) — no compile-time guard needed.
 - Main responsibilities:
   - initialize rendering task and widgets
   - mode switching (`PLAYER`, `VOL`, `STATIONS`, `LOST`, `UPDATING`, screensaver)
@@ -720,10 +719,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Display driver headers now include conf files directly; custom fallback include blocks using `__has_include("conf/*_custom.h")` were removed.
 - `metaBGConf` / `metaBGConfInv` — runtime-switchable station-name background (full bar vs thin line on TFT; bar vs no-bar on OLED). Controlled by `config.store.inverttitle`.
 - OLED configs: `metaBGConf` may be `{ }` (normal mode no bar), `metaBGConfInv` has the bar (inverted mode). `importlayout.py` auto-swaps when importing into OLED targets.
-- Buffer bar layout/visibility symbols were renamed:
-  - `heapbarConf` -> `bufferbarConf`
-  - `HIDE_HEAPBAR` -> `HIDE_BUFFERBAR`
-- Battery widget layout now exists on the feasible non-LCD configs; unsupported small/LCD panels explicitly define `HIDE_BATTERY`.
+- All conf files must define every `WidgetConfig` / `FillConfig` / `ScrollConfig` / `ProgressConfig` / `VUBandsConfig` / `MoveConfig` field that `display.cpp` references — nothing is optional at link time. Disabling a feature is done by zeroing the relevant struct (e.g. `height=0`, `buffsize=0`, `dimension=0`); `display.cpp` checks those sentinel values at runtime and skips the widget. This eliminates the old `HIDE_*` compile-time macro system entirely.
 
 ## Display tools
 - `src/displays/tools/utf8To.*`

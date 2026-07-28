@@ -55,9 +55,8 @@
     #endif
     #include "conf/displayLCD128x64conf.h"
   #else
-    // Default scroll macros for OLED [120px/s]
     #ifndef SCROLLTIME
-      #define SCROLLTIME 15
+      #define SCROLLTIME 20
     #endif
     #if DSP_WIDTH==256 && DSP_HEIGHT==64
       #include "conf/displayOLED256x64conf.h"
@@ -73,15 +72,17 @@
   #endif
 #else
   /* ----- TFT / color displays (default) ----- */
-  // Default scroll macros for TFT [120px/s]
   #ifndef SCROLLDELAY
     #define SCROLLDELAY 5000
   #endif
   #ifndef SCROLLTIME
-    #define SCROLLTIME 15
+    #define SCROLLTIME 20
   #endif
   #if DSP_WIDTH==480 && DSP_HEIGHT==320
     #include "conf/displayTFT480x320conf.h"
+  #elif DSP_WIDTH==428 && DSP_HEIGHT==142
+    #include "conf/displayTFT428x142conf.h"
+    #warning "428x142 layouts are completely untested!"
   #elif DSP_WIDTH==320 && DSP_HEIGHT==240
     #include "conf/displayTFT320x240conf.h"
   #elif DSP_WIDTH==284 && DSP_HEIGHT==76
@@ -101,7 +102,7 @@
   #elif DSP_WIDTH==128 && DSP_HEIGHT==128
     #include "conf/displayTFT128x128conf.h"
   #else
-    #error "Unsupported TFT resolution! Must be 480x320, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128."
+    #error "Unsupported TFT resolution! Must be 480x320, 428x142, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128."
   #endif
 #endif
 

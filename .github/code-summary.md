@@ -881,14 +881,6 @@ Implementation:
 
 This section calls out hardware implementations that diverge from the common code path and are more likely to regress.
 
-- Separate serial protocol parser and command emitter (`^...$` framed messages).
-- Uses dedicated queue and task loop; does not behave like generic TFT/OLED widget drivers.
-- Includes an explicit maintainer warning in file header about potential breakage.
-- Risk notes:
-  - page/component names are hardcoded strings, so HMI/editor changes can silently break firmware integration.
-  - parser uses fixed-size buffers and repeated `sscanf` patterns; malformed serial payloads can cause fragile behavior.
-  - parity drift risk vs WebUI commandhandler (settings logic duplicated in another channel).
-
 ## Audio backend variants (`src/core/player.cpp` + `src/libraries/*`)
 - Two major audio stacks are used depending on macros/hardware:
   - I2S audio library path

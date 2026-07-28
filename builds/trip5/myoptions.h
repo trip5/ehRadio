@@ -367,6 +367,7 @@
 
 //#define PLAYLIST_MODE_PAGED false
 
-//#define BATTERY_PIN     2
+//#define BATTERY_PIN     2 //ILI
+#define BATTERY_PIN     6 //3 BTNS
 
 #endif // myoptions_h

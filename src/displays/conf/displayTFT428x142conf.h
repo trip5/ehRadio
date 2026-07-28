@@ -9,11 +9,12 @@
 #define DSP_HEIGHT      142
 #define TFT_FRAMEWDT    4
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
-#define HIDE_IP_ONLY_MAIN_SCREEN// Ukrywa adres IP tylko na glownym ekranie
-#define HIDE_VOL_FOOTER // Ukrywa stopke na ekranie glosnosci
 #define bootLogoTop     28
 
 // Trip5 Note: This conf file was imported but remains un-implemented and un-tested...
+
+#define HIDE_IP_ONLY_MAIN_SCREEN// Ukrywa adres IP tylko na glownym ekranie
+#define HIDE_VOL_FOOTER // Ukrywa stopke na ekranie glosnosci
 
 // ******************** CHECK ALL #define LINES CAREFULLY! ********************
 const char _layoutNames[][32] PROGMEM = {"krzxsiek", "krzxsiek (BoomBox)", "krzxsiek-kopia"};

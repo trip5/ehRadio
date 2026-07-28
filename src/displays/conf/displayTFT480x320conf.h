@@ -109,9 +109,9 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "WiFi %d";
-const char iptxtFmt[]             PROGMEM = "\010 %s";
-const char voltxtFmt[]            PROGMEM = "\023\025%d";
-const char batteryRangeFmt[][8]   PROGMEM = { "\013 %d%%", "\014 %d%%", "\015 %d%%" };
+const char iptxtFmt[]             PROGMEM = "\037 %s";
+const char voltxtFmt[]            PROGMEM = "%d";
+const char batterytxtFmt[]        PROGMEM = "%d%%";
 const char bitrateFmt[]           PROGMEM = "%d kBs";
 
 #endif

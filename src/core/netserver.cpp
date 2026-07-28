@@ -668,17 +668,12 @@ void NetServer::processQueue() {
       case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
         BatteryStatus bat = battery.getStatus();
-        if (!bat.valid && !battery.isInitialized()) {
-          /* Still send battref even if battery not detected so UI shows calibration value */
+        if (!bat.present && !battery.isInitialized()) {
           uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
         } else {
-          /* formatted with labels: "volt: 4049mV, percentage: 92%, status: Idle" */
-          const char *statusstr = "Idle";
-          if (bat.charging) statusstr = "Charging";
-          else if (bat.discharging_inferred) statusstr = "Discharging";
-          char valbuf[96];
-          snprintf(valbuf, sizeof(valbuf), "volt: %dmV, percentage: %d%%, status: %s", bat.voltage_mv, bat.percentage, statusstr);
+          char valbuf[64];
+          snprintf(valbuf, sizeof(valbuf), "volt: %dmV, percentage: %d%%", bat.voltage_mv, bat.percentage);
           uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
         }

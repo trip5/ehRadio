@@ -92,10 +92,9 @@ class Display {
     void _showDialog(const char *title);
     void _setReturnTicker(uint8_t time_s);
     void _swichMode(displayMode_e newmode);
-    #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-      void _updateBattery();
-    #endif
-};
+    void _updateBattery();
+    void _updateVolume();
+  };
 
 #else
 

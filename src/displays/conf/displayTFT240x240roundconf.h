@@ -7,7 +7,9 @@
 
 #define TFT_FRAMEWDT    8
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
-#define RSSI_DIGIT      true
+#ifndef RSSI_DIGIT
+  #define RSSI_DIGIT      true
+#endif
 #define BOOTLOGOTOP     68
 #define BOOMBOX_STYLE
 
@@ -62,9 +64,9 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "WiFi %d";
-const char iptxtFmt[]             PROGMEM = "\010 %s";
-const char voltxtFmt[]            PROGMEM = "\023\025%d";
-const char batteryRangeFmt[][8]   PROGMEM = { "\013 %d%%", "\014 %d%%", "\015 %d%%" };
+const char iptxtFmt[]             PROGMEM = "\037 %s";
+const char voltxtFmt[]            PROGMEM = "%d";
+const char batterytxtFmt[]        PROGMEM = "%d%%";
 const char bitrateFmt[]           PROGMEM = "%d KBS";
 
 #endif

@@ -41,7 +41,7 @@ const LayoutData _layouts[] PROGMEM = {
         .bootstrConf         = { 0, 64-8, 1, WA_CENTER },
         .bitrateConf         = { 0, 19, 1, WA_RIGHT },
         .voltxtConf          = { }, // unused
-        .batteryConf         = { DSP_WIDTH-6*3, DSP_HEIGHT-9, 1, WA_LEFT },                                                   // <-- NEEDS EDITING!
+        .batteryConf         = { 0, 44, 1, WA_LEFT },                                                   // <-- NEEDS EDITING!
         .iptxtConf           = { TFT_FRAMEWDT, 64-9, 1, WA_LEFT },
         .rssiConf            = { 0, 64-9, 1, WA_RIGHT },
         .numConf             = { 0, 28+FONTSHIFT, 0, WA_CENTER },
@@ -67,9 +67,9 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "%d";
-const char iptxtFmt[]             PROGMEM = "\010 %s";
+const char iptxtFmt[]             PROGMEM = "\037 %s";
 const char voltxtFmt[]            PROGMEM = "";
-const char batteryRangeFmt[][8]   PROGMEM = { "\013 %d%%", "\014 %d%%", "\015 %d%%" };
+const char batterytxtFmt[]        PROGMEM = "";
 const char bitrateFmt[]           PROGMEM = "%d";
 
 #endif

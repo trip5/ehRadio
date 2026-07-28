@@ -742,19 +742,19 @@ bool MyNetwork::buildWeatherString() {
     if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     
     if (config.store.weatherfeels && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.1f%s", l10n(L10N_LBL_W_FEELSLIKE), feels_display, tempUnit);
+      written = snprintf(p, remaining, " ~ %s %.1f%s", l10n(L10N_LBL_W_FEELSLIKE), feels_display, tempUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherpressure && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.0f %s", l10n(L10N_LBL_W_PRESSURE), press_display, pressUnit);
+      written = snprintf(p, remaining, " ~ %s %.0f %s", l10n(L10N_LBL_W_PRESSURE), press_display, pressUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherhumidity && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %d%%", l10n(L10N_LBL_W_HUMIDITY), WeatherCache::humidity);
+      written = snprintf(p, remaining, " ~ %s %d%%", l10n(L10N_LBL_W_HUMIDITY), WeatherCache::humidity);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherwind && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.1f %s [%s]", l10n(L10N_LBL_W_WIND), wind_display, windUnit, l10n_wind(wind_dir_idx));
+      written = snprintf(p, remaining, " ~ %s %.1f %s [%s]", l10n(L10N_LBL_W_WIND), wind_display, windUnit, l10n_wind(wind_dir_idx));
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= (size_t)written; }
     }
     

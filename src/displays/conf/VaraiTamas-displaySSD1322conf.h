@@ -68,7 +68,7 @@ const WidgetConfig vuConf         PROGMEM = { 8, 40, 1, WA_CENTER };
 const char         numtxtFmt[]    PROGMEM = "%d";
 const char           rssiFmt[]    PROGMEM = "WiFi %d";
 const char          iptxtFmt[]    PROGMEM = "%s";//\010 znaczek ip
-const char         voltxtFmt[]    PROGMEM = "\023\025%d";
+const char         voltxtFmt[]    PROGMEM = "%d";
 const char        bitrateFmt[]    PROGMEM = "%dkBs";
 
 /* MOVES  */                             /* { left, top, width } */

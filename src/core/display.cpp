@@ -19,9 +19,9 @@
 #include "../displays/themes.h"
 #include "../displays/widgets/pages.h"
 #include "../displays/widgets/widgets.h"
-#if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-  #include "battery.h"
-#endif
+#include "battery.h"
+
+extern const char batterytxtFmt[] PROGMEM;
 
 #ifndef IP_WEATHER_SHARED
   #define IP_WEATHER_SHARED false
@@ -158,10 +158,10 @@ void Display::_bootScreen() {
   _bootstring = (TextWidget*) &_boot->addWidget(new TextWidget(*bootstrConf_ptr, 50, true, BOOT_TXT_COLOR, 0));
   const char* icon;
   if ((network.offlineMode || config.store.SDoffline))
-                                         icon = "\016\017";  // SD_A + SD_B
+                                         icon = "\030\031";  // SD_A + SD_B
   else if (!config.store.lastBootGood)   icon = "\034";      // PAUSE (safe mode)
-  else if (config.store.smartstart)      icon = "\020";      // PLAY (smart start)
-  else                                   icon = "\025";      // VOL_50 (default)
+  else if (config.store.smartstart)      icon = "\035";      // PLAY (smart start)
+  else                                   icon = "\026";      // VOL_75 (default)
   char buf[64];
   snprintf(buf, sizeof(buf), "\023 %s %s", RADIOVERSION, icon);
   _bootstring->setText(buf);
@@ -202,13 +202,11 @@ void Display::_buildPager() {
   if (rssiConf_ptr->textsize > 0) {
     _rssi = new TextWidget(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
   }
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-    if (batteryConf_ptr->textsize > 0) {
-      _battery = new TextWidget(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
-    }
-  #endif
+  if (batteryConf_ptr->textsize > 0) {
+    _battery = new TextWidget(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
+  }
   if (weatherConf_ptr->buffsize > 0) {
-    _weather = new ScrollWidget("\007", *weatherConf_ptr, config.theme.weather, config.theme.background);
+    _weather = new ScrollWidget("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
   }
 
   if (_volbar)   _footer->addWidget(_volbar);
@@ -355,7 +353,7 @@ void Display::_start() {
   if (iptxtConf_ptr->textsize > 0) {
     if (_volip) {
       if (network.status == SDOFFLINE) {
-        _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
+        _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
       } else {
         #if IP_WEATHER_SHARED
           if (config.store.showweather) _volip->setText("");
@@ -366,11 +364,9 @@ void Display::_start() {
       }
     }
   }
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-    if (batteryConf_ptr->textsize > 0) {
-      if(_battery) _updateBattery();
-    }
-  #endif
+  if (batteryConf_ptr->textsize > 0) {
+    if(_battery) _updateBattery();
+  }
   _pager->setPage(pages[PG_PLAYER]);
   _volume();
   _station();
@@ -417,7 +413,7 @@ void Display::_swichMode(displayMode_e newmode) {
     _pager->setPage(pages[PG_PLAYER]);
     if (_volip) {
         if (network.status == SDOFFLINE) {
-          _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
+          _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
         } else {
           #if IP_WEATHER_SHARED // weather and IP share the same bottom row; hide IP when weather is active
             if (config.store.showweather) _volip->setText("");
@@ -463,7 +459,7 @@ void Display::_swichMode(displayMode_e newmode) {
       _showDialog(l10n(L10N_LBL_VOLUME));
     }
     if (_volip) {
-        if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
+        if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
         else _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
       }
     _nums->setText(config.store.volume, numtxtFmt);
@@ -692,26 +688,22 @@ void Display::loop() {
             _bufferbar->setValue(normalizeBufferbarValue(player.isRunning() ? player.inBufferFilled() : 0, _bufferbarMax));
           }
           break;
-        #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-          case DSPBATTERY: {
-            if(_battery) _updateBattery();
-            break;
-          }
-        #endif
+        case DSPBATTERY: {
+          if(_battery) _updateBattery();
+          break;
+        }
         case PSTART: _layoutChange(true);   break;
         case PSTOP:  _layoutChange(false);  break;
         case DSP_START: _start();  break;
         case NEWIP: {
           if (_volip) {
               if (network.status == SDOFFLINE) {
-                _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\016\017%s");
+                _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
               } else {
                 #if IP_WEATHER_SHARED // skip IP repaint in PLAYER when weather owns the shared row
                   if (!(_mode == PLAYER && config.store.showweather))
                 #endif
                 _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
-                #if IP_WEATHER_SHARED
-                #endif
               }
             }
           break;
@@ -755,71 +747,50 @@ void Display::_setRSSI(int rssi) {
   _rssi->setText(rssiG);
 }
 
-#if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-  void Display::_updateBattery() {
-    if(_battery) {
-      BatteryStatus bat = battery.getStatus();
-      if(!bat.valid && battery.isInitialized()) {
-        battery.recalcNow();
-        bat = battery.getStatus();
-      }
-      if(battery.isInitialized() || bat.valid) {
-        const char *baseFmt;
-        if(bat.percentage < 25) baseFmt = batteryRangeFmt[0];
-        else if(bat.percentage < 75) baseFmt = batteryRangeFmt[1];
-        else baseFmt = batteryRangeFmt[2];
-        char buf[48];
-        snprintf(buf, sizeof(buf), baseFmt, bat.percentage);
+void Display::_updateBattery() {
+  if(!_battery) return;
 
-        // Insert warning marker before numeric percentage (so it appears after the icon)
-        // Only show single exclamation on LOW battery; critical state triggers deep-sleep so
-        // an explicit visual critical marker is unnecessary.
-        if(bat.low_battery) {
-          const char *mark = "!";
-          char *p = buf;
-          while(*p && !isdigit((unsigned char)*p)) p++; // find start of digits
-          if(*p) {
-            size_t len = strlen(buf);
-            size_t mlen = strlen(mark);
-            if(len + mlen < sizeof(buf)) {
-              memmove(p + mlen, p, len - (p - buf) + 1); // include null
-              memcpy(p, mark, mlen);
-            } else {
-              /* append safely to avoid overflow */
-              strncat(buf, mark, sizeof(buf) - strlen(buf) - 1);
-            }
-          } else {
-            /* append safely to avoid overflow */
-            strncat(buf, mark, sizeof(buf) - strlen(buf) - 1);
-          }
-        }
-
-        /* Add charging/discharging icon prefix before the battery icon if available.
-           Icons are single-byte glyphs in `glcdfont.c`:
-             - decimal 24 (octal \030) => charging icon
-             - decimal 25 (octal \031) => discharging icon
-           Use inferred flags when a charge pin isn't present. */
-        const char *chg_prefix = NULL;
-        if (bat.charging || bat.charging_inferred) chg_prefix = "\030"; /* dec24 */
-        else if (bat.discharging_inferred) chg_prefix = "\031"; /* dec25 */
-        if (chg_prefix) {
-          /* Insert prefix glyph then a 2-pixel spacer control char (0x1E) before the battery text. */
-          size_t len = strlen(buf);
-          size_t plen = strlen(chg_prefix);
-          if (len + plen + 1 < sizeof(buf)) {
-            memmove(buf + plen + 1, buf, len + 1); /* include null */
-            memcpy(buf, chg_prefix, plen);
-            buf[plen] = '\x1E'; /* 2-pixel spacer */
-          }
-        }
-
-        _battery->setText(buf);
-      } else {
-        _battery->setText("");
-      }
+  #ifdef BATTERY_FORCE_DISPLAY // force it to display (fake it)
+    int pct = BATTERY_FORCE_DISPLAY;
+    if (pct > 100) pct = 100;
+  #else
+    BatteryStatus bat = battery.getStatus();
+    if(!bat.present && battery.isInitialized()) {
+      battery.recalcNow();
+      bat = battery.getStatus();
     }
+    if(!battery.isInitialized() || !bat.present) {
+      _battery->setText("");
+      return;
+    }
+    int pct = bat.percentage;
+  #endif
+
+  // 2-glyph 4-segment battery, RSSI-style
+  //   BATTERY_00=\013, BATTERY_10=\015, BATTERY_11=\016
+  //   BATTERY__00=\014, BATTERY__10=\017, BATTERY__11=\020
+  static const char leftGlyphs[3]  = { '\013', '\015', '\016' }; // 0,1,2 segs
+  static const char rightGlyphs[3] = { '\014', '\017', '\020' }; // 0,1,2 segs
+
+  int segs = (pct + 12) / 25;  // 0-4  (0-12,13-37,38-62,63-87,88-100)
+  if (segs > 4) segs = 4;
+  int left  = (segs > 2) ? 2 : segs;
+  int right = (segs > 2) ? (segs - 2) : 0;
+
+  char buf[16];
+  buf[0] = leftGlyphs[left];
+  buf[1] = rightGlyphs[right];
+  buf[2] = ' ';
+  buf[3] = '\0';
+
+  if (batterytxtFmt[0] != '\0') {
+    char numbuf[8];
+    snprintf(numbuf, sizeof(numbuf), batterytxtFmt, pct);
+    strlcat(buf, numbuf, sizeof(buf));
   }
-#endif
+
+  _battery->setText(buf);
+}
 
 void Display::_station() {
   _meta->setAlign(metaConf_ptr->widget.align);
@@ -880,9 +851,40 @@ void Display::_time(bool redraw) {
   if (redraw) _clock->forceDraw(); else _clock->draw();
 }
 
+void Display::_updateVolume() {
+  if(!_voltxt) return;
+
+  uint8_t vol = config.store.volume;
+
+  // 2-glyph: speaker + volume waves
+  // \023 = speaker (always)
+  // Volume 0 → space (no waves). >0 → 1-4 waves via \024-\027.
+  static const char waveGlyphs[4] = { '\024', '\025', '\026', '\027' };
+
+  char buf[16];
+  buf[0] = '\023';             // speaker
+  if (vol == 0) {
+    buf[1] = ' ';              // silence: no waves
+  } else {
+    int level = (vol * 4) / (VOLUME_SCALE + 1);  // 0-3
+    if (level > 3) level = 3;
+    buf[1] = waveGlyphs[level];
+  }
+  buf[2] = '\x1E';
+  buf[3] = '\0';
+
+  if (voltxtFmt[0] != '\0') {
+    char numbuf[8];
+    snprintf(numbuf, sizeof(numbuf), voltxtFmt, vol);
+    strlcat(buf, numbuf, sizeof(buf));
+  }
+
+  _voltxt->setText(buf);
+}
+
 void Display::_volume() {
   if (_volbar) _volbar->setValue(config.store.volume);
-  if (_voltxt) _voltxt->setText(config.store.volume, voltxtFmt);
+  _updateVolume();
   if (_mode==VOL) {
     _setReturnTicker(3);
     _nums->setText(config.store.volume, numtxtFmt);
@@ -921,11 +923,9 @@ void Display::_reinitWidgets() {
   if (_voltxt) _voltxt->init(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
   if (_volip) _volip->init(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);
   if (_rssi) _rssi->init(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-    if (_battery) _battery->init(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
-  #endif
+  if (_battery) _battery->init(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
   _nums->init(*numConf_ptr, 10, false, config.theme.digit, config.theme.background);
-  if (_weather) _weather->init("\007", *weatherConf_ptr, config.theme.weather, config.theme.background);
+  if (_weather) _weather->init("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
   if (_fullbitrate) _fullbitrate->init(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
   if (_bitrate) _bitrate->init(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
   // Background fills
@@ -991,9 +991,7 @@ void Display::_applyState() {
   #endif
   _reinitWidgets();
   _volume();
-  #if defined(BATTERY_PIN) && (BATTERY_PIN!=255)
-    if (_battery) _updateBattery();
-  #endif
+  if (_battery) _updateBattery();
   if (_weather && config.store.showweather && network.weatherBuf) _weather->setText(network.weatherBuf);
   _station();
   _title();

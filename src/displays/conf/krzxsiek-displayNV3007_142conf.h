@@ -69,7 +69,7 @@ const VUBandsConfig bandsConf     PROGMEM = { 200, 6, 2, 2, 30, 4 }; /* { oneban
 const char         numtxtFmt[]    PROGMEM = "%d";
 const char           rssiFmt[]    PROGMEM = "WiFi %ddBm";
 const char          iptxtFmt[]    PROGMEM = "\010 %s";
-const char         voltxtFmt[]    PROGMEM = "\023\025%d%%";
+const char         voltxtFmt[]    PROGMEM = "%d%%";
 const char        bitrateFmt[]    PROGMEM = "%d kBs";
 
 /* MOVES  */                             /* { left, top, width } */

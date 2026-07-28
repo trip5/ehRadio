@@ -118,7 +118,6 @@ void loop() {
   
   rgbled.loop();
   battery.loop();
-  battery.applyPowerPolicy();
 
   controls.loop();
   if (network.status == CONNECTED || network.status == SDOFFLINE) {

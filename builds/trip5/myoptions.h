@@ -367,7 +367,10 @@
 
 //#define PLAYLIST_MODE_PAGED false
 
-//#define BATTERY_PIN     2 //ILI
-#define BATTERY_PIN     6 //3 BTNS
+#if defined(SH1106_VS1053_3BUTTONS)
+  #define BATTERY_FORCE_DISPLAY 0 // 0, 25, 50, 75, 100
+#elif defined(ILI9488_VS1053_1BUTTON)
+  #define BATTERY_FORCE_DISPLAY 50 // 0, 25, 50, 75, 100
+#endif
 
 #endif // myoptions_h

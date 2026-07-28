@@ -20,6 +20,7 @@
   config.theme.rssi       = TFT_FG;
   config.theme.ip         = TFT_FG;
   config.theme.vol        = TFT_FG;
+  config.theme.battery    = TFT_FG;
   config.theme.bitrate    = TFT_FG;
   config.theme.digit      = TFT_FG;
   config.theme.buffer     = TFT_FG;

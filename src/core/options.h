@@ -1239,9 +1239,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #ifndef BATTERY_PIN
   #define BATTERY_PIN 255 // GPIO pin for battery voltage ADC reading
 #endif
-#ifndef BATTERY_CHARGE_PIN
-  #define BATTERY_CHARGE_PIN 255 // GPIO pin for charging status (TP4054 CHRG pin, active LOW)
-#endif
 #ifndef BATTERY_DIVIDER_RATIO
   #define BATTERY_DIVIDER_RATIO 2.0 // Voltage divider ratio (battery voltage / ADC voltage)
 #endif
@@ -1253,28 +1250,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #endif
 #ifndef BATTERY_SAMPLES
   #define BATTERY_SAMPLES 10 // Number of ADC samples to average
-#endif
-#ifndef BATTERY_DIM_BRIGHTNESS
-  #define BATTERY_DIM_BRIGHTNESS 20 // Battery dim fixed brightness when LOW battery (percentage 0-100)
-#endif
-#if (BATTERY_DIM_BRIGHTNESS < 0) || (BATTERY_DIM_BRIGHTNESS > 100)
-  #error define error in myoptions.h: BATTERY_DIM_BRIGHTNESS must be a percentage between 0 and 100
-#endif
-#ifndef BATTERY_RECOVER_HYSTERESIS_PCT
-  #define BATTERY_RECOVER_HYSTERESIS_PCT 5 // Hysteresis for recovering from low-battery dimming (percent)
-#endif
-/* Inference tuning defaults: control sensitivity for charging/discharging detection. */
-#ifndef BATTERY_CHARGE_INFER_HOLD_SAMPLES
-  #define BATTERY_CHARGE_INFER_HOLD_SAMPLES 3 // number of measurements (samples) to hold (e.g., 3 readings)
-#endif
-#ifndef BATTERY_IMMEDIATE_PERCENT_THRESHOLD
-  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 3 // percent; immediate single-reading threshold
-#endif
-#ifndef BATTERY_CANDIDATE_PERCENT_DELTA
-  #define BATTERY_CANDIDATE_PERCENT_DELTA 1 // percent; minimal delta to start a candidate
-#endif
-#ifndef BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD
-  #define BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD 0 // percent over hold window required to confirm
 #endif
 /* Battery presence detection (mV) - default single-cell LiPo safe range. */
 #ifndef BATTERY_PRESENT_MIN_MV
@@ -1289,24 +1264,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #endif
 #ifndef BATTERY_CURVE_PCT
   #define BATTERY_CURVE_PCT 100, 95, 90, 80, 70, 55, 30, 10, 0
-#endif
-#ifndef BATTERY_LOW_THRESHOLD
-  #define BATTERY_LOW_THRESHOLD 25 // Low battery warning threshold (percentage, 0-100)
-#endif
-#if (BATTERY_LOW_THRESHOLD < 0) || (BATTERY_LOW_THRESHOLD > 100)
-  #error define error in myoptions.h: BATTERY_LOW_THRESHOLD must be a percentage between 0 and 100
-#endif
-#ifndef BATTERY_CRITICAL_THRESHOLD
-  #define BATTERY_CRITICAL_THRESHOLD 5 // Critical battery threshold (percentage, 0-100)
-#endif
-#if BATTERY_CRITICAL_THRESHOLD < 0 || BATTERY_CRITICAL_THRESHOLD > 100
-  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be a percentage between 0 and 100
-#endif
-#if BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD
-  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be less than BATTERY_LOW_THRESHOLD
-#endif
-#ifdef BATTERY_DEBUG
- // if defined enables full information about battery in serial log
 #endif
 
 

@@ -18,7 +18,7 @@ const char _layoutNames[][64] PROGMEM = {
 /* LAYOUT DEFINITIONS */
 
 const LayoutData _layouts[] PROGMEM = {
-    {   // [0] Default
+    {   // Default
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ 0, 0, 1, WA_LEFT }, 140, true, MAX_WIDTH-6, SCROLLDELAY, 2, SCROLLTIME },
         .title1Conf          = {{ 0, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-4, SCROLLDELAY, 2, SCROLLTIME },

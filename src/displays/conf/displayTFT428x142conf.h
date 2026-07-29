@@ -28,7 +28,7 @@ const char _layoutNames[][64] PROGMEM = {
 /* LAYOUT DEFINITIONS */
 
 const LayoutData _layouts[] PROGMEM = {
-    {   // [0] krzxsiek
+    {   // krzxsiek
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, 5000, 5, 30 },
         .title1Conf          = {{ TFT_FRAMEWDT, 43, 2, WA_LEFT }, 140, true, MAX_WIDTH-165, 5000, 4, 30 },
@@ -71,7 +71,7 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 10, DSP_HEIGHT-50, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, DSP_HEIGHT-50, MAX_WIDTH },
     },
-    {   // [1] krzxsiek (BoomBox)
+    {   // krzxsiek (BoomBox)
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, 5000, 5, 30 },
         .title1Conf          = {{ TFT_FRAMEWDT, 43, 2, WA_LEFT }, 140, true, MAX_WIDTH-165, 5000, 4, 30 },
@@ -116,7 +116,7 @@ const LayoutData _layouts[] PROGMEM = {
         /* BOOMBOX STYLE: middle-out VU */
         .boomboxStyle        = true,
     },
-    {   // [2] krzxsiek-kopia
+    {   // krzxsiek-kopia
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ TFT_FRAMEWDT+1, TFT_FRAMEWDT+2, 2, WA_LEFT }, 140, true, MAX_WIDTH-2, 5000, 2, 25 },
         .title1Conf          = {{ TFT_FRAMEWDT+1, 19+14, 2, WA_LEFT }, 135, true, DSP_WIDTH/2+38, 5000, 2, 25 },

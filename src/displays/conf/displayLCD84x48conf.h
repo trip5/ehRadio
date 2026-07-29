@@ -16,7 +16,7 @@ const char _layoutNames[][64] PROGMEM = {
 /* LAYOUT DEFINITIONS */
 
 const LayoutData _layouts[] PROGMEM = {
-    {   // [0] Default
+    {   // Default
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 1, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 6, SCROLLTIME },
         .title1Conf          = {{ TFT_FRAMEWDT, 8, 1, WA_LEFT }, 140, true, MAX_WIDTH-24, SCROLLDELAY, 6, SCROLLTIME },

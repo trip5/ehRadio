@@ -11,6 +11,20 @@
 #define META_MOVE
 #define BOOTLOGOTOP     0
 
+const BootData _bootConfig PROGMEM = {
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .apTitleConf         = { }, // unused
+        .apSettConf          = { }, // unused
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bootstrConf         = { 0, 1, 1, WA_CENTER },
+        .apNameConf          = { }, // unused
+        .apName2Conf         = { }, // unused
+        .apPassConf          = { }, // unused
+        .apPass2Conf         = { }, // unused
+        .bootWdtConf         = { 0, 2, 1, WA_CENTER },
+        .bootPrgConf         = { 250, 10, 4 },
+};
+
 const char _layoutNames[][64] PROGMEM = {
     "Default",
 };
@@ -24,8 +38,6 @@ const LayoutData _layouts[] PROGMEM = {
         .title1Conf          = {{ 0, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-4, SCROLLDELAY, 2, SCROLLTIME },
         .title2Conf          = {{ 0, 2, 1, WA_LEFT }, 140, true, MAX_WIDTH,   SCROLLDELAY, 2, SCROLLTIME },
         .playlistConf        = {{ 1, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-1, SCROLLDELAY, 2, SCROLLTIME },
-        .apTitleConf         = { }, // unused
-        .apSettConf          = { }, // unused
         .weatherConf         = {{ 0, 3, 1, WA_LEFT }, 140, false, MAX_WIDTH-4, SCROLLDELAY, 2, SCROLLTIME },
         /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
         .metaBGConf          = { }, // unused
@@ -34,21 +46,14 @@ const LayoutData _layouts[] PROGMEM = {
         .playlBGConf         = { }, // unused
         .bufferbarConf       = { }, // unused
         /* WIDGETS             { left, top, fontsize, align } */
-        .bootstrConf         = { 0, 1, 1, WA_CENTER },
         .bitrateConf         = { 0, 1, 1, WA_RIGHT },
         .voltxtConf          = { 0, 3, 1, WA_RIGHT },
         .batteryConf         = { }, // unused
         .iptxtConf           = { }, // unused
         .rssiConf            = { }, // unused
         .numConf             = { 0, 2, 1, WA_CENTER },
-        .apNameConf          = { }, // unused
-        .apName2Conf         = { }, // unused
-        .apPassConf          = { }, // unused
-        .apPass2Conf         = { }, // unused
         .clockConf           = { 0, 0, 1, WA_RIGHT },
         .vuConf              = { }, // unused
-        .bootWdtConf         = { 0, 2, 1, WA_CENTER },
-        .bootPrgConf         = { 250, 10, 4 },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = { }, // unused
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */

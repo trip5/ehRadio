@@ -121,7 +121,6 @@ extern const MoveConfig*    weatherMove_ptr;
 extern const MoveConfig*    weatherMoveVU_ptr;
 extern const bool*          boomboxStyle_ptr;
 
-extern const BootData _bootConfig;
 extern LayoutData activeLayout;
 extern uint8_t layoutCount;
 

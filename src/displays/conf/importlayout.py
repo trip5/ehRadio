@@ -302,6 +302,9 @@ def _normalize(val):
 
 def emit_layout_entry(name, configs, layout_fields, index, boombox_style=False, hidden_fields=None):
     if hidden_fields is None: hidden_fields = set()
+    # Filter out boot fields — they're extracted separately into BootData block
+    boot_names = set(f for f, _ in BOOT_FIELDS)
+    configs = [(n, v) for n, v in configs if n not in boot_names]
     lines = [f'    {{   // {name}']
     seen_sections = set()
     config_dict = {c[0]: c[1] for c in configs}
@@ -404,13 +407,32 @@ def create_target_file(out_path, data, name, dry_run):
     out.append('')
     for d in defines: out.append(d.rstrip())
     out.append('')
+    out.append('// ******************** CHECK ALL #define LINES CAREFULLY! ********************')
+    out.append('')
+
+    # --- BootData block ---
+    config_dict = {c[0]: c[1] for c in data['configs_normal']}
+    boot_lines = ['const BootData _bootConfig PROGMEM = {']
+    boot_section_done = set()
+    for bf, btype in BOOT_FIELDS:
+        if btype == 'ScrollConfig' and 'SCROLLS' not in boot_section_done:
+            boot_lines.append('        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */')
+            boot_section_done.add('SCROLLS')
+        elif btype in ('WidgetConfig', 'ProgressConfig') and 'WIDGETS' not in boot_section_done:
+            boot_lines.append('        /* WIDGETS             { left, top, fontsize, align } */')
+            boot_section_done.add('WIDGETS')
+        if bf in config_dict:
+            boot_lines.append(f'        .{bf:19s} = {_normalize(config_dict[bf])},')
+        else:
+            boot_lines.append(f'        .{bf:19s} = {{ }},')
+    boot_lines.append('};')
+    out.append('\n'.join(boot_lines))
+    out.append('')
 
     if has_boombox:
         names = [f'"{_trunc_name(name)}"', f'"{_trunc_name(f"{name} (BoomBox)")}"']
     else:
         names = [f'"{_trunc_name(name)}"']
-    out.append('// ******************** CHECK ALL #define LINES CAREFULLY! ********************')
-    out.append('')
     indented = '\n'.join(f'    {n},' for n in names)
     out.append(f'const char _layoutNames[][64] PROGMEM = {{\n{indented}\n}};')
     out.append('')

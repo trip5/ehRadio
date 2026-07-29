@@ -247,15 +247,15 @@ void Display::_buildPager() {
 
     // compute bar width once
     {
-      uint8_t ts = apPassConf_ptr->textsize > 0 ? apPassConf_ptr->textsize : 1;
-      uint16_t widgetPx = dsp.width() - apPassConf_ptr->left;
+      uint8_t ts = _bootConfig.apPassConf.textsize > 0 ? _bootConfig.apPassConf.textsize : 1;
+      uint16_t widgetPx = dsp.width() - _bootConfig.apPassConf.left;
       int chars = (int)(widgetPx / (CHARWIDTH * ts));
       _updBarWidth = (chars < 2) ? 2 : (chars > 64) ? 64 : chars;
     }
 
     // place progress widget under the label maintaining original spacing
     WidgetConfig valConf = _bootConfig.apPassConf;
-    int16_t origGap = apPassConf_ptr->top - apNameConf_ptr->top;
+    int16_t origGap = _bootConfig.apPassConf.top - _bootConfig.apNameConf.top;
     if (origGap < 0) origGap = updConf.textsize * CHARHEIGHT + 2; // fallback
     valConf.top = updConf.top + origGap;
     _updValue = new TextWidget(valConf, (uint16_t)(_updBarWidth + 2), false,

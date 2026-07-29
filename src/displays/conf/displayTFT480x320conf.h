@@ -20,7 +20,6 @@ const BootData _bootConfig PROGMEM = {
         .apSettConf          = {{ TFT_FRAMEWDT, 320-TFT_FRAMEWDT-16, 2, WA_LEFT }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
         /* WIDGETS             { left, top, fontsize, align } */
         .bootstrConf         = { 0, 243, 2, WA_CENTER },
-        /* WIDGETS             { left, top, fontsize, align } */
         .apNameConf          = { TFT_FRAMEWDT, 88, 3, WA_CENTER },
         .apName2Conf         = { TFT_FRAMEWDT, 120, 3, WA_CENTER },
         .apPassConf          = { TFT_FRAMEWDT, 173, 3, WA_CENTER },
@@ -50,7 +49,6 @@ const LayoutData _layouts[] PROGMEM = {
         .volbarConf          = {{ TFT_FRAMEWDT, DSP_HEIGHT-TFT_FRAMEWDT-8, 0, WA_LEFT }, MAX_WIDTH, 8, true },
         .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
         .bufferbarConf       = {{ 0, DSP_HEIGHT-2, 0, WA_LEFT }, DSP_WIDTH, 2, false },
-        /* WIDGETS             { left, top, fontsize, align } */
         .bitrateConf         = { 6, 62, 2, WA_RIGHT },
         .voltxtConf          = { 0, DSP_HEIGHT-38, 2, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },

@@ -17,6 +17,20 @@
   #define FONTSHIFT 15
 #endif
 
+const BootData _bootConfig PROGMEM = {
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 2, WA_CENTER }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
+        .apSettConf          = {{ TFT_FRAMEWDT, 64-7, 1, WA_LEFT }, 140, false, MAX_WIDTH, 0, 1, SCROLLTIME },
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bootstrConf         = { 0, 64-8, 1, WA_CENTER },
+        .apNameConf          = { 0, 18, 1, WA_CENTER },
+        .apName2Conf         = { 0, 26, 1, WA_CENTER },
+        .apPassConf          = { 0, 37, 1, WA_CENTER },
+        .apPass2Conf         = { 0, 45, 1, WA_CENTER },
+        .bootWdtConf         = { 0, 64-8*2-5, 1, WA_CENTER },
+        .bootPrgConf         = { 90, 14, 4 },
+};
+
 const char _layoutNames[][64] PROGMEM = {
     "Default",
 };
@@ -30,8 +44,6 @@ const LayoutData _layouts[] PROGMEM = {
         .title1Conf          = {{ TFT_FRAMEWDT, 19, 1, WA_LEFT }, 140, true, MAX_WIDTH-6*4, SCROLLDELAY, 1, SCROLLTIME },
         .title2Conf          = {{ TFT_FRAMEWDT, 28, 1, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 1, SCROLLTIME },
         .playlistConf        = {{ TFT_FRAMEWDT, 30, 1, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 1, SCROLLTIME },
-        .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 2, WA_CENTER }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
-        .apSettConf          = {{ TFT_FRAMEWDT, 64-7, 1, WA_LEFT }, 140, false, MAX_WIDTH, 0, 1, SCROLLTIME },
         .weatherConf         = {{ TFT_FRAMEWDT, 64-9, 1, WA_LEFT }, 140, true, MAX_WIDTH-6*4, 0, 1, SCROLLTIME },
         /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
         .metaBGConf          = { },
@@ -41,22 +53,15 @@ const LayoutData _layouts[] PROGMEM = {
         .bufferbarConf       = { }, // unused
         // .bufferbarConf       = {{ 0, 63, 0, WA_LEFT }, DSP_WIDTH, 1, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bootstrConf         = { 0, 64-8, 1, WA_CENTER },
         .bitrateConf         = { 0, 19, 1, WA_RIGHT },
         .voltxtConf          = { }, // unused
         .batteryConf         = { 0, 64-9, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-9, 1, WA_LEFT },
         .rssiConf            = { 0, 64-9, 1, WA_RIGHT },
         .numConf             = { 0, 28+FONTSHIFT, 0, WA_CENTER },
-        .apNameConf          = { 0, 18, 1, WA_CENTER },
-        .apName2Conf         = { 0, 26, 1, WA_CENTER },
-        .apPassConf          = { 0, 37, 1, WA_CENTER },
-        .apPass2Conf         = { 0, 45, 1, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
         .vuConf              = { }, // unused
         // .vuConf              = { 1, 28, 1, WA_LEFT },
-        .bootWdtConf         = { 0, 64-8*2-5, 1, WA_CENTER },
-        .bootPrgConf         = { 90, 14, 4 },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = { }, // unused
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */

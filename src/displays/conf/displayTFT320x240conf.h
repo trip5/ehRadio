@@ -12,12 +12,13 @@
 
 const char _layoutNames[][64] PROGMEM = {
     "Default",
+    "VaraiTamas (BoomBox)",
 };
 
 /* LAYOUT DEFINITIONS */
 
 const LayoutData _layouts[] PROGMEM = {
-    {   // [0] Default
+    {   // Default
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
         .title1Conf          = {{ TFT_FRAMEWDT, 48, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
@@ -56,6 +57,51 @@ const LayoutData _layouts[] PROGMEM = {
         .clockMove           = { 8, 180, -1 },
         .weatherMove         = { TFT_FRAMEWDT, 97, MAX_WIDTH },
         .weatherMoveVU       = { 70, 97, MAX_WIDTH-70+TFT_FRAMEWDT },
+    },
+    {   // VaraiTamas (BoomBox)
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
+        .title1Conf          = {{ TFT_FRAMEWDT, 48, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = {{ TFT_FRAMEWDT, 72, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .playlistConf        = {{ TFT_FRAMEWDT, 112, 2, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
+        .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_CENTER }, 140, false, MAX_WIDTH, 0, 3, SCROLLTIME },
+        .apSettConf          = {{ TFT_FRAMEWDT, 240-TFT_FRAMEWDT-16, 2, WA_LEFT }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
+        .weatherConf         = {{ TFT_FRAMEWDT, 87, 2, WA_CENTER }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
+        .metaBGConf          = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 38, false },
+        .metaBGConfInv       = {{ 0, 38, 0, WA_LEFT }, DSP_WIDTH, 1, false },
+        .volbarConf          = {{ TFT_FRAMEWDT, 240-TFT_FRAMEWDT-6, 0, WA_LEFT }, MAX_WIDTH, 4, true },
+        .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
+        .bufferbarConf       = {{ 0, 239, 0, WA_LEFT }, DSP_WIDTH, 1, false },
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bootstrConf         = { 0, 182, 1, WA_CENTER },
+        .bitrateConf         = { TFT_FRAMEWDT, 148, 1, WA_RIGHT },
+        // ??? chtxtConf     = { 210 ,214, 1, WA_LEFT };
+        .voltxtConf          = { 0, 214, 1, WA_CENTER },
+        .batteryConf         = { (DSP_WIDTH*2)/3+2, 214, 1, WA_LEFT },
+        .iptxtConf           = { TFT_FRAMEWDT, 214, 1, WA_LEFT },
+        .rssiConf            = { TFT_FRAMEWDT, 214-6, 2, WA_RIGHT },
+        .numConf             = { 0, 120+30, 0, WA_CENTER },
+        .apNameConf          = { TFT_FRAMEWDT, 66, 2, WA_CENTER },
+        .apName2Conf         = { TFT_FRAMEWDT, 90, 2, WA_CENTER },
+        .apPassConf          = { TFT_FRAMEWDT, 130, 2, WA_CENTER },
+        .apPass2Conf         = { TFT_FRAMEWDT, 154, 2, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT*2, 170, 1, WA_RIGHT },
+        .vuConf              = { 24, 198, 1, WA_CENTER },
+        // ??? namedayConf   = { TFT_FRAMEWDT, 139, 1, WA_LEFT };
+        // ??? dateConf      = { TFT_FRAMEWDT *2, 169, 1, WA_LEFT };
+        .bootWdtConf         = { 0, 162, 1, WA_CENTER },
+        .bootPrgConf         = { 90, 14, 4 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        .fullbitrateConf     = {{ 8, 124, 2, WA_LEFT }, 41 },
+        /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
+        .bandsConf           = { 130, 5, 4, 2, 20, 5 },
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
+        .weatherMove         = { 10, 95, MAX_WIDTH },
+        .weatherMoveVU       = { TFT_FRAMEWDT, 95, MAX_WIDTH },
+        /* BOOMBOX STYLE: middle-out VU */
+        .boomboxStyle        = true,
     },
 };
 

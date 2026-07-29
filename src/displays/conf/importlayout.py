@@ -37,20 +37,27 @@ import re, sys, os
 # --- Canonical LayoutData field order ---------------------------------------
 LAYOUT_FIELDS = [
     ('metaConf','ScrollConfig'),('title1Conf','ScrollConfig'),('title2Conf','ScrollConfig'),
-    ('playlistConf','ScrollConfig'),('apTitleConf','ScrollConfig'),('apSettConf','ScrollConfig'),
-    ('weatherConf','ScrollConfig'),
+    ('playlistConf','ScrollConfig'),('weatherConf','ScrollConfig'),
     ('metaBGConf','FillConfig'),('metaBGConfInv','FillConfig'),('volbarConf','FillConfig'),
     ('playlBGConf','FillConfig'),('bufferbarConf','FillConfig'),
-    ('bootstrConf','WidgetConfig'),('bitrateConf','WidgetConfig'),('voltxtConf','WidgetConfig'),
+    ('bitrateConf','WidgetConfig'),('voltxtConf','WidgetConfig'),
     ('batteryConf','WidgetConfig'),('iptxtConf','WidgetConfig'),('rssiConf','WidgetConfig'),
-    ('numConf','WidgetConfig'),('apNameConf','WidgetConfig'),('apName2Conf','WidgetConfig'),
-    ('apPassConf','WidgetConfig'),('apPass2Conf','WidgetConfig'),('clockConf','WidgetConfig'),
-    ('vuConf','WidgetConfig'),('bootWdtConf','WidgetConfig'),
-    ('bootPrgConf','ProgressConfig'),
+    ('numConf','WidgetConfig'),('clockConf','WidgetConfig'),
+    ('vuConf','WidgetConfig'),
     ('fullbitrateConf','BitrateConfig'),
     ('bandsConf','VUBandsConfig'),
     ('clockMove','MoveConfig'),('weatherMove','MoveConfig'),('weatherMoveVU','MoveConfig'),
     ('boomboxStyle','bool'),
+]
+
+# Boot/AP fields — extracted from first layout, output as global BootData block
+BOOT_FIELDS = [
+    ('apTitleConf','ScrollConfig'),('apSettConf','ScrollConfig'),
+    ('bootstrConf','WidgetConfig'),
+    ('apNameConf','WidgetConfig'),('apName2Conf','WidgetConfig'),
+    ('apPassConf','WidgetConfig'),('apPass2Conf','WidgetConfig'),
+    ('bootWdtConf','WidgetConfig'),
+    ('bootPrgConf','ProgressConfig'),
 ]
 
 # Format strings required in every conf file (linker must find them)
@@ -368,7 +375,7 @@ def modify_target(target_path, entries, names):
     indented = '\n'.join(f'    "{n}",' for n in new)
     new_line = f'const char _layoutNames[][64] PROGMEM = {{\n{indented}\n}};'
     entries_text = '\n'.join(entries)
-    new_content = content[:closing] + entries_text + '\n' + content[closing:]
+    new_content = content[:closing].rstrip('\n') + '\n' + entries_text + '\n' + content[closing:].lstrip('\n')
     new_content = new_content[:nm.start()] + new_line + new_content[nm_brace_end+1:]
     new_content = re.sub(r'\};(\};)+', '};', new_content)
     with open(target_path, 'w', encoding='utf-8') as f:

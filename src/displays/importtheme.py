@@ -91,7 +91,7 @@ COMPUTED_FALLBACK = [
     ('clockbgss', 'clockss', 0.15),   # 15% of clockss (resolved above)
 ]
 
-MAX_NAME_LEN = 31  # _themeNames[][32] -- 31 chars + null
+MAX_NAME_LEN = 50  # _themeNames[][64] -- truncate at 50 for safety
 
 
 def _trunc_name(n):
@@ -244,7 +244,7 @@ def emit_theme_entry(name, data, index):
             needs_fixing.add(fname)
 
     # ---- emit ----
-    lines = [f'    {{   // [{index}] {name}']
+    lines = [f'    {{   // {name}']
     for fname in FIELD_ORDER:
         if fname == 'playlist':
             vals = []
@@ -271,16 +271,23 @@ def emit_theme_entry(name, data, index):
 def modify_themes(target_path, entries, names):
     with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
-    m = re.search(r'_themes\[\]\s*PROGMEM\s*=\s*\{', content)
-    if not m: print("ERROR: Could not find _themes[]."); return False
-    closing = content.find('\n};', m.start())
+    if not re.search(r'\b_themes\[\]\s*PROGMEM\s*=\s*\{', content):
+        print("ERROR: Could not find _themes[]."); return False
+    closing = content.rfind('\n};')  # last }; in file = _themes[] closing
     if closing == -1: print("ERROR: Could not find closing '};' of _themes[]."); return False
-    nm = re.search(r'(const char _themeNames\[\]\[\d+\] PROGMEM = \{)"(.+)"\};', content)
+    nm = re.search(r'(const char _themeNames\[\]\[64\] PROGMEM = )\{', content)
     if not nm: print("ERROR: Could not find _themeNames."); return False
-    old = [n.strip().strip('"') for n in nm.group(2).split(',')]
-    new_line = f'const char _themeNames[][32] PROGMEM = {{{", ".join(f"\"{n}\"" for n in old + names)}}};'
+    nm_brace_end = content.find('\n};', nm.end())
+    if nm_brace_end == -1: print("ERROR: Could not find closing } of _themeNames."); return False
+    block = content[nm.end():nm_brace_end]
+    old = [n.strip().strip('"').strip(',').strip('"') for n in block.strip().split('\n') if n.strip()]
+    new_names = old + names
+    indented = '\n'.join(f'    "{n}",' for n in new_names)
+    new_line = f'const char _themeNames[][64] PROGMEM = {{\n{indented}\n}};'
+    # Insert new entries before the closing }; of _themes[]
     new_content = content[:closing] + '\n' + '\n'.join(entries) + content[closing:]
-    new_content = new_content.replace(nm.group(0), new_line)
+    new_content = new_content[:nm.start()] + new_line + new_content[nm_brace_end+1:]
+    new_content = re.sub(r'\};(\};)+', '};', new_content)
     with open(target_path, 'w', encoding='utf-8') as f:
         f.write(new_content)
     return True
@@ -339,7 +346,7 @@ def main():
         entries.append(entry_text)
         names_to_add.append(theme_name)
         if result['unknowns']: issues = True
-        print(f"\nTheme [{idx}]: {theme_name}")
+        print(f"\nTheme: {theme_name}")
         print(f"  {len(result['colors'])} colors, {len(result['unknowns'])} unknown")
         idx += 1
 

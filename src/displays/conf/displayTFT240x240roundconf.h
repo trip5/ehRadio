@@ -13,7 +13,9 @@
 #define BOOTLOGOTOP     68
 #define BOOMBOX_STYLE
 
-const char _layoutNames[][32] PROGMEM = {"Default"};
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -50,10 +52,11 @@ const LayoutData _layouts[] PROGMEM = {
         .vuConf              = { TFT_FRAMEWDT+20, 188, 1, WA_CENTER },
         .bootWdtConf         = { 0, 162, 1, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = { }, // unused
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 90, 20, 6, 2, 10, 5 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 0, 164, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 202, -1 },
         .weatherMoveVU       = { TFT_FRAMEWDT, 202, -1/*MAX_WIDTH*/ },

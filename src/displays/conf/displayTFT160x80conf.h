@@ -9,7 +9,9 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define BOOTLOGOTOP     5
 
-const char _layoutNames[][32] PROGMEM = {"Default"};
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -48,10 +50,11 @@ const LayoutData _layouts[] PROGMEM = {
         .vuConf              = { 1, 28, 1, WA_LEFT },
         .bootWdtConf         = { 0, 50, 1, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = { }, // unused
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 12, 48, 2, 1, 8, 2 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 6, 29+34, 0},
         .weatherMove         = { TFT_FRAMEWDT, 80-13, MAX_WIDTH-6*3-30 },
         .weatherMoveVU       = { 30, 80-13, MAX_WIDTH-6*3-30 },

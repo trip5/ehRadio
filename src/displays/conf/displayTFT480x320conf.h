@@ -14,7 +14,10 @@
   #define BOOTLOGOTOP   110
 #endif
 
-const char _layoutNames[][32] PROGMEM = {"Default", "VaraiTamas (BoomBox)"};
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+    "VaraiTamas (BoomBox)",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -50,12 +53,12 @@ const LayoutData _layouts[] PROGMEM = {
         .vuConf              = { TFT_FRAMEWDT, 136, 1, WA_LEFT },
         .bootWdtConf         = { 0, 205, 2, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 32, 130, 4, 2, 10, 3 },
-        /* MOVES               { left, top, width } */
-        .clockMove           = { 0, 230, -1 },
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
         .weatherMove         = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         .weatherMoveVU       = { 89, 120, MAX_WIDTH-89+TFT_FRAMEWDT },
     },
@@ -87,18 +90,18 @@ const LayoutData _layouts[] PROGMEM = {
         .apName2Conf         = { TFT_FRAMEWDT, 120, 3, WA_CENTER },
         .apPassConf          = { TFT_FRAMEWDT, 173, 3, WA_CENTER },
         .apPass2Conf         = { TFT_FRAMEWDT, 205, 3, WA_CENTER },
-        .clockConf           = { 10, 212, 2, WA_RIGHT },
-        .vuConf              = { 35, 258, 1, WA_CENTER },
+        .clockConf           = { 10, 215, 2, WA_RIGHT },
+        .vuConf              = { 35, 259, 1, WA_CENTER },
         // ??? namedayConf   = { TFT_FRAMEWDT, 175, 2, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT, 226, 1, WA_LEFT };
         .bootWdtConf         = { 0, 216, 1, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
-        .fullbitrateConf     = {{ 10, 142, 2, WA_RIGHT }, 60 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        .fullbitrateConf     = {{ 10, 148, 2, WA_RIGHT }, 60 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 200, 7, 4, 2, 20, 9 },
-        /* MOVES               { left, top, width } */
-        .clockMove           = { 0, 176, -1 },
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
         .weatherMove         = { 10, 116, MAX_WIDTH },
         .weatherMoveVU       = { 10, 116, MAX_WIDTH },
         /* BOOMBOX STYLE: middle-out VU */

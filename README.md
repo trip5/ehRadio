@@ -78,6 +78,7 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
 
 - Display architecture based on ёRadio
   - simplified and expanded
+  - multiple themes and layouts compiled-in
 
 - SPI architecture supports non-standard pins
   - uses custom-named buses `SPIA` and `SPIB` defined in `myoptions.h`
@@ -96,7 +97,6 @@ This involved significant changes to the original code and layouts.
 
 Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
 Other display sizes may have quirks or issues with layouts that need repair.
-
 
 ---
 

@@ -12,7 +12,9 @@
 #define PLMITEMHEIGHT   22
 #define BOOTLOGOTOP     68
 
-const char _layoutNames[][32] PROGMEM = {"Default"};
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -48,10 +50,11 @@ const LayoutData _layouts[] PROGMEM = {
         .vuConf              = { TFT_FRAMEWDT, 94, 1, WA_CENTER },
         .bootWdtConf         = { 0, 162, 1, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = { }, // unused
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 100, 20, 10, 2, 10, 5 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 0, 176, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 202, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, 202, MAX_WIDTH },

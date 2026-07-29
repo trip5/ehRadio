@@ -7,10 +7,12 @@
 
 #define TFT_FRAMEWDT    4
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
-
 #define BOOTLOGOTOP     16
+#define RSSI_BATT_SHARED true // these widgets share the same space
 
-const char _layoutNames[][32] PROGMEM = {"Default"};
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -35,7 +37,7 @@ const LayoutData _layouts[] PROGMEM = {
         .bitrateConf         = { TFT_FRAMEWDT, 26, 1, WA_RIGHT },
         // .bitrateConf       = { TFT_FRAMEWDT, 99, 1, WA_LEFT },
         .voltxtConf          = { TFT_FRAMEWDT, 108, 1, WA_LEFT },
-        .batteryConf         = { },                                                   // <-- NEEDS EDITING!
+        .batteryConf         = { TFT_FRAMEWDT, 108, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 108, 1, WA_CENTER },
         .rssiConf            = { TFT_FRAMEWDT, 108, 1, WA_RIGHT },
         .numConf             = { 0, 86, 0, WA_CENTER },
@@ -43,15 +45,16 @@ const LayoutData _layouts[] PROGMEM = {
         .apName2Conf         = { 0, 54, 1, WA_CENTER },
         .apPassConf          = { 0, 74, 1, WA_CENTER },
         .apPass2Conf         = { 0, 88, 1, WA_CENTER },
-        .clockConf           = { 0, 94, 0, WA_CENTER },
+        .clockConf           = { 0, 98, 0, WA_CENTER },
         .vuConf              = { TFT_FRAMEWDT, 54, 1, WA_LEFT },
         .bootWdtConf         = { 0, 90, 1, WA_CENTER },
         .bootPrgConf         = { 90, 14, 4 },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = {{DSP_WIDTH-TFT_FRAMEWDT-19, 23, 1, WA_LEFT}, 22 },
         /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 12, 50, 2, 1, 10, 1 },
-        /* MOVES               { left, top, width } */
-        .clockMove           = { 14, 94, 0},
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 14, 98, 0},
         .weatherMove         = {TFT_FRAMEWDT, 48, MAX_WIDTH},
         .weatherMoveVU       = { 34, 48, MAX_WIDTH-34+TFT_FRAMEWDT },
     },
@@ -60,9 +63,9 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "%d";
-const char iptxtFmt[]             PROGMEM = "\037 %s";
+const char iptxtFmt[]             PROGMEM = "%s";
 const char voltxtFmt[]            PROGMEM = "%d";
-const char batterytxtFmt[]        PROGMEM = "%d%%";
+const char batterytxtFmt[]        PROGMEM = "";
 const char bitrateFmt[]           PROGMEM = "%d";
 
 #endif

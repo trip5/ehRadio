@@ -19,7 +19,11 @@
 #define HIDE_VOL_FOOTER // Ukrywa stopke na ekranie glosnosci
 
 // ******************** CHECK ALL #define LINES CAREFULLY! ********************
-const char _layoutNames[][32] PROGMEM = {"krzxsiek", "krzxsiek (BoomBox)", "krzxsiek-kopia"};
+const char _layoutNames[][64] PROGMEM = {
+    "krzxsiek",
+    "krzxsiek (BoomBox)",
+    "krzxsiek-kopia",
+};
 
 /* LAYOUT DEFINITIONS */
 
@@ -58,11 +62,11 @@ const LayoutData _layouts[] PROGMEM = {
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
         .bootWdtConf         = { 0, DSP_HEIGHT-30, 1, WA_CENTER },
         .bootPrgConf         = { 90, 10, 4 },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 200, 6, 2, 2, 30, 4 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 0, 176, -1 },
         .weatherMove         = { 10, DSP_HEIGHT-50, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, DSP_HEIGHT-50, MAX_WIDTH },
@@ -101,11 +105,11 @@ const LayoutData _layouts[] PROGMEM = {
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
         .bootWdtConf         = { 0, DSP_HEIGHT-30, 1, WA_CENTER },
         .bootPrgConf         = { 90, 10, 4 },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { 130, 5, 4, 2, 20, 5 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 0, 176, -1 },
         .weatherMove         = { 10, DSP_HEIGHT-50, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, DSP_HEIGHT-50, MAX_WIDTH },
@@ -147,11 +151,11 @@ const LayoutData _layouts[] PROGMEM = {
         .vuConf              = { 2, DSP_HEIGHT-26, 1, WA_CENTER },
         .bootWdtConf         = { 0, 162, 2, WA_CENTER },
         .bootPrgConf         = { 90, 10, 4 },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
         .fullbitrateConf     = {{ 8, 104-10-10, 1, WA_LEFT }, 41 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
         .bandsConf           = { DSP_WIDTH/2-TFT_FRAMEWDT*2-2, 7,             TFT_FRAMEWDT*2+4, 1, 17, 2 },
-        /* MOVES               { left, top, width } */
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
         .clockMove           = { 0, 176, -1 },
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },

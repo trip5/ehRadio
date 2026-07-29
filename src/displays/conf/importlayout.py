@@ -67,9 +67,9 @@ SECTION_COMMENTS = {
     'metaConf':       '/* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */',
     'metaBGConf':     '/* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */',
     'bootstrConf':    '/* WIDGETS             { left, top, fontsize, align } */',
-    'fullbitrateConf':'/* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */',
+    'fullbitrateConf':'/* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */',
     'bandsConf':      '/* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */',
-    'clockMove':      '/* MOVES               { left, top, width } */',
+    'clockMove':      '/* MOVES               { left, top, width (-1 keeps Conf position) */',
 }
 
 NAME_MAP = {'heapbarConf': 'bufferbarConf'}
@@ -84,7 +84,7 @@ HIDE_TO_FIELD = {
 
 # --- Helpers -----------------------------------------------------------------
 
-MAX_NAME_LEN = 31  # _layoutNames[][32] -- 31 chars + null
+MAX_NAME_LEN = 50  # _layoutNames[][64] -- truncate at 50 for safety
 
 
 def _trunc_name(n):
@@ -295,7 +295,7 @@ def _normalize(val):
 
 def emit_layout_entry(name, configs, layout_fields, index, boombox_style=False, hidden_fields=None):
     if hidden_fields is None: hidden_fields = set()
-    lines = [f'    {{   // [{index}] {name}']
+    lines = [f'    {{   // {name}']
     seen_sections = set()
     config_dict = {c[0]: c[1] for c in configs}
     known_set = set(f for f, _ in layout_fields)
@@ -354,34 +354,23 @@ def modify_target(target_path, entries, names):
     with open(target_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
     # Find closing }; of _layouts[] — scan from _layouts[] decl, counting braces
-    m = re.search(r'_layouts\[\]\s*PROGMEM\s*=\s*\{', content)
-    if not m: print("ERROR: Could not find _layouts[]."); return False
-    pos = m.end() - 1  # point to the opening {
-    depth = 1
-    closing = -1
-    in_string = False
-    i = pos + 1
-    while i < len(content) and depth > 0:
-        ch = content[i]
-        if ch == '"' and (i == 0 or content[i-1] != '\\'): in_string = not in_string
-        elif ch == '\\' and in_string: i += 1  # skip escaped char
-        elif not in_string:
-            if ch == '{': depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    closing = i  # insert before };
-                    break
-        i += 1
+    if not re.search(r'\b_layouts\[\]\s*PROGMEM\s*=\s*\{', content):
+        print("ERROR: Could not find _layouts[]."); return False
+    closing = content.rfind('\n};')  # last }; in file = _layouts[] closing
     if closing == -1: print("ERROR: Could not find closing '};' of _layouts[]."); return False
-    nm = re.search(r'(const char _layoutNames\[\]\[\d+\] PROGMEM = \{)"(.+)"\};', content)
+    nm = re.search(r'(const char _layoutNames\[\]\[64\] PROGMEM = )\{', content)
     if not nm: print("ERROR: Could not find _layoutNames."); return False
-    old = [n.strip().strip('"') for n in nm.group(2).split(',')]
+    nm_brace_end = content.find('\n};', nm.end())
+    if nm_brace_end == -1: print("ERROR: Could not find closing } of _layoutNames."); return False
+    block = content[nm.end():nm_brace_end]
+    old = [n.strip().strip('"').strip(',').strip('"') for n in block.strip().split('\n') if n.strip()]
     new = old + names
-    new_line = f'const char _layoutNames[][32] PROGMEM = {{{", ".join(f"\"{n}\"" for n in new)}}};'
+    indented = '\n'.join(f'    "{n}",' for n in new)
+    new_line = f'const char _layoutNames[][64] PROGMEM = {{\n{indented}\n}};'
     entries_text = '\n'.join(entries)
     new_content = content[:closing] + entries_text + '\n' + content[closing:]
-    new_content = new_content.replace(nm.group(0), new_line)
+    new_content = new_content[:nm.start()] + new_line + new_content[nm_brace_end+1:]
+    new_content = re.sub(r'\};(\};)+', '};', new_content)
     with open(target_path, 'w', encoding='utf-8') as f:
         f.write(new_content)
     return True
@@ -414,7 +403,9 @@ def create_target_file(out_path, data, name, dry_run):
     else:
         names = [f'"{_trunc_name(name)}"']
     out.append('// ******************** CHECK ALL #define LINES CAREFULLY! ********************')
-    out.append(f'const char _layoutNames[][32] PROGMEM = {{{", ".join(names)}}};')
+    out.append('')
+    indented = '\n'.join(f'    {n},' for n in names)
+    out.append(f'const char _layoutNames[][64] PROGMEM = {{\n{indented}\n}};')
     out.append('')
     out.append('/* LAYOUT DEFINITIONS */')
     out.append('')
@@ -426,26 +417,27 @@ def create_target_file(out_path, data, name, dry_run):
         et, c, nf, uk = emit_layout_entry(_trunc_name(name), data['configs_normal'], LAYOUT_FIELDS, idx, boombox_style=False, hidden_fields=hidden_fields)
         out.append(et)
         if nf>0 or uk>0: issues = True
-        print(f"\nLayout [{idx}]: {_trunc_name(name)}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
+        print(f"\nLayout: {_trunc_name(name)}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
         idx += 1
         et, c, nf, uk = emit_layout_entry(_trunc_name(f"{name} (BoomBox)"), data['configs_boombox'], LAYOUT_FIELDS, idx, boombox_style=True, hidden_fields=hidden_fields)
         out.append(et)
         if nf>0 or uk>0: issues = True
-        print(f"\nLayout [{idx}]: {_trunc_name(f'{name} (BoomBox)')}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
+        print(f"\nLayout: {_trunc_name(f'{name} (BoomBox)')}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
     elif boombox_mandatory:
         et, c, nf, uk = emit_layout_entry(_trunc_name(name), data['configs_normal'], LAYOUT_FIELDS, idx, boombox_style=True, hidden_fields=hidden_fields)
         out.append(et)
         if nf>0 or uk>0: issues = True
-        print(f"\nLayout [{idx}]: {_trunc_name(name)} (BoomBox mandatory)"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
+        print(f"\nLayout: {_trunc_name(name)} (BoomBox mandatory)"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
     else:
         et, c, nf, uk = emit_layout_entry(_trunc_name(name), data['configs_normal'], LAYOUT_FIELDS, idx, hidden_fields=hidden_fields)
         out.append(et)
         if nf>0 or uk>0: issues = True
-        print(f"\nLayout [{idx}]: {_trunc_name(name)}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
+        print(f"\nLayout: {_trunc_name(name)}"); print(f"  {c} widgets, {nf} not found, {uk} unknown")
 
     out.append('};')
     out.append('// ******************** CHECK ALL const char LINES CAREFULLY! ********************')
     out.append('// check all needed strings are present... and double-check octal codes \\0xx too!')
+    out.append('// Note that rssi and battery will still render 2-glyph icons even when blank')
     out.append('')
     out.append('/* STRINGS */')
 

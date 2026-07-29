@@ -413,10 +413,18 @@ void Display::_swichMode(displayMode_e newmode) {
   _mode = newmode;
   dsp.setScrollId(NULL);
   if (newmode == PLAYER) {
-    if (player.isRunning())
-      if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
-    else
+    if (player.isRunning()){
+      if (config.store.vumeter && _vuwidget) {
+        if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
+        if (_weather) _weather->moveTo(*weatherMoveVU_ptr);
+      } else {
+        _clock->moveBack();  // restore from screensaver position
+        if (_weather) _weather->moveTo(*weatherMove_ptr);
+      }
+    } else {
       _clock->moveBack();
+      if (_weather) _weather->moveBack();
+    }
     #ifdef DSP_LCD
       dsp.clearDsp();
     #endif
@@ -469,7 +477,7 @@ void Display::_swichMode(displayMode_e newmode) {
   }
   if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
     config.isScreensaver = true;
-    _pager->setPage(pages[PG_SCREENSAVER]);
+    _pager->setPage(pages[PG_SCREENSAVER], true);
     if (newmode == SCREENBLANK) {
       //dsp.clearClock();
       _clock->clear();
@@ -610,7 +618,7 @@ void Display::_layoutChange(bool played) {
     }
   } else {
     if (played) {
-      if (clockMove_ptr->width<0) _clock->moveBack(); else _clock->moveTo(*clockMove_ptr);
+      _clock->moveBack();  // restore clock from VU-shifted position
       if (_weather) _weather->moveTo(*weatherMove_ptr);
       //_clock->moveBack();
     } else {
@@ -1029,6 +1037,7 @@ void Display::_applyState() {
     }
   #endif
   _reinitWidgets();
+  if (_vuwidget && !config.store.vumeter) _vuwidget->lock();  // keep VU off when disabled
   _volume();
   if (_battery) _updateBattery();
   if (_weather && config.store.showweather && network.weatherBuf) _weather->setText(network.weatherBuf);

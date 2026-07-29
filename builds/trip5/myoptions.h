@@ -267,17 +267,9 @@
 #if defined(ES3C28P)
   /* Battery monitoring on ES3C28P board */
   #define BATTERY_PIN     9       /* GPIO9: ADC pin for battery voltage */
-  //#define BATTERY_CHARGE_PIN 255  /* No charging status GPIO exposed (TP4054 CHRG pin not connected on ES3C28P) */
-
   #define BATTERY_DIVIDER_RATIO 2.0   /* 100k + 100k voltage divider = 1:2 ratio */
   #define BATTERY_ADC_REF_MV 3438     /* ESP32-S3 ADC reference voltage (calibrated EL103565 3000mAh 11.1Wh) */
   #define BATTERY_UPDATE_INTERVAL 60  /* Update interval in seconds */
-  #define BATTERY_DEBUG               /* Uncomment to enable debug output */
-
-  #define BATTERY_CHARGE_INFER_HOLD_SAMPLES 3 /* number of measurements (samples) to hold (e.g., 3 readings at BATTERY_UPDATE_INTERVAL) */
-  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 3 /* percent */
-  #define BATTERY_CANDIDATE_PERCENT_DELTA 1 /* percent */
-  #define BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD 0 /* percent over hold window */
 #endif
 
 
@@ -344,9 +336,10 @@
 //#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
 //#define BATTERY_DEBUG
+//#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 
-/* --- Fonts --- */
-// Display Text:
+/* --- Display --- */
+// Display Font:
 //#define DISPLAYFONT MATRIXCHUNKY
 //#define DISPLAYFONT MATRIXLIGHT
 //#define DISPLAYFONT X11
@@ -360,17 +353,9 @@
 //#define PRETEXT_FOLDACCENT
 //#define WWW_CASETRANSFORM
 //#define CLOCKGLOW false
-
-//#define DEEP_SLEEP_DISABLE
-
-//#define BOOMBOX_STYLE
-
 //#define PLAYLIST_MODE_PAGED false
 
-#if defined(SH1106_VS1053_3BUTTONS)
-  #define BATTERY_FORCE_DISPLAY 0 // 0, 25, 50, 75, 100
-#elif defined(ILI9488_VS1053_1BUTTON)
-  #define BATTERY_FORCE_DISPLAY 50 // 0, 25, 50, 75, 100
-#endif
+// Other:
+//#define DEEP_SLEEP_DISABLE
 
 #endif // myoptions_h

@@ -59,7 +59,7 @@ REQUIRED_STRINGS = {
     'rssiFmt':         '"%d"',
     'iptxtFmt':        '""',
     'voltxtFmt':       '""',
-    'batteryRangeFmt': '{ "\\013 %d%%", "\\014 %d%%", "\\015 %d%%" }',
+    'batterytxtFmt':   '"%d%%"',
     'bitrateFmt':      '"%d"',
 }
 
@@ -518,6 +518,13 @@ def main():
     data = parse_conf(community_path)
     if data['width'] is None or data['height'] is None:
         print("ERROR: DSP_WIDTH/DSP_HEIGHT not found."); sys.exit(1)
+
+    # Guard: mandatory widgets must be present
+    config_names = {n for n, _ in data['configs_normal']}
+    missing_mandatory = [f for f in ('metaConf', 'playlistConf') if f not in config_names]
+    if missing_mandatory:
+        print(f"ERROR: Missing mandatory widget(s): {', '.join(missing_mandatory)}. Is this a valid conf file?")
+        sys.exit(1)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     basename = os.path.basename(community_path)

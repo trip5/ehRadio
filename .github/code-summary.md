@@ -729,7 +729,6 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - `src/displays/tools/commongfx.h`
 - `src/displays/tools/psframebuffer.h`
 - `src/displays/tools/oledcolorfix.h` — OLED monochrome color initialization. `DSP_INVERT_TITLE` ifdef removed; `metafill` corrected to `TFT_FG` (was `TFT_BG` — invisible on black screen).
-- `src/displays/tools/tftinverttitle.h` — **DEPRECATED**, no longer included. Replaced by runtime `inverttitle` in `_applyState()`.
 
 Purpose:
 - text normalization/transliteration and glyph handling

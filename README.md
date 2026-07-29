@@ -88,6 +88,18 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
 
 ---
 
+## A Warning & Disclaimer
+
+
+With the `2026.07.30` release, the display architecture was overhauled to make layouts and colors changeable while running.
+This involved significant changes to the original code and layouts.
+
+Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
+Other display sizes may have quirks or issues with layouts that need repair.
+
+
+---
+
 ## WebUI
 
 The WebUI is optimized for mobile browsers but looks great on PCs, too.
@@ -302,7 +314,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.07.27 | Various fixes to touchscreen, battery,  |
+| 2026.07.30 | Layouts and Themes changeable while running, Various fixes to touchscreen, battery functions simplified, |
 | 2026.07.20 | Various fixes to inputs, SD Offline mode, `DSP_DUMMY`, SD metadata, `Controls.md` edit, w/Kle7rx: mute |
 | 2026.07.17 | Various fixes to safe mode, boot screen shows version and mode, `Hardware.md` edit |
 | 2026.07.12 | SD Offline Mode added, `Hardware.md` added, fixes to Deep Sleep, smart start, SD index, SD metadata, VS1053 volume curve, PSRAM |
@@ -340,6 +352,6 @@ A full history of ёRadio from v0.4.177 to v0.9.533 can be seen in the [old Read
 Thanks to:
 
   - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute feature, VS1053/I2S fixing, and amplifier schematics
-  - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales and a bunch of work for ES3C28P (including ES8311 decoder, ILI9341 battery widget, FT6336 touchscreen)
+  - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales, battery support and widget, and a bunch of work for ES3C28P (including ES8311 decoder, FT6336 touchscreen)
   - [e2002](https://github.com/e2002) - for [ёRadio](https://github.com/e2002/yoradio/) without which ehRadio would not be possible
 

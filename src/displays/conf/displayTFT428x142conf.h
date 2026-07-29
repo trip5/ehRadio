@@ -12,6 +12,8 @@
 #define bootLogoTop     28
 
 // Trip5 Note: This conf file was imported but remains un-implemented and un-tested...
+// check displayOLED128x64 if needing to share IP & RSSI with Weather & Battery
+// (which is what the next defines seem to imply - imported from the original layout)
 
 #define HIDE_IP_ONLY_MAIN_SCREEN// Ukrywa adres IP tylko na glownym ekranie
 #define HIDE_VOL_FOOTER // Ukrywa stopke na ekranie glosnosci

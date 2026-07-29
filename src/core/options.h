@@ -1165,7 +1165,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 /* ============================== DEBUG ============================== */
 
 /* Enable all the debug logs with #define ALL_DEBUG_LOGS */
-/* BATTERY_DEBUG is included elsewhere */
 #ifdef ALL_DEBUG_LOGS
   #ifndef ESPFILEUPDATER_DEBUG
     #define ESPFILEUPDATER_DEBUG // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
@@ -1235,6 +1234,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define CORE_1 "(Main" CORE_1A CORE_1B CORE_1C CORE_1D ")"
 #endif
 
+
 /* ============================== BATTERY ============================== */
 #ifndef BATTERY_PIN
   #define BATTERY_PIN 255 // GPIO pin for battery voltage ADC reading
@@ -1265,6 +1265,8 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #ifndef BATTERY_CURVE_PCT
   #define BATTERY_CURVE_PCT 100, 95, 90, 80, 70, 55, 30, 10, 0
 #endif
+/* No Battery but need to see the widget? */
+// #define BATTERY_FORCE_DISPLAY 0 // 0, 25, 50, 75, 100
 
 
 /* ============================== USER DEFAULTS ============================== */
@@ -1337,8 +1339,8 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define SCREEN_INVERT false
 #endif
 #ifndef INVERT_TITLE
-  #ifdef DSP_OLED // from dspcore.h - OLEDS look better with this mode on
-    #define INVERT_TITLE true
+  #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1322 || DSP_MODEL==DSP_SSD1327
+    #define INVERT_TITLE true // OLEDS look better with this mode on (on first-boot anyways)
   #else
     #define INVERT_TITLE false
   #endif

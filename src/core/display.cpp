@@ -26,6 +26,9 @@ extern const char batterytxtFmt[] PROGMEM;
 #ifndef IP_WEATHER_SHARED
   #define IP_WEATHER_SHARED false
 #endif
+#ifndef RSSI_BATT_SHARED
+  #define RSSI_BATT_SHARED false
+#endif
 
 Display display;
 
@@ -350,6 +353,21 @@ void Display::_start() {
 
   if (_vuwidget) _vuwidget->lock();
   if (_rssi) { if (network.status == SDOFFLINE) _setRSSI(0); else _setRSSI(WiFi.RSSI()); }
+  #if RSSI_BATT_SHARED
+    if (_battery && _rssi) {
+      bool haveBattery = battery.isInitialized();
+      #ifdef BATTERY_FORCE_DISPLAY
+        haveBattery = true;
+      #endif
+      if (haveBattery) {
+        _rssi->setText(""); _rssi->setActive(false);
+        _battery->setActive(true); _updateBattery();
+      } else {
+        _battery->setText(""); _battery->setActive(false);
+        _rssi->setActive(true);
+      }
+    }
+  #endif
   if (iptxtConf_ptr->textsize > 0) {
     if (_volip) {
       if (network.status == SDOFFLINE) {
@@ -431,6 +449,21 @@ void Display::_swichMode(displayMode_e newmode) {
         if (network.weatherBuf) _weather->setText(network.weatherBuf);
       }
     #endif
+    #if RSSI_BATT_SHARED
+      if (_battery && _rssi) {
+        bool haveBattery = battery.isInitialized();
+        #ifdef BATTERY_FORCE_DISPLAY
+          haveBattery = true;
+        #endif
+        if (haveBattery) {
+          _rssi->setText(""); _rssi->setActive(false);
+          _battery->setActive(true); _updateBattery();
+        } else {
+          _battery->setText(""); _battery->setActive(false);
+          _rssi->setActive(true);
+        }
+      }
+    #endif
     config.setDspOn(config.store.dspon, false);
     display.putRequest(DBITRATE);  // refresh bitrate badge when returning to player (may have been cleared while on playlist page)
   }
@@ -453,6 +486,12 @@ void Display::_swichMode(displayMode_e newmode) {
         // Pause weather updates while volume UI is active to avoid shared-line collisions.
         _weather->lock(true);
         _weather->setText("");
+      }
+    #endif
+    #if RSSI_BATT_SHARED
+      if (_battery && _rssi) {
+        _battery->setText(""); _battery->setActive(false);
+        _rssi->setActive(true);
       }
     #endif
     if (config.store.volumepage) {
@@ -780,10 +819,10 @@ void Display::_updateBattery() {
   char buf[16];
   buf[0] = leftGlyphs[left];
   buf[1] = rightGlyphs[right];
-  buf[2] = ' ';
-  buf[3] = '\0';
+  buf[2] = '\0';
 
   if (batterytxtFmt[0] != '\0') {
+    strlcat(buf, " ", sizeof(buf));  // space before number
     char numbuf[8];
     snprintf(numbuf, sizeof(numbuf), batterytxtFmt, pct);
     strlcat(buf, numbuf, sizeof(buf));
@@ -870,10 +909,10 @@ void Display::_updateVolume() {
     if (level > 3) level = 3;
     buf[1] = waveGlyphs[level];
   }
-  buf[2] = '\x1E';
-  buf[3] = '\0';
+  buf[2] = '\0';
 
   if (voltxtFmt[0] != '\0') {
+    strlcat(buf, "\x1E", sizeof(buf));  // 2-pixel spacer before number
     char numbuf[8];
     snprintf(numbuf, sizeof(numbuf), voltxtFmt, vol);
     strlcat(buf, numbuf, sizeof(buf));

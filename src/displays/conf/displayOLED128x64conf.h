@@ -9,6 +9,7 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define BOOTLOGOTOP     8
 #define IP_WEATHER_SHARED true // these widgets share the same space
+#define RSSI_BATT_SHARED true // these widgets share the same space
 
 #if CLOCKFONT == YO_MONO
   #define FONTSHIFT 0
@@ -41,7 +42,7 @@ const LayoutData _layouts[] PROGMEM = {
         .bootstrConf         = { 0, 64-8, 1, WA_CENTER },
         .bitrateConf         = { 0, 19, 1, WA_RIGHT },
         .voltxtConf          = { }, // unused
-        .batteryConf         = { 0, 44, 1, WA_LEFT },                                                   // <-- NEEDS EDITING!
+        .batteryConf         = { 0, 64-9, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-9, 1, WA_LEFT },
         .rssiConf            = { 0, 64-9, 1, WA_RIGHT },
         .numConf             = { 0, 28+FONTSHIFT, 0, WA_CENTER },

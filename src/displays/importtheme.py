@@ -76,13 +76,19 @@ FIELD_ORDER = [
 ]
 
 SMART_FALLBACK = [
-    ('dow',       'date'),
-    ('clockss',   'clock'),
-    ('clockbgss', 'clockbg'),
-    ('secondsss', 'seconds'),
-    ('dowss',     'dow'),
-    ('datess',    'date'),
-    ('battery',   'rssi'),
+    ('dow',     'date'),
+    ('battery', 'rssi'),
+]
+
+# Computed fallbacks: (field, source_field, multiplier) — applied after SMART_FALLBACK.
+# Resolved in dependency order so later entries can depend on earlier ones.
+COMPUTED_FALLBACK = [
+    ('clockbg',   'clock',   0.15),   # 15% of clock
+    ('clockss',   'clock',   0.50),   # 50% of clock
+    ('secondsss', 'seconds', 0.50),   # 50% of seconds
+    ('dowss',     'dow',     0.50),   # 50% of dow
+    ('datess',    'date',    0.50),   # 50% of date
+    ('clockbgss', 'clockss', 0.15),   # 15% of clockss (resolved above)
 ]
 
 MAX_NAME_LEN = 31  # _themeNames[][32] -- 31 chars + null
@@ -217,6 +223,13 @@ def emit_theme_entry(name, data, index):
             final[field] = final[source]
             needs_fixing.add(field)
 
+    # ---- computed fallbacks (dependency order) ----
+    for field, source, pct in COMPUTED_FALLBACK:
+        if field not in final and source in final:
+            sr, sg, sb = final[source]
+            final[field] = (int(sr * pct), int(sg * pct), int(sb * pct))
+            needs_fixing.add(field)
+
     # ---- meta fallback for everything still missing ----
     meta = final.get('meta', (0, 0, 0))
     for fname in FIELD_ORDER:
@@ -302,6 +315,10 @@ def main():
 
     results, blocks = parse_theme(theme_path)
     basename = os.path.basename(theme_path)
+
+    if not any(r['colors'] for r in results):
+        print(f"ERROR: No COLOR_* defines found in {basename}. Is this an old-style theme file?")
+        sys.exit(1)
 
     if start_idx is None:
         with open(target_full, 'r', encoding='utf-8', errors='replace') as f: tc = f.read()

@@ -41,10 +41,16 @@ struct ThemeData {
 
 #define RGB(r, g, b) ((uint16_t)(((r) >> 3) << 11) | ((uint16_t)((g) >> 2) << 5) | ((uint16_t)(b) >> 3))
 
-const char _themeNames[][32] PROGMEM = {"ehRadio Blue & Red", "ёRadio Gold", "Krzsiek Gray"};
+const char _themeNames[][32] PROGMEM = {
+    "ehRadio Blue & Red (Trip5)",
+    "ёRadio Gold (e2002)",
+    "Gray (Krzsiek)",
+    "Navy Blue (Rico van Dooren)",
+    "Golden Wind (András Daradici)",
+};
 
 const ThemeData _themes[] PROGMEM = {
-    {   // [0] Default
+    {   // ehRadio Blue & Red (Trip5)
         .background   = RGB(  0,   0,   0),
         .meta         = RGB(247, 247, 247),
         .metabg       = RGB(  0,  63, 207),
@@ -79,7 +85,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentfill= RGB(231,  23,   7),
         .playlist     = {RGB(231,231,231), RGB(199,199,199), RGB(167,167,167), RGB(135,135,135), RGB(103,103,103)},
     },
-    {   // [1] ёRadio
+    {   // ёRadio Gold (e2002)
         .background    = RGB(  0,   0,   0),
         .meta          = RGB(  0,   0,   0),
         .metabg        = RGB(231, 211,  90),
@@ -114,7 +120,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentfill = RGB(231, 211,  90),
         .playlist      = {RGB(115, 115, 115), RGB( 89,  89,  89), RGB( 56,  56,  56), RGB( 35,  35,  35), RGB( 25,  25,  25)},
     },
-    {   // [2] Krzsiek Gray (minor edit)
+    {   // Gray (Krzsiek)
         .background    = RGB(  0,   0,   0),
         .meta          = RGB(  0,   0,   0),
         .metabg        = RGB(255, 255, 255),
@@ -160,6 +166,78 @@ const ThemeData _themes[] PROGMEM = {
         // ??? COLOR_PRST_TITLE_2 = RGB(200, 200, 200)
         // ??? COLOR_PRST_TITLE_3 = RGB(150, 150, 150)
         // ??? COLOR_PRST_LINE = RGB(162, 162, 162)
+    },
+    {   // Navy Blue (Rico van Dooren)
+        .background    = RGB( 40,  40,  40),
+        .meta          = RGB(255, 255, 255),
+        .metabg        = RGB(  0,   0, 125),
+        .metafill      = RGB(  0,   0, 125),
+        .title1        = RGB(255, 255, 255),
+        .title2        = RGB(105, 105, 105),
+        .digit         = RGB(100, 100, 255),
+        .div           = RGB(255, 255, 255),
+        .weather       = RGB(105, 105, 105),
+        .vumax         = RGB(255, 255, 255),
+        .vumin         = RGB(  0,   0, 125),
+        .clock         = RGB(255, 255, 255),
+        .clockbg       = RGB(  0,   0,   0),
+        .seconds       = RGB(185, 185, 185),
+        .dow           = RGB(185, 185, 185),
+        .date          = RGB(185, 185, 185),
+        .clockss       = RGB(127, 127, 127), // needs fixing?
+        .clockbgss     = RGB( 19,  19,  19), // needs fixing?
+        .secondsss     = RGB( 92,  92,  92), // needs fixing?
+        .dowss         = RGB( 92,  92,  92), // needs fixing?
+        .datess        = RGB( 92,  92,  92), // needs fixing?
+        .buffer        = RGB(  0,   0, 105),
+        .ip            = RGB(255, 255, 255),
+        .vol           = RGB(255, 255, 255),
+        .rssi          = RGB(  0,   0, 125),
+        .battery       = RGB(  0,   0, 125), // needs fixing?
+        .bitrate       = RGB(  0,   0, 125),
+        .volbarout     = RGB(105, 105, 105),
+        .volbarin      = RGB(255, 255, 255),
+        .plcurrent     = RGB(  0,   0,   0),
+        .plcurrentbg   = RGB( 91, 118, 255),
+        .plcurrentfill = RGB( 91, 118, 255),
+        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        // ??? COLOR_HEAP = RGB(255, 168, 162)
+    },
+    {   // Golden Wind (András Daradici)
+        .background    = RGB(255, 177,   0),
+        .meta          = RGB(255, 255, 255),
+        .metabg        = RGB(195, 117,   0),
+        .metafill      = RGB(195, 117,   0),
+        .title1        = RGB(255, 255, 255),
+        .title2        = RGB(225, 225, 225),
+        .digit         = RGB(100, 100, 255),
+        .div           = RGB(255, 255, 255),
+        .weather       = RGB(255, 255, 255),
+        .vumax         = RGB(105,  27,   0),
+        .vumin         = RGB(195, 117,   0),
+        .clock         = RGB(249, 255, 255),
+        .clockbg       = RGB(195, 117,   0),
+        .seconds       = RGB(255, 255, 255),
+        .dow           = RGB(255, 255, 255),
+        .date          = RGB(255, 255, 255),
+        .clockss       = RGB(124, 127, 127), // needs fixing?
+        .clockbgss     = RGB( 18,  19,  19), // needs fixing?
+        .secondsss     = RGB(127, 127, 127), // needs fixing?
+        .dowss         = RGB(127, 127, 127), // needs fixing?
+        .datess        = RGB(127, 127, 127), // needs fixing?
+        .buffer        = RGB(195, 117,   0),
+        .ip            = RGB(255, 255, 255),
+        .vol           = RGB(  0,   0,   0),
+        .rssi          = RGB(195, 117,   0),
+        .battery       = RGB(195, 117,   0), // needs fixing?
+        .bitrate       = RGB(195, 117,   0),
+        .volbarout     = RGB(195, 117,   0),
+        .volbarin      = RGB(195, 117,   0),
+        .plcurrent     = RGB(255, 255, 255),
+        .plcurrentbg   = RGB(195, 117,   0),
+        .plcurrentfill = RGB(195, 117,   0),
+        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
 };
 

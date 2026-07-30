@@ -51,6 +51,7 @@ void setup() {
   controls.checkButtonsHeldOnBoot();  // check for hold-to-SD before network decision
   backlightControls.init();
   display.init();
+  startup.checkSpiffsandVer();
   player.init();
   battery.bootStatus();
   if ((network.offlineMode || config.store.SDoffline)) {

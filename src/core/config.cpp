@@ -94,20 +94,6 @@ void Config::init() {
   store.play_mode = store.play_mode & 0b11;
   if (store.play_mode>1) store.play_mode=PM_WEB;
   _initHW();
-  esp_log_level_set("SPIFFS", ESP_LOG_NONE); // Suppress ESP-IDF "SPIFFS: mount failed, -10025" on first boot.
-  bool spiffsReady = SPIFFS.begin(false); // Try mounting without formatting first; if that fails, format explicitly.
-  if (!spiffsReady) {
-    BOOTLOG("SPIFFS not formatted, formatting now (please be patient)...");
-    spiffsReady = SPIFFS.begin(true);
-  }
-  esp_log_level_set("SPIFFS", ESP_LOG_ERROR); // allow SPIFFS logging again
-  if (!spiffsReady) {
-    ERRORLOG("SPIFFS Mount Failed");
-    return;
-  }
-  BOOTLOG("SPIFFS mounted");
-  startup.checkVerAndSpiffs();
-
   #ifdef USE_SD
     _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&SPIFFS:_SDplaylistFS);
   #else

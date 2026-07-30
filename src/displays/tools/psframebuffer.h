@@ -123,7 +123,7 @@ class  psFrameBuffer : public Adafruit_GFX {
     void _writeGlyph(uint16_t cp) {
       const GFXfont *f = &DisplayFont;
       // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE.
-      // Must precede \n / \r checks so that \015 (BATTERY_HIGH, 0x0D = CR)
+      // Must precede \n / \r checks so that \015 (0x0D = CR)
       // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
         const uint8_t* const *table = ICON_TABLE;

@@ -585,7 +585,7 @@ void Display::updateProgress(const char* label, float progress) {
       int bars = (int)(progress * _updBarWidth + 0.5f);
       if (bars < 0) bars = 0;
       if (bars > _updBarWidth) bars = _updBarWidth;
-      const char barChar = '\x10'; // play icon is progress
+      const char barChar = '\016'; // play icon is progress
       char buf[68];
       memset(buf, barChar, bars);
       memset(buf + bars, ' ', _updBarWidth - bars); // empty space is empty space
@@ -805,8 +805,6 @@ void Display::_updateBattery() {
   #endif
 
   // 2-glyph 4-segment battery, RSSI-style
-  //   BATTERY_00=\013, BATTERY_10=\015, BATTERY_11=\016
-  //   BATTERY__00=\014, BATTERY__10=\017, BATTERY__11=\020
   static const char leftGlyphs[3]  = { '\013', '\015', '\016' }; // 0,1,2 segs
   static const char rightGlyphs[3] = { '\014', '\017', '\020' }; // 0,1,2 segs
 

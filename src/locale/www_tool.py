@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 """
-Scan data/www/*.html and *.js files for translation keys and compare with locale JSON.
+Scan data/www/*.html and *.js files and src/core/netserver.h for translation keys and compare with locale JSON.
 
 NOTE:
     Check .md files for how to install full translation support
@@ -313,7 +313,7 @@ def extract_keys_from_html_js(file_path):
 
 
 def scan_www_folder(www_path):
-    """Scan all .html and .js files in www folder."""
+    """Scan all .html and .js files in www folder, plus netserver.h for PROGMEM HTML."""
     all_keys = {}
     
     for filename in os.listdir(www_path):
@@ -327,6 +327,18 @@ def scan_www_folder(www_path):
                 else:
                     if filename not in all_keys[key]['files']:
                         all_keys[key]['files'].append(filename)
+    
+    # Also scan netserver.h for data-i18n keys in emptyfs_html PROGMEM string
+    netserver_h = os.path.join(www_path, '..', '..', 'src', 'core', 'netserver.h')
+    netserver_h = os.path.abspath(netserver_h)
+    if os.path.exists(netserver_h):
+        keys = extract_keys_from_html_js(netserver_h)
+        for key, text in keys.items():
+            if key not in all_keys:
+                all_keys[key] = {'text': text, 'files': ['netserver.h']}
+            else:
+                if 'netserver.h' not in all_keys[key]['files']:
+                    all_keys[key]['files'].append('netserver.h')
     
     return all_keys
 
@@ -519,6 +531,7 @@ def get_sort_priority(key):
         'btn_',      # 3
         'msg_',      # 4
         'unit_',     # 5
+        'z_',        # 6 — netserver emptyfs keys, always at bottom
     ]
     
     for i, prefix in enumerate(prefixes):

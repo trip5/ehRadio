@@ -22,6 +22,7 @@
 #include "telnet.h"
 #include "utility.h"
 #include "../locale/wwwlocale.h"
+#include "../locale/locale_js.h"
 #include "../locale/dsplocale.h"
 #include "../displays/dspcore.h"
 #include "../displays/dspfont.h"
@@ -191,13 +192,15 @@ char* updateError() {
 }
 
 void handleDynamicLocale(AsyncWebServerRequest *request) {
-  // Serve locale.json (gzip-compressed) from PROGMEM based on config.store.locale_webui
-  if (strcmp(config.store.locale_webui, HARDCODED_WEBUI_LOCALE) == 0) {
+  // Serve locale.json (gzip-compressed) from PROGMEM
+  // Uses ?l=XX query param if present, otherwise config.store.locale_webui
+  const char* localeCode = request->hasArg("l") ? request->arg("l").c_str() : config.store.locale_webui;
+  if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
     request->send(404); // No locale needed ??hardcoded text matches target language
     return;
   }
   for (uint8_t i = 0; i < WWW_LOCALE_COUNT; i++) {
-    if (strcmp_P(config.store.locale_webui, ((const char*)pgm_read_ptr(&www_locales[i].code))) == 0) {
+    if (strcmp_P(localeCode, ((const char*)pgm_read_ptr(&www_locales[i].code))) == 0) {
       uint16_t size = pgm_read_word(&www_locales[i].size);
       AsyncWebServerResponse *response = request->beginResponse(200, "application/json",
         (const uint8_t*)pgm_read_ptr(&www_locales[i].data), size);
@@ -370,6 +373,11 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/wwwlocale.json", HTTP_GET, handleWWWLocaleIndex);
   webserver.on("/dsplocale.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", dsplocale_index);
+  });
+  webserver.on("/locale.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", locale_js_gz, LOCALE_JS_GZ_SIZE);
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
   });
   webserver.on("/search", HTTP_GET, handleSearch);
   webserver.on("/search", HTTP_POST, handleSearchPost);
@@ -1631,6 +1639,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var onlineUpdCapable=%s;\n"
       "var newVerAvailable=%s;\n"
       "var updateUrl='%s';\n"
+      "var currentLocale='%s';\n"
       "var casetransform=%s;\n",
       escapedRadioVersion,
       (network.status == CONNECTED && config.wwwFilesExist) ? "webboard" : "",
@@ -1642,6 +1651,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       #endif
       (netserver.newVersionAvailable) ? "true" : "false",
       escapedGithubUrl,
+      config.store.locale_webui,
       #ifdef WWW_CASETRANSFORM
         "true"
       #else
@@ -1731,7 +1741,14 @@ void handleNotFound(AsyncWebServerRequest * request) {
 
 void handleIndex(AsyncWebServerRequest * request) {
   if (!config.wwwFilesExist) {
-    if (request->url()=="/" && request->method() == HTTP_GET) { request->send(200, "text/html", emptyfs_html); return; }
+    if (request->url()=="/" && request->method() == HTTP_GET) {
+      if (request->hasArg("l")) {
+        cmd.exec("locale_webui", request->arg("l").c_str(), 0, CommandSource::HttpUrl);
+        request->send(200, "text/html", emptyfs_html);
+        return;
+      }
+      request->send(200, "text/html", emptyfs_html); return;
+    }
     if (request->url()=="/" && request->method() == HTTP_POST) {
       if (request->arg("ssid")!="" && request->arg("pass")!="") {
         char buf[80];

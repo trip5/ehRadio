@@ -7,7 +7,7 @@
 class Startup {
 public:
   void deassertCsPins();
-  void checkVerAndSpiffs();
+  void checkSpiffsandVer();
   void initNetwork();
   void startupServices();
   void checkSafeMode();

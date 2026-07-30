@@ -290,6 +290,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 /* Pre-processed Text: Prefer ALL CAPS? Maybe all latin accents removed from your display? */
 // #define PRETEXT_ALLCAPS
 // #define PRETEXT_FOLDACCENT
+// #define PRETEXT_FOLDCYRILLIC
 
 /* If using PRETEXT_ALLCAPS, why not do the same to your WebUI? */
 // #define WWW_CASETRANSFORM

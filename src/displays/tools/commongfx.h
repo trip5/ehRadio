@@ -251,10 +251,20 @@ class DspCore: public yoDisplay {
             }
           }
           endWrite();
+        } else {
+          // Empty glyph slot — try fallback mapping
+          uint16_t mapped = checkFallbackGlyph(cp, f);
+          if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
+          // No fallback available — advance cursor by one space width so
+          // the missing glyph appears as a visible gap instead of being
+          // silently deleted (xAdvance is 0 for empty slots).
+          uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
+          cursor_x += (int16_t)spaceAdv * textsize_x;
+          return;
         }
         cursor_x += (int16_t)pgm_read_byte(&glyph->xAdvance) * textsize_x;
       } else {
-        uint16_t mapped = foldAccent(cp, f);
+        uint16_t mapped = checkFallbackGlyph(cp, f);
         if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
         // Unrenderable codepoint (not in font, no accent mapping).
         // Advance cursor by one character cell so scroll width stays

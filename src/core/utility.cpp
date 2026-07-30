@@ -382,7 +382,7 @@ void Utility::initPlaylist() {
 }
 
 bool Utility::cleanPlaylist() {
-  // Phase 1: Quick scan for blank lines or bare-LF (non-CRLF) line endings
+  // Phase 1: Scan for blank lines, bare LF, or invalid CSV format
   File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
   if (!playlist) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: playlist.csv not found, nothing to clean");
@@ -404,6 +404,16 @@ bool Utility::cleanPlaylist() {
       needsClean = true;
       break;
     }
+    // Check for invalid CSV format (must be tab-delimited: NAME\tURL\tOVOL)
+    {
+      char _name[STATION_FIELD_LENGTH] = {0};
+      char _url[STATION_FIELD_LENGTH] = {0};
+      int _ovol = 0;
+      if (!parseCSV(line.c_str(), _name, _url, _ovol)) {
+        needsClean = true;
+        break;
+      }
+    }
   }
   playlist.close();
 
@@ -413,7 +423,7 @@ bool Utility::cleanPlaylist() {
   }
 
   // Phase 2: Rewrite clean version with CRLF line endings
-  FUNCTIONLOG("Playlist", "cleanPlaylist: issues found, rewriting with CRLF endings...");
+  FUNCTIONLOG("Playlist", "cleanPlaylist: issues found, rewriting...");
   playlist = SPIFFS.open(PLAYLIST_PATH, "r");
   File tmpFile = SPIFFS.open(TMP_PATH, "w");
   if (!playlist || !tmpFile) {

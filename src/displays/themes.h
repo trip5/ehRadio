@@ -49,7 +49,6 @@ const char _themeNames[][64] PROGMEM = {
     "Golden Wind (András Daradici)",
     "Foresty (András Daradici)",
     "Colorful I (Levente Daradici)",
-    "Black and White (Levente Daradici)",
     "White and Black (Levente Daradici)",
     "Ocean (Levente Daradici)",
     "Pretty in Pink (Levente Daradici)",
@@ -246,7 +245,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(255, 255, 255),
         .plcurrentbg   = RGB(195, 117,   0),
         .plcurrentfill = RGB(195, 117,   0),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Foresty (András Daradici)
@@ -282,7 +281,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(  0,   0,   0), RGB( 45,  45,  45), RGB( 85,  85,  85), RGB(135, 135, 135), RGB(205, 205, 205)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Colorful I (Levente Daradici)
@@ -318,43 +317,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
-    },
-    {   // Black and White (Levente Daradici)
-        .background    = RGB( 30,  30,  30),
-        .meta          = RGB(255, 255, 255),
-        .metabg        = RGB(  0,   0,   0),
-        .metafill      = RGB(  0,   0,   0),
-        .title1        = RGB(255, 255, 255),
-        .title2        = RGB(  0,   0,   0),
-        .digit         = RGB(100, 100, 255),
-        .div           = RGB(238,   0,   0),
-        .weather       = RGB(255, 255, 255),
-        .vumax         = RGB(255,   0,   0),
-        .vumin         = RGB(255, 255, 255),
-        .clock         = RGB(249, 255, 255),
-        .clockbg       = RGB( 20,  20,  20),
-        .seconds       = RGB(255, 255, 255),
-        .dow           = RGB(  0,   0,   0),
-        .date          = RGB(  0,   0,   0),
-        .clockss       = RGB(124, 127, 127),
-        .clockbgss     = RGB( 18,  19,  19),
-        .secondsss     = RGB(127, 127, 127),
-        .dowss         = RGB( 30,  30,  30),
-        .datess        = RGB( 30,  30,  30),
-        .buffer        = RGB(  0,   0,   0),
-        .ip            = RGB(255, 255, 255),
-        .vol           = RGB(  0,   0,   0),
-        .rssi          = RGB(255, 238, 255),
-        .battery       = RGB(255, 238, 255),
-        .bitrate       = RGB(255, 255, 255),
-        .volbarout     = RGB(255, 255, 255),
-        .volbarin      = RGB(  0,   0,   0),
-        .plcurrent     = RGB(  0,   0,   0),
-        .plcurrentbg   = RGB( 91, 118, 255),
-        .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // White and Black (Levente Daradici)
@@ -390,7 +353,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(  0,   0,   0), RGB( 45,  45,  45), RGB( 85,  85,  85), RGB(135, 135, 135), RGB(205, 205, 205)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Ocean (Levente Daradici)
@@ -426,7 +389,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Pretty in Pink (Levente Daradici)
@@ -462,7 +425,8 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(255, 255, 255), RGB(235, 235, 235), RGB(210, 210, 210), RGB(170, 170, 170), RGB(135, 135, 135)},
+        
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Poison (András Daradici)
@@ -498,7 +462,7 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrent     = RGB(  0,   0,   0),
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
-        .playlist      = {RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255), RGB(255, 255, 255)},
+        .playlist      = {RGB(255, 255, 255), RGB(235, 235, 235), RGB(210, 210, 210), RGB(170, 170, 170), RGB(135, 135, 135)},
         // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Monochrome (András Daradici)

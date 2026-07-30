@@ -350,6 +350,7 @@
 // Transform:
 //#define PRETEXT_ALLCAPS
 //#define PRETEXT_FOLDACCENT
+//#define PRETEXT_FOLDCYRILLIC
 //#define WWW_CASETRANSFORM
 //#define CLOCKGLOW false
 //#define PLAYLIST_MODE_PAGED false

@@ -46,6 +46,7 @@ input[type=text],input[type=password]{width:170px;background:#272727;color:#eecc
 @media screen and (max-width:480px) {section{zoom:0.7;-moz-transform:scale(0.7);}}
 </style>
 <script type="text/javascript" src="/variables.js"></script>
+<script type="text/javascript" src="/locale.js"></script>
 </head><body>
 <section>
 <div id="uploader">
@@ -118,9 +119,10 @@ const char index_html[] PROGMEM = R"(
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="stylesheet" id="themeCSS" href="theme.css" type="text/css" />
   <link rel="stylesheet" id="styleCSS" href="style.css" type="text/css" />
-  <script type="text/javascript" src="variables.js"></script>
-  <script type="text/javascript" src="script.js"></script>
-  <script type="text/javascript" src="script2.js"></script>
+  <script type="text/javascript" src="/variables.js"></script>
+  <script type="text/javascript" src="/locale.js"></script>
+  <script type="text/javascript" src="/script.js"></script>
+  <script type="text/javascript" src="/script2.js"></script>
   </head>
 <body>
 <div id="content" class="hidden progmem"></div><!--content--><div id="progress"><span id="loader"></span></div>

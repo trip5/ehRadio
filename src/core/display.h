@@ -66,8 +66,8 @@ class Display {
     ScrollWidget *_meta = nullptr, *_title1 = nullptr, *_plcurrent = nullptr, *_weather = nullptr, *_title2 = nullptr;
     PlayListWidget *_plwidget = nullptr;
     #ifdef UPDATEURL
-      TextWidget *_updLabel = nullptr, *_updValue = nullptr;
-      WidgetConfig _updConf;           // keep a copy of the label's configuration
+      ScrollWidget *_updLabel = nullptr;
+      TextWidget *_updValue = nullptr;
       bool _updFirstCall = true;
       int _updBarWidth = 10;
     #endif

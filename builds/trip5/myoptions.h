@@ -326,10 +326,10 @@
 //#define GITHUBURL "https://github.com/myid/ehradio" // used by the radio to update firmware and files...
 
 /* Disable automatic runtime downloads from GitHub (ESPFileUpdater) for this board only. */
-//#define DISABLE_UPDATER
+//#undef ENABLE_UPDATER // disables OTA updates
 
 /* --- Locales Notes --- */
-#define DSP_LOCALE "de_DE" // sets the display language - see the available options by checking files in locale/display folder 
+//#define DSP_LOCALE "de_DE" // sets the display language - see the available options by checking files in locale/display folder 
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */

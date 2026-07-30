@@ -296,7 +296,7 @@ void Display::_apScreen() {
       mbg = config.store.inverttitle ? config.theme.metafill : config.theme.metabg;
     #endif
     ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", _bootConfig.apTitleConf, mfg, mbg));
-    bootTitle->setText("AP/Improv Mode");
+    bootTitle->setText(l10n(L10N_LBL_AP_IMPROV_MODE));
     TextWidget *apname = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.apNameConf, 30, false, config.theme.title1, config.theme.background));
     apname->setText(l10n(L10N_LBL_APNAME));
     TextWidget *apname2 = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.apName2Conf, 30, false, config.theme.clock, config.theme.background));
@@ -508,7 +508,7 @@ void Display::_swichMode(displayMode_e newmode) {
       _updFirstCall = true;
     #endif
   }
-  if (newmode == SLEEPING)  _showDialog("SLEEPING");
+  if (newmode == SLEEPING)  _showDialog(l10n(L10N_LBL_SLEEPING));
   if (newmode == SDCHANGE)  _showDialog(l10n(L10N_LBL_WAITFORSD));
   if (newmode == INFO || newmode == SETTINGS || newmode == TIMEZONE || newmode == WIFI) _showDialog("");
   if (newmode == NUMBERS) _showDialog("");

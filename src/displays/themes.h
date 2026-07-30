@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+// Theme Designer: https://vip-cxema.org/index.php/online-kalkulyatory/yoradio-redaktor-tem
+// Can mostly be used to feed the importtheme.py script but the clock screensaver colors
+// will need manual adjustment: clockss, clockbgss, secondsss, dowss, datess
+
 struct ThemeData {
   uint16_t background;
   uint16_t meta;
@@ -199,18 +203,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 10,  10,  10),
         .plcurrentfill = RGB( 10,  10,  10),
         .playlist      = {RGB(115, 115, 115), RGB( 89,  89,  89), RGB( 56,  56,  56), RGB( 35,  35,  35), RGB( 25,  25,  25)},
-        // ??? COLOR_NAMEDAY = RGB(200, 200, 200)
-        // ??? COLOR_VU_MID = RGB(200, 200, 200)
-        // ??? COLOR_CH = RGB(162, 162, 162)
-        // ??? COLOR_HEAP = RGB(41, 40, 41)
-        // ??? COLOR_PRST_BUTTON = RGB(21, 21, 21)
-        // ??? COLOR_PRST_CARD = RGB(21, 21, 21)
-        // ??? COLOR_PRST_ACCENT = RGB(50, 50, 50)
-        // ??? COLOR_PRST_FAV = RGB(255, 255, 255)
-        // ??? COLOR_PRST_TITLE_1 = RGB(255, 255, 255)
-        // ??? COLOR_PRST_TITLE_2 = RGB(200, 200, 200)
-        // ??? COLOR_PRST_TITLE_3 = RGB(150, 150, 150)
-        // ??? COLOR_PRST_LINE = RGB(162, 162, 162)
     },
     {   // Golden Wind (András Daradici)
         .background    = RGB(255, 177,   0),
@@ -246,7 +238,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB(195, 117,   0),
         .plcurrentfill = RGB(195, 117,   0),
         .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Foresty (András Daradici)
         .background    = RGB(  0, 255,   0),
@@ -282,7 +273,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(  0,   0,   0), RGB( 45,  45,  45), RGB( 85,  85,  85), RGB(135, 135, 135), RGB(205, 205, 205)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Colorful I (Levente Daradici)
         .background    = RGB(  0,   0,   0),
@@ -318,7 +308,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // White and Black (Levente Daradici)
         .background    = RGB(255, 255, 255),
@@ -354,7 +343,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(  0,   0,   0), RGB( 45,  45,  45), RGB( 85,  85,  85), RGB(135, 135, 135), RGB(205, 205, 205)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Ocean (Levente Daradici)
         .background    = RGB(  0,   0,  91),
@@ -390,7 +378,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Pretty in Pink (Levente Daradici)
         .background    = RGB(195,   0, 195),
@@ -426,8 +413,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(255, 255, 255), RGB(235, 235, 235), RGB(210, 210, 210), RGB(170, 170, 170), RGB(135, 135, 135)},
-        
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Poison (András Daradici)
         .background    = RGB( 99,  50, 130),
@@ -463,7 +448,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB( 91, 118, 255),
         .plcurrentfill = RGB( 91, 118, 255),
         .playlist      = {RGB(255, 255, 255), RGB(235, 235, 235), RGB(210, 210, 210), RGB(170, 170, 170), RGB(135, 135, 135)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // Monochrome (András Daradici)
         .background    = RGB(  0,   0,   0),
@@ -499,7 +483,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB(165, 165, 165),
         .plcurrentfill = RGB(165, 165, 165),
         .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // UltraPerfect (András Daradici)
         .background    = RGB( 68,   0,   0),
@@ -535,7 +518,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB(189, 130,   0),
         .plcurrentfill = RGB(189, 130,   0),
         .playlist      = {RGB(255, 255, 255), RGB(205, 205, 205), RGB(135, 135, 135), RGB( 85,  85,  85), RGB( 45,  45,  45)},
-        // ??? COLOR_HEAP = RGB(255, 168, 162)
     },
     {   // vip-cxema.org
         .background    = RGB(  0,   0,   0),
@@ -571,7 +553,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentbg   = RGB(  0,   0,   0),
         .plcurrentfill = RGB(  0,   0,   0),
         .playlist      = {RGB(165, 165, 165), RGB(145, 145, 145), RGB(120, 120, 120), RGB(100, 100, 100), RGB( 80,  80,  80)},
-        // ??? COLOR_HEAP = RGB(255, 0, 0)
     },
 };
 

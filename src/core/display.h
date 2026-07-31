@@ -119,6 +119,8 @@ class Display {
     void flip() {}
     void applyLayout(uint8_t) {}
     uint8_t getLayoutCount() { return 1; }
+    String getThemeListJson()  { return "[]"; }
+    String getLayoutListJson() { return "[]"; }
     void applyTheme(uint8_t) {}
     uint8_t getThemeCount() { return 1; }
     void applyInvertTitle() {}

@@ -1,5 +1,5 @@
 [ { "title": "Firmware File",
-    "info": "Give your build a name!" },
+    "info": "Give your build a name!\n\nDo not use short words like: check, data, debug, error, mode, name, ok, run, state, status, test, type, value!" },
   {
     "name": "Your ehRadio's Name",
     "defines": [

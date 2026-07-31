@@ -34,6 +34,7 @@ Display display;
 
 // Layout switching — pointers initially point to PROGMEM defaults
 LayoutData activeLayout;
+#ifndef DUMMYDISPLAY
 const ScrollConfig*   metaConf_ptr        = &_layouts[0].metaConf;
 const ScrollConfig*   title1Conf_ptr      = &_layouts[0].title1Conf;
 const ScrollConfig*   title2Conf_ptr      = &_layouts[0].title2Conf;
@@ -59,6 +60,33 @@ const MoveConfig*     weatherMove_ptr     = &_layouts[0].weatherMove;
 const MoveConfig*     weatherMoveVU_ptr   = &_layouts[0].weatherMoveVU;
 const bool*           boomboxStyle_ptr    = &activeLayout.boomboxStyle;
 uint8_t layoutCount = (sizeof(_layoutNames) / sizeof(_layoutNames[0]));
+#else
+const ScrollConfig*   metaConf_ptr        = nullptr;
+const ScrollConfig*   title1Conf_ptr      = nullptr;
+const ScrollConfig*   title2Conf_ptr      = nullptr;
+const ScrollConfig*   playlistConf_ptr    = nullptr;
+const ScrollConfig*   weatherConf_ptr     = nullptr;
+const FillConfig*     metaBGConf_ptr      = nullptr;
+const FillConfig*     metaBGConfInv_ptr   = nullptr;
+const FillConfig*     volbarConf_ptr      = nullptr;
+const FillConfig*     playlBGConf_ptr     = nullptr;
+const FillConfig*     bufferbarConf_ptr   = nullptr;
+const WidgetConfig*   bitrateConf_ptr     = nullptr;
+const WidgetConfig*   voltxtConf_ptr      = nullptr;
+const WidgetConfig*   batteryConf_ptr     = nullptr;
+const WidgetConfig*   iptxtConf_ptr       = nullptr;
+const WidgetConfig*   rssiConf_ptr        = nullptr;
+const WidgetConfig*   numConf_ptr         = nullptr;
+const WidgetConfig*   clockConf_ptr       = nullptr;
+const WidgetConfig*   vuConf_ptr          = nullptr;
+const BitrateConfig*  fullbitrateConf_ptr = nullptr;
+const VUBandsConfig*  bandsConf_ptr       = nullptr;
+const MoveConfig*     clockMove_ptr       = nullptr;
+const MoveConfig*     weatherMove_ptr     = nullptr;
+const MoveConfig*     weatherMoveVU_ptr   = nullptr;
+const bool*           boomboxStyle_ptr    = nullptr;
+uint8_t layoutCount = 0;
+#endif
 
 QueueHandle_t displayQueue;
 

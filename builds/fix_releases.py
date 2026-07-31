@@ -151,26 +151,27 @@ def generate_releases_md(firmwares, url_map, output_path):
             continue
 
         # Contributor section header
-        m = re.match(r'^###\s+(\w+)\s+Firmware\s*$', line)
+        m = re.match(r'^###\s+(.+?)\s+Firmware\s*$', line)
         if m:
             key = m.group(1).lower()
-            seen_contributors.add(key)
             i += 1
             # Skip existing entry lines
             while i < len(lines) and lines[i].strip().startswith('- '):
                 i += 1
-            if key in by_contributor:
-                disp = display_name[key]
-                new_lines.append(f'### {disp} Firmware\n')
-                for fw_env, _ in by_contributor[key]:
-                    filename = f'{fw_env}.bin'
-                    if fw_env in url_map:
-                        new_lines.append(f'  - [`{filename}`]({url_map[fw_env]})\n')
-                    else:
-                        new_lines.append(f'  - `{filename}`\n')
-                print(f'[OK] Updated {disp} Firmware section ({len(by_contributor[key])} entries)')
-            else:
-                print(f'[!] No firmware for {m.group(1)} -- section removed')
+            if key not in seen_contributors:
+                seen_contributors.add(key)
+                if key in by_contributor:
+                    disp = display_name[key]
+                    new_lines.append(f'### {disp} Firmware\n')
+                    for fw_env, _ in by_contributor[key]:
+                        filename = f'{fw_env}.bin'
+                        if fw_env in url_map:
+                            new_lines.append(f'  - [`{filename}`]({url_map[fw_env]})\n')
+                        else:
+                            new_lines.append(f'  - `{filename}`\n')
+                    print(f'[OK] Updated {disp} Firmware section ({len(by_contributor[key])} entries)')
+                else:
+                    print(f'[!] No firmware for {m.group(1)} -- section removed')
             continue
 
         new_lines.append(line)

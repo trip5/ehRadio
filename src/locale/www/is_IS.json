@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Þetta mun endurræsa tækið.",
   "lbl_dz_reset_msg": "Þetta mun endurstilla öll stillingar á sjálfgefnar.",
   "lbl_dz_unlock": "Kveikja alla rofa til að opna",
+  "lbl_eh_discovery": "eh Discovery-prótókollið",
   "lbl_ehdp_name": "ehDP nafn",
   "lbl_enable_dimming": "Kveikja á dimmun",
   "lbl_enable_mqtt": "Virkja MQTT",

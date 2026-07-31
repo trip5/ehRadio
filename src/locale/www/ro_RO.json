@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Aceasta va reporni dispozitivul.",
   "lbl_dz_reset_msg": "Aceasta va readuce toate setările la valorile implicite.",
   "lbl_dz_unlock": "Activează toate comutatoarele pentru a debloca",
+  "lbl_eh_discovery": "eh Protocolul Discovery",
   "lbl_ehdp_name": "Nume ehDP",
   "lbl_enable_dimming": "Activați Dimming",
   "lbl_enable_mqtt": "Activează MQTT",

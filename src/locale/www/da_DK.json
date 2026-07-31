@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Dette vil genstarte enheden.",
   "lbl_dz_reset_msg": "Dette vil nulstille alle indstillinger til standard.",
   "lbl_dz_unlock": "Tænd alle kontakter for at låse op",
+  "lbl_eh_discovery": "eh Discovery-protokollen",
   "lbl_ehdp_name": "ehDP Navn",
   "lbl_enable_dimming": "Aktivér dæmpning",
   "lbl_enable_mqtt": "Aktivér MQTT",

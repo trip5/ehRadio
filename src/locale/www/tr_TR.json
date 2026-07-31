@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Bu cihazı yeniden başlatacaktır.",
   "lbl_dz_reset_msg": "Bu, tüm ayarları varsayılana döndürecektir.",
   "lbl_dz_unlock": "Kilidi açmak için tüm anahtarları açın",
+  "lbl_eh_discovery": "eh Discovery Protokolü",
   "lbl_ehdp_name": "ehDP Adı",
   "lbl_enable_dimming": "Karartmayı Etkinleştir",
   "lbl_enable_mqtt": "MQTT etkinleştir",

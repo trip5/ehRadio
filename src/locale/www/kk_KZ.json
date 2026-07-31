@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Бұл құрылғыны қайта іске қосады.",
   "lbl_dz_reset_msg": "Бұл барлық параметрлерді әдепкіге қайтарады.",
   "lbl_dz_unlock": "Ашу үшін барлық қосқыштарды қосыңыз",
+  "lbl_eh_discovery": "эһ Дискавери протоколы",
   "lbl_ehdp_name": "ehDP атауы",
   "lbl_enable_dimming": "Жарықтықты төмендетуді қосу",
   "lbl_enable_mqtt": "MQTT қосу",

@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Ez újraindítja az eszközt.",
   "lbl_dz_reset_msg": "Ez visszaállítja az összes beállítást az alapértelmezett értékekre.",
   "lbl_dz_unlock": "Kapcsolja be az összes kapcsolót a feloldáshoz",
+  "lbl_eh_discovery": "eh Discovery Protocol",
   "lbl_ehdp_name": "ehDP név",
   "lbl_enable_dimming": "Dimmelés engedélyezése",
   "lbl_enable_mqtt": "MQTT engedélyezése",

@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "これによりデバイスが再起動します。",
   "lbl_dz_reset_msg": "これによりすべての設定がデフォルトにリセットされます。",
   "lbl_dz_unlock": "すべてのスイッチをオンにしてロック解除",
+  "lbl_eh_discovery": "えー、ディスカバリー・プロトコル",
   "lbl_ehdp_name": "ehDP名",
   "lbl_enable_dimming": "調光を有効にする",
   "lbl_enable_mqtt": "MQTT を有効にする",

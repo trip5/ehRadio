@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Ovo će ponovo pokrenuti uređaj.",
   "lbl_dz_reset_msg": "Ovo će vratiti sve postavke na zadane vrijednosti.",
   "lbl_dz_unlock": "Pritisnite sve prekidače da biste otključali.",
+  "lbl_eh_discovery": "eh Discovery protokol",
   "lbl_ehdp_name": "ehDP ime",
   "lbl_enable_dimming": "Omogući prigušivanje",
   "lbl_enable_mqtt": "Omogući MQTT",

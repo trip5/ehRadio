@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "This will reboot the device.",
   "lbl_dz_reset_msg": "This will reset all settings to defaults.",
   "lbl_dz_unlock": "Turn on all switches to unlock",
+  "lbl_eh_discovery": "eh Discovery Protocol",
   "lbl_ehdp_name": "ehDP Name",
   "lbl_enable_dimming": "Enable Dimming",
   "lbl_enable_mqtt": "Enable MQTT",

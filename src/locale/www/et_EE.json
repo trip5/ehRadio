@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "See taaskäivitab seadme.",
   "lbl_dz_reset_msg": "See taastab kõik sätted vaikeseadistustele.",
   "lbl_dz_unlock": "Lülitage kõik lülitid, et avada",
+  "lbl_eh_discovery": "eh Discovery-protokoll",
   "lbl_ehdp_name": "ehDP nimi",
   "lbl_enable_dimming": "Lülita timmimine sisse",
   "lbl_enable_mqtt": "Luba MQTT",

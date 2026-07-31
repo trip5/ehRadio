@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Questo riavvier? il dispositivo.",
   "lbl_dz_reset_msg": "Questo ripristiner? tutte le impostazioni ai valori predefiniti.",
   "lbl_dz_unlock": "Attiva tutti gli interruttori per sbloccare",
+  "lbl_eh_discovery": "eh Protocollo Discovery",
   "lbl_ehdp_name": "Nome ehDP",
   "lbl_enable_dimming": "Abilitazione della regolazione della luminosità",
   "lbl_enable_mqtt": "Abilita MQTT",

@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Бул түзмөктү кайра жүктөйт.",
   "lbl_dz_reset_msg": "Бул бардык параметрлерди демейки абалга кайтарат.",
   "lbl_dz_unlock": "Ачуу үчүн бардык которгучтарды күйгүзүңүз",
+  "lbl_eh_discovery": "ээ Изилдөө протоколу",
   "lbl_ehdp_name": "ehDP Аты",
   "lbl_enable_dimming": "Жарыкты жөндөөнү күйгүзүү",
   "lbl_enable_mqtt": "MQTTди күйгүзүү",

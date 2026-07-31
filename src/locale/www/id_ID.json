@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Ini akan mem-reboot perangkat.",
   "lbl_dz_reset_msg": "Ini akan mereset semua pengaturan ke default.",
   "lbl_dz_unlock": "Turn on all switches to unlock",
+  "lbl_eh_discovery": "eh, Discovery Protocol",
   "lbl_ehdp_name": "Nama ehDP",
   "lbl_enable_dimming": "Aktifkan Peredupan",
   "lbl_enable_mqtt": "Enable MQTT",

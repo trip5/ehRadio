@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Tai perkraus įrenginį.",
   "lbl_dz_reset_msg": "Tai atkurs visus nustatymus į numatytuosius.",
   "lbl_dz_unlock": "Įjunkite visus jungiklius, kad atrakintumėte",
+  "lbl_eh_discovery": "eh „Discovery“ protokolas",
   "lbl_ehdp_name": "ehDP pavadinimas",
   "lbl_enable_dimming": "Įjungti užtamsinimą",
   "lbl_enable_mqtt": "Įjungti MQTT",

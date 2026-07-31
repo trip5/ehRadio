@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "장치가 재부팅됩니다.",
   "lbl_dz_reset_msg": "모든 설정이 기본값으로 초기화됩니다.",
   "lbl_dz_unlock": "모든 스위치를 켜서 잠금 해제",
+  "lbl_eh_discovery": "에~ 디스커버리 프로토콜",
   "lbl_ehdp_name": "ehDP 이름",
   "lbl_enable_dimming": "디밍 활성화",
   "lbl_enable_mqtt": "MQTT 활성화",

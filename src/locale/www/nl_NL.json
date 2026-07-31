@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Dit zal het apparaat opnieuw opstarten.",
   "lbl_dz_reset_msg": "Dit zal alle instellingen terugzetten naar de standaardwaarden.",
   "lbl_dz_unlock": "Schakel alle schakelaars in om te ontgrendelen",
+  "lbl_eh_discovery": "eh Discovery-protocol",
   "lbl_ehdp_name": "ehDP Naam",
   "lbl_enable_dimming": "Dimmen inschakelen",
   "lbl_enable_mqtt": "MQTT inschakelen",

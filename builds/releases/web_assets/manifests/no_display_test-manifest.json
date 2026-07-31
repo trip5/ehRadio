@@ -1,5 +1,5 @@
 {
-  "name": "ehRadio - Color Screen with 1-Button",
+  "name": "ehRadio - No Display Test",
   "version": "2026.07.31",
   "funding_url": "https://github.com/sponsors/trip5",
   "builds": [
@@ -15,7 +15,7 @@
           "offset": 32768
         },
         {
-          "path": "../firmware/trip5_st7735_pcm_1button.bin",
+          "path": "../firmware/no_display_test.bin",
           "offset": 65536
         }
       ]

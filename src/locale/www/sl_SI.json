@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "To bo znova zagnalo napravo.",
   "lbl_dz_reset_msg": "To bo ponastavilo vse nastavitve na privzete.",
   "lbl_dz_unlock": "Vključite vse stikalke za odklepanje",
+  "lbl_eh_discovery": "eh Protokol Discovery",
   "lbl_ehdp_name": "Ime ehDP",
   "lbl_enable_dimming": "Omogoči zatemnitev",
   "lbl_enable_mqtt": "Omogoči MQTT",

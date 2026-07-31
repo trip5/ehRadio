@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Detta kommer att starta om enheten.",
   "lbl_dz_reset_msg": "Detta återställer alla inställningar till standard.",
   "lbl_dz_unlock": "Slå på alla omkopplare för att låsa upp",
+  "lbl_eh_discovery": "eh Discovery-protokollet",
   "lbl_ehdp_name": "ehDP Namn",
   "lbl_enable_dimming": "Aktivera dimning",
   "lbl_enable_mqtt": "Aktivera MQTT",

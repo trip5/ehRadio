@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "To spowoduje restart urządzenia.",
   "lbl_dz_reset_msg": "To przywróci wszystkie ustawienia do domyślnych.",
   "lbl_dz_unlock": "Włącz wszystkie przełączniki, aby odblokować",
+  "lbl_eh_discovery": "eh Protokół Discovery",
   "lbl_ehdp_name": "Nazwa ehDP",
   "lbl_enable_dimming": "Włącz ściemnianie",
   "lbl_enable_mqtt": "Włącz MQTT",

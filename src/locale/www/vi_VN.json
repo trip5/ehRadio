@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Điều này sẽ khởi động lại thiết bị.",
   "lbl_dz_reset_msg": "Điều này sẽ đặt lại tất cả cài đặt về mặc định.",
   "lbl_dz_unlock": "Bật tất cả công tắc để mở khóa",
+  "lbl_eh_discovery": "eh Giao thức Discovery",
   "lbl_ehdp_name": "Tên ehDP",
   "lbl_enable_dimming": "Bật chế độ điều chỉnh độ sáng",
   "lbl_enable_mqtt": "Bật MQTT",

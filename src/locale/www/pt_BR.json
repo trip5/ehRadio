@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Isso reiniciará o dispositivo.",
   "lbl_dz_reset_msg": "Isso redefinirá todas as configurações para os padrões.",
   "lbl_dz_unlock": "Turn on all switches to unlock",
+  "lbl_eh_discovery": "Protocolo de Descoberta, né?",
   "lbl_ehdp_name": "Nome do ehDP",
   "lbl_enable_dimming": "Ativar escurecimento",
   "lbl_enable_mqtt": "Enable MQTT",

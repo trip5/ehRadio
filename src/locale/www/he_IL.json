@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "זה יאתחל את המכשיר.",
   "lbl_dz_reset_msg": "זה יאפס את כל ההגדרות לברירת מחדל.",
   "lbl_dz_unlock": "הפעל את כל המתגים לביטול נעילה",
+  "lbl_eh_discovery": "אה, פרוטוקול דיסקברי",
   "lbl_ehdp_name": "שם ehDP",
   "lbl_enable_dimming": "הפעל עמעום",
   "lbl_enable_mqtt": "הפעל MQTT",

@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Dies wird das Gerät neu starten.",
   "lbl_dz_reset_msg": "Dies wird alle Einstellungen auf Standard zurücksetzen.",
   "lbl_dz_unlock": "Alle Schalter einschalten zum Entsperren",
+  "lbl_eh_discovery": "äh, Discovery-Protokoll",
   "lbl_ehdp_name": "ehDP Name",
   "lbl_enable_dimming": "Dimmen einschalten",
   "lbl_enable_mqtt": "MQTT aktivieren",

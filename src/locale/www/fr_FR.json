@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Ceci va redémarrer l'appareil.",
   "lbl_dz_reset_msg": "Ceci va réinitialiser tous les paramètres par défaut.",
   "lbl_dz_unlock": "Activez tous les interrupteurs pour déverrouiller",
+  "lbl_eh_discovery": "Protocole « eh Discovery »",
   "lbl_ehdp_name": "Nom de l'ehDP",
   "lbl_enable_dimming": "Activer la gradation",
   "lbl_enable_mqtt": "Activer MQTT",

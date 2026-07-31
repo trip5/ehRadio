@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Tämä käynnistää laitteen uudelleen.",
   "lbl_dz_reset_msg": "Tämä palauttaa kaikki asetukset oletusarvoihin.",
   "lbl_dz_unlock": "Kytke kaikki kytkimet avataksesi",
+  "lbl_eh_discovery": "eh Discovery-protokolla",
   "lbl_ehdp_name": "ehDP Nimi",
   "lbl_enable_dimming": "Ota himmennys käyttöön",
   "lbl_enable_mqtt": "Ota MQTT käyttöön",

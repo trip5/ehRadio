@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Toto reštartuje zariadenie.",
   "lbl_dz_reset_msg": "Toto obnoví všetky nastavenia na predvolené.",
   "lbl_dz_unlock": "Zapnite všetky prepínače na odomknutie",
+  "lbl_eh_discovery": "eh Protokol Discovery",
   "lbl_ehdp_name": "Názov ehDP",
   "lbl_enable_dimming": "Povolenie stmievania",
   "lbl_enable_mqtt": "Povoliť MQTT",

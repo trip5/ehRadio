@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.07.20"
+#define RADIOVERSION "2026.07.31"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.

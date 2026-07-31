@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Це перезапустить пристрій.",
   "lbl_dz_reset_msg": "Це відновить усі налаштування за замовчуванням.",
   "lbl_dz_unlock": "Увімкніть всі перемикачі, щоб розблокувати",
+  "lbl_eh_discovery": "eh Протокол Discovery",
   "lbl_ehdp_name": "ehDP Назва",
   "lbl_enable_dimming": "Увімкнути затемнення",
   "lbl_enable_mqtt": "Увімкнути MQTT",

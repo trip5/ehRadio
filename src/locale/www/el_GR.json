@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Αυτό θα επανεκκινήσει τη συσκευή.",
   "lbl_dz_reset_msg": "Αυτό θα επαναφέρει όλες τις ρυθμίσεις στις προεπιλογές.",
   "lbl_dz_unlock": "Ενεργοποιήστε όλους τους διακόπτες για ξεκλείδωμα",
+  "lbl_eh_discovery": "eh Πρωτόκολλο Discovery",
   "lbl_ehdp_name": "Όνομα ehDP",
   "lbl_enable_dimming": "Ενεργοποίηση εξασθένισης",
   "lbl_enable_mqtt": "Ενεργοποίηση MQTT",

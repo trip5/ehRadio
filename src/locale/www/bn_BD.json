@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "এটি ডিভাইসটি রিবুট করবে।",
   "lbl_dz_reset_msg": "এটি সমস্ত সেটিংস ডিফল্টে রিসেট করবে।",
   "lbl_dz_unlock": "সব সুইচ চালু করুন আনলক করতে",
+  "lbl_eh_discovery": "এহ ডিসকভারি প্রোটোকল",
   "lbl_ehdp_name": "ehDP নাম",
   "lbl_enable_dimming": "ডিমিং সক্ষম করুন",
   "lbl_enable_mqtt": "MQTT সক্ষম করুন",

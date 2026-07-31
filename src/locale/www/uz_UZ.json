@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Bu qurilmani qayta ishga tushiradi.",
   "lbl_dz_reset_msg": "Bu barcha sozlamalarni standart holatga qaytaradi.",
   "lbl_dz_unlock": "O'chirish uchun barcha kalitlarni yoqing",
+  "lbl_eh_discovery": "eh Kashfiyot Protokol",
   "lbl_ehdp_name": "ehDP nomi",
   "lbl_enable_dimming": "Yoritishni so'ndirishni yoqish",
   "lbl_enable_mqtt": "MQTT ni yoqish",

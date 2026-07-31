@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "Tas restartēs ierīci.",
   "lbl_dz_reset_msg": "Tas atiestatīs visus iestatījumus uz noklusējumu.",
   "lbl_dz_unlock": "Ieslēdziet visus slēdžus, lai atslēgtu",
+  "lbl_eh_discovery": "eh „Discovery” protokols",
   "lbl_ehdp_name": "ehDP nosaukums",
   "lbl_enable_dimming": "Ieslēgt aptumšošanu",
   "lbl_enable_mqtt": "Ieslēgt MQTT",

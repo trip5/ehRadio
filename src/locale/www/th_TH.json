@@ -52,6 +52,7 @@
   "lbl_dz_reboot_msg": "การดำเนินการนี้จะรีบูตอุปกรณ์",
   "lbl_dz_reset_msg": "การดำเนินการนี้จะรีเซ็ตการตั้งค่าทั้งหมดเป็นค่าเริ่มต้น",
   "lbl_dz_unlock": "เปิดสวิตช์ทั้งหมดเพื่อปลดล็อก",
+  "lbl_eh_discovery": "eh Discovery Protocol",
   "lbl_ehdp_name": "ehDP ชื่อ",
   "lbl_enable_dimming": "เปิดใช้งานการปรับความสว่าง",
   "lbl_enable_mqtt": "เปิดใช้งาน MQTT",

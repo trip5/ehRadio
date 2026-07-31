@@ -472,11 +472,21 @@ SD reader modules like this are cheap and work well. Some come with a power regu
 
 ![image](images/hardware/sdreader.jpg) ![image](images/hardware/sdreader2.jpg)
 
-The [SD Offline mode](README.md#sd-offline-mode) should be considered as a "fallback because wi-fi is not available" mode, not a primary playback mode.
-
 It is recommended to encode files on SD card using MP3 at a constant bit rate of 256kbps or less
 to avoid system stress and get maximum compatibility with the decoders.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
+
+### SD Offline Mode
+
+The [SD Offline mode](README.md#sd-offline-mode) should be considered as a "fallback because wi-fi is not available" mode, not a primary playback mode.
+
+By default, all buttons and encoder switches can be used to enter this mode on boot.
+If you wish to use a special pin, add something like `#define SDOFFLINE_BTN 2` or `#define SDOFFLINE_BTN BTN_DOWN` to `myoptions.h`.
+
+`TS_INT` cannot be used for this purpose as the touchscreen leaves it floating at boot.
+
+Remember that certain GPIOs may cause issues if held while powering-up (so best not to attach buttons to `GPIO0` or `GPIO3`).
+Most users will not remember the difference between "shortly after power-up" and "during power-up".
 
 ---
 

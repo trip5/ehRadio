@@ -8,49 +8,73 @@
 #define TFT_FRAMEWDT    0
 #define MAX_WIDTH       16
 #define PLMITEMS        2
-
-#define HIDE_IP
-#define HIDE_TITLE2
-#define HIDE_VOL
-#define HIDE_VOLBAR
-#define HIDE_BUFFERBAR
-#define HIDE_RSSI
-#define HIDE_VU
-#define HIDE_WEATHER
-#define HIDE_BATTERY
 #define META_MOVE
-
 #define BOOTLOGOTOP     0
 
-/* SCROLLS  */                           /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
-// SDELTA removed - using SCROLLDELTA from dspconf.h
-// STIME removed - using SCROLLTIME from dspconf.h
-const ScrollConfig metaConf       PROGMEM = {{ 0, 0, 1, WA_LEFT }, 140, true, MAX_WIDTH-6, SCROLLDELAY, 2, SCROLLTIME };
-const ScrollConfig title1Conf     PROGMEM = {{ 0, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-4, SCROLLDELAY, 2, SCROLLTIME };
-const ScrollConfig playlistConf   PROGMEM = {{ 1, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-1, SCROLLDELAY, 2, SCROLLTIME };
+const BootData _bootConfig PROGMEM = {
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .apTitleConf         = { }, // unused
+        .apSettConf          = { }, // unused
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bootstrConf         = { 0, 0, 1, WA_CENTER },
+        .apNameConf          = { }, // unused
+        .apName2Conf         = { }, // unused
+        .apPassConf          = { }, // unused
+        .apPass2Conf         = { }, // unused
+        .bootWdtConf         = { 0, 1, 1, WA_CENTER },
+        .bootPrgConf         = { 250, 10, 4 },
+};
 
-/* WIDGETS  */                           /* { left, top, fontsize, align } */
-const WidgetConfig bootstrConf    PROGMEM = { 0, 0, 1, WA_CENTER };
-const WidgetConfig bitrateConf    PROGMEM = { 0, 1, 1, WA_RIGHT };
-const WidgetConfig numConf        PROGMEM = { 0, 1, 1, WA_CENTER };
-const WidgetConfig clockConf      PROGMEM = { 0, 0, 1, WA_RIGHT };
-const WidgetConfig bootWdtConf    PROGMEM = { 0, 1, 1, WA_CENTER };
-const ProgressConfig bootPrgConf  PROGMEM = { 250, 10, 4 };
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+};
 
-/* STRINGS  */
+/* LAYOUT DEFINITIONS */
+
+const LayoutData _layouts[] PROGMEM = {
+    {   // Default
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ 0, 0, 1, WA_LEFT }, 140, true, MAX_WIDTH-6, SCROLLDELAY, 2, SCROLLTIME },
+        .title1Conf          = {{ 0, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-4, SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = { }, // unused
+        .playlistConf        = {{ 1, 1, 1, WA_LEFT }, 140, true, MAX_WIDTH-1, SCROLLDELAY, 2, SCROLLTIME },
+        .weatherConf         = { }, // unused
+        /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
+        .metaBGConf          = { }, // unused
+        .metaBGConfInv       = { }, // unused
+        .volbarConf          = { }, // unused
+        .playlBGConf         = { }, // unused
+        .bufferbarConf       = { }, // unused
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bitrateConf         = { 0, 1, 1, WA_RIGHT },
+        .voltxtConf          = { }, // unused
+        .batteryConf         = { }, // unused
+        .iptxtConf           = { }, // unused
+        .rssiConf            = { }, // unused
+        .numConf             = { 0, 1, 1, WA_CENTER },
+        .clockConf           = { 0, 0, 1, WA_RIGHT },
+        .vuConf              = { }, // unused
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        .fullbitrateConf     = { }, // unused
+        /* BANDS               { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
+        .bandsConf           = { }, // unused
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
+        .weatherMove         = { 0, 0, -1 },
+        .weatherMoveVU       = { 0, 0, -1 },
+    },
+};
+
+/* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
-const char bitrateFmt[]           PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "";
+const char iptxtFmt[]             PROGMEM = "";
+const char voltxtFmt[]            PROGMEM = "";
+const char batterytxtFmt[]        PROGMEM = "%d%%";
+const char bitrateFmt[]           PROGMEM = "%d";
 const char const_lcdApMode[]      PROGMEM = "AP-IMPROV MODE";
 const char const_lcdApName[]      PROGMEM = "AP NAME: ";
 const char const_lcdApPass[]      PROGMEM = "PASSWORD: ";
 //const char bootstrFmt[]           PROGMEM = "Wifi- %s";
 
-/* MOVES  */                             /* { left, top, width } */
-const MoveConfig metaMove         PROGMEM = { 0, 0, MAX_WIDTH };
-const MoveConfig clockMove        PROGMEM = { 0, 0, -1 };
-const MoveConfig weatherMove      PROGMEM = { 0, 0, -1 };
-const MoveConfig weatherMoveVU    PROGMEM = { 0, 0, -1 };
-
 #endif
-

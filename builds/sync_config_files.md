@@ -5,7 +5,6 @@ This folder contains contributor-specific configuration files that are automatic
 ## What Gets Synced
   - /platformio.ini
   - /myoptions.h
-  - /mytheme.h
 
 ## Setup
 
@@ -32,11 +31,6 @@ This folder contains contributor-specific configuration files that are automatic
 		{
 			"match": "myoptions.h",
 			"cmd": "if \"${file}\"==\"${workspaceRoot}\\myoptions.h\" copy \"${file}\" \"${workspaceRoot}\\builds\\username\\myoptions.h\"", 
-			"event": "onFileChange"
-		},
-		{
-			"match": "mytheme.h",
-			"cmd": "if \"${file}\"==\"${workspaceRoot}\\mytheme.h\" copy \"${file}\" \"${workspaceRoot}\\builds\\username\\mytheme.h\"", 
 			"event": "onFileChange"
 		}
 	]

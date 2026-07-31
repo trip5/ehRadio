@@ -22,6 +22,7 @@
 #include "telnet.h"
 #include "utility.h"
 #include "../locale/wwwlocale.h"
+#include "../locale/locale_js.h"
 #include "../locale/dsplocale.h"
 #include "../displays/dspcore.h"
 #include "../displays/dspfont.h"
@@ -191,13 +192,15 @@ char* updateError() {
 }
 
 void handleDynamicLocale(AsyncWebServerRequest *request) {
-  // Serve locale.json (gzip-compressed) from PROGMEM based on config.store.locale_webui
-  if (strcmp(config.store.locale_webui, HARDCODED_WEBUI_LOCALE) == 0) {
+  // Serve locale.json (gzip-compressed) from PROGMEM
+  // Uses ?l=XX query param if present, otherwise config.store.locale_webui
+  const char* localeCode = request->hasArg("l") ? request->arg("l").c_str() : config.store.locale_webui;
+  if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
     request->send(404); // No locale needed ??hardcoded text matches target language
     return;
   }
   for (uint8_t i = 0; i < WWW_LOCALE_COUNT; i++) {
-    if (strcmp_P(config.store.locale_webui, ((const char*)pgm_read_ptr(&www_locales[i].code))) == 0) {
+    if (strcmp_P(localeCode, ((const char*)pgm_read_ptr(&www_locales[i].code))) == 0) {
       uint16_t size = pgm_read_word(&www_locales[i].size);
       AsyncWebServerResponse *response = request->beginResponse(200, "application/json",
         (const uint8_t*)pgm_read_ptr(&www_locales[i].data), size);
@@ -371,6 +374,11 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/dsplocale.json", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", dsplocale_index);
   });
+  webserver.on("/locale.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", locale_js_gz, LOCALE_JS_GZ_SIZE);
+    response->addHeader("Content-Encoding", "gzip");
+    request->send(response);
+  });
   webserver.on("/search", HTTP_GET, handleSearch);
   webserver.on("/search", HTTP_POST, handleSearchPost);
 
@@ -479,12 +487,6 @@ void NetServer::chunkedHtmlPage(const String& contentType, AsyncWebServerRequest
 #else
   #define DSP_CAN_FLIPPED false
 #endif
-#if !defined(HIDE_WEATHER) && (!defined(DUMMYDISPLAY) )
-  #define SHOW_WEATHER  true
-#else
-  #define SHOW_WEATHER  false
-#endif
-
 const char *getFormat(BitrateFormat _format) {
   switch (_format) {
     case BF_MP3:  return "MP3";
@@ -518,42 +520,45 @@ void NetServer::processQueue() {
         getPlaylist(clientId); break;
       }
       case GETACTIVE: {
-          bool dbgact = false, nxtn=false;
+          #define DBGWUI false // set true to debug WebUI
           String act = F("\"group_wifi\",");
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
-            if (battery.isInitialized() || dbgact)              act += F("\"group_battery\",");
-                                                              #ifdef MQTT_ENABLE
+            if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
+                                                              #if defined(MQTT_ENABLE) || DBGWUI
                                                                 act += F("\"group_mqtt\",");
                                                               #endif
-            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DSP_MODEL == DSP_NOKIA5110 || dbgact)    act += F("\"group_display\",");
-                                                              #if defined(LCD_I2C) || defined(DSP_OLED)
+            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DSP_MODEL == DSP_NOKIA5110 || DBGWUI)
+                                                                act += F("\"group_display\",");
+                                                              #if defined(LCD_I2C) || defined(DSP_OLED) || DBGWUI
                                                                 act += F("\"group_oled\",");
                                                               #endif
-                                                              #ifndef HIDE_VU
-                                                                #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true))
-                                                                  act += F("\"group_vu\",");
-                                                                #endif
+                                                              #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
+            if (vuConf_ptr->textsize > 0 || DBGWUI) act += F("\"group_vu\",");
                                                               #endif
-                                                              #ifndef HIDE_BUFFERBAR
-                                                                act += F("\"group_buffer\",");
+            if (bufferbarConf_ptr->height > 0 || DBGWUI)        act += F("\"group_buffer\",");
+            if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
+            if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
+            if (DSP_CAN_FLIPPED || DBGWUI)                      act += F("\"group_tft\",");
+                                                              #if (!defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110) || DBGWUI
+                                                                act += F("\"group_inverttitle\",");
+                                                              #endif 
+            if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
+                                                              #if defined(DSP_TFT) || DBGWUI
+            if (display.getThemeCount() > 1|| DBGWUI)           act += F("\"group_theme\",");
                                                               #endif
-
-            if (BRIGHTNESS_PIN != 255 || nxtn || dbgact)        act += F("\"group_brightness\",");
-            if (DSP_DIMMING_ENABLED || dbgact)                  act += F("\"group_dimming\",");
-            if (DSP_CAN_FLIPPED || dbgact)                      act += F("\"group_tft\",");
-            if (TIME_SIZE !=35 || dbgact)                       act += F("\"group_full_time\",");
-            if (TS_MODEL != TS_MODEL_UNDEFINED || dbgact)       act += F("\"group_touch\",");
-            if (DSP_MODEL == DSP_NOKIA5110)                     act += F("\"group_nokia\",");
+            if (TIME_SIZE !=35 || DBGWUI)                       act += F("\"group_full_time\",");
+            if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
+            if (DSP_MODEL == DSP_NOKIA5110 || DBGWUI)           act += F("\"group_nokia\",");
                                                                 act += F("\"group_locale\",");
-            if (SHOW_WEATHER || dbgact)                         act += F("\"group_weather\",");
+            if (weatherConf_ptr->buffsize > 0 || DBGWUI)        act += F("\"group_weather\",");
                                                                 act += F("\"group_controls\",");
-            if (BTN_UP != 255 || BTN_DOWN != 255 || dbgact)     act += F("\"group_volbuttons\",");
-            if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || dbgact)
+            if (BTN_UP != 255 || BTN_DOWN != 255 || DBGWUI)     act += F("\"group_volbuttons\",");
+            if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)
                                                                 act += F("\"group_stnbuttons\",");
-            if (ENC_DT != 255 || ENC2_DT != 255 || dbgact)      act += F("\"group_encoder\",");
-            if (IR_PIN != 255 || dbgact)                        act += F("\"group_ir\",");
-                                                              #ifdef UPDATEURL
+            if (ENC_DT != 255 || ENC2_DT != 255 || DBGWUI)      act += F("\"group_encoder\",");
+            if (IR_PIN != 255 || DBGWUI)                        act += F("\"group_ir\",");
+                                                              #if defined(UPDATEURL) || DBGWUI
                                                                 act += F("\"group_update\",");
                                                               #endif
           }
@@ -586,7 +591,7 @@ void NetServer::processQueue() {
                                   config.store.autoupdate,
                                   config.store.mdnsname);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -608,7 +613,10 @@ void NetServer::processQueue() {
                                   config.store.dimmingTimeout,
                                   config.store.dimmingBrightness,
                                   config.store.volumepage,
-                                  config.store.clock12);
+                                  config.store.clock12,
+                                  config.store.inverttitle,
+                                  config.store.layoutId,
+                                  config.store.themeId);
                                   break;
       case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,
@@ -668,17 +676,12 @@ void NetServer::processQueue() {
       case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
         BatteryStatus bat = battery.getStatus();
-        if (!bat.valid && !battery.isInitialized()) {
-          /* Still send battref even if battery not detected so UI shows calibration value */
+        if (!bat.present && !battery.isInitialized()) {
           uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
         } else {
-          /* formatted with labels: "volt: 4049mV, percentage: 92%, status: Idle" */
-          const char *statusstr = "Idle";
-          if (bat.charging) statusstr = "Charging";
-          else if (bat.discharging_inferred) statusstr = "Discharging";
-          char valbuf[96];
-          snprintf(valbuf, sizeof(valbuf), "volt: %dmV, percentage: %d%%, status: %s", bat.voltage_mv, bat.percentage, statusstr);
+          char valbuf[64];
+          snprintf(valbuf, sizeof(valbuf), "volt: %dmV, percentage: %d%%", bat.voltage_mv, bat.percentage);
           uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
         }
@@ -1636,6 +1639,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var onlineUpdCapable=%s;\n"
       "var newVerAvailable=%s;\n"
       "var updateUrl='%s';\n"
+      "var currentLocale='%s';\n"
       "var casetransform=%s;\n",
       escapedRadioVersion,
       (network.status == CONNECTED && config.wwwFilesExist) ? "webboard" : "",
@@ -1647,6 +1651,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       #endif
       (netserver.newVersionAvailable) ? "true" : "false",
       escapedGithubUrl,
+      config.store.locale_webui,
       #ifdef WWW_CASETRANSFORM
         "true"
       #else
@@ -1688,6 +1693,20 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(response);
     return;
   }
+  if (request->url() == "/themes.json") {
+    String json = display.getThemeListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/layouts.json") {
+    String json = display.getLayoutListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
   if (strcmp(request->url().c_str(), "/settings.html") == 0 || strcmp(request->url().c_str(), "/update.html") == 0 || strcmp(request->url().c_str(), "/ir.html") == 0) {
     request->send(200, "text/html", index_html);
     return;
@@ -1722,7 +1741,14 @@ void handleNotFound(AsyncWebServerRequest * request) {
 
 void handleIndex(AsyncWebServerRequest * request) {
   if (!config.wwwFilesExist) {
-    if (request->url()=="/" && request->method() == HTTP_GET) { request->send(200, "text/html", emptyfs_html); return; }
+    if (request->url()=="/" && request->method() == HTTP_GET) {
+      if (request->hasArg("l")) {
+        cmd.exec("locale_webui", request->arg("l").c_str(), 0, CommandSource::HttpUrl);
+        request->send(200, "text/html", emptyfs_html);
+        return;
+      }
+      request->send(200, "text/html", emptyfs_html); return;
+    }
     if (request->url()=="/" && request->method() == HTTP_POST) {
       if (request->arg("ssid")!="" && request->arg("pass")!="") {
         char buf[80];

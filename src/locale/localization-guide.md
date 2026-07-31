@@ -42,8 +42,6 @@ Settings are applied in this order — later entries override earlier ones:
 src/core/options.h          ← built-in system defaults (DO NOT EDIT)
          ↓
 myoptions.h                 ← your hardware & locale overrides
-         ↓
-mytheme.h                   ← colour / UI overrides (optional)
 ```
 
 The display locale default is set via `DSP_LOCALE` in `myoptions.h`. Both display and WebUI locales can also be changed at runtime via the settings page.

@@ -17,6 +17,10 @@
 //
 //#undef SH1106_PCM_REMOTE
 //
+// Uncomment the next line for safety (pio does weird things otherwise)...
+//
+//#error YOU FORGOT TO COMMENT THE TOP OF MYOPTIONS.H AGAIN!
+//
 // Then uncomment the build to debug:
 //
 //#define SH1106_PCM_REMOTE            // Self-contained OLED with PCM, Remote
@@ -256,7 +260,6 @@
   #define SD_CS           47
 #endif
 
-
 #define MQTT_ENABLE
 
 /* --- Battery --- */
@@ -264,17 +267,9 @@
 #if defined(ES3C28P)
   /* Battery monitoring on ES3C28P board */
   #define BATTERY_PIN     9       /* GPIO9: ADC pin for battery voltage */
-  //#define BATTERY_CHARGE_PIN 255  /* No charging status GPIO exposed (TP4054 CHRG pin not connected on ES3C28P) */
-
   #define BATTERY_DIVIDER_RATIO 2.0   /* 100k + 100k voltage divider = 1:2 ratio */
   #define BATTERY_ADC_REF_MV 3438     /* ESP32-S3 ADC reference voltage (calibrated EL103565 3000mAh 11.1Wh) */
-  #define BATTERY_UPDATE_INTERVAL 60000 /* Update every 60 seconds */
-  //#define BATTERY_DEBUG               /* Uncomment to enable debug output */
-
-  #define BATTERY_CHARGE_INFER_HOLD_SAMPLES 3 /* number of measurements (samples) to hold (e.g., 3 readings at BATTERY_UPDATE_INTERVAL) */
-  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 20 /* percent */
-  #define BATTERY_CANDIDATE_PERCENT_DELTA 1 /* percent */
-  #define BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD 0 /* percent over hold window */
+  #define BATTERY_UPDATE_INTERVAL 60  /* Update interval in seconds */
 #endif
 
 
@@ -331,18 +326,19 @@
 //#define GITHUBURL "https://github.com/myid/ehradio" // used by the radio to update firmware and files...
 
 /* Disable automatic runtime downloads from GitHub (ESPFileUpdater) for this board only. */
-//#define DISABLE_UPDATER
+//#undef ENABLE_UPDATER // disables OTA updates
 
 /* --- Locales Notes --- */
 //#define DSP_LOCALE "de_DE" // sets the display language - see the available options by checking files in locale/display folder 
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */
-//#define CORE_MONITOR
 //#define ALL_DEBUG_LOGS
+//#define CORE_MONITOR
+//#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 
-/* --- Fonts --- */
-// Display Text:
+/* --- Display --- */
+// Display Font:
 //#define DISPLAYFONT MATRIXCHUNKY
 //#define DISPLAYFONT MATRIXLIGHT
 //#define DISPLAYFONT X11
@@ -354,9 +350,12 @@
 // Transform:
 //#define PRETEXT_ALLCAPS
 //#define PRETEXT_FOLDACCENT
+//#define PRETEXT_FOLDCYRILLIC
 //#define WWW_CASETRANSFORM
 //#define CLOCKGLOW false
+//#define PLAYLIST_MODE_PAGED false
 
+// Other:
 //#define DEEP_SLEEP_DISABLE
 
 #endif // myoptions_h

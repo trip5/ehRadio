@@ -3,15 +3,9 @@
 #pragma once
 
   config.theme.background = TFT_BG;
-#if DSP_INVERT_TITLE
-  config.theme.meta       = TFT_BG;
-  config.theme.metabg     = TFT_FG;
-  config.theme.metafill   = TFT_FG;
-#else
   config.theme.meta       = TFT_FG;
   config.theme.metabg     = TFT_BG;
-  config.theme.metafill   = TFT_BG;
-#endif  
+  config.theme.metafill   = TFT_FG;
   config.theme.clock      = TFT_FG;
   config.theme.seconds    = TFT_FG;
   config.theme.clockbg    = TFT_BG;
@@ -26,6 +20,7 @@
   config.theme.rssi       = TFT_FG;
   config.theme.ip         = TFT_FG;
   config.theme.vol        = TFT_FG;
+  config.theme.battery    = TFT_FG;
   config.theme.bitrate    = TFT_FG;
   config.theme.digit      = TFT_FG;
   config.theme.buffer     = TFT_FG;

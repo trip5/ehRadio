@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.07.20"
+#define RADIOVERSION "2026.07.31"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
@@ -17,14 +17,12 @@ You can use the myoptions.h and platformio.ini generator:
 https://trip5.github.io/ehRadio/myoptions/generator.html
 or examine the examples in builds/trip5 and make your own!
 
-You may also create your own mytheme.h in the root folder.
+mytheme.h is no longer compiled in - if you have a
+custom theme, use importtheme.py in src/display folder
 ********************************************************/
 
 #if __has_include("../../myoptions.h")
   #include "../../myoptions.h" // write your variable values here
-#endif
-#if __has_include("../../mytheme.h")
-  #include "../../mytheme.h" // Theme file
 #endif
 
 #if !(defined(ARDUINO_ESP32_DEV) || defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV))
@@ -216,19 +214,12 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #ifndef DSP_INVERT_QUIRK
   #define DSP_INVERT_QUIRK false // if a display shows inverted colors by default, override it by setting this to true
 #endif
-#ifndef DSP_INVERT_TITLE
-  #define DSP_INVERT_TITLE true // Invert title colors for displays
-#endif
 #ifndef RSSI_DIGIT
   #define RSSI_DIGIT false // display RSSI as number
 #endif
 #ifndef RSSI_STEPS
   #define RSSI_STEPS -50,-60,-70,-80
 #endif
-#ifndef BITRATE_FULL
-  #define BITRATE_FULL true // display bitrate badge
-#endif
-
 /* Use #define BIG_BOOT_LOGO with big displays (480x320) displays if you want a bigger boot logo */
 #if DSP_WIDTH >= 480
   #ifndef BIG_BOOT_LOGO
@@ -299,25 +290,10 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 /* Pre-processed Text: Prefer ALL CAPS? Maybe all latin accents removed from your display? */
 // #define PRETEXT_ALLCAPS
 // #define PRETEXT_FOLDACCENT
+// #define PRETEXT_FOLDCYRILLIC
 
 /* If using PRETEXT_ALLCAPS, why not do the same to your WebUI? */
 // #define WWW_CASETRANSFORM
-
-/* Other Transforms */
-// Frankly speaking, most of these go beyond regular display transforms.
-// They may hide the option in the WebUI completely.
-// It is not recommended to build without these options but here they are anyways.
-//#define HIDE_TITLE2
-//#define DSP_INVERT_TITLE
-//#define HIDE_VU
-//#define HIDE_VOLBAR
-//#define HIDE_BUFFERBAR
-//#define HIDE_VOL
-//#define HIDE_IP
-//#define HIDE_RSSI
-//#define HIDE_BATTERY
-//#define HIDE_WEATHER
-
 
 /* ============================== SPI BUSES AND PINS ============================== */
 
@@ -726,23 +702,31 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #error TS_SPI not defined in myoptions.h
 #endif
 
+// Minimum px movement before swipe direction is detected (default: 20 for XPT2046 resistive, 12 for GT911/FT6336 capacitive)
+// #define TS_SWIPE_THRESHOLD_PX 20
+// Converts screen dimensions to steps (default: 40) ie. higher = more sensitive, lower = less sensitive
+// #define TS_STEPS 40
+// Post-release debounce in ms (default 150)
+// #define TS_COOLDOWN_MS 150
+// Window for double-tap detection in ms (default 400)
+// #define TS_DOUBLETAP_MS 400
+// Stationary hold duration before deep sleep in ms (default 5000)
+// #define TS_DEEPSLEEP_MS 5000
+
 /* --- SD OFFLINE MODE BUTTON --- */
 // SD Offline Mode is activated by holding the Mode Switch Button or a Rotary Encoder Switch at boot.
-// Use this if your build does not include these or if using all 3 interferes with boot:
+// Use this if your build does not include these or if using all buttons interferes with boot
+// ...although this actually likely means you should be pulling up the pin.
 // #define SDOFFLINE_BTN BTN_MODE
 // Use this to deactivate this method of booting to SD Offline Mode:
 // #define SDOFFLINE_BTN 255
-// If this is defined, the other button methods will be deactivated.
 
 // You can also use a GPIO directly with this
-// #define SDOFFLINE_PIN 2
+// #define SDOFFLINE_BTN 2
 // ...and you can manually override how the pin is treated (defaults below)
-#ifndef SDOFFLINE_PIN_ACTIVE_LOW
-  #define SDOFFLINE_PIN_ACTIVE_LOW true
-#endif
-#ifndef SDOFFLINE_PIN_PULLUP
-  #define SDOFFLINE_PIN_PULLUP true
-#endif
+// #define SDOFFLINE_BTN_ACTIVE_LOW true
+// #define SDOFFLINE_BTN_PULLUP true
+
 
 /* --- IR --- */
 #ifndef IR_PIN
@@ -889,7 +873,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define BUFFERBAR_VISUAL_FULL_KB 250
 #endif
 
-
 /* --- CPU CORES --- */
 /* ESP32 and ESP32-S3 have 2 cores (Main loop runs on Core 1). ESP32-C3 has 1 core (Main loop runs on Core 0) .*/
 /* Default VS1053 assignments: Core 0 Audio + Net + TCP / Core 1 Main + Display */
@@ -931,7 +914,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
     #define DSP_TASK_CORE_ID 1
   #endif
 #endif
-
 
 /* --- TWEAKS FOR CORE PROCESSES --- */
 /* Board-scaled stack size multiplier */
@@ -1043,122 +1025,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define CONFIG_ASYNC_TCP_USE_WDT 0 // 1 = watchdog enabled (adds between 33us and 200us per event)
 #endif
 
-/* ============================== COLOR ============================== */
-/* ehRadio Color Theme: over-ridden by mytheme.h (if it exists)        */
-/*---------------------------------------------------------------------*/
-/*      COLOR NAME       Color (0-255) R,   G,   B // note             */
-/*---------------------------------------------------------------------*/
-#ifndef COLOR_BACKGROUND
-  #define COLOR_BACKGROUND             0,   0,   0 // background
-#endif
-#ifndef COLOR_STATION_NAME
-  #define COLOR_STATION_NAME         247, 247, 247 // station text color
-#endif
-#ifndef COLOR_STATION_BG
-  #define COLOR_STATION_BG             0,  63, 207 // current station background
-#endif
-#ifndef COLOR_STATION_FILL
-  #define COLOR_STATION_FILL           0,  55, 191 // fill color (outside bg)
-#endif
-#ifndef COLOR_SNG_TITLE_1
-  #define COLOR_SNG_TITLE_1          239, 239, 239 // first title
-#endif
-#ifndef COLOR_SNG_TITLE_2
-  #define COLOR_SNG_TITLE_2          207, 207, 207 // second title
-#endif
-#ifndef COLOR_WEATHER
-  #define COLOR_WEATHER              223, 223,   0 // weather string
-#endif
-#ifndef COLOR_VU_MAX
-  #define COLOR_VU_MAX               175,  31,  31 // max of VU meter
-#endif
-#ifndef COLOR_VU_MIN
-  #define COLOR_VU_MIN                15, 127,  15 // min of VU meter
-#endif
-#ifndef COLOR_CLOCK
-  #define COLOR_CLOCK                255,  31,   7 // clock color
-#endif
-#ifndef COLOR_CLOCK_BG
-  #define COLOR_CLOCK_BG              31,   3,   0 // clock color background
-#endif
-#ifndef COLOR_SECONDS
-  #define COLOR_SECONDS              247,  27,   5 // seconds color (DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
-#endif
-#ifndef COLOR_DAY_OF_W
-  #define COLOR_DAY_OF_W             255, 192, 192 // day of week color (for DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
-#endif
-#ifndef COLOR_DATE
-  #define COLOR_DATE                 192, 192, 255 // date color (DSP_ST7789, DSP_ILI9341, DSP_ILI9225)
-#endif
-#ifndef COLOR_CLOCK_SS
-  #define COLOR_CLOCK_SS             153, 217, 234 // screensaver clock color
-#endif
-#ifndef COLOR_CLOCK_BG_SS
-  #define COLOR_CLOCK_BG_SS            8,  11,  12 // screensaver clock glow/background color
-#endif
-#ifndef COLOR_SECONDS_SS
-  #define COLOR_SECONDS_SS           140, 200, 220 // screensaver seconds color
-#endif
-#ifndef COLOR_DAY_OF_W_SS
-  #define COLOR_DAY_OF_W_SS          110, 110, 150 // screensaver day of week color
-#endif
-#ifndef COLOR_DATE_SS
-  #define COLOR_DATE_SS              150, 110, 110 // screensaver date color
-#endif
-#ifndef COLOR_BUFFER
-  #define COLOR_BUFFER               231,  47, 255 // buffer bar line
-#endif
-#ifndef COLOR_IP
-  #define COLOR_IP                   153, 217, 234 // IP address
-#endif
-#ifndef COLOR_VOLUME_VALUE
-  #define COLOR_VOLUME_VALUE         223, 223,   0 // volume number
-#endif
-#ifndef COLOR_RSSI
-  #define COLOR_RSSI                 153, 217, 234 // rssi
-#endif
-#ifndef COLOR_BATTERY
-  #define COLOR_BATTERY              153, 217, 234 // battery
-#endif
-#ifndef COLOR_VOLBAR_OUT
-  #define COLOR_VOLBAR_OUT           223, 223,   0 // border of volume bar
-#endif
-#ifndef COLOR_VOLBAR_IN
-  #define COLOR_VOLBAR_IN            207, 207,   0 // inside volume bar
-#endif
-#ifndef COLOR_DIGITS
-  #define COLOR_DIGITS               255,  31,   7 // number on the volume page
-#endif
-#ifndef COLOR_DIVIDER
-  #define COLOR_DIVIDER               91,  91,  91 // lines around clock
-#endif
-#ifndef COLOR_PL_CURRENT
-  #define COLOR_PL_CURRENT           255, 255, 255 // playlist current item
-#endif
-#ifndef COLOR_PL_CURRENT_BG
-  #define COLOR_PL_CURRENT_BG        255,  31,   7 // playlist current item background
-#endif
-#ifndef COLOR_PL_CURRENT_FILL
-  #define COLOR_PL_CURRENT_FILL      231,  23,   7 // playlist current item fill outline
-#endif
-#ifndef COLOR_PLAYLIST_0
-  #define COLOR_PLAYLIST_0           231, 231, 231 // playlist string 0
-#endif
-#ifndef COLOR_PLAYLIST_1
-  #define COLOR_PLAYLIST_1           199, 199, 199 // playlist string 1
-#endif
-#ifndef COLOR_PLAYLIST_2
-  #define COLOR_PLAYLIST_2           167, 167, 167 // playlist string 2
-#endif
-#ifndef COLOR_PLAYLIST_3
-  #define COLOR_PLAYLIST_3           135, 135, 135 // playlist string 3
-#endif
-#ifndef COLOR_PLAYLIST_4
-  #define COLOR_PLAYLIST_4           103, 103, 103 // playlist string 4
-#endif
-#ifndef COLOR_BITRATE
-  #define COLOR_BITRATE              231,  47, 255 // stream bitrate
-#endif
 
 /* ============================== SYSTEM DEFAULTS ============================== */
 
@@ -1267,7 +1133,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define SCREENSAVERSTARTUPDELAY 5
 #endif
 #ifndef SCREENSAVERMOVE // how often to move the screensaver (in seconds)
-  #define SCREENSAVERMOVE 5
+  #define SCREENSAVERMOVE 15
 #endif
 #ifndef HEADER_TIMEOUT
   #define HEADER_TIMEOUT 5000
@@ -1300,7 +1166,6 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 /* ============================== DEBUG ============================== */
 
 /* Enable all the debug logs with #define ALL_DEBUG_LOGS */
-/* BATTERY_DEBUG is included elsewhere */
 #ifdef ALL_DEBUG_LOGS
   #ifndef ESPFILEUPDATER_DEBUG
     #define ESPFILEUPDATER_DEBUG // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
@@ -1370,12 +1235,10 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define CORE_1 "(Main" CORE_1A CORE_1B CORE_1C CORE_1D ")"
 #endif
 
+
 /* ============================== BATTERY ============================== */
 #ifndef BATTERY_PIN
   #define BATTERY_PIN 255 // GPIO pin for battery voltage ADC reading
-#endif
-#ifndef BATTERY_CHARGE_PIN
-  #define BATTERY_CHARGE_PIN 255 // GPIO pin for charging status (TP4054 CHRG pin, active LOW)
 #endif
 #ifndef BATTERY_DIVIDER_RATIO
   #define BATTERY_DIVIDER_RATIO 2.0 // Voltage divider ratio (battery voltage / ADC voltage)
@@ -1384,32 +1247,10 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #define BATTERY_ADC_REF_MV 3300 // ADC reference voltage in millivolts
 #endif
 #ifndef BATTERY_UPDATE_INTERVAL
-  #define BATTERY_UPDATE_INTERVAL 60000 // Update interval in milliseconds
+  #define BATTERY_UPDATE_INTERVAL 5 // Update interval in seconds
 #endif
 #ifndef BATTERY_SAMPLES
   #define BATTERY_SAMPLES 10 // Number of ADC samples to average
-#endif
-#ifndef BATTERY_DIM_BRIGHTNESS
-  #define BATTERY_DIM_BRIGHTNESS 20 // Battery dim fixed brightness when LOW battery (percentage 0-100)
-#endif
-#if (BATTERY_DIM_BRIGHTNESS < 0) || (BATTERY_DIM_BRIGHTNESS > 100)
-  #error define error in myoptions.h: BATTERY_DIM_BRIGHTNESS must be a percentage between 0 and 100
-#endif
-#ifndef BATTERY_RECOVER_HYSTERESIS_PCT
-  #define BATTERY_RECOVER_HYSTERESIS_PCT 5 // Hysteresis for recovering from low-battery dimming (percent)
-#endif
-/* Inference tuning defaults: control sensitivity for charging/discharging detection. */
-#ifndef BATTERY_CHARGE_INFER_HOLD_SAMPLES
-  #define BATTERY_CHARGE_INFER_HOLD_SAMPLES 3 // number of measurements (samples) to hold (e.g., 3 readings)
-#endif
-#ifndef BATTERY_IMMEDIATE_PERCENT_THRESHOLD
-  #define BATTERY_IMMEDIATE_PERCENT_THRESHOLD 3 // percent; immediate single-reading threshold
-#endif
-#ifndef BATTERY_CANDIDATE_PERCENT_DELTA
-  #define BATTERY_CANDIDATE_PERCENT_DELTA 1 // percent; minimal delta to start a candidate
-#endif
-#ifndef BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD
-  #define BATTERY_SUSTAINED_PERCENT_WINDOW_THRESHOLD 0 // percent over hold window required to confirm
 #endif
 /* Battery presence detection (mV) - default single-cell LiPo safe range. */
 #ifndef BATTERY_PRESENT_MIN_MV
@@ -1425,24 +1266,8 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #ifndef BATTERY_CURVE_PCT
   #define BATTERY_CURVE_PCT 100, 95, 90, 80, 70, 55, 30, 10, 0
 #endif
-#ifndef BATTERY_LOW_THRESHOLD
-  #define BATTERY_LOW_THRESHOLD 25 // Low battery warning threshold (percentage, 0-100)
-#endif
-#if (BATTERY_LOW_THRESHOLD < 0) || (BATTERY_LOW_THRESHOLD > 100)
-  #error define error in myoptions.h: BATTERY_LOW_THRESHOLD must be a percentage between 0 and 100
-#endif
-#ifndef BATTERY_CRITICAL_THRESHOLD
-  #define BATTERY_CRITICAL_THRESHOLD 5 // Critical battery threshold (percentage, 0-100)
-#endif
-#if BATTERY_CRITICAL_THRESHOLD < 0 || BATTERY_CRITICAL_THRESHOLD > 100
-  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be a percentage between 0 and 100
-#endif
-#if BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD
-  #error define error in myoptions.h: BATTERY_CRITICAL_THRESHOLD must be less than BATTERY_LOW_THRESHOLD
-#endif
-#ifdef BATTERY_DEBUG
- // if defined enables full information about battery in serial log
-#endif
+/* No Battery but need to see the widget? */
+// #define BATTERY_FORCE_DISPLAY 0 // 0, 25, 50, 75, 100
 
 
 /* ============================== USER DEFAULTS ============================== */
@@ -1513,6 +1338,13 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #endif
 #ifndef SCREEN_INVERT
   #define SCREEN_INVERT false
+#endif
+#ifndef INVERT_TITLE
+  #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1322 || DSP_MODEL==DSP_SSD1327
+    #define INVERT_TITLE true // OLEDS look better with this mode on (on first-boot anyways)
+  #else
+    #define INVERT_TITLE false
+  #endif
 #endif
 #ifndef NUMBERED_PLAYLIST
   #define NUMBERED_PLAYLIST false

@@ -1,6 +1,7 @@
 #include "options.h"
 #include <ctype.h>
 #include <cstddef>
+#include <esp_log.h>
 #include <ESPFileUpdater.h>
 #include <nvs_flash.h>
 #ifndef ARDUINO_ESP32C3_DEV
@@ -20,6 +21,7 @@
 #include "telnet.h"
 #include "utility.h"
 #include "../displays/dspcore.h"
+#include "../displays/themes.h"
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
@@ -92,13 +94,6 @@ void Config::init() {
   store.play_mode = store.play_mode & 0b11;
   if (store.play_mode>1) store.play_mode=PM_WEB;
   _initHW();
-  if (!SPIFFS.begin(true)) {
-    ERRORLOG("SPIFFS Mount Failed");
-    return;
-  }
-  BOOTLOG("SPIFFS mounted");
-  startup.checkVerAndSpiffs();
-
   #ifdef USE_SD
     _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&SPIFFS:_SDplaylistFS);
   #else
@@ -363,85 +358,43 @@ void Config::_initHW() {
   #endif
 }
 
-uint16_t Config::color565(uint8_t r, uint8_t g, uint8_t b)
-{
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-
 void Config::loadTheme() {
-  theme.background    = color565(COLOR_BACKGROUND);
-  theme.meta          = color565(COLOR_STATION_NAME);
-  theme.metabg        = color565(COLOR_STATION_BG);
-  theme.metafill      = color565(COLOR_STATION_FILL);
-  theme.title1        = color565(COLOR_SNG_TITLE_1);
-  theme.title2        = color565(COLOR_SNG_TITLE_2);
-  theme.digit         = color565(COLOR_DIGITS);
-  theme.div           = color565(COLOR_DIVIDER);
-  theme.weather       = color565(COLOR_WEATHER);
-  theme.vumax         = color565(COLOR_VU_MAX);
-  theme.vumin         = color565(COLOR_VU_MIN);
-  theme.clock         = color565(COLOR_CLOCK);
-  theme.clockbg       = color565(COLOR_CLOCK_BG);
-  theme.seconds       = color565(COLOR_SECONDS);
-  theme.dow           = color565(COLOR_DAY_OF_W);
-  theme.date          = color565(COLOR_DATE);
-  theme.clockss       = color565(COLOR_CLOCK_SS);
-  theme.clockbgss     = color565(COLOR_CLOCK_BG_SS);
-  theme.secondsss     = color565(COLOR_SECONDS_SS);
-  theme.dowss         = color565(COLOR_DAY_OF_W_SS);
-  theme.datess        = color565(COLOR_DATE_SS);
-  theme.buffer        = color565(COLOR_BUFFER);
-  theme.ip            = color565(COLOR_IP);
-  theme.vol           = color565(COLOR_VOLUME_VALUE);
-  theme.rssi          = color565(COLOR_RSSI);
-  theme.battery       = color565(COLOR_BATTERY);
-  theme.bitrate       = color565(COLOR_BITRATE);
-  theme.volbarout     = color565(COLOR_VOLBAR_OUT);
-  theme.volbarin      = color565(COLOR_VOLBAR_IN);
-  theme.plcurrent     = color565(COLOR_PL_CURRENT);
-  theme.plcurrentbg   = color565(COLOR_PL_CURRENT_BG);
-  theme.plcurrentfill = color565(COLOR_PL_CURRENT_FILL);
-  theme.playlist[0]   = color565(COLOR_PLAYLIST_0);
-  theme.playlist[1]   = color565(COLOR_PLAYLIST_1);
-  theme.playlist[2]   = color565(COLOR_PLAYLIST_2);
-  theme.playlist[3]   = color565(COLOR_PLAYLIST_3);
-  theme.playlist[4]   = color565(COLOR_PLAYLIST_4);
-  #include "../displays/tools/tftinverttitle.h"
+  uint8_t count = sizeof(_themes) / sizeof(_themes[0]);
+  if (config.store.themeId >= count) config.store.themeId = 0;
+  memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData));
 }
 
 void Config::defaultSettings(const char *val, uint8_t clientId) {
-  if (strcmp(val, "system") == 0) {
+  if (strcmp(val, "controls") == 0) {
     saveValue(&store.smartstart, (bool)SMART_START);
-    saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
-    saveValue(&store.autoupdate, false);
-    saveValue(&store.ehdp, (bool)EHDP);
-    saveValue(store.ehdpname, "");
-    saveValue(&store.softapdelay, (uint8_t)SOFTAP_REBOOT_DELAY);
-    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", getChipId()); saveValue(store.mdnsname, tmp);
-    display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
-    netserver.requestOnChange(GETSYSTEM, clientId);
-    return;
-  }
-  if (strcmp(val, "battery") == 0) {
-    saveValue(&store.battery_adc_ref_mv, (uint16_t)BATTERY_ADC_REF_MV);
-    battery.recalcNow();
-    netserver.requestOnChange(GETBATTERY, clientId);
+    saveValue(&store.oneclickswitch, (bool)ONE_CLICK_SWITCH);
+    saveValue(&store.fliptouch, (bool)TOUCH_FLIP);
+    controls.flipTS();
+    saveValue(&store.dbgtouch, (bool)TOUCH_DEBUG);
+    controls.setEncAcceleration(ROTARY_ACCEL);
+    controls.setIRTolerance(IR_TOLERANCE);
+    netserver.requestOnChange(GETCONTROLS, clientId);
     return;
   }
   if (strcmp(val, "screen") == 0) {
     saveValue(&store.flipscreen, (bool)SCREEN_FLIP);
-    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
-    saveValue(&store.clock12, (bool)CLOCK_TWELVE);
-    saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
-    saveValue(&store.vumeter, (bool)SHOW_VU_METER);
     display.flip();
     saveValue(&store.invertdisplay, (bool)SCREEN_INVERT);
     display.invert();
+    saveValue(&store.inverttitle, INVERT_TITLE);
+    saveValue(&store.themeId, (uint8_t)0);
+    display.applyTheme(0);
+    saveValue(&store.layoutId, (uint8_t)0);
+    display.applyLayout(0);
+    saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
+    saveValue(&store.clock12, (bool)CLOCK_TWELVE);
+    saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
+    saveValue(&store.vumeter, (bool)SHOW_VU_METER);
+    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.dspon, true);
     store.brightness = (uint8_t)SCREEN_BRIGHTNESS; setBrightness(false);
     saveValue(&store.contrast, (uint8_t)SCREEN_CONTRAST);
     display.setContrast();
-    saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
     saveValue(&store.screensaverEnabled, (bool)SS_NOTPLAYING);
     saveValue(&store.screensaverBlank, (bool)SS_NOTPLAYING_BLANK);
     saveValue(&store.screensaverTimeout, (uint16_t)SS_NOTPLAYING_TIME);
@@ -455,16 +408,6 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     backlightControls.restart();
     display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
     netserver.requestOnChange(GETSCREEN, clientId);
-    return;
-  }
-  if (strcmp(val, "controls") == 0) {
-    saveValue(&store.fliptouch, (bool)TOUCH_FLIP);
-    controls.flipTS();
-    saveValue(&store.dbgtouch, (bool)TOUCH_DEBUG);
-    saveValue(&store.oneclickswitch, (bool)ONE_CLICK_SWITCH);
-    controls.setEncAcceleration(ROTARY_ACCEL);
-    controls.setIRTolerance(IR_TOLERANCE);
-    netserver.requestOnChange(GETCONTROLS, clientId);
     return;
   }
   if (strcmp(val, "locale") == 0) {
@@ -504,6 +447,17 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     netserver.requestOnChange(GETWEATHER, clientId);
     return;
   }
+  if (strcmp(val, "system") == 0) {
+    saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
+    saveValue(&store.autoupdate, false);
+    saveValue(&store.ehdp, (bool)EHDP);
+    saveValue(store.ehdpname, "");
+    saveValue(&store.softapdelay, (uint8_t)SOFTAP_REBOOT_DELAY);
+    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", getChipId()); saveValue(store.mdnsname, tmp);
+    display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
+    netserver.requestOnChange(GETSYSTEM, clientId);
+    return;
+  }
   if (strcmp(val, "mqtt") == 0) {
     saveValue(&store.mqttenable, false);
     saveValue(store.mqtthost, MQTT_HOST);
@@ -514,15 +468,21 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     netserver.requestOnChange(GETMQTT, clientId);
     return;
   }
+  if (strcmp(val, "battery") == 0) {
+    saveValue(&store.battery_adc_ref_mv, (uint16_t)BATTERY_ADC_REF_MV);
+    battery.recalcNow();
+    netserver.requestOnChange(GETBATTERY, clientId);
+    return;
+  }
   if (strcmp(val, "1") == 0 || strcmp(val, "") == 0) {
     setDefaults();
-    defaultSettings("system", clientId);
-    defaultSettings("battery", clientId);
-    defaultSettings("screen", clientId);
     defaultSettings("controls", clientId);
+    defaultSettings("screen", clientId);
     defaultSettings("locale", clientId);
     defaultSettings("weather", clientId);
+    defaultSettings("system", clientId);
     defaultSettings("mqtt", clientId);
+    defaultSettings("battery", clientId);
     return;
   }
 }
@@ -805,6 +765,7 @@ void Config::bootInfo() {
 // Preferences Look-up Table (store_variable, "key_max_15_char")
 // Macro expands to 3 fields (offset_of_config_t_store_variable, "key_max_15_char", size_of_store_variable)
 const configKeyMap Config::keyMap[] = {
+  // Internal / player state
   CONFIG_KEY_ENTRY(config_set_magic, "cfgset"),
   CONFIG_KEY_ENTRY(lastStationUrl, "lasturl"),
   CONFIG_KEY_ENTRY(countStation, "countsta"),
@@ -817,24 +778,27 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(middle, "mid"),
   CONFIG_KEY_ENTRY(bass, "bass"),
   CONFIG_KEY_ENTRY(sdshuffle, "sdshuffle"),
+  // Controls
   CONFIG_KEY_ENTRY(smartstart, "smartstartx"),
-  CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
-  CONFIG_KEY_ENTRY(bufferbar, "audioinfo"),
-  CONFIG_KEY_ENTRY(vumeter, "vumeter"),
-  CONFIG_KEY_ENTRY(wifiscanbest, "wifiscan"),
-  CONFIG_KEY_ENTRY(ehdp, "ehdp"),
-  CONFIG_KEY_ENTRY(ehdpname, "ehdpname"),
-  CONFIG_KEY_ENTRY(softapdelay, "softapdelay"),
-  CONFIG_KEY_ENTRY(mdnsname, "mdnsname"),
+  CONFIG_KEY_ENTRY(oneclickswitch, "skipplupdn"), // var used to be oneclickswitch
+  CONFIG_KEY_ENTRY(fliptouch, "fliptouch"),
+  CONFIG_KEY_ENTRY(dbgtouch, "dbgtouch"),
+  CONFIG_KEY_ENTRY(encacc, "encaccel"),
+  CONFIG_KEY_ENTRY(irtlp, "irtlp"),
+  // Screen
   CONFIG_KEY_ENTRY(flipscreen, "flipscr"),
   CONFIG_KEY_ENTRY(invertdisplay, "invdisp"),
+  CONFIG_KEY_ENTRY(inverttitle, "inverttitle"),
+  CONFIG_KEY_ENTRY(layoutId, "layoutid"),
+  CONFIG_KEY_ENTRY(themeId, "themeid"),
   CONFIG_KEY_ENTRY(dspon, "dspon"),
   CONFIG_KEY_ENTRY(numplaylist, "numplaylist"),
   CONFIG_KEY_ENTRY(clock12, "clock12"),
+  CONFIG_KEY_ENTRY(bufferbar, "audioinfo"),
+  CONFIG_KEY_ENTRY(vumeter, "vumeter"),
   CONFIG_KEY_ENTRY(volumepage, "volpage"),
   CONFIG_KEY_ENTRY(brightness, "bright"),
   CONFIG_KEY_ENTRY(contrast, "contrast"),
-  CONFIG_KEY_ENTRY(battery_adc_ref_mv, "battref"),
   CONFIG_KEY_ENTRY(screensaverEnabled, "scrnsvren"),
   CONFIG_KEY_ENTRY(screensaverBlank, "scrnsvrbl"),
   CONFIG_KEY_ENTRY(screensaverTimeout, "scrnsvrto"),
@@ -845,11 +809,7 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
   CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
   CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
-  CONFIG_KEY_ENTRY(fliptouch, "fliptouch"),
-  CONFIG_KEY_ENTRY(dbgtouch, "dbgtouch"),
-  CONFIG_KEY_ENTRY(encacc, "encaccel"),
-  CONFIG_KEY_ENTRY(oneclickswitch, "skipplupdn"), // var used to be oneclickswitch
-  CONFIG_KEY_ENTRY(irtlp, "irtlp"),
+  // Locale
   CONFIG_KEY_ENTRY(locale_webui, "localewebui"),
   CONFIG_KEY_ENTRY(locale_display, "localedsp"),
   CONFIG_KEY_ENTRY(tz_name, "tzname"),
@@ -857,12 +817,13 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(sntp1, "sntp1"),
   CONFIG_KEY_ENTRY(sntp2, "sntp2"),
   CONFIG_KEY_ENTRY(timesyncinterval, "timesync"),
+  // Weather
   CONFIG_KEY_ENTRY(showweather, "showwthr"),
-  CONFIG_KEY_ENTRY(weatherapi, "weatherapi"),
   CONFIG_KEY_ENTRY(weathersyncinterval, "weathersync"),
+  CONFIG_KEY_ENTRY(weatherapi, "weatherapi"),
+  CONFIG_KEY_ENTRY(weatherlang, "weatherlang"),
   CONFIG_KEY_ENTRY(weatherlat, "weatherlat"),
   CONFIG_KEY_ENTRY(weatherlon, "weatherlon"),
-  CONFIG_KEY_ENTRY(weatherlang, "weatherlang"),
   CONFIG_KEY_ENTRY(weatherkey, "weatherkey"),
   CONFIG_KEY_ENTRY(weatherelevation, "weatherelev"),
   CONFIG_KEY_ENTRY(weathertempimp, "weathertempi"),
@@ -872,12 +833,22 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(weatherhumidity, "weatherhumid"),
   CONFIG_KEY_ENTRY(weatherpressure, "weatherpress"),
   CONFIG_KEY_ENTRY(weatherwind, "weatherwind"),
+  // System
+  CONFIG_KEY_ENTRY(wifiscanbest, "wifiscan"),
+  CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
+  CONFIG_KEY_ENTRY(ehdp, "ehdp"),
+  CONFIG_KEY_ENTRY(ehdpname, "ehdpname"),
+  CONFIG_KEY_ENTRY(softapdelay, "softapdelay"),
+  CONFIG_KEY_ENTRY(mdnsname, "mdnsname"),
+  // MQTT
   CONFIG_KEY_ENTRY(mqttenable, "mqttenable"),
   CONFIG_KEY_ENTRY(mqtthost, "mqtthost"),
   CONFIG_KEY_ENTRY(mqttport, "mqttport"),
   CONFIG_KEY_ENTRY(mqttuser, "mqttuser"),
   CONFIG_KEY_ENTRY(mqttpass, "mqttpass"),
   CONFIG_KEY_ENTRY(mqtttopic, "mqtttopic"),
+  // Battery
+  CONFIG_KEY_ENTRY(battery_adc_ref_mv, "battref"),
   CONFIG_KEY_ENTRY(lastBootGood, "lastbootgood"),
   CONFIG_KEY_ENTRY(SDoffline, "sdoffline"),
   {0, nullptr, 0} // Yup, 3 fields - don't delete the last line!
@@ -885,9 +856,7 @@ const configKeyMap Config::keyMap[] = {
 
 void Config::deleteOldKeys() {
   // List any old/legacy keys to remove here (they will be deleted from prefs if found)
-  prefs.remove("laststa"); // previous numeric, replaced by lastStationUrl
-  prefs.remove("encacc"); // previous encoder acceleration was scale 0 to 700
-  prefs.remove("smartstart"); // previous smartstart was numeric 0, 1, 2
-  prefs.remove("vsteps"); // volume steps was needed when volume was 0 to 254
+  // prefs.remove("laststa"); // previous numeric, replaced by lastStationUrl
+  // none yet
 }
 

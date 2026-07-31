@@ -2,109 +2,92 @@
     </div>
     <h2 class="pagetitle" data-i18n="ttl_settings">Settings</h2>
     <div class="navigation group group_system hidden" id="navigation">
-      <div class="navitem group group_system hidden" data-target="group_system" data-i18n="ttl_system">System</div>
-      <div class="navitem group group_battery hidden" data-target="group_battery" data-i18n="ttl_battery">Battery</div>
-      <div class="navitem group group_display hidden" data-target="group_display" data-i18n="ttl_screen">Screen</div>
       <div class="navitem group group_controls hidden" data-target="group_controls" data-i18n="ttl_controls">Controls</div>
+      <div class="navitem group group_display hidden" data-target="group_display" data-i18n="ttl_screen">Screen</div>
       <div class="navitem group group_locale hidden" data-target="group_locale" data-i18n="ttl_locale">Locale</div>
-      <div class="navitem group group_wifi hidden" data-target="group_wifi" data-i18n="ttl_wifi">Wi-Fi</div>
       <div class="navitem group group_weather hidden" data-target="group_weather" data-i18n="ttl_weather">Weather</div>
+      <div class="navitem group group_system hidden" data-target="group_system" data-i18n="ttl_system">System</div>
+      <div class="navitem group group_wifi hidden" data-target="group_wifi" data-i18n="ttl_wifi">Wi-Fi</div>
       <div class="navitem group group_mqtt hidden" data-target="group_mqtt" data-i18n="ttl_mqtt">MQTT</div>
+      <div class="navitem group group_battery hidden" data-target="group_battery" data-i18n="ttl_battery">Battery</div>
     </div>
     <div id="settingswrap">
       <div id="settingscontent">
-        <a name="system"></a>
-        <section class="group group_system hidden" id="group_system">
-          <div class="title"><span data-i18n="ttl_system">System</span></div>
-          <div class="reset" data-name="system" title="reset"></div>
-          <div class="flex-row">
+
+        <a name="controls"></a>
+        <section class="group group_controls hidden" id="group_controls">
+          <div class="title"><span data-i18n="ttl_controls">Controls</span></div>
+          <div class="reset" data-name="controls" title="reset"></div>
+          <div class="flex-row group group_stnbuttons hidden">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_smart_start">Smart Start</span>
               <div class="checkbox" id="sst" data-command="smartstart"><div class="knob"></div></div>
             </div>
             <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_wifi_scan">Scan for Best Wi-Fi on Boot</span>
-              <div class="checkbox" id="wifiscan" data-command="wifiscan"><div class="knob"></div></div>
+              <span class="inputtitle" data-i18n="lbl_oneclick">One-click Station Switching</span>
+              <div class="checkbox" id="oneclick" data-command="oneclickswitch"><div class="knob"></div></div>
             </div>
           </div>
-          <div class="flex-row" id="mdnsnamerow">
+          <div class="flex-row group group_touch hidden">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_flip_touch">Flip touch</span>
+              <div class="checkbox" id="tsf" data-command="fliptouch"><div class="knob"></div></div>
+            </div>
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_debug_touch">Debug touch</span>
+              <div class="checkbox" id="tsd" data-command="dbgtouch"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row group group_encoder hidden">
             <div class="inputwrap pad">
-              <span class="inputtitle" data-i18n="lbl_mdns_name_no_local">mDNS Name (do not add '.local')</span>
-              <input type="text" id="mdns" class="text" name="mdnsname" value="" maxlength="24" />
-            </div>
-            <div class="fb hl local" data-command="restartmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
-          </div>
-          <div class="flex-row">
-            <div class="inputwrap center pad">
-              <span class="inputtitle" data-i18n="lbl_eh_discovery">eh Discovery Protocol [<a href="https://github.com/trip5/eh-Device-Scanner#google-play-store" target="_blank">?</a>]</span>
-              <div class="checkbox" id="ehdp" data-command="ehdp"><div class="knob"></div></div>
+              <span class="inputtitle" data-i18n="lbl_enc_acc">Rotary Encoder Acceleration</span>
+              <span class="inputinfo" id="slencaccelerationinfo">0</span>
+              <input type="range" id="enca" data-command="encacc" data-slaveid="slencaccelerationinfo" min="0" max="7" value="0">
             </div>
           </div>
-          <div class="flex-row">
+          <div class="flex-row group group_ir hidden">
             <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ehdp_name">ehDP Name</span>
-              <input type="text" id="ehdpname" class="text" name="ehdpname" value="" maxlength="24" />
-            </div>
-            <div class="fb hl local" data-command="ehdpsave" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
-          </div>
-          <div class="flex-row">
-            <div class="inputwrap pad">
-              <span class="inputtitle" data-i18n="lbl_softap_delay">Soft AP Reboot Delay (min)</span>
-              <span class="inputinfo" id="slsoftapinfo">0</span>
-              <input type="range" id="softr" data-slaveid="slsoftapinfo" data-command="softap" min="0" max="20" value="0">
+              <span class="inputtitle" data-i18n="lbl_ir_tolerance">IR Tolerance</span>
+              <span class="inputtitle">[<a href="https://crankyoldgit.github.io/IRremoteESP8266/doxygen/html/" target="_blank">?</a>]</span>
+              <span class="inputinfo" id="slirtlpinfo">0</span>
+              <input type="range" id="irtl" data-command="irtlp" data-slaveid="slirtlpinfo" min="10" max="80" value="0">
             </div>
           </div>
-          <div class="row-title"><span data-i18n="ttl_update">Update</span></div>
-          <div class="flex-row">
-            <div class="inputwrap center group group_update hidden">
-              <span class="inputtitle" data-i18n="lbl_auto_update">Auto Update on Boot</span>
-              <div class="checkbox" id="autoupdate" data-command="autoupdate"><div class="knob"></div></div>
-            </div>
-          </div>
-          <div class="flex-row last">
-            <div class="fb local" data-command="fwupdate" data-i18n="btn_firmware">Firmware</div>
-            <div class="fb local" data-command="webboard" id="webboard" data-i18n="btn_board">Board</div>
+          <div class="flex-row group group_ir last hidden">
+            <div class="fb local" data-command="setupir" data-i18n="ttl_ir_recorder">IR Recorder</div>
           </div>
         </section>
-        <a name="battery"></a>
-        <section class="group group_battery hidden" id="group_battery">
-          <div class="title"><span data-i18n="ttl_battery">Battery</span></div>
-          <div class="reset" data-name="battery" title="reset"></div>
-          <div class="flex-row center" style="padding-bottom: 10;">
-            <div class="infoitem" id="batteryinfo">
-              <span data-i18n="lbl_batt_volt">Voltage</span>: <span id="battery_volt" class="text"></span>mV, 
-              <span data-i18n="lbl_batt_percentage">Percentage</span>: <span id="battery_perc" class="text"></span>%, 
-              <span data-i18n="lbl_batt_status">Status</span>:
-                  <span id="battery_charging" class="text hidden" data-i18n="msg_batt_charging">Charging</span>
-                  <span id="battery_discharging" class="text hidden" data-i18n="msg_batt_discharging">Discharging</span>
-                  <span id="battery_idle" class="text hidden" data-i18n="msg_batt_idle">Idle</span>
-            </div>
-          </div>
-          <div class="flex-row" id="battrefrow">
-            <div class="inputwrap pad">
-              <span class="inputtitle" data-i18n="lbl_calibrate">Calibrate (Measured mV)</span>
-              <input type="number" id="battref" class="text" name="battref" value="" min="2500" max="4500" placeholder="Multimeter reading" data-i18n="lbl_battref" />
-            </div>
-            <div class="fb hl local" data-command="savebattref" style="margin-top: 24px; height: 37px;" data-i18n="btn_calibrate">Calibrate</div>
-          </div>
-          <div class="flex-row center" style="padding-bottom: 0;">
-            <div style="font-size:12px;color:#999;max-width:520px;text-align:center;">
-              <span data-i18n="lbl_batt_cal_hint">Measure battery voltage across the battery terminals with a multimeter (DC mV) while the device is idle / not charging. Enter the reading in mV and press</span>&nbsp;<strong data-i18n="btn_calibrate">calibrate</strong>.
-            </div>
-          </div>
-        </section>
+
         <a name="screen"></a>
         <section class="group group_display group_oled hidden" id="group_display">
           <div class="title"><span data-i18n="ttl_screen">Screen</span></div>
           <div class="reset" data-name="screen" title="reset"></div>
-          <div class="flex-row group_tft hidden">
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_flip_screen">Flip screen</span>
+          <div class="flex-row">
+            <div class="inputwrap center group_tft hidden">
+              <span class="inputtitle" data-i18n="lbl_flip_screen">Flip Screen</span>
               <div class="checkbox" id="flip" data-command="flipscreen"><div class="knob"></div></div>
             </div>
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_invert_screen">Invert screen</span>
+            <div class="inputwrap center group_tft hidden">
+              <span class="inputtitle" data-i18n="lbl_invert_screen">Invert Screen</span>
               <div class="checkbox" id="inv" data-command="invertdisplay"><div class="knob"></div></div>
+            </div>
+            <div class="inputwrap center group_inverttitle hidden">
+              <span class="inputtitle" data-i18n="lbl_invert_title">Invert Title</span>
+              <div class="checkbox" id="invtitle" data-command="inverttitle"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row">
+            <div class="inputwrap group_layout hidden">
+              <span class="inputtitle" data-i18n="lbl_webui_layout">Display Layout</span>
+              <select type="text" id="layoutId" name="layoutId">
+                <option value="">Layouts Load Here</option>
+              </select>
+            </div>
+            <div class="inputwrap group_theme hidden">
+              <span class="inputtitle" data-i18n="lbl_display_theme">Display Theme</span>
+              <select type="text" id="themeId" name="themeId">
+                <option value="">Themes Load Here</option>
+              </select>
             </div>
           </div>
           <div class="flex-row group_tft hidden">
@@ -199,45 +182,7 @@
             </div>
           </div>
         </section>
-        <a name="controls"></a>
-        <section class="group group_controls hidden" id="group_controls">
-          <div class="title"><span data-i18n="ttl_controls">Controls</span></div>
-          <div class="reset" data-name="controls" title="reset"></div>
-          <div class="flex-row group group_touch hidden">
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_flip_touch">Flip touch</span>
-              <div class="checkbox" id="tsf" data-command="fliptouch"><div class="knob"></div></div>
-            </div>
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_debug_touch">Debug touch</span>
-              <div class="checkbox" id="tsd" data-command="dbgtouch"><div class="knob"></div></div>
-            </div>
-          </div>
-          <div class="flex-row group group_stnbuttons hidden">
-            <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_oneclick">One-click Station Switching</span>
-              <div class="checkbox" id="oneclick" data-command="oneclickswitch"><div class="knob"></div></div>
-            </div>
-          </div>
-          <div class="flex-row group group_encoder hidden">
-            <div class="inputwrap pad">
-              <span class="inputtitle" data-i18n="lbl_enc_acc">Rotary Encoder Acceleration</span>
-              <span class="inputinfo" id="slencaccelerationinfo">0</span>
-              <input type="range" id="enca" data-command="encacc" data-slaveid="slencaccelerationinfo" min="0" max="7" value="0">
-            </div>
-          </div>
-          <div class="flex-row group group_ir hidden">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ir_tolerance">IR Tolerance</span>
-              <span class="inputtitle">[<a href="https://crankyoldgit.github.io/IRremoteESP8266/doxygen/html/" target="_blank">?</a>]</span>
-              <span class="inputinfo" id="slirtlpinfo">0</span>
-              <input type="range" id="irtl" data-command="irtlp" data-slaveid="slirtlpinfo" min="10" max="80" value="0">
-            </div>
-          </div>
-          <div class="flex-row group group_ir last hidden">
-            <div class="fb local" data-command="setupir" data-i18n="ttl_ir_recorder">IR Recorder</div>
-          </div>
-        </section>
+
         <a name="locale"></a>
         <section class="group group_locale hidden" id="group_locale">
           <div class="title"><span data-i18n="ttl_locale">Locale</span></div>
@@ -290,65 +235,7 @@
             <div class="fb hl local" data-command="applylocale" data-i18n="btn_apply_changes">Apply Changes</div>
           </div>
         </section>
-        <a name="wifi"></a>
-        <section class="group group_wifi hidden" id="group_wifi">
-          <div class="title"><span data-i18n="ttl_wifi">Wi-Fi</span></div>
-          <div class="flex-row credential">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
-              <input type="text" id="ssid0" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
-            </div>
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_password">Password</span>
-              <input type="text" id="pass0" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
-            </div>
-          </div>
-          <div class="flex-row credential">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
-              <input type="text" id="ssid1" class="textinput" name="ssid" maxlength="30" autocomplete="off" />
-            </div>
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_password">Password</span>
-              <input type="text" id="pass1" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
-            </div>
-          </div>
-          <div class="flex-row credential">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
-              <input type="text" id="ssid2" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
-            </div>
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_password">Password</span>
-              <input type="text" id="pass2" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
-            </div>
-          </div>
-          <div class="flex-row credential">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
-              <input type="text" id="ssid3" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
-            </div>
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_password">Password</span>
-              <input type="text" id="pass3" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
-            </div>
-          </div>
-          <div class="flex-row credential">
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
-              <input type="text" id="ssid4" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
-            </div>
-            <div class="inputwrap">
-              <span class="inputtitle" data-i18n="lbl_password">Password</span>
-              <input type="text" id="pass4" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
-            </div>
-          </div>
-          <div class="flex-row last">
-            <input id="file-upload" type="file" accept=".txt, .csv" hidden/>
-            <div class="fb local group group_system hidden" data-command="wifiexport" data-i18n="btn_export">Export</div>
-            <div class="fb hl local" data-command="wifiupload" data-i18n="btn_save_reboot">Save & Reboot</div>
-          </div>
-        </section>
+
         <a name="weather"></a>
         <section class="group group_weather hidden" id="group_weather">
           <div class="title"><span data-i18n="ttl_weather">Weather</span></div>
@@ -451,6 +338,118 @@
           </div>
         </section>
 
+        <a name="system"></a>
+        <section class="group group_system hidden" id="group_system">
+          <div class="title"><span data-i18n="ttl_system">System</span></div>
+          <div class="reset" data-name="system" title="reset"></div>
+          <div class="flex-row">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_wifi_scan">Scan for Best Wi-Fi on Boot</span>
+              <div class="checkbox" id="wifiscan" data-command="wifiscan"><div class="knob"></div></div>
+            </div>
+            <div class="inputwrap center">
+              <span class="inputtitle">
+                <span data-i18n="lbl_eh_discovery">eh Discovery Protocol</span>
+                [<a href="https://github.com/trip5/eh-Device-Scanner#google-play-store" target="_blank">?</a>]
+              </span>
+              <div class="checkbox" id="ehdp" data-command="ehdp"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row">
+            <div class="inputwrap pad">
+              <span class="inputtitle" data-i18n="lbl_ehdp_name">ehDP Name</span>
+              <input type="text" id="ehdpname" class="text" name="ehdpname" value="" maxlength="24" />
+            </div>
+            <div class="fb hl local" data-command="ehdpsave" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
+          </div>
+          <div class="flex-row" id="mdnsnamerow">
+            <div class="inputwrap pad">
+              <span class="inputtitle" data-i18n="lbl_mdns_name_no_local">mDNS Name (do not add '.local')</span>
+              <input type="text" id="mdns" class="text" name="mdnsname" value="" maxlength="24" />
+            </div>
+            <div class="fb hl local" data-command="restartmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
+          </div>
+          <div class="flex-row">
+            <div class="inputwrap pad">
+              <span class="inputtitle" data-i18n="lbl_softap_delay">Soft AP Reboot Delay (min)</span>
+            </div>
+            <div class="inputwra pad">
+              <input type="number" id="softr" data-command="softap" value="" maxlength="3" min="0" max="20" />
+            </div>
+          </div>
+          <div class="row-title"><span data-i18n="ttl_update">Update</span></div>
+          <div class="flex-row">
+            <div class="inputwrap center group group_update hidden">
+              <span class="inputtitle" data-i18n="lbl_auto_update">Auto Update on Boot</span>
+              <div class="checkbox" id="autoupdate" data-command="autoupdate"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row last">
+            <div class="fb local" data-command="fwupdate" data-i18n="btn_firmware">Firmware</div>
+            <div class="fb local" data-command="webboard" id="webboard" data-i18n="btn_board">Board</div>
+          </div>
+        </section>
+        
+        <a name="wifi"></a>
+        <section class="group group_wifi hidden" id="group_wifi">
+          <div class="title"><span data-i18n="ttl_wifi">Wi-Fi</span></div>
+          <div class="flex-row credential">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
+              <input type="text" id="ssid0" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
+            </div>
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_password">Password</span>
+              <input type="text" id="pass0" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
+            </div>
+          </div>
+          <div class="flex-row credential">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
+              <input type="text" id="ssid1" class="textinput" name="ssid" maxlength="30" autocomplete="off" />
+            </div>
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_password">Password</span>
+              <input type="text" id="pass1" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
+            </div>
+          </div>
+          <div class="flex-row credential">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
+              <input type="text" id="ssid2" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
+            </div>
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_password">Password</span>
+              <input type="text" id="pass2" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
+            </div>
+          </div>
+          <div class="flex-row credential">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
+              <input type="text" id="ssid3" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
+            </div>
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_password">Password</span>
+              <input type="text" id="pass3" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
+            </div>
+          </div>
+          <div class="flex-row credential">
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_ssid">SSID</span>
+              <input type="text" id="ssid4" class="textinput" name="ssid" value="" maxlength="30" autocomplete="off" />
+            </div>
+            <div class="inputwrap">
+              <span class="inputtitle" data-i18n="lbl_password">Password</span>
+              <input type="text" id="pass4" class="textinput" name="pass" value="" placeholder="**********" maxlength="40" autocomplete="off" readonly="readonly" data-pass="" onfocus="this.removeAttribute('readonly');" />
+            </div>
+          </div>
+          <div class="flex-row last">
+            <input id="file-upload" type="file" accept=".txt, .csv" hidden/>
+            <div class="fb local group group_system hidden" data-command="wifiexport" data-i18n="btn_export">Export</div>
+            <div class="fb hl local" data-command="wifiupload" data-i18n="btn_save_reboot">Save & Reboot</div>
+          </div>
+        </section>
+
         <a name="mqtt"></a>
         <section class="group group_mqtt hidden" id="group_mqtt">
           <div class="title"><span data-i18n="ttl_mqtt">MQTT</span></div>
@@ -492,8 +491,36 @@
           </div>
         </section>
 
-        <a name="tools"></a>
-        <section class="group group_system hidden" id="group_tools">
+        <a name="battery"></a>
+        <section class="group group_battery hidden" id="group_battery">
+          <div class="title"><span data-i18n="ttl_battery">Battery</span></div>
+          <div class="reset" data-name="battery" title="reset"></div>
+          <div class="flex-row center" style="padding-bottom: 10;">
+            <div class="infoitem" id="batteryinfo">
+              <span data-i18n="lbl_batt_volt">Voltage</span>: <span id="battery_volt" class="text"></span>mV, 
+              <span data-i18n="lbl_batt_percentage">Percentage</span>: <span id="battery_perc" class="text"></span>%, 
+              <span data-i18n="lbl_batt_status">Status</span>:
+                  <span id="battery_charging" class="text hidden" data-i18n="msg_batt_charging">Charging</span>
+                  <span id="battery_discharging" class="text hidden" data-i18n="msg_batt_discharging">Discharging</span>
+                  <span id="battery_idle" class="text hidden" data-i18n="msg_batt_idle">Idle</span>
+            </div>
+          </div>
+          <div class="flex-row" id="battrefrow">
+            <div class="inputwrap pad">
+              <span class="inputtitle" data-i18n="lbl_calibrate">Calibrate (Measured mV)</span>
+              <input type="number" id="battref" class="text" name="battref" value="" min="2500" max="4500" placeholder="Multimeter reading" data-i18n="lbl_battref" />
+            </div>
+            <div class="fb hl local" data-command="savebattref" style="margin-top: 24px; height: 37px;" data-i18n="btn_calibrate">Calibrate</div>
+          </div>
+          <div class="flex-row center" style="padding-bottom: 0;">
+            <div style="font-size:12px;color:#999;max-width:520px;text-align:center;">
+              <span data-i18n="lbl_batt_cal_hint">Measure battery voltage across the battery terminals with a multimeter (DC mV) while the device is idle / not charging. Enter the reading in mV and press</span>&nbsp;<strong data-i18n="btn_calibrate">calibrate</strong>.
+            </div>
+          </div>
+        </section>
+
+        <a name="danger_zone"></a>
+        <section class="group group_system hidden" id="group_danger_zone">
         <div class="title"><span data-i18n="ttl_dangerzone">Danger Zone</span></div>
         <div class="flex-row">
           <div class="inputwrap center">

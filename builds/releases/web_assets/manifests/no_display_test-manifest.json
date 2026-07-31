@@ -1,0 +1,24 @@
+{
+  "name": "ehRadio - No Display Test",
+  "version": "2026.07.31",
+  "funding_url": "https://github.com/sponsors/trip5",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/esp32_s3_n16r8_bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "../firmware/esp32_s3_n16r8_partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "../firmware/no_display_test.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

@@ -8,66 +8,108 @@
 #define TFT_FRAMEWDT    10
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 
-#if BITRATE_FULL
-  #define TITLE_FIX     44
-#else
-  #define TITLE_FIX     0
-#endif
 #if defined(BIG_BOOT_LOGO) || BIG_BOOT_LOGO // true
   #define BOOTLOGOTOP   60
 #else
   #define BOOTLOGOTOP   110
 #endif
 
-/* SCROLLS  */                           /* {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
-const ScrollConfig metaConf       PROGMEM = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME };
-const ScrollConfig title1Conf     PROGMEM = {{ TFT_FRAMEWDT, 62, 2, WA_LEFT }, 140, true, MAX_WIDTH-(TITLE_FIX==0?6*2*7-6:TITLE_FIX), SCROLLDELAY, 2, SCROLLTIME };
-const ScrollConfig title2Conf     PROGMEM = {{ TFT_FRAMEWDT, 86, 2, WA_LEFT }, 140, true, MAX_WIDTH-TITLE_FIX, SCROLLDELAY, 2, SCROLLTIME };
-const ScrollConfig playlistConf   PROGMEM = {{ TFT_FRAMEWDT, 146, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 3, SCROLLTIME };
-const ScrollConfig apTitleConf    PROGMEM = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_CENTER }, 140, false, MAX_WIDTH, 0, 3, SCROLLTIME };
-const ScrollConfig apSettConf     PROGMEM = {{ TFT_FRAMEWDT, 320-TFT_FRAMEWDT-16, 2, WA_LEFT }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME };
-const ScrollConfig weatherConf    PROGMEM = {{ TFT_FRAMEWDT, 120, 2, WA_LEFT }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME };
+const BootData _bootConfig PROGMEM = {
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_CENTER }, 140, false, MAX_WIDTH, 0, 3, SCROLLTIME },
+        .apSettConf          = {{ TFT_FRAMEWDT, 320-TFT_FRAMEWDT-16, 2, WA_LEFT }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bootstrConf         = { 0, 243, 2, WA_CENTER },
+        .apNameConf          = { TFT_FRAMEWDT, 88, 3, WA_CENTER },
+        .apName2Conf         = { TFT_FRAMEWDT, 120, 3, WA_CENTER },
+        .apPassConf          = { TFT_FRAMEWDT, 173, 3, WA_CENTER },
+        .apPass2Conf         = { TFT_FRAMEWDT, 205, 3, WA_CENTER },
+        .bootWdtConf         = { 0, 205, 2, WA_CENTER },
+        .bootPrgConf         = { 90, 14, 4 },
+};
 
-/* BACKGROUNDS  */                       /* {{ left, top, fontsize, align }, width, height, outlined } */
-const FillConfig metaBGConf       PROGMEM = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 50, false };
-const FillConfig metaBGConfInv    PROGMEM = {{ 0, 50, 0, WA_LEFT }, DSP_WIDTH, 2, false };
-const FillConfig volbarConf       PROGMEM = {{ TFT_FRAMEWDT, DSP_HEIGHT-TFT_FRAMEWDT-8, 0, WA_LEFT }, MAX_WIDTH, 8, true };
-const FillConfig playlBGConf      PROGMEM = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false };
-const FillConfig bufferbarConf    PROGMEM = {{ 0, DSP_HEIGHT-2, 0, WA_LEFT }, DSP_WIDTH, 2, false };
+const char _layoutNames[][64] PROGMEM = {
+    "Default",
+    "VaraiTamas (BoomBox)",
+};
 
-/* WIDGETS  */                           /* { left, top, fontsize, align } */
-const WidgetConfig bootstrConf    PROGMEM = { 0, 243, 2, WA_CENTER };
-const WidgetConfig bitrateConf    PROGMEM = { 6, 62, 2, WA_RIGHT };
-const WidgetConfig voltxtConf     PROGMEM = { 0, DSP_HEIGHT-38, 2, WA_CENTER };
-const WidgetConfig batteryConf    PROGMEM = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT };
-const WidgetConfig iptxtConf      PROGMEM = { TFT_FRAMEWDT, DSP_HEIGHT-38, 2, WA_LEFT };
-const WidgetConfig rssiConf       PROGMEM = { TFT_FRAMEWDT, DSP_HEIGHT-38-6, 3, WA_RIGHT };
-const WidgetConfig numConf        PROGMEM = { 0, 200, 0, WA_CENTER };
-const WidgetConfig apNameConf     PROGMEM = { TFT_FRAMEWDT, 88, 3, WA_CENTER };
-const WidgetConfig apName2Conf    PROGMEM = { TFT_FRAMEWDT, 120, 3, WA_CENTER };
-const WidgetConfig apPassConf     PROGMEM = { TFT_FRAMEWDT, 173, 3, WA_CENTER };
-const WidgetConfig apPass2Conf    PROGMEM = { TFT_FRAMEWDT, 205, 3, WA_CENTER };
-const WidgetConfig clockConf      PROGMEM = { TFT_FRAMEWDT*2, 230, 0, WA_RIGHT };
-const WidgetConfig vuConf         PROGMEM = { TFT_FRAMEWDT, 136, 1, WA_LEFT };
+/* LAYOUT DEFINITIONS */
 
-const WidgetConfig bootWdtConf    PROGMEM = { 0, 205, 2, WA_CENTER };
-const ProgressConfig bootPrgConf  PROGMEM = { 90, 14, 4 };
-const BitrateConfig fullbitrateConf PROGMEM = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 };
+const LayoutData _layouts[] PROGMEM = {
+    {   // Default
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME },
+        .title1Conf          = {{ TFT_FRAMEWDT, 62, 2, WA_LEFT }, 140, true, MAX_WIDTH-(44==0?6*2*7-6:44), SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = {{ TFT_FRAMEWDT, 86, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .playlistConf        = {{ TFT_FRAMEWDT, 146, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 3, SCROLLTIME },
+        .weatherConf         = {{ TFT_FRAMEWDT, 120, 2, WA_LEFT }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
+        .metaBGConf          = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 50, false },
+        .metaBGConfInv       = {{ 0, 50, 0, WA_LEFT }, DSP_WIDTH, 2, false },
+        .volbarConf          = {{ TFT_FRAMEWDT, DSP_HEIGHT-TFT_FRAMEWDT-8, 0, WA_LEFT }, MAX_WIDTH, 8, true },
+        .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
+        .bufferbarConf       = {{ 0, DSP_HEIGHT-2, 0, WA_LEFT }, DSP_WIDTH, 2, false },
+        .bitrateConf         = { 6, 62, 2, WA_RIGHT },
+        .voltxtConf          = { 0, DSP_HEIGHT-38, 2, WA_CENTER },
+        .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },
+        .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-38, 2, WA_LEFT },
+        .rssiConf            = { TFT_FRAMEWDT, DSP_HEIGHT-38-6, 3, WA_RIGHT },
+        .numConf             = { 0, 200, 0, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT*2, 230, 0, WA_RIGHT },
+        .vuConf              = { TFT_FRAMEWDT, 136, 1, WA_LEFT },
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
+        /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
+        .bandsConf           = { 32, 130, 4, 2, 10, 3 },
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
+        .weatherMove         = { TFT_FRAMEWDT, 120, MAX_WIDTH },
+        .weatherMoveVU       = { 89, 120, MAX_WIDTH-89+TFT_FRAMEWDT },
+    },
+    {   // VaraiTamas (BoomBox)
+        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 4, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME },
+        .title1Conf          = {{ TFT_FRAMEWDT, 62, 2, WA_LEFT }, 140, true, MAX_WIDTH-(44==0?6*2*7-6:44), SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = {{ TFT_FRAMEWDT, 86, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .playlistConf        = {{ TFT_FRAMEWDT, 146, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 3, SCROLLTIME },
+        .weatherConf         = {{ TFT_FRAMEWDT, 120, 2, WA_CENTER }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* BACKGROUNDS         {{ left, top, fontsize, align }, width, height, outlined } */
+        .metaBGConf          = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 50, false },
+        .metaBGConfInv       = {{ 0, 50, 0, WA_LEFT }, DSP_WIDTH, 2, false },
+        .volbarConf          = {{ TFT_FRAMEWDT, DSP_HEIGHT - TFT_FRAMEWDT - 8, 0, WA_LEFT }, MAX_WIDTH, 5, true },
+        .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
+        .bufferbarConf       = {{ 0, DSP_HEIGHT-2, 0, WA_LEFT }, DSP_WIDTH, 2, false },
+        /* WIDGETS             { left, top, fontsize, align } */
+        .bitrateConf         = { TFT_FRAMEWDT, 145, 2, WA_RIGHT },
+        // ??? chtxtConf     = { 310 ,282, 2, WA_LEFT };
+        .voltxtConf          = { 0, 282, 2, WA_CENTER },
+        .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },
+        .iptxtConf           = { TFT_FRAMEWDT, 282, 2, WA_LEFT },
+        .rssiConf            = { TFT_FRAMEWDT, 282, 2, WA_RIGHT },
+        .numConf             = { 0, 200, 70, WA_CENTER },
+        .clockConf           = { 10, 215, 2, WA_RIGHT },
+        .vuConf              = { 35, 259, 1, WA_CENTER },
+        // ??? namedayConf   = { TFT_FRAMEWDT, 175, 2, WA_LEFT };
+        // ??? dateConf      = { TFT_FRAMEWDT, 226, 1, WA_LEFT };
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        .fullbitrateConf     = {{ 10, 148, 2, WA_RIGHT }, 60 },
+        /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
+        .bandsConf           = { 200, 7, 4, 2, 20, 9 },
+        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        .clockMove           = { 0, 0, -1 },
+        .weatherMove         = { 10, 116, MAX_WIDTH },
+        .weatherMoveVU       = { 10, 116, MAX_WIDTH },
+        /* BOOMBOX STYLE: middle-out VU */
+        .boomboxStyle        = true,
+    },
+};
 
-/* BANDS  */                             /* { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands, fadespeed } */
-const VUBandsConfig bandsConf     PROGMEM = { 32, 130, 4, 2, 10, 3 };
-
-/* STRINGS  */
+/* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "WiFi %d";
-const char iptxtFmt[]             PROGMEM = "\010 %s";
-const char voltxtFmt[]            PROGMEM = "\023\025%d";
-const char batteryRangeFmt[][8]   PROGMEM = { "\013 %d%%", "\014 %d%%", "\015 %d%%" };
+const char iptxtFmt[]             PROGMEM = "\037 %s";
+const char voltxtFmt[]            PROGMEM = "%d";
+const char batterytxtFmt[]        PROGMEM = "%d%%";
 const char bitrateFmt[]           PROGMEM = "%d kBs";
-
-/* MOVES  */                             /* { left, top, width } */
-const MoveConfig clockMove        PROGMEM = { 0, 230, -1 };
-const MoveConfig weatherMove      PROGMEM = { TFT_FRAMEWDT, 120, MAX_WIDTH };
-const MoveConfig weatherMoveVU    PROGMEM = { 89, 120, MAX_WIDTH-89+TFT_FRAMEWDT };
 
 #endif

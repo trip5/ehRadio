@@ -5,6 +5,8 @@
 #include "controls.h"
 #include "display.h"
 #include "logging.h"
+#include "network.h"
+#include "utility.h"
 #include "player.h"
 #include "touchscreen.h"
 
@@ -23,13 +25,29 @@
 #ifndef TS_STEPS
   #define TS_STEPS              40
 #endif
+#ifndef TS_SWIPE_THRESHOLD_PX
+  #if TS_MODEL == TS_MODEL_XPT2046
+    #define TS_SWIPE_THRESHOLD_PX  20   // resistive: needs jitter filtering
+  #else
+    #define TS_SWIPE_THRESHOLD_PX  12   // capacitive (GT911, FT6336): clean signal
+  #endif
+#endif
+#ifndef TS_COOLDOWN_MS
+  #define TS_COOLDOWN_MS         150
+#endif
+#ifndef TS_DEEPSLEEP_MS
+  #define TS_DEEPSLEEP_MS        5000
+#endif
+#ifndef TS_DOUBLETAP_MS
+  #define TS_DOUBLETAP_MS        400
+#endif
 
 #if TS_MODEL==TS_MODEL_XPT2046
   #include <XPT2046_Touchscreen.h>
   XPT2046_Touchscreen ts(TS_CS);
   typedef TS_Point TSPoint;
 #elif TS_MODEL==TS_MODEL_GT911
- #include "../libraries/GT911_Touchscreen/TAMC_GT911.h"
+ #include <TAMC_GT911.h>
   TAMC_GT911 ts = TAMC_GT911(TS_SDA, TS_SCL, TS_INT, TS_RST, 0, 0);
   typedef TP_Point TSPoint;
 #elif TS_MODEL==TS_MODEL_FT6336
@@ -71,7 +89,7 @@ void TouchScreen::init(uint16_t w, uint16_t h) {
 tsDirection_e TouchScreen::_tsDirection(uint16_t x, uint16_t y) {
   int16_t dX = x - _oldTouchX;
   int16_t dY = y - _oldTouchY;
-  if (abs(dX) > 20 || abs(dY) > 20) {
+  if (abs(dX) > TS_SWIPE_THRESHOLD_PX || abs(dY) > TS_SWIPE_THRESHOLD_PX) {
     if (abs(dX) > abs(dY)) {
       if (dX > 0) {
         return TSD_RIGHT;
@@ -117,6 +135,8 @@ void TouchScreen::loop() {
 #endif
   bool istouched = _istouched();
   if (istouched) {
+    if (!_tapPending && _touchCooldown && (millis() - _touchCooldown < TS_COOLDOWN_MS)) return;
+    _touchCooldown = 0;
   #if TS_MODEL==TS_MODEL_XPT2046
     TSPoint p = ts.getPoint();
     touchX = map(p.x, TS_X_MIN, TS_X_MAX, 0, _width);
@@ -131,6 +151,12 @@ void TouchScreen::loop() {
     touchY = p.y;
   #endif
   if (!wastouched) { /*     START TOUCH     */
+      if (_tapPending && (millis() - _tapPendingTime < TS_DOUBLETAP_MS)) {
+        _isDoubleTap = true;
+        _tapPending = false;
+      } else {
+        _tapPending = false;
+      }
       _oldTouchX = touchX;
       _oldTouchY = touchY;
       touchVol = touchX;
@@ -138,7 +164,20 @@ void TouchScreen::loop() {
       direct = TSD_REQUEST;
       touchLongPress=millis();
     } else { /*     SWIPE TOUCH     */
-      direct = _tsDirection(touchX, touchY);
+      if (direct == TSD_REQUEST) {
+        direct = _tsDirection(touchX, touchY);
+        if (direct != TSD_REQUEST) {
+          _tapPending = false;
+          _isDoubleTap = false;
+        }
+      }
+      if (direct == TSD_REQUEST && (millis() - touchLongPress >= TS_DEEPSLEEP_MS)) {
+        if (network.status != SDOFFLINE) {
+          #ifndef DEEP_SLEEP_DISABLE
+            display.putRequest(NEWMODE, SLEEPING);
+          #endif
+        }
+      }
       switch (direct) {
         case TSD_LEFT:
         case TSD_RIGHT: {
@@ -177,13 +216,26 @@ void TouchScreen::loop() {
     if (wastouched) {/*     END TOUCH     */
       if (direct == TSD_REQUEST) {
         uint32_t pressTicks = millis()-touchLongPress;
-        if (pressTicks < BTN_PRESS_TICKS*2) {
-          if (pressTicks > 50) controls.onBtnClick(EVT_BTN_PLAY);
-        } else {
-          display.putRequest(NEWMODE, display.mode() == PLAYER ? STATIONS : PLAYER);
+        if (pressTicks >= TS_DEEPSLEEP_MS) {
+          #ifndef DEEP_SLEEP_DISABLE
+            utility.doSleepW();
+          #endif
+        } else if (pressTicks > 50) {
+          if (_isDoubleTap) {
+            controls.onBtnClick(EVT_BTN_MODE);
+            _isDoubleTap = false;
+          } else {
+            _tapPending = true;
+            _tapPendingTime = millis();
+          }
         }
       }
       direct = TSD_STAY;
+      _touchCooldown = millis();
+    }
+    if (_tapPending && (millis() - _tapPendingTime >= TS_DOUBLETAP_MS)) {
+      controls.onBtnClick(EVT_BTN_PLAY);
+      _tapPending = false;
     }
   }
   wastouched = istouched;

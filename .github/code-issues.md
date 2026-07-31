@@ -160,7 +160,7 @@ If we do that, we should initiate cleanup on every boot (well, initiate cleanup 
 ### [ ] 4.1 Battery widget checked on real hardware? `[LOW]`
 
 - **File**: All `src/displays/conf/display*conf.h`
-- **Problem**: `src/core/display.cpp` references `batteryConf`, `batteryRangeLowFmt`, `batteryRangeMidFmt`, and `batteryRangeHighFmt` inside `#if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)` guards. The feasible non-LCD display configs now define those symbols; tiny panels and LCD-only panels use `HIDE_BATTERY` instead of trying to force a bad layout.
+- **Problem**: `src/core/display.cpp` references `batteryConf`, `batteryRangeLowFmt`, `batteryRangeMidFmt`, and `batteryRangeHighFmt` inside `#if defined(BATTERY_PIN) && (BATTERY_PIN!=255)` guards. The `_battery` pointer is null-checked at every call site — unsupported panels simply leave `batteryConf` zeroed rather than using a compile-time `HIDE_BATTERY` guard.
 - **Action**: Keep the non-LCD display confs aligned with this contract, and use the checklist below as the real-hardware verification matrix for each target.
 
 | Battery widget checked on real hardware? | Display conf file |

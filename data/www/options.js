@@ -18,6 +18,8 @@ if (typeof window.originalLocaleDisp === 'undefined') {
 // Load timezones and locales - handle both immediate and deferred execution
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    loadThemes();
+    loadLayouts();
     loadTimezones();
     loadLocales();
     loadDisplayLocales();
@@ -26,12 +28,80 @@ if (document.readyState === 'loading') {
   });
 } else {
   // DOM already loaded (script loaded dynamically)
+  loadThemes();
+  loadLayouts();
   loadTimezones();
   loadLocales();
   loadDisplayLocales();
   setupWeatherProviderToggle();
   setupDimmingControls();
 }
+
+/** THEME & LAYOUT dropdowns **/
+let themeData = null, layoutData = null;
+let pendingThemeId = null, pendingLayoutId = null;
+
+async function loadThemes() {
+  try {
+    const r = await fetch('themes.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    themeData = await r.json();
+    populateNamedDropdown('themeId', themeData);
+    if (pendingThemeId !== null) {
+      const sel = getId('themeId');
+      if (sel) sel.value = pendingThemeId;
+      pendingThemeId = null;
+    }
+  } catch(e) { console.error('Failed to load themes:', e); }
+}
+
+async function loadLayouts() {
+  try {
+    const r = await fetch('layouts.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    layoutData = await r.json();
+    populateNamedDropdown('layoutId', layoutData);
+    if (pendingLayoutId !== null) {
+      const sel = getId('layoutId');
+      if (sel) sel.value = pendingLayoutId;
+      pendingLayoutId = null;
+    }
+  } catch(e) { console.error('Failed to load layouts:', e); }
+}
+
+function populateNamedDropdown(elemId, data) {
+  const sel = getId(elemId);
+  if (!sel) return;
+  sel.innerHTML = '';
+  Object.entries(data).forEach(([id, name]) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = name.length > 40 ? name.substring(0,37)+'...' : name;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => {
+    if (sel.dataset.prev !== sel.value) {
+      const cmd = elemId === 'themeId' ? 'theme' : 'layout';
+      websocket.send(`${cmd}=${sel.value}`);
+      sel.dataset.prev = sel.value;
+    }
+  });
+}
+
+// Hook for script.js websocket handler to restore current values
+window.afterSetupElement = (function(orig) {
+  return function(id, value, element) {
+    if (typeof orig === 'function') orig(id, value, element);
+    if (id === 'themeId') {
+      if (themeData) getId('themeId').value = value;
+      else pendingThemeId = value;
+    }
+    if (id === 'layoutId') {
+      if (layoutData) getId('layoutId').value = value;
+      else pendingLayoutId = value;
+    }
+  };
+})(window.afterSetupElement);
 
 /** SCREEN DIMMING **/
 function syncDimmingUi(sendClampCommand = false) {

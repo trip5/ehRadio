@@ -355,15 +355,9 @@ void Controls::onBtnLongPressStart(int id) {
         display.putRequest(NEWMODE, display.mode() == PLAYER ? STATIONS : PLAYER);
         break;
     }
-    case EVT_ENC2_SW: {
-        if (network.status == SDOFFLINE) break;
-        #ifndef DEEP_SLEEP_DISABLE
-          display.putRequest(NEWMODE, SLEEPING);
-        #endif
-        break;
-      }
+    case EVT_ENC2_SW:
     case EVT_BTN_MODE: {
-        if (network.status == SDOFFLINE) break;  // no sleep in SD Offline mode
+        if (network.status == SDOFFLINE) break;
         #ifndef DEEP_SLEEP_DISABLE
           display.putRequest(NEWMODE, SLEEPING);
         #endif
@@ -382,8 +376,9 @@ void Controls::onBtnLongPressStop(int id) {
         lpId = -1;
         break;
       }
-    case EVT_BTN_MODE: {
-        if (network.status == SDOFFLINE) break;  // no sleep in SD Offline mode
+    case EVT_BTN_MODE:
+    case EVT_ENC2_SW: {
+        if (network.status == SDOFFLINE) break;
         #ifndef DEEP_SLEEP_DISABLE
           utility.doSleepW();
         #endif
@@ -391,13 +386,6 @@ void Controls::onBtnLongPressStop(int id) {
       }
     case EVT_ENC_SW: {
         break;  // do nothing on release
-      }
-    case EVT_ENC2_SW: {
-        if (network.status == SDOFFLINE) break;  // no sleep in SD Offline mode
-        #ifndef DEEP_SLEEP_DISABLE
-          utility.doSleepW();
-        #endif
-        break;
       }
     default:
         break;
@@ -667,14 +655,14 @@ void Controls::flipTS() {
 // Instant read (no blocking): if user is holding a button at boot time, force SD Offline Mode boot
 void Controls::checkButtonsHeldOnBoot() {
   #if defined(SDOFFLINE_BTN) && SDOFFLINE_BTN == 255
-    #define USE_SD_OFFLINE_MODE false
+    #define USE_SD_OFFLINE_MODE false // use no buttons ^^
   #else
     #define USE_SD_OFFLINE_MODE true
   #endif
   #if defined(USE_SD) && USE_SD_OFFLINE_MODE
     bool held = false;
     bool gpioheld = false;
-    #ifdef SDOFFLINE_BTN
+    #ifdef SDOFFLINE_BTN // use 1 button
       #if SDOFFLINE_BTN == BTN_MODE && BTN_MODE != 255
         pinMode(BTN_MODE, BTN_MODE_PULLUP ? INPUT_PULLUP : INPUT);
         if (digitalRead(BTN_MODE) == LOW) held = true;
@@ -699,15 +687,18 @@ void Controls::checkButtonsHeldOnBoot() {
       #elif SDOFFLINE_BTN == BTN_DOWN && BTN_DOWN != 255
         pinMode(BTN_DOWN, BTN_DOWN_PULLUP ? INPUT_PULLUP : INPUT);
         if (digitalRead(BTN_DOWN) == LOW) held = true;
-      #elif SDOFFLINE_BTN == TS_INT && TS_INT != 255
-        pinMode(TS_INT, INPUT_PULLUP);  // touch interrupt — always pullup
-        if (digitalRead(TS_INT) == LOW) held = true;
+      #else
+        #ifndef SDOFFLINE_BTN_ACTIVE_LOW
+          #define SDOFFLINE_BTN_ACTIVE_LOW true
+        #endif
+        #ifndef SDOFFLINE_BTN_PULLUP
+          #define SDOFFLINE_BTN_PULLUP true
+        #endif
+        pinMode(SDOFFLINE_BTN, SDOFFLINE_BTN_PULLUP ? INPUT_PULLUP : INPUT);
+        bool state = digitalRead(SDOFFLINE_BTN);
+        if (SDOFFLINE_BTN_ACTIVE_LOW ? (state == LOW) : (state == HIGH)) gpioheld = true;
       #endif
-    #else // use default buttons (unless...)
-      #if BTN_MODE != 255
-        pinMode(BTN_MODE, BTN_MODE_PULLUP ? INPUT_PULLUP : INPUT);
-        if (digitalRead(BTN_MODE) == LOW) held = true;
-      #endif
+    #else // use all buttons
       #if ENC_SW != 255
         pinMode(ENC_SW, ENC_SW_PULLUP ? INPUT_PULLUP : INPUT);
         if (digitalRead(ENC_SW) == LOW) held = true;
@@ -716,17 +707,30 @@ void Controls::checkButtonsHeldOnBoot() {
         pinMode(ENC2_SW, ENC2_SW_PULLUP ? INPUT_PULLUP : INPUT);
         if (digitalRead(ENC2_SW) == LOW) held = true;
       #endif
-    #endif
-    #ifdef SDOFFLINE_PIN // use GPIO directly
-      #ifndef SDOFFLINE_PIN_ACTIVE_LOW
-        #define SDOFFLINE_PIN_ACTIVE_LOW true
+      #if BTN_MODE != 255
+        pinMode(BTN_MODE, BTN_MODE_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_MODE) == LOW) held = true;
       #endif
-      #ifndef SDOFFLINE_PIN_PULLUP
-        #define SDOFFLINE_PIN_PULLUP true
+      #if BTN_PLAY != 255
+        pinMode(BTN_PLAY, BTN_PLAY_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_PLAY) == LOW) held = true;
       #endif
-      pinMode(SDOFFLINE_PIN, SDOFFLINE_PIN_PULLUP ? INPUT_PULLUP : INPUT);
-      bool state = digitalRead(SDOFFLINE_PIN);
-      if (SDOFFLINE_PIN_ACTIVE_LOW ? (state == LOW) : (state == HIGH)) gpioheld = true;
+      #if BTN_PREV != 255
+        pinMode(BTN_PREV, BTN_PREV_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_PREV) == LOW) held = true;
+      #endif
+      #if BTN_NEXT != 255
+        pinMode(BTN_NEXT, BTN_NEXT_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_NEXT) == LOW) held = true;
+      #endif
+      #if BTN_UP != 255
+        pinMode(BTN_UP, BTN_UP_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_UP) == LOW) held = true;
+      #endif
+      #if BTN_DOWN != 255
+        pinMode(BTN_DOWN, BTN_DOWN_PULLUP ? INPUT_PULLUP : INPUT);
+        if (digitalRead(BTN_DOWN) == LOW) held = true;
+      #endif
     #endif
     if (held || gpioheld) {
       network.offlineMode = true;  // signals network.begin() to skip Wi-Fi

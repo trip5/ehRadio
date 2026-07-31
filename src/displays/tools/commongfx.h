@@ -159,9 +159,9 @@ class DspCore: public yoDisplay {
     // unlike the library's GFXfont drawChar which draws only foreground.
     void _writeGlyph(uint16_t cp) {
       const GFXfont *f = &DisplayFont;
-      if (cp == '\n') { cursor_x = 0; cursor_y += (int16_t)textsize_y * (uint8_t)pgm_read_byte(&f->yAdvance); return; }
-      if (cp == '\r') return;
-      // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE
+      // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE.
+      // Must precede \n / \r checks so that \015 (0x0D = CR)
+      // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
         const uint8_t* const *table = ICON_TABLE;
         if (cp < 32) {
@@ -187,10 +187,13 @@ class DspCore: public yoDisplay {
             }
             endWrite();
             cursor_x += 6 * textsize_x;
+            return;
           }
         }
-        return;
+        // NULL icon (e.g. \012 / LF): fall through to normal handling below
       }
+      if (cp == '\n') { cursor_x = 0; cursor_y += (int16_t)textsize_y * (uint8_t)pgm_read_byte(&f->yAdvance); return; }
+      if (cp == '\r') return;
       // Space (0x20) — advance cursor by one character cell.  Some fonts
       // start at 0x21; without this, space falls to foldAccent and the
       // cursor never advances, causing characters to run together.
@@ -248,10 +251,20 @@ class DspCore: public yoDisplay {
             }
           }
           endWrite();
+        } else {
+          // Empty glyph slot — try fallback mapping
+          uint16_t mapped = checkFallbackGlyph(cp, f);
+          if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
+          // No fallback available — advance cursor by one space width so
+          // the missing glyph appears as a visible gap instead of being
+          // silently deleted (xAdvance is 0 for empty slots).
+          uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
+          cursor_x += (int16_t)spaceAdv * textsize_x;
+          return;
         }
         cursor_x += (int16_t)pgm_read_byte(&glyph->xAdvance) * textsize_x;
       } else {
-        uint16_t mapped = foldAccent(cp, f);
+        uint16_t mapped = checkFallbackGlyph(cp, f);
         if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
         // Unrenderable codepoint (not in font, no accent mapping).
         // Advance cursor by one character cell so scroll width stays

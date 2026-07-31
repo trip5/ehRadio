@@ -43,49 +43,55 @@ hr{margin:20px 0;border:0; border-top:#555 1px solid;} p{text-align:center;margi
 input[type=file]{color:#ccc;} input[type=file]::file-selector-button, input[type=submit]{border:2px solid #eecccc;color:#000;padding:6px 16px;border-radius:25px;background-color:#eecccc;margin:0 6px;cursor:pointer;}
 input[type=submit]{font-size:18px;text-transform:uppercase;padding:8px 26px;margin-top:10px;font-family:Times;} span{color:#ccc} .flex{display:flex;justify-content: space-around;margin-top:10px;}
 input[type=text],input[type=password]{width:170px;background:#272727;color:#eecccc;padding:6px 12px;font-size:20px;border:#2d2d2d 1px solid;margin:4px 0 0 4px;border-radius:4px;outline:none;}
+select{background:#272727;color:#eecccc;padding:4px 8px;font-size:16px;border:#2d2d2d 1px solid;border-radius:4px;margin-left:8px;}
 @media screen and (max-width:480px) {section{zoom:0.7;-moz-transform:scale(0.7);}}
 </style>
 <script type="text/javascript" src="/variables.js"></script>
+<script type="text/javascript" src="/locale.js"></script>
 </head><body>
+<div style="text-align:center;padding:10px 20px 0;">
+<span data-i18n="lbl_webui_locale">WebUI Locale</span>
+<select id="localePicker"><option value="">Loading...</option></select>
+</div>
 <section>
 <div id="uploader">
-<h2>ehRadio - WEB Board Uploader</h2>
+<h2>ehRadio - <span data-i18n="z_webui_uploader">WebUI Files Uploader</span></h2>
 <hr />
-<span>Select <u>ALL</u> files from <i>data/www/</i><br />and upload them using the form below</span>
+<span data-i18n="z_select_www_files">Select ALL files from data/www/ and upload them using the form below</span>
 <hr />
 <form action="/webboard" method="post" enctype="multipart/form-data">
-<p><label for="www">www:</label> <input type="file" name="www" id="www" multiple></p>
+<p><label for="www" data-i18n="z_www_files">www Files:</label> <input type="file" name="www" id="www" multiple></p>
 <hr />
-<span>= OPTIONAL =<br />You can also upload <i>playlist.csv</i><br />and <i>wifi.csv files</i> from your backup</span>
-<p><label for="data">wifi:</label><input type="file" name="data" id="data" multiple></p>
+<span data-i18n="z_optional_upload"> OPTIONAL: You can also upload playlist.csv and wifi.csv files from your backup</span>
+<p><label for="data" data-i18n="z_csv_files">CSV Files:</label><input type="file" name="data" id="data" multiple></p>
 <hr />
-<p><input type="submit" name="submit" value="Upload Files"></p>
+<p><input type="submit" name="submit" value="Upload Files" data-i18n="z_upload_files"></p>
 </form>
 </div>
 <div style="padding:10px 0 0;" id="wupload">
 <div id="credtitle-x">
 <hr />
-<span>= OPTIONAL =<br />If you can't connect from PC to 192.168.4.1 address<br />setup WiFi connection first!</span>
+<span data-i18n="z_optional_set_wifi">OPTIONAL: Setup Wi-Fi connection first!</span>
 </div>
 <div id="credtitle" class="hidden">
-<h2>ehRadio - Credentials</h2>
+<h2>ehRadio - <span data-i18n="z_credentials">Credentials</span></h2>
 <hr />
 </div>
 <form name="wifiform" method="post" enctype="multipart/form-data">
-<div class="flex"><div><label for="ssid">ssid:</label><input type="text" id="ssid" name="ssid" value="" maxlength="30" autocomplete="off"></div>
-<div><label for="pass">pass:</label><input type="password" id="pass" name="pass" value="" maxlength="40" autocomplete="off"></div>
+<div class="flex"><div><label for="ssid" data-i18n="z_ssid">SSID:</label><input type="text" id="ssid" name="ssid" value="" maxlength="30" autocomplete="off"></div>
+<div><label for="pass" data-i18n="z_password">password:</label><input type="password" id="pass" name="pass" value="" maxlength="40" autocomplete="off"></div>
 </div>
-<p><input type="submit" name="submit" value="Save Credentials"></p>
+<p><input type="submit" name="submit" value="Save Credentials" data-i18n="z_save_credentials"></p>
 </form>
 </div>
 <div id="downloader" class="hidden">
-<h2>ehRadio - WEB Board Downloader</h2>
+<h2>ehRadio - <span data-i18n="z_webui_downloader">WebUI Files Downloader</span></h2>
 <hr />
-<span>The WebUI files are currently downloading. Please wait a few moments. The device will restart and this page will reload when everything is ready.</span>
+<span data-i18n="z_downloading">The WebUI files are currently downloading. Please wait a few moments. The device will restart and this page will reload when everything is ready.</span>
 <hr />
 </div>
 </section>
-<p><a href="/emergency">emergency firmware uploader</a></p>
+<p><a href="/emergency" data-i18n="z_emergency_firmware_uploader">Emergency Firmware Uploader</a></p>
 <div id="copy">powered by <a target="_blank" href="https://trip5.github.io/ehRadio/">ehRadio</a> | <span id="version"></span></div>
 </body>
 <script>
@@ -95,14 +101,26 @@ document.getElementById("wupload").classList.add("hidden");
 if (onlineUpdCapable) {
 document.getElementById('downloader').classList.remove("hidden");
 document.getElementById('uploader').classList.add("hidden");
-setTimeout(() => { window.location.reload(true); }, 10000);
+setTimeout(function(){ window.location.reload(true); }, 10000);
 }
 } else if (onlineUpdCapable) {
 document.getElementById('credtitle').classList.remove("hidden");
 document.getElementById('credtitle-x').classList.add("hidden");
 document.getElementById('uploader').classList.add("hidden");
 }
-document.getElementById("version").innerHTML=`${radioVersion}`;
+document.getElementById("version").innerHTML=radioVersion;
+var activeLocale=(window.location.search.match(/l=([^&]+)/)||[])[1]||(typeof currentLocale!=='undefined'?currentLocale:'');
+fetch('/wwwlocale.json').then(function(r){return r.json();}).then(function(locales){
+var sel=document.getElementById('localePicker');
+sel.innerHTML='';
+Object.entries(locales).sort().forEach(function(e){
+var o=document.createElement('option');
+o.value=e[0];o.textContent=e[0]+': '+e[1];
+sel.appendChild(o);
+});
+sel.value=activeLocale;
+sel.onchange=function(){window.location='/?l='+this.value;};
+});
 </script>
 </html>
 )";
@@ -118,9 +136,10 @@ const char index_html[] PROGMEM = R"(
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="stylesheet" id="themeCSS" href="theme.css" type="text/css" />
   <link rel="stylesheet" id="styleCSS" href="style.css" type="text/css" />
-  <script type="text/javascript" src="variables.js"></script>
-  <script type="text/javascript" src="script.js"></script>
-  <script type="text/javascript" src="script2.js"></script>
+  <script type="text/javascript" src="/variables.js"></script>
+  <script type="text/javascript" src="/locale.js"></script>
+  <script type="text/javascript" src="/script.js"></script>
+  <script type="text/javascript" src="/script2.js"></script>
   </head>
 <body>
 <div id="content" class="hidden progmem"></div><!--content--><div id="progress"><span id="loader"></span></div>

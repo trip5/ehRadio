@@ -514,7 +514,7 @@ void MyNetwork::setWifiParams() {
   WiFi.onEvent(WiFiReconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(WiFiLostConnection, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   weatherBuf=NULL;
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     if (weatherBuf) { free(weatherBuf); weatherBuf = nullptr; }
     weatherBuf = (char *) malloc(sizeof(char) * WEATHER_STRING_L);
     memset(weatherBuf, 0, WEATHER_STRING_L);
@@ -692,7 +692,7 @@ static bool shouldClearWeatherCacheOnFailure() {
 
 // Build weather display string from cached data (no API refetch)
 bool MyNetwork::buildWeatherString() {
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     if (!weatherBuf) return false;
 
     // If no cached data or cache expired, show loading message
@@ -742,19 +742,19 @@ bool MyNetwork::buildWeatherString() {
     if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     
     if (config.store.weatherfeels && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.1f%s", l10n(L10N_LBL_W_FEELSLIKE), feels_display, tempUnit);
+      written = snprintf(p, remaining, " ~ %s %.1f%s", l10n(L10N_LBL_W_FEELSLIKE), feels_display, tempUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherpressure && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.0f %s", l10n(L10N_LBL_W_PRESSURE), press_display, pressUnit);
+      written = snprintf(p, remaining, " ~ %s %.0f %s", l10n(L10N_LBL_W_PRESSURE), press_display, pressUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherhumidity && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %d%%", l10n(L10N_LBL_W_HUMIDITY), WeatherCache::humidity);
+      written = snprintf(p, remaining, " ~ %s %d%%", l10n(L10N_LBL_W_HUMIDITY), WeatherCache::humidity);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
     if (config.store.weatherwind && remaining > 1) {
-      written = snprintf(p, remaining, " \007 %s %.1f %s [%s]", l10n(L10N_LBL_W_WIND), wind_display, windUnit, l10n_wind(wind_dir_idx));
+      written = snprintf(p, remaining, " ~ %s %.1f %s [%s]", l10n(L10N_LBL_W_WIND), wind_display, windUnit, l10n_wind(wind_dir_idx));
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= (size_t)written; }
     }
     
@@ -767,7 +767,7 @@ bool MyNetwork::buildWeatherString() {
 
 // Get weather from Open-Meteo API (free, no API key)
 bool getWeather_OpenMeteo(char *wstr) {
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     FUNCTIONLOG("Weather", "Calling Open-Meteo v1 API for current weather...");
     
     // Build URL - always request metric (Celsius, m/s, hPa) for consistent processing
@@ -849,7 +849,7 @@ bool getWeather_OpenMeteo(char *wstr) {
 
 // Get weather from OpenWeather API 2.5 (legacy)
 bool getWeather_OpenWeather25(char *wstr) {
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     FUNCTIONLOG("Weather", "Calling OpenWeather API 2.5 for current weather...");
     
     // Check for API key
@@ -1000,7 +1000,7 @@ float calculateGroundPressure(float seaLevelPressure, float elevationMeters) {
 
 // Get weather from OpenWeather API 3.0 (current)
 bool getWeather_OpenWeather30(char *wstr) {
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     FUNCTIONLOG("Weather", "Calling OpenWeather API 3.0 for current weather...");
     
     // Check for API key
@@ -1091,7 +1091,7 @@ bool getWeather_OpenWeather30(char *wstr) {
 }
 
 bool getWeather(char *wstr) {
-  #if (DSP_MODEL!=DSP_DUMMY ) && !defined(HIDE_WEATHER)
+  #if (DSP_MODEL!=DSP_DUMMY)
     // Provider dispatcher - route to appropriate weather API
     if (strcmp(config.store.weatherapi, "OW30") == 0) {
       return getWeather_OpenWeather30(wstr);

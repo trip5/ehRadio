@@ -2,7 +2,7 @@
 #define display_h
 #include <Ticker.h>
 #include "common.h"
-#include "../displays/widgets/widgetsconfig.h"  // needed for WidgetConfig type
+#include "../displays/widgets/widgetsconfig.h"  // WidgetConfig types + layout switching pointers
 
 #ifndef DUMMYDISPLAY
 class ScrollWidget;
@@ -44,6 +44,13 @@ class Display {
     void _time(bool redraw = false);
     void _volume();
     void flip();
+    void applyLayout(uint8_t id);
+    uint8_t getLayoutCount();
+    void applyTheme(uint8_t id);
+    uint8_t getThemeCount();
+    String getThemeListJson();
+    String getLayoutListJson();
+    void applyInvertTitle();
     void invert();
     void setContrast();
     bool deepsleep();
@@ -59,8 +66,8 @@ class Display {
     ScrollWidget *_meta = nullptr, *_title1 = nullptr, *_plcurrent = nullptr, *_weather = nullptr, *_title2 = nullptr;
     PlayListWidget *_plwidget = nullptr;
     #ifdef UPDATEURL
-      TextWidget *_updLabel = nullptr, *_updValue = nullptr;
-      WidgetConfig _updConf;           // keep a copy of the label's configuration
+      ScrollWidget *_updLabel = nullptr;
+      TextWidget *_updValue = nullptr;
       bool _updFirstCall = true;
       int _updBarWidth = 10;
     #endif
@@ -78,15 +85,16 @@ class Display {
     Ticker _returnTicker;
     bool _locked = false;
     uint8_t _bootStep = 0;
-
     void _createDspTask();
+    void _reinitWidgets();
+    void _setLayoutPointers();
+    void _applyState();
     void _showDialog(const char *title);
     void _setReturnTicker(uint8_t time_s);
     void _swichMode(displayMode_e newmode);
-    #if defined(BATTERY_PIN) && (BATTERY_PIN!=255) && !defined(HIDE_BATTERY)
-      void _updateBattery();
-    #endif
-};
+    void _updateBattery();
+    void _updateVolume();
+  };
 
 #else
 
@@ -109,6 +117,13 @@ class Display {
     void centerText(const char* text, uint8_t y, uint16_t fg, uint16_t bg) {}
     void rightText(const char* text, uint8_t y, uint16_t fg, uint16_t bg) {}
     void flip() {}
+    void applyLayout(uint8_t) {}
+    uint8_t getLayoutCount() { return 1; }
+    String getThemeListJson()  { return "[]"; }
+    String getLayoutListJson() { return "[]"; }
+    void applyTheme(uint8_t) {}
+    uint8_t getThemeCount() { return 1; }
+    void applyInvertTitle() {}
     void invert() {}
     void setContrast() {}
     bool deepsleep() {return true;}

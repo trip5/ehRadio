@@ -124,49 +124,47 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "clearspiffs")) { utility.cleanupSpiffs(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
 
   /* Options: Load Settings */
-  if (cmdIs(command, "getsystem"))   { netserver.requestOnChange(GETSYSTEM, cid); return true; }
+  if (cmdIs(command, "getcontrols")) { netserver.requestOnChange(GETCONTROLS, cid); return true; }
   if (cmdIs(command, "getscreen"))   { netserver.requestOnChange(GETSCREEN, cid); return true; }
   if (cmdIs(command, "getlocale"))   { netserver.requestOnChange(GETLOCALE, cid); return true; }
-  if (cmdIs(command, "getcontrols")) { netserver.requestOnChange(GETCONTROLS, cid); return true; }
   if (cmdIs(command, "getweather"))  { netserver.requestOnChange(GETWEATHER, cid); return true; }
+  if (cmdIs(command, "getsystem"))   { netserver.requestOnChange(GETSYSTEM, cid); return true; }
   if (cmdIs(command, "getmqtt"))     { netserver.requestOnChange(GETMQTT, cid); return true; }
   if (cmdIs(command, "getbattery"))  { netserver.requestOnChange(GETBATTERY, cid); return true; }
 
-  /* Options: System */
+  /* Options: Controls */
   if (cmdIs(command, "smartstart"))  { config.saveValue(&config.store.smartstart, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "bufferbar"))   { config.saveValue(&config.store.bufferbar, static_cast<bool>(atoi(value))); display.putRequest(SHOWBUFFERBAR); return true; }
-  if (cmdIs(command, "vumeter"))     { config.saveValue(&config.store.vumeter, static_cast<bool>(atoi(value))); display.putRequest(SHOWVUMETER); return true; }
-  if (cmdIs(command, "wifiscan"))    { config.saveValue(&config.store.wifiscanbest, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "autoupdate"))  { config.saveValue(&config.store.autoupdate, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "ehdpname"))    { config.saveValue(config.store.ehdpname, value); network.ehDPinit(); return true; }
-  if (cmdIs(command, "softap"))      { config.saveValue(&config.store.softapdelay, static_cast<uint8_t>(atoi(value))); return true; }
-  if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); netserver.restartMdns(); return true; }
-
-  /* Options: Battery */
-  if (cmdIs(command, "battref"))     { if (battery.calibrate(atoi(value))) netserver.requestOnChange(GETBATTERY, cid); return true; }
-  if (cmdIs(command, "battrecalc"))  { battery.recalcNow(); netserver.requestOnChange(GETBATTERY, cid); return true; }
+  if (cmdIs(command, "fliptouch"))      { config.saveValue(&config.store.fliptouch, static_cast<bool>(atoi(value))); controls.flipTS(); return true; }
+  if (cmdIs(command, "dbgtouch"))       { config.saveValue(&config.store.dbgtouch, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "encacc"))         { int e=atoi(value); controls.setEncAcceleration(static_cast<uint8_t>(e < 0 ? 0 : (e > 7 ? 7 : e))); return true; }
+  if (cmdIs(command, "oneclickswitch")) { config.saveValue(&config.store.oneclickswitch, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "irtlp"))          { controls.setIRTolerance(static_cast<uint8_t>(atoi(value))); return true; }
 
   /* Options: Screen */
-  if (cmdIs(command, "flipscreen"))    { config.saveValue(&config.store.flipscreen, static_cast<bool>(atoi(value))); display.flip(); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "invertdisplay")) { config.saveValue(&config.store.invertdisplay, static_cast<bool>(atoi(value))); return true; } //display.invert();
-  if (cmdIs(command, "numplaylist"))   { config.saveValue(&config.store.numplaylist, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
-  if (cmdIs(command, "clock12"))       { config.saveValue(&config.store.clock12, static_cast<bool>(atoi(value))); display.putRequest(CLOCK); return true; }
-  if (cmdIs(command, "volumepage"))    { config.saveValue(&config.store.volumepage, static_cast<bool>(atoi(value))); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "flipscreen"))    { config.saveValueButWait(&config.store.flipscreen, static_cast<bool>(atoi(value)), 5000); display.flip(); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "invertdisplay")) { config.saveValueButWait(&config.store.invertdisplay, static_cast<bool>(atoi(value)), 5000); return true; } //display.invert();
+  if (cmdIs(command, "inverttitle"))   { config.saveValueButWait(&config.store.inverttitle, static_cast<bool>(atoi(value)), 5000); display.applyTheme(config.store.themeId); return true; }
+  if (cmdIs(command, "layout"))        { uint8_t id = constrain(atoi(value), 0, display.getLayoutCount() - 1); config.saveValueButWait(&config.store.layoutId, id, 5000); display.applyLayout(id); return true; }
+  if (cmdIs(command, "theme"))         { uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1); config.saveValueButWait(&config.store.themeId, id, 5000); display.applyTheme(id); return true; }
+  if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
+  if (cmdIs(command, "clock12"))       { config.saveValueButWait(&config.store.clock12, static_cast<bool>(atoi(value)), 5000); display.putRequest(CLOCK); return true; }
+  if (cmdIs(command, "bufferbar"))     { config.saveValue(&config.store.bufferbar, static_cast<bool>(atoi(value))); display.putRequest(SHOWBUFFERBAR); return true; }
+  if (cmdIs(command, "vumeter"))       { config.saveValue(&config.store.vumeter, static_cast<bool>(atoi(value))); display.putRequest(SHOWVUMETER); return true; }
+  if (cmdIs(command, "volumepage"))    { config.saveValueButWait(&config.store.volumepage, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "brightness", "dim")) {
     if (!config.store.dspon) netserver.requestOnChange(DSPON, 0);
     int bri=atoi(value);
     config.store.brightness = (uint8_t)(bri < 0 ? 0 : (bri > 100 ? 100 : bri));
     if (config.store.dimmingBrightness > config.store.brightness) {
       config.store.dimmingBrightness = config.store.brightness;
-      config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 4000);
+      config.saveValueButWait(&config.store.dimmingBrightness, config.store.dimmingBrightness, 5000);
     }
     config.setBrightness(true);
     backlightControls.restart();
     return true;
   }
   if (cmdIs(command, "screenon", "dspon"))    { config.setDspOn(static_cast<bool>(atoi(value))); backlightControls.restart(); return true; }
-  if (cmdIs(command, "contrast"))             { int con=atoi(value); config.saveValueButWait(&config.store.contrast, (uint8_t)(con < 0 ? 0 : (con > 100 ? 100 : con)), 4000); display.setContrast(); return true; }
+  if (cmdIs(command, "contrast"))             { int con=atoi(value); config.saveValueButWait(&config.store.contrast, (uint8_t)(con < 0 ? 0 : (con > 100 ? 100 : con)), 5000); display.setContrast(); return true; }
   /* De-deplicated helper for screensaver / No-op for LCDs */
   auto screensaverHelper = []() {
     #ifndef DSP_LCD
@@ -191,13 +189,6 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     return true;
   }
   if (cmdIs(command, "dimmingtimeout"))            { config.saveValue(&config.store.dimmingTimeout, static_cast<uint16_t>(constrain(atoi(value), 5, 65520))); backlightControls.restart(); return true; }
-
-  /* Options: Controls */
-  if (cmdIs(command, "fliptouch"))      { config.saveValue(&config.store.fliptouch, static_cast<bool>(atoi(value))); controls.flipTS(); return true; }
-  if (cmdIs(command, "dbgtouch"))       { config.saveValue(&config.store.dbgtouch, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "encacc"))         { int e=atoi(value); controls.setEncAcceleration(static_cast<uint8_t>(e < 0 ? 0 : (e > 7 ? 7 : e))); return true; }
-  if (cmdIs(command, "oneclickswitch")) { config.saveValue(&config.store.oneclickswitch, static_cast<bool>(atoi(value))); return true; }
-  if (cmdIs(command, "irtlp"))          { controls.setIRTolerance(static_cast<uint8_t>(atoi(value))); return true; }
 
   /* Options: Locale */
   if (cmdIs(command, "locale_webui")) { config.saveValue(config.store.locale_webui, value); return true; }
@@ -242,6 +233,14 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "wlat"))          { config.saveValue(config.store.weatherlat, value); config.store.weatherelevation = 0; config.saveValue(&config.store.weatherelevation, static_cast<int16_t>(0)); network.forceWeather = true; return true; }
   if (cmdIs(command, "wlon"))          { config.saveValue(config.store.weatherlon, value); config.store.weatherelevation = 0; config.saveValue(&config.store.weatherelevation, static_cast<int16_t>(0)); network.forceWeather = true; return true; }
 
+  /* Options: System */
+  if (cmdIs(command, "wifiscan"))    { config.saveValue(&config.store.wifiscanbest, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "autoupdate"))  { config.saveValue(&config.store.autoupdate, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "ehdpname"))    { config.saveValue(config.store.ehdpname, value); network.ehDPinit(); return true; }
+  if (cmdIs(command, "softap"))      { config.saveValue(&config.store.softapdelay, static_cast<uint8_t>(atoi(value))); return true; }
+  if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); netserver.restartMdns(); return true; }
+
   /* Options: MQTT */
   #ifdef MQTT_ENABLE
     if (cmdIs(command, "mqttenable")) { config.saveValue(&config.store.mqttenable, static_cast<bool>(atoi(value))); mqtt.init(); return true; }
@@ -251,6 +250,10 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     if (cmdIs(command, "mqttpass"))   { config.saveValue(config.store.mqttpass, value); return true; }
     if (cmdIs(command, "mqtttopic"))  { config.saveValue(config.store.mqtttopic, value); return true; }
   #endif
+
+  /* Options: Battery */
+  if (cmdIs(command, "battref"))     { if (battery.calibrate(atoi(value))) netserver.requestOnChange(GETBATTERY, cid); return true; }
+  if (cmdIs(command, "battrecalc"))  { battery.recalcNow(); netserver.requestOnChange(GETBATTERY, cid); return true; }
 
   /* Options: Danger Zone */
   if (cmdIs(command, "reboot", "boot"))  { FUNCTIONLOG("REBOOT", "Reboot triggered by command."); delay(10); ESP.restart(); return true; }

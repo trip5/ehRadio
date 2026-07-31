@@ -21,6 +21,7 @@
 
 #elif DSP_MODEL==DSP_ST7735
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayST7735.h"
 
 #elif DSP_MODEL==DSP_SSD1306
@@ -33,6 +34,7 @@
 
 #elif DSP_MODEL==DSP_ST7789
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayST7789.h"
 
 #elif DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107
@@ -49,6 +51,7 @@
 
 #elif DSP_MODEL==DSP_ILI9341
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayILI9341.h"
 
 #elif DSP_MODEL==DSP_SSD1305
@@ -57,22 +60,27 @@
 
 #elif DSP_MODEL==DSP_GC9106
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayGC9106.h"
 
 #elif DSP_MODEL==DSP_ILI9225
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayILI9225.h"
 
 #elif DSP_MODEL==DSP_ST7796
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayST7796.h"
 
 #elif DSP_MODEL==DSP_GC9A01A
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayGC9A01A.h"
 
 #elif DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486
   #define PSFBUFFER
+  #define DSP_TFT
   #include "displayILI9488.h"
 
 #elif DSP_MODEL==DSP_SSD1322

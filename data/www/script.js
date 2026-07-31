@@ -1278,7 +1278,7 @@ function continueLoading(mode){
           case "confirm-reset": showDangerConfirm('dz_reset'); break;
           case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...'), 15, true); break;
           case "format": websocket.send("format=1"); rebootSystem(t('msg_format_reboot', 'Format SPIFFS. Rebooting...'), 0, false); break;
-          case "reset":  websocket.send("reset=1"); getId("settingscontent").innerHTML=`<h2>${t('msg_reset_reboot', 'Settings reset.')}</h2>`; setTimeout(() => location.reload(), 2000); break;
+          case "reset":  websocket.send("reset=1"); getId("settingscontent").innerHTML=`<h2>${t('msg_reset', 'Settings reset.')}</h2>`; setTimeout(() => location.reload(), 2000); break;
           case "shuffle": toggleShuffle(); break;
           case "ehdpsave": websocket.send(`ehdpname=${getId('ehdpname').value}`); break;
           case "restartmdns": {

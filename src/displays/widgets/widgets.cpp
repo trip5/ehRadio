@@ -2,6 +2,7 @@
 #if DSP_MODEL!=DSP_DUMMY
 #include <Arduino.h>
 #include "../dspcore.h"
+#include "../../core/display.h"
 #include "../tools/psframebuffer.h"
 #include "widgets.h"
 #include "../../locale/dsplocale.h"
@@ -470,16 +471,16 @@ void VuWidget::_draw(){
   for(int i=0; i<dimension; i++){
     if(i%(dimension/_bands.perheight)==0){
       if(_config.align){
-        #ifndef BOOMBOX_STYLE
+        if (!*boomboxStyle_ptr) {
           bandColor = (i>_bands.width-(_bands.width/_bands.perheight)*4)?_vumaxcolor:_vumincolor;
           _canvas->fillRect(i, 0, h, _bands.height, bandColor);
           _canvas->fillRect(i + _bands.width + _bands.space, 0, h, _bands.height, bandColor);
-        #else
+        } else {
           bandColor = (i>(_bands.width/_bands.perheight))?_vumincolor:_vumaxcolor;
           _canvas->fillRect(i, 0, h, _bands.height, bandColor);
           bandColor = (i>_bands.width-(_bands.width/_bands.perheight)*3)?_vumaxcolor:_vumincolor;
           _canvas->fillRect(i + _bands.width + _bands.space, 0, h, _bands.height, bandColor);
-        #endif
+        }
       }else{
         bandColor = (i<(_bands.height/_bands.perheight)*3)?_vumaxcolor:_vumincolor;
         _canvas->fillRect(0, i, _bands.width, h, bandColor);
@@ -488,18 +489,18 @@ void VuWidget::_draw(){
     }
   }
   if(_config.align){
-    #ifndef BOOMBOX_STYLE
+    if (!*boomboxStyle_ptr) {
       _canvas->fillRect(_bands.width-measL, 0, measL, _bands.width, _bgcolor);
       _canvas->fillRect(_bands.width * 2 + _bands.space - measR, 0, measR, _bands.width, _bgcolor);
       dsp.drawRGBBitmap(_config.left, _config.top, _canvas->getBuffer(), _bands.width * 2 + _bands.space, _bands.height);
-    #else
+    } else {
       _canvas->fillRect(0, 0, _bands.width-(_bands.width-measL), _bands.width, _bgcolor);
       _canvas->fillRect(_bands.width * 2 + _bands.space - measR, 0, measR, _bands.width, _bgcolor);
       dsp.startWrite();
       dsp.setAddrWindow(_config.left, _config.top, _bands.width * 2 + _bands.space, _bands.height);
       dsp.writePixels((uint16_t*)_canvas->getBuffer(), (_bands.width * 2 + _bands.space)*_bands.height);
       dsp.endWrite();
-    #endif
+    }
   }else{
     _canvas->fillRect(0, 0, _bands.width, measL, _bgcolor);
     _canvas->fillRect(_bands.width + _bands.space, 0, _bands.width, measR, _bgcolor);
@@ -680,7 +681,8 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
 
 void ClockWidget::_begin(){
   #ifdef PSFBUFFER
-    _fb->begin(&dsp, _clockleft, _config.top-_timeheight, _clockwidth, _clockheight+1, config.theme.background);
+    uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
+    _fb->begin(&dsp, _clockleft, _config.top-_timeheight, _clockwidth, _clockheight+1, bgColor);
   #endif
 }
 
@@ -743,17 +745,26 @@ void ClockWidget::_getTimeBounds() {
     bool clockInTitle=!config.isScreensaver && _config.top<_timeheight; //DSP_SSD1306x32
     uint16_t clockColor = config.isScreensaver ? config.theme.clockss : config.theme.clock;
     uint16_t clockBgColor = config.isScreensaver ? config.theme.clockbgss : config.theme.clockbg;
+    uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
     uint16_t secondsColor = config.isScreensaver ? config.theme.secondsss : config.theme.seconds;
     uint16_t dowColor = config.isScreensaver ? config.theme.dowss : config.theme.dow;
     uint16_t dateColor = config.isScreensaver ? config.theme.datess : config.theme.date;
     bool showFullClockOnScreensaver = !config.isScreensaver || (_fb->ready() && config.store.screensaverFullDateTime);
     bool showSecondsOnScreensaver = !config.isScreensaver || config.store.screensaverFullDateTime;
+    static bool wasScreensaver = false;
+    if (wasScreensaver != config.isScreensaver) {
+      force = true;
+      wasScreensaver = config.isScreensaver;
+      #ifdef PSFBUFFER
+        _reset();  // reinitialize framebuffer with new bgColor
+      #endif
+    }
     if(force){
       _clearClock();
       _getTimeBounds();
       #ifndef DSP_OLED
         if(CLOCKGLOW) {
-          gfx.setTextColor(clockBgColor, config.theme.background);
+          gfx.setTextColor(clockBgColor, bgColor);
           gfx.setCursor(_left(), _top());
           gfx.print(CLOCKGLOW_STRING);
         }
@@ -761,7 +772,7 @@ void ClockWidget::_getTimeBounds() {
       if(clockInTitle)
         gfx.setTextColor(config.theme.meta, config.theme.metabg);
       else
-        gfx.setTextColor(clockColor, config.theme.background);
+        gfx.setTextColor(clockColor, bgColor);
       uint16_t timeLeft = _left();
       const char* timeText = _timebuffer;
       if (config.store.clock12 && _timebuffer[0] == ' ') {
@@ -779,7 +790,7 @@ void ClockWidget::_getTimeBounds() {
           gfx.setFont();
           gfx.setTextSize(_superfont);
           gfx.setCursor(_linesleft+_space+1, _top()-CHARHEIGHT * _superfont);
-          gfx.setTextColor(dowColor, config.theme.background);
+          gfx.setTextColor(dowColor, bgColor);
           gfx.print(l10n_dow(network.timeinfo.tm_wday));
           sprintf(_tmp, "%2d %s %d", network.timeinfo.tm_mday, l10n_month(network.timeinfo.tm_mon), network.timeinfo.tm_year+1900);
           strlcpy(_datebuf, _tmp, sizeof(_datebuf));
@@ -790,7 +801,7 @@ void ClockWidget::_getTimeBounds() {
           #else
             gfx.setCursor(_left()+_clockwidth-_datewidth, _top() + _space);
           #endif
-          gfx.setTextColor(dateColor, config.theme.background);
+          gfx.setTextColor(dateColor, bgColor);
           gfx.print(_datebuf);
         }
       }
@@ -807,14 +818,14 @@ void ClockWidget::_getTimeBounds() {
       }else{
         gfx.setCursor(_linesleft+_space+1, _top()-_timeheight);
       }
-      gfx.setTextColor(secondsColor, config.theme.background);
+      gfx.setTextColor(secondsColor, bgColor);
       // Clear seconds area before drawing — GFXfont drawChar only paints
       // foreground pixels, so narrower glyphs (e.g. "1" after "0") leave
       // leftover pixels from the previous character.
       if (Clock_GFXfontPtr != NULL) {
         uint16_t sx = !_fullclock ? _left()+_timewidth+_space : _linesleft+_space+1;
         uint16_t sy = !_fullclock ? _top()-_timeheight+_space : _top()-_timeheight;
-        gfx.fillRect(sx, sy, 2 * CHARWIDTH * _superfont, CHARHEIGHT * _superfont, config.theme.background);
+        gfx.fillRect(sx, sy, 2 * CHARWIDTH * _superfont, CHARHEIGHT * _superfont, bgColor);
       }
       sprintf(_tmp, "%02d", network.timeinfo.tm_sec);
       gfx.print(_tmp);
@@ -822,12 +833,12 @@ void ClockWidget::_getTimeBounds() {
     gfx.setTextSize(Clock_GFXfontPtr==nullptr?TIME_SIZE:1);
     gfx.setFont(Clock_GFXfontPtr);
     #ifndef DSP_OLED
-      gfx.setTextColor(dots ? clockColor : (CLOCKGLOW?clockBgColor:config.theme.background), config.theme.background);
+      gfx.setTextColor(dots ? clockColor : (CLOCKGLOW?clockBgColor:bgColor), bgColor);
     #else
       if(clockInTitle) {
         gfx.setTextColor(dots ? config.theme.meta:config.theme.metabg, config.theme.metabg);
       }else{
-        gfx.setTextColor(dots ? clockColor:config.theme.background, config.theme.background);
+        gfx.setTextColor(dots ? clockColor:bgColor, bgColor);
       }
     #endif
     dots=!dots;
@@ -838,14 +849,14 @@ void ClockWidget::_getTimeBounds() {
   }
 
   void ClockWidget::_clearClock(){
+    uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
   #ifdef PSFBUFFER
-    if(_fb->ready()) _fb->clear();
-    else
+    if(_fb->ready()) { _fb->clear(); return; }
   #endif
   #ifndef CLOCKFONT5x7
-    dsp.fillRect(_left(), _top()-_timeheight, _clockwidth+2, _clockheight+1, config.theme.background);
+    dsp.fillRect(_left(), _top()-_timeheight, _clockwidth+2, _clockheight+1, bgColor);
   #else
-    dsp.fillRect(_left(), _top(), _clockwidth+1, _clockheight+1, config.theme.background);
+    dsp.fillRect(_left(), _top(), _clockwidth+1, _clockheight+1, bgColor);
   #endif
   }
 
@@ -974,7 +985,7 @@ void PlayListWidget::init(ScrollWidget* current){
   _plTtemsCount = PLMITEMS;
   _plCurrentPos = 1;
 #elif PLAYLIST_MODE_PAGED
-  _plItemHeight = playlistConf.widget.textsize*(CHARHEIGHT-1)+playlistConf.widget.textsize*4;
+  _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
   _plPlaylistTop = TFT_FRAMEWDT;
   _plPlaylistBottom = dsp.height() - TFT_FRAMEWDT;
   uint16_t available = _plPlaylistBottom - _plPlaylistTop;
@@ -985,11 +996,11 @@ void PlayListWidget::init(ScrollWidget* current){
   _plPageStart = 0;
   _plPrevItem = 0;
 #else
-  _plItemHeight = playlistConf.widget.textsize*(CHARHEIGHT-1)+playlistConf.widget.textsize*4;
+  _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
   _plTtemsCount = round((float)dsp.height()/_plItemHeight);
   if(_plTtemsCount%2==0) _plTtemsCount++;
   _plCurrentPos = _plTtemsCount/2;
-  _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf.widget.textsize*2;
+  _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf_ptr->widget.textsize*2;
 #endif
 }
 
@@ -1031,7 +1042,7 @@ void PlayListWidget::_drawFade(uint16_t currentItem) {
 }
 
 void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
-  dsp.setTextSize(playlistConf.widget.textsize);
+  dsp.setTextSize(playlistConf_ptr->widget.textsize);
   if (pos == _plCurrentPos) {
     _current->setText(item);
   } else {
@@ -1088,9 +1099,9 @@ void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
 #if PLAYLIST_MODE_PAGED && !DSP_LCD
 
 void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name){
-  dsp.setTextSize(playlistConf.widget.textsize);
-  uint8_t charH = CHARHEIGHT * playlistConf.widget.textsize;
-  int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf.widget.textsize;
+  dsp.setTextSize(playlistConf_ptr->widget.textsize);
+  uint8_t charH = CHARHEIGHT * playlistConf_ptr->widget.textsize;
+  int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize;
   if (selected) {
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentfill);
     dsp.fillRect(TFT_FRAMEWDT, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);

@@ -84,6 +84,7 @@ struct theme_t {
 };
 struct config_t // specify defaults here (and macros in options.h) (defaults are NOT saved to Prefs)
 {
+  // Internal / player state
   uint16_t  config_set_magic = 1867;
   uint16_t  lastStation = 0;
   char      lastStationUrl[STATION_FIELD_LENGTH] = "";
@@ -97,20 +98,28 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   int8_t    middle = EQ_MIDDLE;
   int8_t    bass = EQ_BASS;
   bool      sdshuffle = SD_SHUFFLE;
+  bool      lastBootGood = false;  // safe mode: set true when boot proves stable
+  bool      SDoffline = false;  // one-shot: set by AP→SD switch, cleared on next boot
+
+  // Controls
   bool      smartstart = SMART_START;
-  bool      autoupdate = false;
-  bool      bufferbar = SHOW_BUFFERBAR;
-  bool      vumeter = SHOW_VU_METER;
-  bool      wifiscanbest = WIFI_SCAN_BEST_RSSI;
-  bool      ehdp = EHDP;
-  char      ehdpname[EHDPNAME_LENGTH] = "";
-  uint8_t   softapdelay = SOFTAP_REBOOT_DELAY;
-  char      mdnsname[MDNS_LENGTH] = "";
+  bool      oneclickswitch = ONE_CLICK_SWITCH;
+  bool      fliptouch = TOUCH_FLIP;
+  bool      dbgtouch = TOUCH_DEBUG;
+  uint8_t   encacc = ROTARY_ACCEL;
+  uint8_t   irtlp = IR_TOLERANCE;
+
+  // Screen
   bool      flipscreen = SCREEN_FLIP;
   bool      invertdisplay = SCREEN_INVERT;
+  bool      inverttitle = INVERT_TITLE;
+  uint8_t   layoutId = 0;
+  uint8_t   themeId = 0;
   bool      dspon = true;
   bool      numplaylist = NUMBERED_PLAYLIST;
   bool      clock12 = CLOCK_TWELVE;
+  bool      bufferbar = SHOW_BUFFERBAR;
+  bool      vumeter = SHOW_VU_METER;
   bool      volumepage = VOLUME_PAGE;
   uint8_t   brightness = SCREEN_BRIGHTNESS;
   uint8_t   contrast = SCREEN_CONTRAST;
@@ -124,12 +133,8 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      dimmingEnabled = DIMMING_ENABLED;
   uint16_t  dimmingTimeout = DIMMING_TIMEOUT;
   uint8_t   dimmingBrightness = DIMMING_BRIGHTNESS;
-  bool      fliptouch = TOUCH_FLIP;
-  bool      dbgtouch = TOUCH_DEBUG;
-  uint8_t   encacc = ROTARY_ACCEL;
-  uint16_t  battery_adc_ref_mv = BATTERY_ADC_REF_MV;
-  bool      oneclickswitch = ONE_CLICK_SWITCH;
-  uint8_t   irtlp = IR_TOLERANCE;
+
+  // Locale
   char      locale_webui[6] = WEBUI_LOCALE;
   char      locale_display[6] = DSP_LOCALE;
   char      tz_name[70] = TIMEZONE_NAME;
@@ -137,6 +142,8 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   char      sntp1[35] = SNTP_1;
   char      sntp2[35] = SNTP_2;
   uint8_t   timesyncinterval = TIME_SYNC_INTERVAL;
+
+  // Weather
   bool      showweather = false;
   uint8_t   weathersyncinterval = WEATHER_SYNC_INTERVAL;
   char      weatherapi[6] = WEATHER_API;
@@ -152,14 +159,25 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      weatherhumidity = false;
   bool      weatherpressure = false;
   bool      weatherwind = false;
+
+  // System
+  bool      wifiscanbest = WIFI_SCAN_BEST_RSSI;
+  bool      autoupdate = false;
+  bool      ehdp = EHDP;
+  char      ehdpname[EHDPNAME_LENGTH] = "";
+  uint8_t   softapdelay = SOFTAP_REBOOT_DELAY;
+  char      mdnsname[MDNS_LENGTH] = "";
+
+  // MQTT
   bool      mqttenable = false;
   char      mqtthost[60] = MQTT_HOST;
   uint16_t  mqttport = MQTT_PORT;
   char      mqttuser[30] = MQTT_USER;
   char      mqttpass[40] = MQTT_PASS;
   char      mqtttopic[60] = MQTT_TOPIC;
-  bool      lastBootGood = false;  // safe mode: set true when boot proves stable
-  bool      SDoffline = false;  // one-shot: set by AP→SD switch, cleared on next boot
+
+  // Battery
+  uint16_t  battery_adc_ref_mv = BATTERY_ADC_REF_MV;
 
   // if adding a variable, you can do it anywhere, just be sure to add it to configKeyMap() in config.cpp
   // if removing a variable and key, add to deleteOldKeys()
@@ -371,7 +389,6 @@ class Config {
 
     bool _wwwFilesExist();
     void _initHW();
-    uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
     void setDefaults();
 
     uint16_t _randomStation() {

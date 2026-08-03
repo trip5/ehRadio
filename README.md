@@ -92,7 +92,7 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
 ## A Warning & Disclaimer
 
 
-With the `2026.07.30` release, the display architecture was overhauled to make layouts and colors changeable while running.
+With the `2026.07.31` release, the display architecture was overhauled to make layouts and colors changeable while running.
 This involved significant changes to the original code and layouts.
 
 Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.

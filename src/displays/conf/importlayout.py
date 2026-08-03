@@ -327,7 +327,7 @@ def emit_layout_entry(name, configs, layout_fields, index, boombox_style=False, 
         if fname in unknown_map:
             for uname, uval in unknown_map[fname]:
                 pad = max(1, 28 - 8 - 7 - len(uname))
-                lines.append(f'        // ??? {uname}{" " * pad} = {uval};')
+                lines.append(f'        // ??? (Unused by ehRadio) {uname}{" " * pad} = {uval};')
         if fname in config_dict:
             val = config_dict[fname]
             if fname == 'boomboxStyle':

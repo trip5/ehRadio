@@ -76,6 +76,7 @@ def list_themes():
     if not names:
         print("No themes found.")
         return
+    print(f"Themes in file ({len(names)}):")
     for i, name in enumerate(names):
         print(f"[{i}] {name}")
 

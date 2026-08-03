@@ -36,42 +36,39 @@ enum import_e      : uint8_t  { IMDONE=0, IMWIFI=2 };
 const char emptyfs_html[] PROGMEM = R"(
 <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.25"><meta charset="UTF-8">
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAABJ0AAASdAHeZh94AAAAlElEQVRYw+2XSw6AIAxEG9fe/0zeSuOCBI2FVqafKCTdFeYFBmiJBse2LjtFjn8DnOIlwgHcIe7iLgC1SA/ABKgW4gBMd+RJlAuTq2QKIJmIBLjkaRYYFWdzW6ZCAHTzpItqAMSgmrNFxmuDTQC4+ARI4QFvCMh7Dxf3gDD5+9NvecobEAqT34DN8klQS7r1Cp9oTA8ah+h47LQOmQAAAABJRU5ErkJggg==">
-<title>ehRadio - WEB Board Uploader</title><style>html, body{margin: 0; padding: 0; height: 100%; background-color:#000;color:#eecccc;font-size:20px;display:flex;flex-direction:column;}
-hr{margin:20px 0;border:0; border-top:#555 1px solid;} p{text-align:center;margin-bottom:10px;} section{max-width:500px; text-align:center;margin:0 auto 30px auto;padding:20px;flex:1;}
+<title>ehRadio - WEB Board Uploader</title><style>html, body{margin: 0; padding: 0; height: 100%; background-color:#000; color:#eecccc; font-size:20px; display:flex; flex-direction:column;}
+hr{margin:20px 0;border:0; border-top:#555 1px solid;} p{text-align:center; margin-bottom:10px;} section{max-width:500px; text-align:center; margin:0 auto 30px auto; padding:20px; flex:1;}
 .hidden{display:none;} a{color: #ccccee; font-size:14px; text-decoration: none; font-weight: bold;} a:hover{text-decoration: underline}
 #copy{text-align: center; padding: 14px; font-size: 14px;}
-input[type=file]{color:#ccc;} input[type=file]::file-selector-button, input[type=submit]{border:2px solid #eecccc;color:#000;padding:6px 16px;border-radius:25px;background-color:#eecccc;margin:0 6px;cursor:pointer;}
-input[type=submit]{font-size:18px;text-transform:uppercase;padding:8px 26px;margin-top:10px;font-family:Times;} span{color:#ccc} .flex{display:flex;justify-content: space-around;margin-top:10px;}
-input[type=text],input[type=password]{width:170px;background:#272727;color:#eecccc;padding:6px 12px;font-size:20px;border:#2d2d2d 1px solid;margin:4px 0 0 4px;border-radius:4px;outline:none;}
-select{background:#272727;color:#eecccc;padding:4px 8px;font-size:16px;border:#2d2d2d 1px solid;border-radius:4px;margin-left:8px;}
-@media screen and (max-width:480px) {section{zoom:0.7;-moz-transform:scale(0.7);}}
+input[type=file]{color:#ccc;} input[type=file]::file-selector-button, input[type=submit]{border:2px solid #eecccc;color:#000;padding:6px 16px; border-radius:25px; background-color:#eecccc;margin:0 6px; cursor:pointer;} input[type=file]:hover::file-selector-button, input[type=submit]:hover{background-color:#ccccee;border-color:#ccccee}
+input[type=submit]{font-size:18px; padding:8px 26px; margin-top:10px; font-family:Times;} span{color:#ccc} .flex{display:flex; justify-content: space-around;margin-top:10px;}
+input[type=text],input[type=password]{width:170px; background:#272727; color:#eecccc; padding:6px 12px; font-size:20px; border:#2d2d2d 1px solid; margin:4px 0 0 4px; border-radius:4px; outline:none;}
+select{background:#272727; color:#eecccc; padding:4px 8px; font-size:16px; border:#2d2d2d 1px solid; border-radius:4px; margin-left:8px;}
+@media screen and (max-width:480px) {section{zoom:0.7; -moz-transform:scale(0.7);}}
 </style>
 <script type="text/javascript" src="/variables.js"></script>
 <script type="text/javascript" src="/locale.js"></script>
-</head><body>
+</head><body><section>
 <div style="text-align:center;padding:10px 20px 0;">
 <span data-i18n="lbl_webui_locale">WebUI Locale</span>
 <select id="localePicker"><option value="">Loading...</option></select>
 </div>
-<section>
+<hr />
 <div id="uploader">
 <h2>ehRadio - <span data-i18n="z_webui_uploader">WebUI Files Uploader</span></h2>
 <hr />
 <span data-i18n="z_select_www_files">Select ALL files from data/www/ and upload them using the form below</span>
-<hr />
 <form action="/webboard" method="post" enctype="multipart/form-data">
 <p><label for="www" data-i18n="z_www_files">www Files:</label> <input type="file" name="www" id="www" multiple></p>
-<hr />
-<span data-i18n="z_optional_upload"> OPTIONAL: You can also upload playlist.csv and wifi.csv files from your backup</span>
+<span data-i18n="z_upload_csv">You can also upload playlist.csv and wifi.csv files from your backup</span>
 <p><label for="data" data-i18n="z_csv_files">CSV Files:</label><input type="file" name="data" id="data" multiple></p>
-<hr />
 <p><input type="submit" name="submit" value="Upload Files" data-i18n="z_upload_files"></p>
 </form>
 </div>
 <div style="padding:10px 0 0;" id="wupload">
 <div id="credtitle-x">
 <hr />
-<span data-i18n="z_optional_set_wifi">OPTIONAL: Setup Wi-Fi connection first!</span>
+<span data-i18n="z_set_wifi">Setup Wi-Fi connection first!</span>
 </div>
 <div id="credtitle" class="hidden">
 <h2>ehRadio - <span data-i18n="z_credentials">Credentials</span></h2>
@@ -88,7 +85,6 @@ select{background:#272727;color:#eecccc;padding:4px 8px;font-size:16px;border:#2
 <h2>ehRadio - <span data-i18n="z_webui_downloader">WebUI Files Downloader</span></h2>
 <hr />
 <span data-i18n="z_downloading">The WebUI files are currently downloading. Please wait a few moments. The device will restart and this page will reload when everything is ready.</span>
-<hr />
 </div>
 </section>
 <p><a href="/emergency" data-i18n="z_emergency_firmware_uploader">Emergency Firmware Uploader</a></p>

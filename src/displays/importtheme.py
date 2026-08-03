@@ -263,7 +263,7 @@ def emit_theme_entry(name, data, index):
             lines.append(f'        .{fname:13s} = RGB({r:3d}, {g:3d}, {b:3d}),{comment}')
 
     for uname, (r, g, b) in unknowns:
-        lines.append(f'        // ??? {uname} = RGB({r}, {g}, {b})')
+        lines.append(f'        // ??? (Unused by ehRadio) {uname} = RGB({r}, {g}, {b})')
     lines.append('    },')
     return '\n'.join(lines), len(colors)
 

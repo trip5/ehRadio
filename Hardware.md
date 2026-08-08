@@ -476,6 +476,16 @@ It is recommended to encode files on SD card using MP3 at a constant bit rate of
 to avoid system stress and get maximum compatibility with the decoders.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
 
+### SD Cards
+
+SD cards on these cheap SD readers can be pretty finicky.
+Certain brands are known to work better than others.
+Sandisks and Samsungs are recommended.
+Make sure it's "Class 10" or "UHS-I U1" and formatted FAT32.
+Smaller sizes may also work better.
+
+When in doubt or experiencing problems, try a different SD card.
+
 ### SD Offline Mode
 
 The [SD Offline mode](README.md#sd-offline-mode) should be considered as a "fallback because wi-fi is not available" mode, not a primary playback mode.

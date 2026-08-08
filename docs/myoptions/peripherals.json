@@ -3,12 +3,16 @@
   {
     "name": "Display Font",
     "info": "Select font to use for display text",
-    "define": "DISPLAYFONT", "type": "enum", "options": ["MATRIXCHUNKY", "MATRIXLIGHT", "X11"], "default": "MATRIXCHUNKY", "optional": true, "comment": "MATRIXCHUNKY (default), MATRIXLIGHT, X11"
+    "defines": [
+      { "define": "DISPLAYFONT", "type": "enum", "options": ["MATRIXCHUNKY", "MATRIXLIGHT", "X11"], "default": "MATRIXCHUNKY", "optional": true, "comment": "MATRIXCHUNKY (default), MATRIXLIGHT, X11" }
+    ]
   },
   {
     "name": "Clock Font",
     "info": "Usually the clock font is selected based on display type:\nOLEDs get CHUNKY6, TFTs get CHUNKY6_PX (which is the same but with separators between the 'pixels'.\nSelecting YO_MONO on a TFT will get the classic ёRadio 7-segment font but OLED will use the same font as display text.\nSelecting this overrides the default auto-selection.",
-    "define": "CLOCKFONT", "type": "enum", "options": ["CHUNKY6", "CHUNKY6_PX", "YO_MONO"], "optional": true, "comment": "CHUNKY6 (OLED default), CHUNKY6_PX (TFT default), YO_MONO (7-segment/display font)"
+    "defines": [
+      { "define": "CLOCKFONT", "type": "enum", "options": ["CHUNKY6", "CHUNKY6_PX", "YO_MONO"], "optional": true, "comment": "CHUNKY6 (OLED default), CHUNKY6_PX (TFT default), YO_MONO (7-segment/display font)" }
+    ]
   },
   {
     "name": "LED",

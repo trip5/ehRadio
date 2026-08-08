@@ -160,12 +160,14 @@ void Config::changeMode(int newmode) {
           return;
         }
       #endif
+      uint32_t _t_sdstart = millis();
       if (!sdman.start()) {
         ERRORLOG("SD card not found");
         netserver.requestOnChange(GETPLAYERMODE, 0);
         sdman.stop();
         return;
       }
+      FUNCTIONLOG("SD", "sdman.start: %lums", millis() - _t_sdstart);
     }
     if (newmode<0||newmode>MAX_PLAY_MODE) {
       store.play_mode++;
@@ -193,10 +195,14 @@ void Config::changeMode(int newmode) {
         ESP.restart();
       }
       if (pir) player.sendCommand({PR_STOP, 0});  // stop SD playback before unmounting
+      uint32_t _t_sdstop = millis();
       sdman.stop();
+      FUNCTIONLOG("SD", "sdman.stop: %lums", millis() - _t_sdstop);
     }
     if (!_bootDone) return;
+    uint32_t _t_plinit = millis();
     initPlaylistMode();
+    FUNCTIONLOG("SD", "initPlaylistMode: %lums", millis() - _t_plinit);
     if (pir) player.sendCommand({PR_PLAY, getMode()==PM_WEB?store.lastStation:store.lastSdStation});
     netserver.resetQueue();
     //netserver.requestOnChange(GETPLAYERMODE, 0);

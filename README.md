@@ -89,17 +89,6 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
 
 ---
 
-## A Warning & Disclaimer
-
-
-With the `2026.07.31` release, the display architecture was overhauled to make layouts and colors changeable while running.
-This involved significant changes to the original code and layouts.
-
-Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
-Other display sizes may have quirks or issues with layouts that need repair.
-
----
-
 ## WebUI
 
 The WebUI is optimized for mobile browsers but looks great on PCs, too.
@@ -149,11 +138,11 @@ Connecting via telnet will also show serial logs.
 Next to the version on the boot screen (which is very brief when `Scan for Best Wi-Fi on Boot` is disabled),
 an icon will appear to reflect certain boot modes.
 
-### Smart Start <img src="images/Booticon_Play.png">
+### Smart Start <img src="images/Booticon_Pause.png">
 
 Selectable in the `Settings` of the WebUI, `Smart Start` will automatically play the station stream or SD file which was playing when last powered-off.
 
-### Safe Mode <img src="images/Booticon_Pause.png">
+### Safe Mode <img src="images/Booticon_Play.png">
 
 After booting, the device waits 30 seconds after network connection to mark (in NVS) the boot as stable.
 If powering off before this time has elapsed, the next boot will enter "safe mode" - which disables smart start, auto update, and SD Mode.
@@ -183,6 +172,16 @@ Exit this mode (reboot with network functionality) by powering off and powering 
 There are many considerations to make when building a radio.
 
 For a detailed guide to supported hardware and peripherals, wiring, and audio isolation, read [here](Hardware.md).
+
+---
+
+## A Warning & Disclaimer
+
+With the `2026.07.31` release, the display architecture was overhauled to make layouts and colors changeable while running.
+This involved significant changes to the original code and layouts.
+
+Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
+Other display sizes may have quirks or issues with layouts that need repair.
 
 ---
 

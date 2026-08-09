@@ -1176,16 +1176,17 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
   #ifndef CORE_MONITOR
     #define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s), includes SPIFFS information
   #endif
-  #ifndef CORE_MONITOR_ETC_LOOPS
-    #define CORE_MONITOR_ETC_LOOPS 5 // Show SPIFFS + PSRAM info every N core monitor cycles (default: 5, every 25s)
-  #endif
   #ifdef WIDGET_DEBUG
     #define WIDGET_DEBUG // This shows the Widget's Text in logging.  It's extremely noisy.
   #endif
 #endif
+#ifndef CORE_MONITOR_ETC_LOOPS
+  #define CORE_MONITOR_ETC_LOOPS 5 // Show SPIFFS + PSRAM info every N core monitor cycles (default: 5, every 25s)
+#endif
 #ifdef CORS_DEBUG
  // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
 #endif
+
 
 /* CPU CORE NAMES: Name the Cores for what they do... */
 /* Do not use any of these macros directly in myoptions.h! */

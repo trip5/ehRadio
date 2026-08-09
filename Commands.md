@@ -133,8 +133,8 @@ Order and sections match that file.
 | `wlang` | Set weather language and force weather refresh. |
 | `wkey` | Set weather key and refresh display mode. |
 | `winterval` | Set weather sync interval. |
-| `wlat` | Set weather latitude, reset elevation, force weather refresh. |
-| `wlon` | Set weather longitude, reset elevation, force weather refresh. |
+| `wlat` | Set weather latitude, force weather refresh. |
+| `wlon` | Set weather longitude, force weather refresh. |
 
 ## Options: MQTT
 

@@ -180,10 +180,10 @@ void Display::_bootScreen() {
   _bootstring = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.bootstrConf, 50, true, BOOT_TXT_COLOR, 0));
   const char* icon;
   if ((network.offlineMode || config.store.SDoffline))
-                                         icon = "\030\031";  // SD_A + SD_B
-  else if (!config.store.lastBootGood)   icon = "\034";      // PAUSE (safe mode)
-  else if (config.store.smartstart)      icon = "\035";      // PLAY (smart start)
-  else                                   icon = "\026";      // VOL_75 (default)
+                                             icon = "\030\031";  // SD_A + SD_B
+  else if (!config.store.bootStableMarker)   icon = "\034";      // PAUSE (safe mode)
+  else if (config.store.smartstart)          icon = "\035";      // PLAY (smart start)
+  else                                       icon = "\026";      // VOL_75 (default)
   char buf[64];
   snprintf(buf, sizeof(buf), "\023 %s %s", RADIOVERSION, icon);
   _bootstring->setText(buf);
@@ -303,6 +303,7 @@ void Display::_buildPager() {
   #endif
   pages[PG_PLAYLIST]->addWidget(_plwidget);
   for(const auto& p: pages) _pager->addPage(p);
+  _buildJsonCache();
 }
 
 void Display::_apScreen() {
@@ -1104,35 +1105,36 @@ void Display::applyTheme(uint8_t id) {
 
 uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
 
-String Display::getThemeListJson() {
-  String json = "{";
+void Display::_buildJsonCache() {
+  // Build theme list JSON once — theme names are PROGMEM constants
+  _themeListJson = "{";
   for (uint8_t i = 0; i < sizeof(_themes)/sizeof(_themes[0]); i++) {
-    if (i > 0) json += ',';
-    json += '"' + String(i) + "\":\"";
+    if (i > 0) _themeListJson += ',';
+    _themeListJson += '"' + String(i) + "\":\"";
     char buf[33];
     strncpy_P(buf, _themeNames[i], 32);
     buf[32] = 0;
-    json += buf;
-    json += '"';
+    _themeListJson += buf;
+    _themeListJson += '"';
   }
-  json += '}';
-  return json;
-}
+  _themeListJson += '}';
 
-String Display::getLayoutListJson() {
-  String json = "{";
+  // Build layout list JSON once
+  _layoutListJson = "{";
   for (uint8_t i = 0; i < layoutCount; i++) {
-    if (i > 0) json += ',';
-    json += '"' + String(i) + "\":\"";
+    if (i > 0) _layoutListJson += ',';
+    _layoutListJson += '"' + String(i) + "\":\"";
     char buf[33];
     strncpy_P(buf, _layoutNames[i], 32);
     buf[32] = 0;
-    json += buf;
-    json += '"';
+    _layoutListJson += buf;
+    _layoutListJson += '"';
   }
-  json += '}';
-  return json;
+  _layoutListJson += '}';
 }
+
+String Display::getThemeListJson() { return _themeListJson; }
+String Display::getLayoutListJson() { return _layoutListJson; }
 
 void Display::applyInvertTitle() {
   _applyState();

@@ -281,7 +281,7 @@ bool Utility::saveWifi(const char* post) {
   if (parseSsid(post, ssidValue, passValue)) {
     if (addSsid(ssidValue, passValue)) {
       FUNCTIONLOG("REBOOT", "Reboot triggered by Wifi.");
-      config.saveValue(&config.store.lastBootGood, true);
+      config.saveValue(&config.store.bootStableMarker, true);
       delay(250);
       ESP.restart();
       return true;
@@ -335,7 +335,7 @@ bool Utility::importWifi() {
   SPIFFS.remove(SSIDS_PATH);
   SPIFFS.rename(TMP_PATH, SSIDS_PATH);
   FUNCTIONLOG("REBOOT", "Reboot trigger by Import Wifi.");
-  config.saveValue(&config.store.lastBootGood, true);
+  config.saveValue(&config.store.bootStableMarker, true);
   delay(250);
   ESP.restart();
   return true;

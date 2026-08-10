@@ -124,13 +124,23 @@ void ticks() {
       display.putRequest(DSPRSSI, netserver.getRSSI());
     }
     #ifdef USE_SD
-      if (config.getMode()==PM_SDCARD && display.mode()!=SDCHANGE) player.sendCommand({PR_CHECKSD, 0});
+      { static uint32_t _lastCheckSD = 0;
+        if (millis() - _lastCheckSD >= 2000) {
+          _lastCheckSD = millis();
+          if (config.getMode()==PM_SDCARD && display.mode()!=SDCHANGE) player.sendCommand({PR_CHECKSD, 0});
+        }
+      }
       #if SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255
         if (config.getMode()!=PM_SDCARD && digitalRead(SD_CARD_DETECT_PIN)==LOW)
           config.changeMode(PM_SDCARD);
       #endif
     #endif
-    player.sendCommand({PR_VUTONUS, 0});
+    { static uint32_t _lastVUTonus = 0;
+      if (millis() - _lastVUTonus >= 200) {
+        _lastVUTonus = millis();
+        player.sendCommand({PR_VUTONUS, 0});
+      }
+    }
   }
 }
 

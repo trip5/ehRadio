@@ -139,8 +139,10 @@ size_t AudioBuffer::getMaxAvailableBytes() {
 void AudioBuffer::bytesWritten(size_t bw) {
     if(!bw) return;
     m_writePtr += bw;
-    if(m_writePtr == m_endPtr) { m_writePtr = m_buffer; }
-    if(m_writePtr > m_endPtr) log_e("m_writePtr %i, m_endPtr %i", m_writePtr, m_endPtr);
+    if(m_writePtr >= m_endPtr) {
+        size_t tmp = m_writePtr - m_endPtr;
+        m_writePtr = m_buffer + tmp;
+    }
     m_f_isEmpty = false;
 }
 

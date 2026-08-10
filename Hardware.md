@@ -34,7 +34,7 @@ Most modules have onboard regulators anyway.
 
 It is recommended to use a minimum of 470µF 10V capacitor somewhere in your circuit across the `5V` and `GND` (attach negative to `GND`).
 It helps to stablize the system during boot and smooth out the sudden power draw during operations like initializing the decoder, screen, wi-fi, etc.
-The capacitor should be as near as possible to the ESP's `5V` and `G` pins, so it's easiest to just solder the capaciitor directly to the dev board.
+The capacitor should be as near as possible to the ESP's `5V` and `G` pins, so it's easiest to just solder the capacitor directly to the dev board.
 If that's a problem, it's not catastrophic to put elsewhere on the 5V rail. The SD Card Reader and display's 5V pins may be used.
 You may size up either number, but µF is the only number that matters.  To be extra safe, use a 1000 µF capacitor.
 There is no benefit to using a higher volt rating like 16V or 25V or 250V. So, use what's convenient.
@@ -49,9 +49,9 @@ If you really wish to use different gauges of wire, signal wires should be thinn
 AWG 28-30 is ideal for signal wires and will function at extreme lengths.
 Power lines should be thicker AWG20-22 but the longer they are, the more voltage can drop (but too thick also adds resistance).
 
-***Breadboards*** may be fun but take note of wire gauges.
+Breadboards may make prototyping easy but take note of wire gauges.
 duPont jumper wires are typically AWG28-26 and AWG28 is not suitable for the voltage current needed in ESP32 projects.
-If you must prototype with breadboards, be sure that your power wires at least are AWG26 or better.
+Be sure that your power wires at least are AWG26 or better.
 
 ---
 
@@ -202,7 +202,7 @@ Your board may function without modification but the mods are relatively easy an
 
   - Some people report that reflowing the connections on the VS1053B chip fix their issues.
 
-  - Here is a fix that worked for Trip5 (I did not attempt the reflow):
+  - Here is a fix that worked for Trip5 (did not attempt the reflow, ):
   
     Attach 100KΩ resistors from the 3.3V LDO to `XCS` and `XDCS` to pull them up.
     If the error persists, restore R2 with a solder bridge.

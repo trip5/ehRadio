@@ -17,14 +17,14 @@
 Startup startup;
 
 void Startup::checkSafeMode() {
-  if (!config.store.lastBootGood) {
+  if (!config.store.bootStableMarker) {
     FUNCTIONLOG("SAFE MODE", "Smartstart and Autoupdate disabled for this session; Web mode saved to NVS.");
     config.store.smartstart = false;
     config.store.autoupdate = false;
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
   }
   // Mark this boot as in-progress (not yet proven stable)
-  config.saveValue(&config.store.lastBootGood, false);
+  config.saveValue(&config.store.bootStableMarker, false);
   _bootStablePending = true;
 }
 
@@ -35,7 +35,7 @@ void Startup::sdOfflineMode() {
 }
 
 void Startup::markBootStable() {
-  config.saveValue(&config.store.lastBootGood, true);
+  config.saveValue(&config.store.bootStableMarker, true);
   BOOTLOG("Boot stable after %lu ms", millis() - _bootStartMs);
 }
 
@@ -117,7 +117,7 @@ void Startup::checkSpiffsandVer() {
     config.wwwFilesExist = requiredWebFilesExist();
     // New install — prevent false Safe Mode on first boot
     { Preferences prefs; prefs.begin("ehradio", false);
-    prefs.putBool("lastbootgood", true);
+    prefs.putBool("bootstablemarker", true);
     prefs.end(); }
   } else {
     BOOTLOG("Version mismatch detected (stored: %s, current: %s)", storedVersion.c_str(), RADIOVERSION);
@@ -241,7 +241,7 @@ void Startup::getRequiredFiles() {
     delete updater;
     utility.cleanupSpiffs();
     FUNCTIONLOG("REBOOT", "Required Files done. Reboot.");
-    config.saveValue(&config.store.lastBootGood, true);
+    config.saveValue(&config.store.bootStableMarker, true);
     delay(250);
     ESP.restart();
   #endif

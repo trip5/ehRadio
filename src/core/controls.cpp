@@ -527,7 +527,7 @@ void Controls::onBtnClick(int id) {
         }
         if (network.status==SOFT_AP || display.mode()==LOST) {
           #ifdef USE_SD
-            config.saveValue(&config.store.lastBootGood, true);
+            config.saveValue(&config.store.bootStableMarker, true);
             config.saveValue(&config.store.SDoffline, true);
             config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_SDCARD));
             ESP.restart();

@@ -74,7 +74,7 @@ bool Config::_wwwFilesExist() {
 
 void Config::init() {
   loadPreferences();
-  if (!config.store.lastBootGood) delay(1000);  // Allow serial monitor to connect before logging in Safe mode
+  if (!config.store.bootStableMarker) delay(1000);  // Allow serial monitor to connect before logging in Safe mode
   bootInfo();
   #if RTCSUPPORTED
     BOOTLOG("RTC begin(SDA=%d,SCL=%d)", RTC_SDA, RTC_SCL);
@@ -144,7 +144,7 @@ void Config::changeMode(int newmode) {
     }
     if (network.status==SOFT_AP || display.mode()==LOST) {
       FUNCTIONLOG("REBOOT", "Marking NVS Pref keys for intentional reboot to SD Offline mode. Rebooting.");
-      saveValue(&store.lastBootGood, true);
+      saveValue(&store.bootStableMarker, true);
       saveValue(&store.SDoffline, true);
       saveValue(&store.play_mode, static_cast<uint8_t>(PM_SDCARD));
       display.putRequest(NEWMODE, CLEAR);
@@ -189,12 +189,17 @@ void Config::changeMode(int newmode) {
     if (getMode()==PM_WEB) {
       if (network.status==SDOFFLINE) {
         FUNCTIONLOG("REBOOT", "Marking NVS Pref key for intentional reboot. Rebooting.");
-        saveValue(&store.lastBootGood, true);
+        saveValue(&store.bootStableMarker, true);
         display.putRequest(NEWMODE, CLEAR);
         delay(100);
         ESP.restart();
       }
-      if (pir) player.sendCommand({PR_STOP, 0});  // stop SD playback before unmounting
+      if (pir) {
+        player.sendCommand({PR_STOP, 0});  // stop SD playback before unmounting
+        #if MUTE_PIN!=255
+          digitalWrite(MUTE_PIN, MUTE_VAL);  // mute output immediately (DMA buffer still drains)
+        #endif
+      }
       uint32_t _t_sdstop = millis();
       sdman.stop();
       FUNCTIONLOG("SD", "sdman.stop: %lums", millis() - _t_sdstop);
@@ -231,7 +236,7 @@ void Config::initSDPlaylist(bool force) {
         index.readBytes((char*)&magic, 4);
         index.readBytes((char*)&storedCount, 4);
         uint32_t currentCount = sdman.countAudioFiles();
-        FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d magic",
+        FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
                     storedCount, magic, currentCount);
         if (magic != 0x1867) {
           FUNCTIONLOG("SD", "Magic mismatch (should be 1867). Re-indexing.");
@@ -785,8 +790,8 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(bass, "bass"),
   CONFIG_KEY_ENTRY(sdshuffle, "sdshuffle"),
   // Controls
-  CONFIG_KEY_ENTRY(smartstart, "smartstartx"),
-  CONFIG_KEY_ENTRY(oneclickswitch, "skipplupdn"), // var used to be oneclickswitch
+  CONFIG_KEY_ENTRY(smartstart, "smartstart"),
+  CONFIG_KEY_ENTRY(oneclickswitch, "oneclicksw"),
   CONFIG_KEY_ENTRY(fliptouch, "fliptouch"),
   CONFIG_KEY_ENTRY(dbgtouch, "dbgtouch"),
   CONFIG_KEY_ENTRY(encacc, "encaccel"),
@@ -824,7 +829,7 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(sntp2, "sntp2"),
   CONFIG_KEY_ENTRY(timesyncinterval, "timesync"),
   // Weather
-  CONFIG_KEY_ENTRY(showweather, "showwthr"),
+  CONFIG_KEY_ENTRY(showweather, "showweather"),
   CONFIG_KEY_ENTRY(weathersyncinterval, "weathersync"),
   CONFIG_KEY_ENTRY(weatherapi, "weatherapi"),
   CONFIG_KEY_ENTRY(weatherlang, "weatherlang"),
@@ -855,14 +860,17 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(mqtttopic, "mqtttopic"),
   // Battery
   CONFIG_KEY_ENTRY(battery_adc_ref_mv, "battref"),
-  CONFIG_KEY_ENTRY(lastBootGood, "lastbootgood"),
+  CONFIG_KEY_ENTRY(bootStableMarker, "bootstablemark"),
   CONFIG_KEY_ENTRY(SDoffline, "sdoffline"),
   {0, nullptr, 0} // Yup, 3 fields - don't delete the last line!
 };
 
 void Config::deleteOldKeys() {
   // List any old/legacy keys to remove here (they will be deleted from prefs if found)
-  // prefs.remove("laststa"); // previous numeric, replaced by lastStationUrl
+  prefs.remove("lastbootgood"); // previous name made logs confusing (now bootstablemarker)
+  prefs.remove("smartstartx"); // why the x...?
+  prefs.remove("skipplupdn"); // replaced by oneclickswitch
+  prefs.remove("showwthr"); // replaced by showweather
   // none yet
 }
 

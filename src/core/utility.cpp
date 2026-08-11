@@ -672,7 +672,7 @@ void Utility::cleanupSpiffs() {
     }
     if (!keep) {
       SPIFFS.remove(path);
-      BOOTLOG("Removed: %s", path.c_str());
+      FUNCTIONLOG("Cleanup", "Removed: %s", path.c_str());
     }
     file = root.openNextFile();
   }

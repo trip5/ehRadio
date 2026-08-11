@@ -313,7 +313,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.08.08 `dev` | Tracking down issues... |
+| 2026.08.11 | Memory usage fixes (including in ESPFileUpdater) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |
 | 2026.07.31 | Layouts and Themes changeable while running, various fixes to touchscreen, font glyph fallback behaviour, battery functions simplified, playlist verification, localization 100%? |
 | 2026.07.20 | Various fixes to inputs, SD Offline mode, `DSP_DUMMY`, SD metadata, `Controls.md` edit, w/Kle7rx: mute |

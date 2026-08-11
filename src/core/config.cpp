@@ -867,7 +867,7 @@ const configKeyMap Config::keyMap[] = {
 
 void Config::deleteOldKeys() {
   // List any old/legacy keys to remove here (they will be deleted from prefs if found)
-  prefs.remove("lastbootgood"); // previous name made logs confusing (now bootstablemarker)
+  prefs.remove("lastbootgood"); // previous name made logs confusing (now bootstablemark)
   prefs.remove("smartstartx"); // why the x...?
   prefs.remove("skipplupdn"); // replaced by oneclickswitch
   prefs.remove("showwthr"); // replaced by showweather

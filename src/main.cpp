@@ -69,10 +69,12 @@ void setup() {
     netserver.setBootReady(true);
     return;
   }
+  startup.getDefaultPlaylist();
   if (SD_CS!=255 && config.store.play_mode==PM_SDCARD) {
     display.putRequest(WAITFORSD, 0);
     BOOTLOG("SD Search");
   }
+  startup.cleanStaleSearchResults();
   config.initPlaylistMode();
   netserver.begin();
   if (network.status != SDOFFLINE) {

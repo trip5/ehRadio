@@ -175,17 +175,25 @@ Genuine VS1053 is usually $10 minimum. Shop carefully and don't buy the cheapest
 If you end up with a VS1003, it will still be functional for MP3 stations (but nothing else).
 It cannot use the patch and there will be no audio if you use `#define VS_PATCH_ENABLE true` in `myoptions.h`.
 
-There are some "fixes" that should be applied to the green board to ensure it functions as expected.
-Your board may function without modification but the mods are relatively easy and worth doing to improve audio quality.
+Actually, even with genuine VS1053 boards, "no audio" problems can often be directly traced to the patch being applied and failing.
+So, unless you require the VU Meter, don't apply the patch and don't do any hardware fixes listed below...
 
-- First, easiest, and most essential, it is recommended to remove the resistor marked `R2`.
+#### Hardware Fixes
+
+There are some known "fixes" that may be applied to the green board to ensure it functions as expected.
+
+- Simple, easy, with no known drawbacks, it is recommended to remove the resistor marked `R2`.
   This resistor actually pulls down `GPIO0` of the VS1053B chip into MIDI mode at boot.
   Usually the internal pull-up resistor succeeds in pulling it up in time for the patch to be applied.
   Removing it leaves it floating so the internal pull-up always succeeds.
 
     ![image](images/hardware/vs1053.jpg)
 
-- Second, a bit more difficult but can improve actual audio is to place 33Ω damping resistors placed ***right next to*** the ESP32 pins
+#### Not Recommended "Fixes"
+
+If you are sure you have a genuine VS1053 and you're still getting no audio while using the patch, you may try the follow fixes:
+
+- Place 33Ω damping resistors placed ***right next to*** the ESP32 pins
   used for `SCK`, `MOSI`, `XCS`, and `XDCS` before wiring to the VS1053 board.
   ESP32-S3 GPIO pins have an incredibly fast transition time (slew rate), which is around 1-2ns.
   Even with short wires around 10-15 cm, these sharp edges cause severe signal reflections ("ringing").
@@ -195,10 +203,12 @@ Your board may function without modification but the mods are relatively easy an
   As a result, the decoder might assume the communication session was interrupted right in the middle of a data frame transfer.
   This may manifest in the logs with excessive `slow stream, dropouts are possible` messages as well as with audio artifacts like pops and clicks.
 
-- Finally, add 100Ω resistors on the `DREQ` and `XRST` lines (middle of wire is OK) for passive filtering of pulse noise and port protection during initialization.
+- Add 100Ω resistors on the `DREQ` and `XRST` lines (middle of wire is OK) for passive filtering of pulse noise and port protection during initialization.
 
-- Additionally, a board that identifies as `VS0` during boot (check the serial logs) may be fixable.
-  There are various fixes available and it's up to you to see which one works for you.
+#### For boards that identify as VS0
+
+A board that identifies as `VS0` during boot (check the serial logs) may be fixable.
+There are various fixes available and it's up to you to see which one works for you.
 
   - Some people report that reflowing the connections on the VS1053B chip fix their issues.
 
@@ -211,10 +221,7 @@ Your board may function without modification but the mods are relatively easy an
 
     ![image](images/hardware/vs1053_vs0_fix.jpg)
 
-  - Google search for other fixes...
-
-  - And this may be why dealing with VS1053 is problematic.
-    If you've read all of this and decided to use a VS1053 anyways, good luck!
+  - Other fixes may be possible, too!
 
 For more detailed information on why these fixes are applied, the [VS1053 Datasheet](https://www.vlsi.fi/fileadmin/datasheets/vs1053.pdf)
 may prove useful reading.

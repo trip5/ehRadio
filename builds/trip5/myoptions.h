@@ -334,7 +334,7 @@
 
 /* --- Debug? --- */
 //#define ALL_DEBUG_LOGS
-//#define CORE_MONITOR
+#define CORE_MONITOR
 //#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 
 /* --- Display --- */
@@ -357,5 +357,8 @@
 
 // Other:
 //#define DEEP_SLEEP_DISABLE
+
+//#undef VS_PATCH_ENABLE    
+//#define VS_PATCH_ENABLE true
 
 #endif // myoptions_h

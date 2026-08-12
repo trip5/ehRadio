@@ -101,7 +101,7 @@ void Startup::checkSpiffsandVer() {
   BOOTLOG("SPIFFS mounted");
 
   // Health check: verify SPIFFS is readable AND writable (can be corrupted after crash).
-  // Retry up to 3 times with remount; show LOST screen if still broken.
+  // Retry up to 3 times with remount; reboot if still broken.
   {
     bool healthy = false;
     for (int attempt = 1; attempt <= 3; attempt++) {
@@ -165,9 +165,9 @@ void Startup::checkSpiffsandVer() {
       SPIFFS.begin(false);
     }
     if (!healthy) {
-      ERRORLOG("SPIFFS health check failed after 3 attempts");
-      display.putRequest(NEWMODE, LOST);
-      return;
+      ERRORLOG("SPIFFS health check failed after 3 attempts - rebooting...");
+      delay(500);  // flush serial before reboot
+      ESP.restart();
     }
   }
 

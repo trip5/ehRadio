@@ -242,7 +242,6 @@ class Config {
     uint16_t screensaverPlayingTicks = 0;
     bool     isScreensaver = false;
     bool     displayIsInverted = false;
-    bool     displayWasInverted = false;
     int      newConfigMode = 0;
 
     void init();

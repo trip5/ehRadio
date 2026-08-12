@@ -221,7 +221,9 @@ void Config::changeMode(int newmode) {
 }
 
 void Config::syncSDFS() {
-  _SDplaylistFS = (getMode()==PM_SDCARD) ? (FS*)&sdman : (FS*)&SPIFFS;
+  #ifdef USE_SD
+    _SDplaylistFS = (getMode()==PM_SDCARD) ? (FS*)&sdman : (FS*)&SPIFFS;
+  #endif
 }
 
 void Config::initSDPlaylist(bool force) {

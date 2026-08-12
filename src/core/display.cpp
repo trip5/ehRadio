@@ -355,7 +355,11 @@ void Display::_start() {
   _buildPager();
   _mode = PLAYER;
   _applyState();
-  config.setTitle(network.status == SDOFFLINE && !sdman.ready ? l10n(L10N_MSG_NO_SD_CARD) : l10n(L10N_MSG_READY));
+  #ifdef USE_SD
+    config.setTitle(network.status == SDOFFLINE && !sdman.ready ? l10n(L10N_MSG_NO_SD_CARD) : l10n(L10N_MSG_READY));
+  #else
+    config.setTitle(l10n(L10N_MSG_READY));
+  #endif
   
   if (_bufferbar)  _bufferbar->lock(!config.store.bufferbar);
   
@@ -1169,7 +1173,11 @@ void Display::init() {
   _createDspTask();
 }
 void Display::_start() {
-  config.setTitle(network.status == SDOFFLINE && !sdman.ready ? l10n(L10N_MSG_NO_SD_CARD) : l10n(L10N_MSG_READY));
+  #ifdef USE_SD
+    config.setTitle(network.status == SDOFFLINE && !sdman.ready ? l10n(L10N_MSG_NO_SD_CARD) : l10n(L10N_MSG_READY));
+  #else
+    config.setTitle(l10n(L10N_MSG_READY));
+  #endif
 }
 
 void Display::putRequest(displayRequestType_e type, int payload) {

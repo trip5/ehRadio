@@ -358,4 +358,7 @@
 // Other:
 //#define DEEP_SLEEP_DISABLE
 
+//#undef VS_PATCH_ENABLE    
+//#define VS_PATCH_ENABLE true
+
 #endif // myoptions_h

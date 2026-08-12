@@ -288,7 +288,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
     - cleans stale search results older than 24 hours
     - deletes the `ESPFileUpdater` param and self-terminates via `vTaskDelete(NULL)`
   - `deassertCsPins()` — called from `main.cpp` `setup()` before any device init. Sets all known SPI CS pins (`VS1053_CS`, `SD_CS`, `TFT_CS`, `TS_CS`) to `OUTPUT` + `HIGH` to prevent floating CS from causing bus contention during peripheral detection.
-  - safe mode boot crash-loop detection (`checkSafeMode`, `bootInSafeMode`, `markBootStable`, `loop`): reads NVS key `lastbootgood` at boot — if previous boot did not complete successfully, disables `smartstart` and `autoupdate` in memory only for this session so the device does not auto-reconnect to a crash-causing stream; marks boot stable after `BOOT_STABLE_TIME` seconds of uptime
+  - safe mode boot crash-loop detection (`checkSafeMode`, `bootInSafeMode`, `markBootStable`, `loop`): reads NVS key `bootstablemark` at boot — if previous boot did not complete successfully, disables `smartstart` and `autoupdate` in memory only for this session so the device does not auto-reconnect to a crash-causing stream; marks boot stable after `BOOT_STABLE_TIME` seconds of uptime
 - Coupling:
   - drives `utility` for shared update/download helpers
   - reads Config-owned asset allowlists during required-file recovery

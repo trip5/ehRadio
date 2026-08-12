@@ -250,3 +250,9 @@ The v0.9.434m I2S library is the **maximum compatible version** for the current 
 `Maleksm v0.9.720m` = `I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))` — latest Maleksm I2S 3.4.6w, Stage 2 graft target
 
 Graft result = `src/libraries/I2S_Audio/` — after surgery
+
+---
+
+## Addendum (problem discovered much later)
+
+Fixed AudioBuffer::bytesWritten() at Audio.cpp:142: m_writePtr == m_endPtr → >= with overflow wrapping (same pattern as bytesWasRead at line 150). Prevents write pointer from overshooting buffer and corrupting adjacent PSRAM.

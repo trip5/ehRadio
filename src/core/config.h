@@ -98,8 +98,8 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   int8_t    middle = EQ_MIDDLE;
   int8_t    bass = EQ_BASS;
   bool      sdshuffle = SD_SHUFFLE;
-  bool      lastBootGood = false;  // safe mode: set true when boot proves stable
-  bool      SDoffline = false;  // one-shot: set by AP→SD switch, cleared on next boot
+  bool      bootStableMarker = false; // safe mode: set true when boot proves stable
+  bool      SDoffline = false; // one-shot: set by AP→SD switch, cleared on next boot
 
   // Controls
   bool      smartstart = SMART_START;

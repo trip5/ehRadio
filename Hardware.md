@@ -34,7 +34,7 @@ Most modules have onboard regulators anyway.
 
 It is recommended to use a minimum of 470µF 10V capacitor somewhere in your circuit across the `5V` and `GND` (attach negative to `GND`).
 It helps to stablize the system during boot and smooth out the sudden power draw during operations like initializing the decoder, screen, wi-fi, etc.
-The capacitor should be as near as possible to the ESP's `5V` and `G` pins, so it's easiest to just solder the capaciitor directly to the dev board.
+The capacitor should be as near as possible to the ESP's `5V` and `G` pins, so it's easiest to just solder the capacitor directly to the dev board.
 If that's a problem, it's not catastrophic to put elsewhere on the 5V rail. The SD Card Reader and display's 5V pins may be used.
 You may size up either number, but µF is the only number that matters.  To be extra safe, use a 1000 µF capacitor.
 There is no benefit to using a higher volt rating like 16V or 25V or 250V. So, use what's convenient.
@@ -49,9 +49,9 @@ If you really wish to use different gauges of wire, signal wires should be thinn
 AWG 28-30 is ideal for signal wires and will function at extreme lengths.
 Power lines should be thicker AWG20-22 but the longer they are, the more voltage can drop (but too thick also adds resistance).
 
-***Breadboards*** may be fun but take note of wire gauges.
+Breadboards may make prototyping easy but take note of wire gauges.
 duPont jumper wires are typically AWG28-26 and AWG28 is not suitable for the voltage current needed in ESP32 projects.
-If you must prototype with breadboards, be sure that your power wires at least are AWG26 or better.
+Be sure that your power wires at least are AWG26 or better.
 
 ---
 
@@ -175,17 +175,25 @@ Genuine VS1053 is usually $10 minimum. Shop carefully and don't buy the cheapest
 If you end up with a VS1003, it will still be functional for MP3 stations (but nothing else).
 It cannot use the patch and there will be no audio if you use `#define VS_PATCH_ENABLE true` in `myoptions.h`.
 
-There are some "fixes" that should be applied to the green board to ensure it functions as expected.
-Your board may function without modification but the mods are relatively easy and worth doing to improve audio quality.
+Actually, even with genuine VS1053 boards, "no audio" problems can often be directly traced to the patch being applied and failing.
+So, unless you require the VU Meter, don't apply the patch and don't do any hardware fixes listed below...
 
-- First, easiest, and most essential, it is recommended to remove the resistor marked `R2`.
+#### Hardware Fixes
+
+There are some known "fixes" that may be applied to the green board to ensure it functions as expected.
+
+- Simple, easy, with no known drawbacks, it is recommended to remove the resistor marked `R2`.
   This resistor actually pulls down `GPIO0` of the VS1053B chip into MIDI mode at boot.
   Usually the internal pull-up resistor succeeds in pulling it up in time for the patch to be applied.
   Removing it leaves it floating so the internal pull-up always succeeds.
 
     ![image](images/hardware/vs1053.jpg)
 
-- Second, a bit more difficult but can improve actual audio is to place 33Ω damping resistors placed ***right next to*** the ESP32 pins
+#### Not Recommended "Fixes"
+
+If you are sure you have a genuine VS1053 and you're still getting problems with it, you may try the follow fixes:
+
+- Place 33Ω damping resistors placed ***right next to*** the ESP32 pins
   used for `SCK`, `MOSI`, `XCS`, and `XDCS` before wiring to the VS1053 board.
   ESP32-S3 GPIO pins have an incredibly fast transition time (slew rate), which is around 1-2ns.
   Even with short wires around 10-15 cm, these sharp edges cause severe signal reflections ("ringing").
@@ -195,14 +203,18 @@ Your board may function without modification but the mods are relatively easy an
   As a result, the decoder might assume the communication session was interrupted right in the middle of a data frame transfer.
   This may manifest in the logs with excessive `slow stream, dropouts are possible` messages as well as with audio artifacts like pops and clicks.
 
-- Finally, add 100Ω resistors on the `DREQ` and `XRST` lines (middle of wire is OK) for passive filtering of pulse noise and port protection during initialization.
+- Add 100Ω resistors on the `DREQ` and `XRST` lines (middle of wire is OK) for passive filtering of pulse noise and port protection during initialization.
 
-- Additionally, a board that identifies as `VS0` during boot (check the serial logs) may be fixable.
-  There are various fixes available and it's up to you to see which one works for you.
+- Please remember that to test audio with enabling the patch first before AND after trying this fixes.
+
+#### For boards that identify as VS0
+
+A board that identifies as `VS0` during boot (check the serial logs) may be fixable.
+There are various fixes available and it's up to you to see which one works for you.
 
   - Some people report that reflowing the connections on the VS1053B chip fix their issues.
 
-  - Here is a fix that worked for Trip5 (I did not attempt the reflow):
+  - Here is a fix that worked for Trip5 (did not attempt the reflow, ):
   
     Attach 100KΩ resistors from the 3.3V LDO to `XCS` and `XDCS` to pull them up.
     If the error persists, restore R2 with a solder bridge.
@@ -211,10 +223,7 @@ Your board may function without modification but the mods are relatively easy an
 
     ![image](images/hardware/vs1053_vs0_fix.jpg)
 
-  - Google search for other fixes...
-
-  - And this may be why dealing with VS1053 is problematic.
-    If you've read all of this and decided to use a VS1053 anyways, good luck!
+  - Other fixes may be possible, too!
 
 For more detailed information on why these fixes are applied, the [VS1053 Datasheet](https://www.vlsi.fi/fileadmin/datasheets/vs1053.pdf)
 may prove useful reading.
@@ -321,106 +330,9 @@ If you find that your amplifier is buzzing, there are a few things to blame for 
 One suspect is usually backlight control. Typically these use PWM (Pulse Width Management) to achieve dimming.
 That adds interference. The easy fix is to disable dimming and tie the BL pin to 3V3.
 
-### Full Schematics for Full Audio/Power Isolation by [Kle7rx](https://github.com/kle7rx) (This design has not been real-world tested yet)
+### Full Audio/Power Isolation
 
-Complete wiring diagrams with parts lists are available as PDFs:
-
-- [PCM5102 Build Schematic](docs/notebooks/kle7rx/ehRadio_PCM5102.pdf): I2S DAC + LTK5128 amplifiers
-- [VS1053 Build Schematic](docs/notebooks/kle7rx/ehRadio_VS1053.pdf): VS1053 decoder + LTK5128 amplifiers
-
-Both builds share a common power architecture: a **MORNSUN F0505S-3WR2** isolated DC-DC converter separates
-the digital side (ESP32, DAC, display) from the analog/amplifier side, eliminating ground-loop noise.
-Each functional block (POWER, AUDIO, DIGITAL, DISPLAY) uses a **PLY17BN9612R0B2B** common-mode choke
-for additional noise filtering.
-
-#### Common Parts (Both Builds)
-
-| Part                            | Qty   | Purpose                                              | Alternatives |
-| ------------------------------- | :---: | ---------------------------------------------------- | ------------ |
-| ESP32-S3-DevKitC-1 N16R8        |   1   | Main microcontroller with 16MB flash and 8MB PSRAM   | Any ESP32-S3 with minimum 8MB flash and 2MB PSRAM |
-| RS-15-5 (MEAN WELL)             |   1   | 5V 15W AC-DC power supply                            | USB-C PD trigger board (5V), any regulated 5V 3A+ supply |
-| F0505S-3WR2 (MORNSUN)           |   1   | Isolated 5V→5V DC-DC (3W, 600mA); ultra-low 20pF isolation capacitance for clean analog/digital separation | Requires ≥3W for ESP32-S3; cheaper converters lack both power and low isolation capacitance |
-| PLY17BN9612R0B2B (discontinued) |   5   | Murata hybrid CM+DM choke (0.96mH CM, 47μH DM); filters common-mode and differential noise | Würth 7446122001 (1mH, 2A, best direct replacement); KEMET SC-02-10GS (1mH, 2A, toroidal); standard CM choke ≥2A, 0.5–2mH |
-| LTK5128                         |   2   | Class AB 3W audio amplifier (Left + Right)           | PAM8406 (Class D, 5W), PAM8403 (3W), MAX98357A (I2S, 3W) |
-| LD06AJSA                        |   1   | LED constant-current driver; supports LED filaments for encoder illumination | 220Ω resistor + LED (simpler), any 20mA LED driver |
-| RCH664NP-100M                   |   1   | 100μH shielded power inductor for DC-DC filtering    | Any 100μH 1A+ shielded inductor; toroidal core inductor (100μH, 1A+) |
-| EI14 600:600Ω                   |   1   | 1:1 audio isolation transformer (line-level)         | Any 600:600Ω audio transformer, 10μF DC blocking caps |
-| EC11                            |   1   | Rotary encoder (15 pulse/30 detent) with push switch | KY-040, PEC11, any quadrature encoder with switch |
-| VS1838B                         |   1   | 38kHz IR receiver                                    | TSOP38238, TSOP4838, TSOP31238 |
-| SD Card module                  |   1   | SPI microSD card reader for offline playback         | Built-in display SD slot (check for proper resistors!) |
-| XRR6H-6*10-3T                   |   7   | 6-hole ferrite bead (6×10mm, 3-turn); EMI suppression on signal/power lines | Any 6-hole ferrite bead (6×10mm), clip-on ferrite choke, toroidal ferrite core |
-
-#### Capacitors & Resistors
-
-| Component                 | PCM5102 | VS1053 | Where Used                          | Notes |
-| ------------------------- | :-----: | :----: | ----------------------------------- | ----- |
-| 2200 μF 25V electrolytic  |    1    |   1    | Audio rail bulk decoupling          | Must use Low ESR |
-| 1000 μF 16V electrolytic  |    2    |   2    | Amp L+R power, PSU input            | Must use Low ESR |
-| 470 μF 16V electrolytic   |    3    |   3    | Digital rail, Display, LED power    | Should use Low ESR |
-| 100 μF 16V electrolytic   |    2    |   2    | LED driver, SD card                 |       |
-| 47 μF 10V electrolytic    |    2    |   2    | Digital rail, IR receiver           |       |
-| 10 μF 10V electrolytic    |    1    |   1    | DC-DC output filtering              |       |
-| 4.7 μF 10V electrolytic   |    1    |   1    | DC-DC output filtering              |       |
-| 0.1 μF ceramic (MLCC)     |   ~12   |  ~12   | Decoupling on all ICs and rails     | X7R dielectric |
-| 33 Ω resistor (1/4W)      |    6    |   6    | SPI bus damping resistors           | On MOSI, SCLK, MISO, CS, DC lines |
-| 100 Ω resistor (1/4W)     |    2    |   5    | IR receiver, VS1053 control lines   |       |
-
-Kle7rx recommends using Low ESR for all electrolytic capacitors.
-It is also recommended to use metal film resistors but carbon film resistors are acceptable.
-
-#### PCM5102 Build: Additional Parts
-
-| Part        | Qty   | Purpose                        | Alternatives |
-| ----------- | :---: | ------------------------------ | ------------ |
-| GY-PCM5102  |   1   | I2S DAC module (PCM5102A chip) | PCM5102A breakout, MAX98357A (amp+DAC combo) |
-
-#### VS1053 Build: Additional Parts
-
-| Part            | Qty   | Purpose                               | Alternatives |
-| --------------- | :---: | ------------------------------------- | ------------ |
-| VS1053B module  |   1   | SPI MP3/AAC/FLAC/OGG decoder + DAC    | VS1003 (MP3 only), WM8960 (I2S codec) |
-| 10 kΩ resistor  |   1   | Pull-up on XDCS line                  | Any 10kΩ 1/4W |
-
-### Audio Isolation on a Budget (This design has not been real-world tested yet)
-
-A simplified approach that keeps the F0505S-3WR2 isolation core but uses commodity parts
-for the filtering. This costs much less than the full Kle7rx "no compromises" build,
-while still providing clean isolated power to the digital side and an LC-filtered rail
-for the amplifier.
-
-You may use any I2S decoder and amplifier you like for this build.
-
-- [Budget Isolation Schematic](docs/notebooks/budget_isolation.jpg)
-
-#### Parts List
-
-| Part                               | Qty   | Purpose                                                                        | Notes |
-| ---------------------------------- | :---: | ------------------------------------------------------------------------------ | ----- |
-| F0505S-3WR2                        |   1   | Isolated 5V→5V DC-DC (3W, ~20pF isolation); traps ESP32 noise on digital side  | Alt: B0505S-3WR2 (budget, ~50-100pF isolation so try to avoid); same 3W/600mA |
-| 100μF 10V+ electrolytic            |   1   | Input smoothing for F0505S-3WR2; cleans USB charger noise                      | Standard electrolytic is fine |
-| 10μH axial inductor (0.5W)         |   1   | Inrush limiter on F0505S-3WR2 output; protects converter from 1000μF load      | ***See Below Note***|
-| 100μH toroidal inductor (≥2A)      |   1   | LC filter inductor for audio rail; replaces PLY17                              | PAM8406 draws ~1.3A peak; search "100μH toroidal inductor 3A" |
-| 2200μF 10V+ electrolytic (Low ESR) |   1   | Audio rail filter capacitor                                                    | Green "high frequency low ESR" type |
-| 1000μF 10V+ electrolytic           |   1   | Digital rail reservoir; handles WiFi/SD current spikes                         | 470μF at a minimum (but bigger is OK too)  |
-| 0.1μF ceramic (MLCC)               |   3   | High-frequency decoupling: audio rail, F0505S input, F0505S output             | X7R dielectric, marked "104" |
-| EI14 600:600Ω audio transformer    |   1   | Galvanic isolation on audio signal lines; breaks ground loops                  | Any 600:600Ω or 1:1 audio transformer |
-| 5V USB power supply ≥2A            |   1   | Power supply                                                                   |       |
-
-***Note about Inrush Limiter:*** The output of the F0505S-3WR2 is 600mA but the 0.5W rating of a single axial inductor may actually only be 500mA.  Problems will manifest as such:
-
-  - After 10 min of streaming + display on, touch the inductor. Warm = fine. Too hot to hold = overloaded.
-  - Startup failure: F0505S-3WR2 won't start or cycles on/off so the inductor is saturated, cap looks like a short.
-  - Brownouts: ESP32 resets under load - inductor's DCR climbed from overheating, voltage sagged too low.
-
-A few solutions to these problems may be possible:
-
-  - 1 10μH 1A toroidal inductor (best, but more expensive)
-  - 2x 20μH axial inductors in parallel = 10μH / 1A
-  - 2x 10μH axial inductors in parallel = 5μH / 1A
-
-**What's cut vs the full Kle7rx build:** No PLY17 chokes, no XRR6H ferrite beads, no LD06AJSA LED driver,
-no Mean Well PSU. PAM8406 stereo module replaces two LTK5128 mono amps.
-The F0505S-3WR2 isolation is preserved. It's the foundation that makes the approach work.
+You can read some (untested) schematics to achieve [Audio/Power Isolation](Isolation.md).
 
 ---
 

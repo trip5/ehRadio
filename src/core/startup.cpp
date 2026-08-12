@@ -17,14 +17,14 @@
 Startup startup;
 
 void Startup::checkSafeMode() {
-  if (!config.store.lastBootGood) {
+  if (!config.store.bootStableMarker) {
     FUNCTIONLOG("SAFE MODE", "Smartstart and Autoupdate disabled for this session; Web mode saved to NVS.");
     config.store.smartstart = false;
     config.store.autoupdate = false;
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
   }
   // Mark this boot as in-progress (not yet proven stable)
-  config.saveValue(&config.store.lastBootGood, false);
+  config.saveValue(&config.store.bootStableMarker, false);
   _bootStablePending = true;
 }
 
@@ -35,7 +35,7 @@ void Startup::sdOfflineMode() {
 }
 
 void Startup::markBootStable() {
-  config.saveValue(&config.store.lastBootGood, true);
+  config.saveValue(&config.store.bootStableMarker, true);
   BOOTLOG("Boot stable after %lu ms", millis() - _bootStartMs);
 }
 
@@ -100,6 +100,30 @@ void Startup::checkSpiffsandVer() {
   }
   BOOTLOG("SPIFFS mounted");
 
+  // Health check: verify SPIFFS is actually writable (can be corrupted after crash).
+  // Retry up to 3 times with remount; show LOST screen if still broken.
+  {
+    bool healthy = false;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      File test = SPIFFS.open("/.ehradio_test", "w");
+      if (test) {
+        test.close();
+        SPIFFS.remove("/.ehradio_test");
+        healthy = true;
+        break;
+      }
+      BOOTLOG("SPIFFS health check failed (attempt %d/3), remounting...", attempt);
+      SPIFFS.end();
+      delay(100);
+      SPIFFS.begin(false);
+    }
+    if (!healthy) {
+      ERRORLOG("SPIFFS health check failed after 3 attempts");
+      display.putRequest(NEWMODE, LOST);
+      return;
+    }
+  }
+
   String storedVersion = "";
   if (SPIFFS.exists(VERSION_PATH)) {
     File verFile = SPIFFS.open(VERSION_PATH, "r");
@@ -117,7 +141,7 @@ void Startup::checkSpiffsandVer() {
     config.wwwFilesExist = requiredWebFilesExist();
     // New install — prevent false Safe Mode on first boot
     { Preferences prefs; prefs.begin("ehradio", false);
-    prefs.putBool("lastbootgood", true);
+    prefs.putBool("bootstablemark", true);
     prefs.end(); }
   } else {
     BOOTLOG("Version mismatch detected (stored: %s, current: %s)", storedVersion.c_str(), RADIOVERSION);
@@ -165,6 +189,18 @@ void Startup::initNetwork() {
     }
   }
   file.close();
+}
+
+void Startup::getDefaultPlaylist() {
+  #ifdef PLAYLIST_DEFAULT_URL
+    if (!SPIFFS.exists("/data/playlist.csv")) {
+      BOOTLOG("Fetching default playlist");
+      ESPFileUpdater updater(SPIFFS);
+      updater.setMaxSize(1024);
+      updater.setUserAgent(ESPFILEUPDATER_USERAGENT);
+      ESPFileUpdater::UpdateStatus result = updater.checkAndUpdate("/data/playlist.csv", PLAYLIST_DEFAULT_URL, "", ESPFILEUPDATER_VERBOSE);
+    }
+  #endif
 }
 
 void Startup::cleanStaleSearchResults() {
@@ -241,7 +277,7 @@ void Startup::getRequiredFiles() {
     delete updater;
     utility.cleanupSpiffs();
     FUNCTIONLOG("REBOOT", "Required Files done. Reboot.");
-    config.saveValue(&config.store.lastBootGood, true);
+    config.saveValue(&config.store.bootStableMarker, true);
     delay(250);
     ESP.restart();
   #endif
@@ -273,10 +309,26 @@ void Startup::checkNewVersionFile() {
 
 
 void Startup::startupServicesAsync(void* param) {
-  // Delay to let audio stream buffer fill before background HTTP tasks compete for WiFi
-  BOOTLOG("Startup Async Services will begin in %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
-  vTaskDelay(pdMS_TO_TICKS(1000*STARTUP_ASYNC_SERVICES_DELAY));
-  BOOTLOG("Startup Async Services starting", STARTUP_ASYNC_SERVICES_DELAY);
+  // Wait until device leaves SD card playback mode before starting
+  // background downloads. SD mode uses DRAM for SPI reads + MP3 decoding;
+  // ESPFileUpdater's SSL downloads would starve both and drain the audio buffer.
+  // The goto allows restarting the entire wait sequence if the user switches
+  // back to SD mode during the countdown delay.
+wait_for_online:
+  if (config.getMode() == PM_SDCARD) FUNCTIONLOG("Services", "Startup Async Services will not begin while in SD Mode", STARTUP_ASYNC_SERVICES_DELAY);
+  while (config.getMode() == PM_SDCARD) {
+    vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+
+  // Delay to let audio stream buffer fill before background HTTP tasks compete for WiFi.
+  // Check mode each second — if user switched back to SD, restart from the top.
+  FUNCTIONLOG("Services", "Startup Async Services will begin in %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
+  for (int i = 0; i < STARTUP_ASYNC_SERVICES_DELAY; i++) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    if (config.getMode() == PM_SDCARD) goto wait_for_online;
+  }
+
+  FUNCTIONLOG("Services", "Startup Async Services starting", STARTUP_ASYNC_SERVICES_DELAY);
   #ifdef UPDATEURL
     utility.updateFile(param, "/data/new_ver.txt", CHECKUPDATEURL, CHECKUPDATEURL_TIME, "New version check");
     startup.checkNewVersionFile();
@@ -285,15 +337,11 @@ void Startup::startupServicesAsync(void* param) {
       startOnlineUpdate();
     }
   #endif
-  #ifdef PLAYLIST_DEFAULT_URL
-    if (!SPIFFS.exists("/data/playlist.csv")) {
-      utility.updateFile(param, "/data/playlist.csv", PLAYLIST_DEFAULT_URL, "", "Default playlist");
-      if (SPIFFS.exists("/data/playlist.csv")) netserver.requestOnChange(PLAYLISTSAVED, 0);
-    }
-  #endif
   utility.updateFile(param, "/www/timezones.json.gz", TIMEZONES_JSON_URL, TIMEZONES_JSON_CHECKTIME, "Timezones database file");
+  #ifdef CORE_MONITOR
+    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
+  #endif
   utility.updateFile(param, "/www/rb_srvrs.json", RADIO_BROWSER_SERVERS_URL, RB_SERVERS_CHECKTIME, "Radio Browser servers list");
-  startup.cleanStaleSearchResults();
   #ifdef CORE_MONITOR
     FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
   #endif

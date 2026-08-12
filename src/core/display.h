@@ -94,6 +94,9 @@ class Display {
     void _swichMode(displayMode_e newmode);
     void _updateBattery();
     void _updateVolume();
+    void _buildJsonCache();
+    String _themeListJson;
+    String _layoutListJson;
   };
 
 #else

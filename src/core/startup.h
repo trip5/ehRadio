@@ -13,10 +13,11 @@ public:
   void checkSafeMode();
   void sdOfflineMode();
   void loop();
+  void getDefaultPlaylist();
+  void cleanStaleSearchResults();
 
 private:
   void markBootStable();
-  void cleanStaleSearchResults();
   void getRequiredFiles();
   void checkNewVersionFile();
   static void startupServicesAsync(void* param);

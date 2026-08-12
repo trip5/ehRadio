@@ -55,6 +55,7 @@ markdown_extensions:
 nav:
   - Readme: index.md
   - Hardware: Hardware.md
+  - Audio/Power Isolation: Isolation.md
   - Controls: Controls.md
   - Commands: Commands.md
   - Trip 5's Notebook: notebooks/notebook.md

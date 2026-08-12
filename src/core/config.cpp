@@ -195,7 +195,7 @@ void Config::changeMode(int newmode) {
         ESP.restart();
       }
       if (pir) {
-        player.sendCommand({PR_STOP, 0});  // stop SD playback before unmounting
+        player.stopSync();  // synchronous stop — closes SD audio file before unmount
         #if MUTE_PIN!=255
           digitalWrite(MUTE_PIN, MUTE_VAL);  // mute output immediately (DMA buffer still drains)
         #endif

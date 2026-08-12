@@ -90,6 +90,10 @@ void Player::resetQueue() {
 	if (playerQueue!=NULL) xQueueReset(playerQueue);
 }
 
+void Player::stopSync() {
+  _stop();  // synchronous stop — closes the audio file so SD can be unmounted safely
+}
+
 void Player::stopInfo() {
   //telnet.info();
   netserver.requestOnChange(MODE, 0);

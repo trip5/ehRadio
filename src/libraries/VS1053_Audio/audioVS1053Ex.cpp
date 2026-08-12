@@ -866,23 +866,13 @@ void Audio::processLocalFile() {
                 eofHeader = true;
             }
         }
-        else {
-            bytesDecoded = sendBytes(InBuff.getReadPtr(), bytesCanBeRead);
-        }
+        // [fix] fill-only: no inline sendBytes — the FreeRTOS task's playAudioData() is the sole sender.
+        // Header parsing above still consumes bytes (bytesDecoded) from the buffer as needed.
         if(bytesDecoded > 0) {InBuff.bytesWasRead(bytesDecoded);}
         return;
     }
 
     if(!bytesAddedToBuffer) {  // eof
-        bytesCanBeRead = InBuff.bufferFilled();
-        if(bytesCanBeRead > 200){
-            if(bytesCanBeRead > InBuff.getMaxBlockSize()) bytesCanBeRead = InBuff.getMaxBlockSize();
-            bytesDecoded = sendBytes(InBuff.getReadPtr(), bytesCanBeRead); // play last chunk(s)
-            if(bytesDecoded > 0){
-                InBuff.bytesWasRead(bytesDecoded);
-                return;
-            }
-        }
         InBuff.resetBuffer();
 
         // if(m_f_loop  && f_stream){  //eof

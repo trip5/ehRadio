@@ -33,6 +33,7 @@ class Player: public Audio {
     void init();
     void sendCommand(playerRequestParams_t request);
     void resetQueue();
+    void stopSync();  // synchronous stop — closes audio file before SD unmount
     void stopInfo();
     void setError(const char *e);
     void initHeaders(const char *file);

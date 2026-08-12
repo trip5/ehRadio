@@ -312,6 +312,24 @@ When porting to a new library version, any `if(VS_PATCH_ENABLE) { loadUserCode()
 
 ---
 
+## Post-Graft Patch Fixes (2026-08-12)
+
+### SD→VS1053 Pops (Double-Feed Bug)
+
+**Symptom**: Occasional pops during SD card → VS1053 playback, absent on online streams.
+
+**Root cause**: The graft made `processWebStream()` fill-only (task feeds the VS1053), but `processLocalFile()` (the SD path) was left with its PR226 inline `sendBytes()` calls. Both Core 1 (`processLocalFile()`) and Core 0 (`playAudioData()` task) advanced the `InBuff` read pointer and sent data to the VS1053 without synchronization — a double-feed race producing duplicated/skipped MP3 frames.
+
+Online streams didn't pop because `processWebStream()` was correctly fill-only.
+
+**Fix**: Removed both inline `sendBytes()` calls from `processLocalFile()` (the `else` branch and the EOF tail-flush). `processLocalFile()` is now fill-only; the FreeRTOS task's `playAudioData()` is the sole sender.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — `processLocalFile()`.
+
+**Note**: The EOF tail-flush relied on the removed inline `sendBytes()`. The task's `lastFrame` logic in `playAudioData()` is intended to send the final partial block, but `processLocalFile()` now calls `stopSong()` immediately on EOF without waiting for the task to drain the tail. Watch for truncated end-of-file audio during testing.
+
+---
+
 ## Open Items
 
 1. **Mutex guards on connect functions** (Step 9 deferred): `connecttohost()` and `connecttoFS()` should be wrapped with `mutex_playAudioData` to prevent race conditions. Same pattern Maleksm used.

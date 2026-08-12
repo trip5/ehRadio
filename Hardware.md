@@ -205,7 +205,7 @@ If you are sure you have a genuine VS1053 and you're still getting problems with
 
 - Add 100Ω resistors on the `DREQ` and `XRST` lines (middle of wire is OK) for passive filtering of pulse noise and port protection during initialization.
 
-- Please remember that to test audio with enabling the patch first before AND after trying this fixes.
+- Please remember that the patch is sensitive.  Try disabling the patch first before assuming your VS1053 needs fixing.
 
 #### For boards that identify as VS0
 

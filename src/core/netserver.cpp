@@ -1338,7 +1338,7 @@ void radioBrowserSendClick(const char* stationUrl) {
     strlcpy(pendingClickUrl, stationUrl, sizeof(pendingClickUrl));
     clickDelayStart = millis();
     clickDelayActive = true;
-    FUNCTIONLOG("RB Click", "Starting %dms delay for: %s", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
+    FUNCTIONLOG("RB Click", "Starting %ds delay for: %s", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
   #endif //#ifdef RADIO_BROWSER_SEND_CLICKS
 }
 
@@ -1376,10 +1376,16 @@ void processRadioBrowserClick() {
   #ifdef RADIO_BROWSER_SEND_CLICKS
     if (!clickDelayActive) return;
     // Check if delay has elapsed
-    if (millis() - clickDelayStart < RADIO_BROWSER_SEND_CLICK_DELAY) {
+    if (millis() - clickDelayStart < (RADIO_BROWSER_SEND_CLICK_DELAY*1000)) {
       return; // Still waiting
     }
     clickDelayActive = false;
+    // Abandon click if switched to SD mode during the delay —
+    // HTTPS would drain DRAM and starve SD SPI reads + MP3 decoding
+    if (config.getMode() == PM_SDCARD) {
+      FUNCTIONLOG("RB Click", "Abandoning click");
+      return;
+    }
     if (ESP.getFreeHeap() <= MIN_MALLOC) {
       FUNCTIONLOG("Heap", "low heap (%u), refusing rb click task spawn", ESP.getFreeHeap());
       return;

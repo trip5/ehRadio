@@ -282,7 +282,7 @@ void Config::initPlaylistMode() {
           }
         } else
       #endif
-      if (!sdman.start()) {
+      if (!sdman.ready && !sdman.start()) {
         if (network.status == SDOFFLINE) {
           FUNCTIONLOG("SD", "SD mount failed. Staying in offline mode.");
           strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);

@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.08.03"
+#define RADIOVERSION "2026.08.12"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
@@ -1114,7 +1114,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
     #define RADIO_BROWSER_SEND_CLICKS
   #endif
   #ifndef RADIO_BROWSER_SEND_CLICK_DELAY
-    #define RADIO_BROWSER_SEND_CLICK_DELAY 10000 // wait 10 seconds before sending the click
+    #define RADIO_BROWSER_SEND_CLICK_DELAY 10 // wait 10 seconds before sending the click
   #endif
 #else
   #undef RADIO_BROWSER_SEND_CLICKS

@@ -1,6 +1,6 @@
 {
   "name": "ehRadio - OLED with Remote",
-  "version": "2026.08.12",
+  "version": "2026.08.13",
   "funding_url": "https://github.com/sponsors/trip5",
   "builds": [
     {

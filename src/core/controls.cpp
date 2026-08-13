@@ -246,6 +246,9 @@ void Controls::irLoop() {
             if (network.status != CONNECTED && network.status!=SDOFFLINE && target!=IR_AST) return;
             if (target!=IR_AST && display.mode()==LOST) return;
             if (screenSaverExit()) delay(200); // give it time to exit before doing the action
+            // Reset screensaver timers on any IR press so the screensaver can't fire mid-adjustment
+            config.screensaverTicks = 0;
+            config.screensaverPlayingTicks = 0;
             switch (target) {
               case IR_PLAY: {
                   irBlink();

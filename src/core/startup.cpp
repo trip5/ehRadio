@@ -100,16 +100,63 @@ void Startup::checkSpiffsandVer() {
   }
   BOOTLOG("SPIFFS mounted");
 
-  // Health check: verify SPIFFS is actually writable (can be corrupted after crash).
-  // Retry up to 3 times with remount; show LOST screen if still broken.
+  // Health check: verify SPIFFS is readable AND writable (can be corrupted after crash).
+  // Retry up to 3 times with remount; reboot if still broken.
   {
     bool healthy = false;
     for (int attempt = 1; attempt <= 3; attempt++) {
+      // Phase 1: readability — read the last www file (player.html or .gz variant).
+      // A valid HTML file starts with whitespace or '<'; a valid gzip starts with 0x1F 0x8B.
+      // Use exists() first: open() on a missing file can return a truthy File on some cores.
+      bool readable = false;
+      if (Config::wwwFilesCount > 0) {
+        const char* lastFile = Config::wwwFiles[Config::wwwFilesCount - 1];
+        char lastPath[64];
+        snprintf(lastPath, sizeof(lastPath), "/www/%s", lastFile);
+        char gzPath[64];
+        snprintf(gzPath, sizeof(gzPath), "/www/%s.gz", lastFile);
+
+        bool probeGz = false;
+        const char* probePath = nullptr;
+        if (SPIFFS.exists(gzPath)) { probePath = gzPath; probeGz = true; }
+        else if (SPIFFS.exists(lastPath)) { probePath = lastPath; }
+
+        if (probePath) {
+          File f = SPIFFS.open(probePath, "r");
+          if (f) {
+            if (probeGz) {
+              int b0 = f.read(), b1 = f.read();
+              readable = (b0 == 0x1F && b1 == 0x8B);
+            } else {
+              int c = f.read();
+              readable = (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '<');
+            }
+            f.close();
+          }
+        }
+      }
+      if (readable) {
+        healthy = true;
+        BOOTLOG("SPIFFS read health check passed");
+        break;
+      }
+
+      // Phase 2: write + read-back test (deeper — catches write/read failures)
+      bool writeOk = false;
       File test = SPIFFS.open("/.ehradio_test", "w");
       if (test) {
+        test.print('!');
         test.close();
+        File rt = SPIFFS.open("/.ehradio_test", "r");
+        if (rt) {
+          writeOk = (rt.read() == '!');
+          rt.close();
+        }
         SPIFFS.remove("/.ehradio_test");
+      }
+      if (writeOk) {
         healthy = true;
+        BOOTLOG("SPIFFS write-read health check passed");
         break;
       }
       BOOTLOG("SPIFFS health check failed (attempt %d/3), remounting...", attempt);
@@ -118,9 +165,9 @@ void Startup::checkSpiffsandVer() {
       SPIFFS.begin(false);
     }
     if (!healthy) {
-      ERRORLOG("SPIFFS health check failed after 3 attempts");
-      display.putRequest(NEWMODE, LOST);
-      return;
+      ERRORLOG("SPIFFS health check failed after 3 attempts - rebooting...");
+      delay(500);  // flush serial before reboot
+      ESP.restart();
     }
   }
 

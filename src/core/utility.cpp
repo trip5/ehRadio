@@ -374,8 +374,8 @@ void Utility::indexPlaylist() {
 void Utility::initPlaylist() {
   if (!SPIFFS.exists(INDEX_PATH)) {
     FUNCTIONLOG("Playlist", "initPlaylist: index missing, running clean and index");
-    cleanPlaylist();
-    indexPlaylist();
+    bool cleaned = cleanPlaylist();
+    if (!cleaned) indexPlaylist();
   } else {
     FUNCTIONLOG("Playlist", "initPlaylist: index exists, no action needed");
   }

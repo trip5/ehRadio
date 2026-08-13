@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.08.12"
+#define RADIOVERSION "2026.08.13"
 
 /*******************************************************
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
@@ -796,7 +796,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 // How many seconds to wait after boot completed to Start the Async Services (other services are starting and too soon can crash netserver stack).  The less-important services started here (can take a full minute to complete if server connection issues):
 // verifies/downloads locale JSON file, checks for new version (triggers autoupdate), downloads PLAYLIST_DEFAULT_URL (if set), updates timezones.json.gz and rb_srvrs.json, cleans up stale search results
 #ifndef STARTUP_ASYNC_SERVICES_DELAY
-  #define STARTUP_ASYNC_SERVICES_DELAY 20
+  #define STARTUP_ASYNC_SERVICES_DELAY 10
 #endif
  // How many seconds to wait after boot completed (including smart start) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
  #ifndef BOOT_STABLE_TIME

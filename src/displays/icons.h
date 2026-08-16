@@ -345,7 +345,7 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     VOL_50,          // 21: \025
     VOL_75,          // 22: \026
     VOL_100,         // 23: \027
-    SD_B,            // 24: \030
+    SD_A,            // 24: \030
     SD_B,            // 25: \031
     SDSHUFFLE_A,     // 26: \032
     SDSHUFFLE_B,     // 27: \033

@@ -211,7 +211,8 @@
   #define BTN_UP             15
   #define WAKE_PIN           18
 #elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_VS1053_1BUTTON)
-  #define BTN_NEXT           42
+  #define BTN_DOWN 42
+  //#define BTN_NEXT           42
 #elif defined(ES3C28P)
   #define TS_MODEL           TS_MODEL_FT6336
   #define TS_SDA             16
@@ -345,6 +346,7 @@
 
 // Clock:
 //#define CLOCKFONT CHUNKY6
+//#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
 
 // Transform:

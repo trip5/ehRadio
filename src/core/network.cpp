@@ -122,6 +122,8 @@ void ticks() {
       netserver.setRSSI(WiFi.RSSI());
       netserver.requestOnChange(NRSSI, 0);
       display.putRequest(DSPRSSI, netserver.getRSSI());
+    } else if (network.status == SDOFFLINE) {
+      display.putRequest(DSPRSSI, 0);  // no RSSI offline, but keeps the buffer bar refreshed
     }
     #ifdef USE_SD
       { static uint32_t _lastCheckSD = 0;

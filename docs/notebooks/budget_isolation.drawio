@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="Page-1" id="VaBQy82QoJaN6VXkj_3L">
-    <mxGraphModel dx="4226" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="650" pageHeight="800" math="0" shadow="0">
+    <mxGraphModel dx="2693" dy="514" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="650" pageHeight="800" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -117,7 +117,7 @@
             <mxPoint x="-425" y="620" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="hvQeGLuC_HArDB5Cny_p-6" parent="1" style="pointerEvents=1;verticalLabelPosition=bottom;shadow=0;dashed=0;align=center;html=1;verticalAlign=top;shape=mxgraph.electrical.inductors.transformer_1;direction=north;rotation=-180;" value="" vertex="1">
+        <mxCell id="hvQeGLuC_HArDB5Cny_p-6" parent="1" style="pointerEvents=1;verticalLabelPosition=middle;shadow=0;dashed=0;align=center;html=1;verticalAlign=middle;shape=mxgraph.electrical.inductors.transformer_1;direction=north;rotation=-180;labelPosition=center;" value="&lt;h3 style=&quot;padding-top: 38px; margin-top: 0px; margin-bottom: 0px; padding-left: 0px;&quot;&gt;•&amp;nbsp; &amp;nbsp; •&lt;/h3&gt;" vertex="1">
           <mxGeometry height="50" width="44" x="-400" y="565" as="geometry" />
         </mxCell>
         <mxCell id="05gzDeF-ZJ1oIUUWJtNC-157" edge="1" parent="1" source="hvQeGLuC_HArDB5Cny_p-7" style="edgeStyle=orthogonalEdgeStyle;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.998;exitY=0.5;exitDx=0;exitDy=0;exitPerimeter=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;startArrow=none;startFill=0;endArrow=oval;endFill=1;">
@@ -155,7 +155,7 @@
             <mxPoint x="-424.98318507090335" y="620.2268733176865" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="05gzDeF-ZJ1oIUUWJtNC-47" parent="1" style="pointerEvents=1;verticalLabelPosition=bottom;shadow=0;dashed=0;align=center;html=1;verticalAlign=top;shape=mxgraph.electrical.inductors.transformer_1;direction=north;rotation=-180;" value="" vertex="1">
+        <mxCell id="05gzDeF-ZJ1oIUUWJtNC-47" parent="1" style="pointerEvents=1;verticalLabelPosition=middle;shadow=0;dashed=0;align=center;html=1;verticalAlign=middle;shape=mxgraph.electrical.inductors.transformer_1;direction=north;rotation=-180;labelPosition=center;" value="&lt;h3 style=&quot;padding-top: 38px; margin-top: 0px; margin-bottom: 0px; padding-left: 0px;&quot;&gt;•&amp;nbsp; &amp;nbsp; •&lt;/h3&gt;" vertex="1">
           <mxGeometry height="50" width="44" x="-400" y="625" as="geometry" />
         </mxCell>
         <mxCell id="05gzDeF-ZJ1oIUUWJtNC-161" edge="1" parent="1" source="05gzDeF-ZJ1oIUUWJtNC-66" style="edgeStyle=orthogonalEdgeStyle;shape=connector;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.6;exitDx=0;exitDy=0;exitPerimeter=0;strokeColor=default;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=11;fontColor=default;labelBackgroundColor=default;startArrow=none;startFill=0;endArrow=oval;endFill=1;entryX=0.721;entryY=1.001;entryDx=0;entryDy=0;entryPerimeter=0;">

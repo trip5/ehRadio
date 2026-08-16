@@ -581,22 +581,19 @@ void NetServer::processQueue() {
           return; 
           break;
         }
-      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"sst\":%d,\"wifiscan\":%d,\"softr\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"vut\":%d,\"autoupdate\":%d,\"mdns\":\"%s\"}", 
+      case GETCONTROLS:   snprintf(wsbuf, sizeof(wsbuf), "{\"sst\":%d,\"oneclick\":%d,\"tsf\":%d,\"tsd\":%d,\"enca\":%d,\"irtl\":%d,\"maxVol\":%d}",
                                   config.store.smartstart,
-                                  config.store.wifiscanbest,
-                                  config.store.softapdelay,
-                                  config.store.ehdp,
-                                  config.store.ehdpname,
-                                  config.vuThreshold,
-                                  config.store.autoupdate,
-                                  config.store.mdnsname);
+                                  config.store.oneclickswitch,
+                                  config.store.fliptouch,
+                                  config.store.dbgtouch,
+                                  config.store.encacc,
+                                  config.store.irtlp,
+                                  VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
-                                  config.store.fliptouch,
-                                  config.store.dbgtouch,
                                   config.store.dspon,
                                   config.store.brightness,
                                   config.store.contrast,
@@ -644,6 +641,14 @@ void NetServer::processQueue() {
                                   config.store.weatherkey,
                                   config.store.weathersyncinterval);
                                   break;
+      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"softr\":%d,\"autoupdate\":%d}",
+                                  config.store.wifiscanbest,
+                                  config.store.ehdp,
+                                  config.store.ehdpname,
+                                  config.store.mdnsname,
+                                  config.store.softapdelay,
+                                  config.store.autoupdate);
+                                  break;
       case GETMQTT:       snprintf(wsbuf, sizeof(wsbuf), "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
                                   config.store.mqttenable,
                                   config.store.mqtthost,
@@ -651,12 +656,6 @@ void NetServer::processQueue() {
                                   config.store.mqttuser,
                                   config.store.mqttpass,
                                   config.store.mqtttopic);
-                                  break;
-      case GETCONTROLS:   snprintf(wsbuf, sizeof(wsbuf), "{\"enca\":%d,\"irtl\":%d,\"oneclick\":%d,\"maxVol\":%d}",
-                                  config.store.encacc,
-                                  config.store.irtlp,
-                                  config.store.oneclickswitch,
-                                  VOLUME_SCALE);
                                   break;
       case DSPON:         snprintf(wsbuf, sizeof(wsbuf), "{\"dspontrue\":%d}", 1); break;
       case STATION:       requestOnChange(STATIONNAME, clientId); requestOnChange(ITEM, clientId); break;

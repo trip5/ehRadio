@@ -632,16 +632,11 @@ void Display::loop() {
     return;
   }
   if (_bootStep==2) {
-    if (config.isScreensaver) {
-      if (config.displayIsInverted) {
-        config.displayIsInverted = false;
-        display.invert();
-      }
-    } else {
-      if (config.store.invertdisplay != config.displayIsInverted) {
-        config.displayIsInverted = config.store.invertdisplay;
-        display.invert();
-      }
+    // Inversion applies only outside the screensaver; the screensaver is always un-inverted.
+    bool shouldInvert = config.isScreensaver ? false : config.store.invertdisplay;
+    if (shouldInvert != config.displayIsInverted) {
+      config.displayIsInverted = shouldInvert;
+      display.invert();
     }
   }
   if (displayQueue==NULL || _locked) return;

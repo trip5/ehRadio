@@ -362,9 +362,14 @@ void Audio::begin(){
     setVUmeter();
     // m_endFillByte = wram_read(0x1E06) & 0xFF;
     // printDetails("After last clocksetting \n");
+
+    // [fix] query chip type BEFORE patch load — register read after patch may hang or return garbage
+    { uint8_t v = ((read_register(0x01/*SCI_STATUS*/) >> 4) & 15);
+      SERIALLOGX("VS chip: VS%d\t", v==3?1003:v==4?1053:v==6?1063:v==8?1073:0); }
+
     if(VS_PATCH_ENABLE) {
       loadUserCode(); // load in VS1053B if you want to play flac
-      SERIALLOGX("patch applied ");
+      SERIALLOGX("patch applied\t");
     }
 
     // [Maleksm graft] ensure FreeRTOS audio task is running after init
@@ -861,23 +866,13 @@ void Audio::processLocalFile() {
                 eofHeader = true;
             }
         }
-        else {
-            bytesDecoded = sendBytes(InBuff.getReadPtr(), bytesCanBeRead);
-        }
+        // [fix] fill-only: no inline sendBytes — the FreeRTOS task's playAudioData() is the sole sender.
+        // Header parsing above still consumes bytes (bytesDecoded) from the buffer as needed.
         if(bytesDecoded > 0) {InBuff.bytesWasRead(bytesDecoded);}
         return;
     }
 
     if(!bytesAddedToBuffer) {  // eof
-        bytesCanBeRead = InBuff.bufferFilled();
-        if(bytesCanBeRead > 200){
-            if(bytesCanBeRead > InBuff.getMaxBlockSize()) bytesCanBeRead = InBuff.getMaxBlockSize();
-            bytesDecoded = sendBytes(InBuff.getReadPtr(), bytesCanBeRead); // play last chunk(s)
-            if(bytesDecoded > 0){
-                InBuff.bytesWasRead(bytesDecoded);
-                return;
-            }
-        }
         InBuff.resetBuffer();
 
         // if(m_f_loop  && f_stream){  //eof

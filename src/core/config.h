@@ -232,17 +232,17 @@ class Config {
       ircodes_t ircodes;
     #endif
 
-    BitrateFormat configFmt = BF_UNKNOWN;
+    volatile BitrateFormat configFmt = BF_UNKNOWN;  // volatile: cross-core/task access
     neworkItem ssids[5];
     uint8_t ssidsCount = 0;
-    uint32_t sdResumePos = 0;
-    bool     wwwFilesExist = false;
-    uint16_t vuThreshold = 0;
-    uint16_t screensaverTicks = 0;
-    uint16_t screensaverPlayingTicks = 0;
-    bool     isScreensaver = false;
-    bool     displayIsInverted = false;
-    int      newConfigMode = 0;
+    volatile uint32_t sdResumePos = 0;
+    volatile bool     wwwFilesExist = false;
+    volatile uint16_t vuThreshold = 0;
+    volatile uint16_t screensaverTicks = 0;
+    volatile uint16_t screensaverPlayingTicks = 0;
+    volatile bool     isScreensaver = false;
+    volatile bool     displayIsInverted = false;
+    volatile int      newConfigMode = 0;
 
     void init();
     void loadPreferences();

@@ -317,11 +317,29 @@ Use the trim pots on the amplifier to attenuate/reduce input to match the speake
 Audio isolation transformers EI14 600:600Ω use galvanic isolation to physically separate the input and output circuits using magnetic induction.
 This breaks the conductive path for DC voltage and ground loop currents, effectively stopping the 50/60Hz hum caused by potential differences between devices.
 
+
 While the EI14 transformer breaks the ground loop and removes hum from the source, the amplifier itself can reintroduce noise
 if it generates high-frequency switching interference (common in Class-D amps) or if its power supply is noisy.
 For the cleanest result, pair the isolation transformer with a Class-AB amplifier or a well-filtered Class-D module.
 
 Or even better, separate the audio and digital sides of your circuit.
+
+### Transformer Notes
+
+The signal lines R and L from the PCM5102 audio output must be fed to the start (dot-marked) of the primary windings of the EI14 transformers; the ends of the windings go to GND.
+The secondary windings of the EI14 are connected to the PAM8406 similarly: the start (dot-marked) of the windings to Rin and Lin; the ends of the windings to GND.
+
+The datasheet should identify the winding starts. They may not actually have little dots printed on the physical transformer.
+
+You might instead encounter:
+
+- pin numbering showing winding polarity
+- a schematic in the datasheet showing the winding starts
+- a "1" marking on one side of each winding
+- coloured wires with a specified polarity
+- a manufacturer's pinout such as 1–2 = primary, 3–4 = secondary, with pin 1 and pin 3 being the corresponding starts
+
+If the transformer is literally just described as "EI14 600:600 Ω" with four unmarked pins and no datasheet/pinout, then you don't know the polarity from the 600:600 specification alone.
 
 ### Audio/Power Noise
 

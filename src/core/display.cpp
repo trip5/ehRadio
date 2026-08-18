@@ -927,13 +927,14 @@ void Display::_volume() {
     _setReturnTicker(3);
     _nums->setText(config.store.volume, numtxtFmt);
   }
-#if DSP_INVERT_QUIRK
+/// tried here...
+//#if DSP_INVERT_QUIRK
   // Some ILI9488 clones misread a pixel byte issued during the volume redraw as the
   // INVON/INVOFF command and latch inversion. Re-assert the correct polarity after every
   // volume draw so the panel self-heals. Guarded by DSP_INVERT_QUIRK so this compiles
   // only for the affected panels (a no-op on all other displays).
-  display.invert();
-#endif
+  //display.invert();
+//#endif
 }
 
 void Display::flip() { dsp.flip(); }

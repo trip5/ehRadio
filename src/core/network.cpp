@@ -305,6 +305,7 @@ bool MyNetwork::wifiBegin(bool silent) {
       while (WiFi.status() != WL_CONNECTED) {
         if (!silent) SERIALLOGDOT();
         delay(500);
+        network.loopImprov();
         if (LED_PIN!=255 && !silent) digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         errcnt++;
         if (errcnt > WIFI_ATTEMPTS) {

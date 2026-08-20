@@ -317,11 +317,29 @@ Use the trim pots on the amplifier to attenuate/reduce input to match the speake
 Audio isolation transformers EI14 600:600Ω use galvanic isolation to physically separate the input and output circuits using magnetic induction.
 This breaks the conductive path for DC voltage and ground loop currents, effectively stopping the 50/60Hz hum caused by potential differences between devices.
 
+
 While the EI14 transformer breaks the ground loop and removes hum from the source, the amplifier itself can reintroduce noise
 if it generates high-frequency switching interference (common in Class-D amps) or if its power supply is noisy.
 For the cleanest result, pair the isolation transformer with a Class-AB amplifier or a well-filtered Class-D module.
 
 Or even better, separate the audio and digital sides of your circuit.
+
+### Transformer Notes
+
+The signal lines R and L from the PCM5102 audio output must be fed to the start (dot-marked) of the primary windings of the EI14 transformers; the ends of the windings go to GND.
+The secondary windings of the EI14 are connected to the PAM8406 similarly: the start (dot-marked) of the windings to Rin and Lin; the ends of the windings to GND.
+
+The datasheet should identify the winding starts. They may not actually have little dots printed on the physical transformer.
+
+You might instead encounter:
+
+- pin numbering showing winding polarity
+- a schematic in the datasheet showing the winding starts
+- a "1" marking on one side of each winding
+- coloured wires with a specified polarity
+- a manufacturer's pinout such as 1–2 = primary, 3–4 = secondary, with pin 1 and pin 3 being the corresponding starts
+
+If the transformer is literally just described as "EI14 600:600 Ω" with four unmarked pins and no datasheet/pinout, then you don't know the polarity from the 600:600 specification alone.
 
 ### Audio/Power Noise
 
@@ -340,7 +358,7 @@ You can read some (untested) schematics to achieve [Audio/Power Isolation](Isola
 
 ehRadio can be built with various control methods, including rotary encoders, buttons, an IR receiver, touchscreen, WebUI, Home Assistant, MQTT, Telnet, and HTTP.
 
-The most basic physical control is a rotary encoder.  All functions can be accomplished with just one encoder.
+The most basic physical control is a rotary encoder.  All major functions can be accomplished with just one encoder.
 
 Buttons may also be used. Touch is swipe and tap motions only.
 
@@ -359,7 +377,7 @@ Deep sleep may be explicitly disabled with `#define DEEP_SLEEP_DISABLE` in `myop
 
 The KY-040 module is very easy to setup.  It includes the correct resistors onboard.
 
-Other rotary encoders like the EC11 may also be used but may require 10KΩ resistors to tie `CLK` and `DT` to Ground.
+Other rotary encoders like the EC11 may also be used but may require 10KΩ resistors to pull down `CLK` and `DT` to Ground.
 
 ### Buttons
 
@@ -380,21 +398,29 @@ IR receivers like the VS1838 are cheap and work well.  You may need a pullup res
 An SD card reader may be added to the build. It is recommended to be wary of SD readers built onto displays.
 Although some may work, it is well-known that some may be lacking proper resistors or will interfere with display because it is forced onto the same SPI bus.
 
-SD reader modules like this are cheap and work well. Some come with a power regulator but this may not be necessary.
+It is highly recommended to use an SD card reader with a power regulator and a 74VHCT125A buffer.
+If needing to make this type fit with a case, the excess PCB around the slot may be cut off carefully with a knife, sandpaper, or grinding tool.
+Wear a mask if filing or grinding! Fiberglass is bad for your lungs!
 
-![image](images/hardware/sdreader.jpg) ![image](images/hardware/sdreader2.jpg)
+![image](images/hardware/sdreader.jpg)
+
+A simpler SD card reader may work but may cause random, unsolvable issues.
+Do not use on the same SPI bus as other devices.
+
+![image](images/hardware/sdreader2.jpg)
 
 It is recommended to encode files on SD card using MP3 at a constant bit rate of 256kbps or less
 to avoid system stress and get maximum compatibility with the decoders.
+ABR and CBR encoding may work (mostly) but may also result in pops and clicks.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
 
 ### SD Cards
 
 SD cards on these cheap SD readers can be pretty finicky.
-Certain brands are known to work better than others.
-Sandisks and Samsungs are recommended.
+Certain brands are known to work better than others: Sandisks and Samsungs are recommended.
 Make sure it's "Class 10" or "UHS-I U1" and formatted FAT32.
-Smaller sizes may also work better.
+Smaller sizes (32GB and smaller) may also work better.
+Windows disk format does not like formatting larger SD cards but the command line `format /FS:FAT32 X: /Q` will work for larger sizes.
 
 When in doubt or experiencing problems, try a different SD card.
 
@@ -405,7 +431,7 @@ The [SD Offline mode](README.md#sd-offline-mode) should be considered as a "fall
 By default, all buttons and encoder switches can be used to enter this mode on boot.
 If you wish to use a special pin, add something like `#define SDOFFLINE_BTN 2` or `#define SDOFFLINE_BTN BTN_DOWN` to `myoptions.h`.
 
-`TS_INT` cannot be used for this purpose as the touchscreen leaves it floating at boot.
+`TS_INT` cannot be used for this purpose as the touchscreen is floating at boot.
 
 Remember that certain GPIOs may cause issues if held while powering-up (so best not to attach buttons to `GPIO0` or `GPIO3`).
 Most users will not remember the difference between "shortly after power-up" and "during power-up".

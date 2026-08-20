@@ -232,17 +232,17 @@ class Config {
       ircodes_t ircodes;
     #endif
 
-    BitrateFormat configFmt = BF_UNKNOWN;
+    volatile BitrateFormat configFmt = BF_UNKNOWN;  // volatile: cross-core/task access
     neworkItem ssids[5];
     uint8_t ssidsCount = 0;
-    uint32_t sdResumePos = 0;
-    bool     wwwFilesExist = false;
-    uint16_t vuThreshold = 0;
-    uint16_t screensaverTicks = 0;
-    uint16_t screensaverPlayingTicks = 0;
-    bool     isScreensaver = false;
-    bool     displayIsInverted = false;
-    int      newConfigMode = 0;
+    volatile uint32_t sdResumePos = 0;
+    volatile bool     wwwFilesExist = false;
+    volatile uint16_t vuThreshold = 0;
+    volatile uint16_t screensaverTicks = 0;
+    volatile uint16_t screensaverPlayingTicks = 0;
+    volatile bool     isScreensaver = false;
+    volatile bool     displayIsInverted = false;
+    volatile int      newConfigMode = 0;
 
     void init();
     void loadPreferences();
@@ -325,7 +325,10 @@ class Config {
     template <typename T>
     void saveValue(T *field, const T &value) {
       const configKeyMap* entry = getKeyMapEntryForField(field);
-      if (entry && saveRawValue(entry, &value, entry->size)) *field = value;
+      if (entry && saveRawValue(entry, &value, entry->size)) {
+        *field = value;
+        cancelDeferredSave(entry);  // immediate write supersedes any pending debounced write
+      }
     }
     void saveValue(char *field, const char *value) {
       const configKeyMap* entry = getKeyMapEntryForField(field);
@@ -334,7 +337,10 @@ class Config {
         char normalizedValue[sz];
         memset(normalizedValue, 0, sz);
         if (value != nullptr) strlcpy(normalizedValue, value, sz);
-        if (saveRawValue(entry, normalizedValue, sz)) strlcpy(field, normalizedValue, sz);
+        if (saveRawValue(entry, normalizedValue, sz)) {
+          strlcpy(field, normalizedValue, sz);
+          cancelDeferredSave(entry);
+        }
       }
     }
     /* Debounced save: updates the in-memory field immediately, defers the NVS write until
@@ -385,6 +391,13 @@ class Config {
       uint32_t dueMs = 0;
     };
     DeferredSave _deferredSaves[DEFERRED_SAVE_SLOTS];
+
+    // Cancel a pending deferred save for a field — an immediate write supersedes it.
+    void cancelDeferredSave(const configKeyMap* entry) {
+      for (uint8_t i = 0; i < DEFERRED_SAVE_SLOTS; ++i) {
+        if (_deferredSaves[i].entry == entry) { _deferredSaves[i].entry = nullptr; return; }
+      }
+    }
 
     bool _wwwFilesExist();
     void _initHW();

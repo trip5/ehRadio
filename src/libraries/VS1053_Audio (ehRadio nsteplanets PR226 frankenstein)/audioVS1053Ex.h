@@ -10,8 +10,58 @@
 #define _vs1053_ext
 
 #define VS1053VOLM 128        // 128 or 96 only
-#define VS1053VOL(v) (VS1053VOLM==128?log10(((float)v+1)) * 50.54571334 + 128:log10(((float)v+1)) * 64.54571334 + 96)
 
+// requires volume input to be 0-255:
+// #define VS1053VOL(v) (VS1053VOLM==128?log10(((float)v+1)) * 50.54571334 + 128:log10(((float)v+1)) * 64.54571334 + 96)
+
+#ifdef VS1053_VOL_LOG
+  // fixed for macro VOLUME_SCALE:
+  #define VS1053VOL(v) ({ \
+    uint8_t _r; \
+    if ((v) == 0) { _r = VS1053VOLM; } \
+    else { \
+      float _scaled = (float)(v) * 254.0f / (float)VOLUME_SCALE; \
+      _r = (uint8_t)(log10(_scaled + 1.0f) * 50.54571334f + 128.0f); \
+      if (_r == VS1053VOLM) _r = 0; \
+    } \
+    _r; \
+  })
+#elif defined(VS1053_VOL_CURVE)
+  // This one starts at -60dB (might be appropriate for an amplified VS1053)
+  // Cubic polynomial volume curve for perceptual loudness — correct for any VOLUME_SCALE.
+  // dB = -112t³ + 172t² - 60  (where t = v/VOLUME_SCALE, then converted to VS1053 register format)
+  // Replaces the old log10 curve which couldn't reach full volume with small VOLUME_SCALE values.
+  #define VS1053VOL(v) ({ \
+    uint8_t _r; \
+    if ((v) == 0) { _r = VS1053VOLM; } \
+    else { \
+      float _t = (float)(v) / (float)VOLUME_SCALE; \
+      float _t2 = _t * _t; \
+      float _dB = -112.0f * _t2 * _t + 172.0f * _t2 - 60.0f; \
+      float _reg = -_dB * 2.0f; \
+      _r = (uint8_t)(254.0f - _reg * 254.0f / 248.0f); \
+    } \
+    _r; \
+  })
+#else
+  // Cubic polynomial volume curve for perceptual loudness — VOLUME_SCALE-aware.
+  // This one starts at -35dB (appropriate for an unamplified VS1053)
+  // dB = a·t³ + b·t² + c  (where t = v/VOLUME_SCALE)
+  // To tune: change c (starting dB at silence). b = -c / 0.35, a = -(b + c).
+  // c=-35: t=0.25 → -22dB (audible), t=0.5 → -8dB (comfortable), t=1.0 → 0dB (full).
+  #define VS1053VOL(v) ({ \
+    uint8_t _r; \
+    if ((v) == 0) { _r = VS1053VOLM; } \
+    else { \
+      float _t = (float)(v) / (float)VOLUME_SCALE; \
+      float _t2 = _t * _t; \
+      float _dB = -65.0f * _t2 * _t + 100.0f * _t2 - 35.0f; \
+      float _reg = -_dB * 2.0f; \
+      _r = (uint8_t)(254.0f - _reg * 254.0f / 248.0f); \
+    } \
+    _r; \
+  })
+#endif
 
 #include "Arduino.h"
 #include <vector>

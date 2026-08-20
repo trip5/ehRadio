@@ -11,7 +11,9 @@
 #include <SPI.h>
 #include "ILI9486_SPI.h"
 
-#define SPI_SPEED 40000000UL
+#ifndef SPI_SPEED
+  #define SPI_SPEED 40000000UL
+#endif
 //#define SPI_SPEED 20000000 // max reliable speed is 20Mhz for RPi SPI kludge
 //#define SPI_SPEED 4000000
 

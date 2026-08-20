@@ -429,6 +429,7 @@ void Display::_setReturnTicker(uint8_t time_s) {
 
 void Display::_swichMode(displayMode_e newmode) {
   if (newmode == CLEAR) { dsp.fillScreen(config.theme.background); _mode = CLEAR; return; }
+  if (newmode == VOL && !config.store.volumepage) return;  // no overlay — skip VOL mode to avoid a needless page switch
   if (newmode == _mode || (network.status != CONNECTED && network.status != SDOFFLINE)) return;
   _mode = newmode;
   dsp.setScrollId(NULL);
@@ -632,16 +633,11 @@ void Display::loop() {
     return;
   }
   if (_bootStep==2) {
-    if (config.isScreensaver) {
-      if (config.displayIsInverted) {
-        config.displayIsInverted = false;
-        display.invert();
-      }
-    } else {
-      if (config.store.invertdisplay != config.displayIsInverted) {
-        config.displayIsInverted = config.store.invertdisplay;
-        display.invert();
-      }
+    // Inversion applies only outside the screensaver; the screensaver is always un-inverted.
+    bool shouldInvert = config.isScreensaver ? false : config.store.invertdisplay;
+    if (shouldInvert != config.displayIsInverted) {
+      config.displayIsInverted = shouldInvert;
+      display.invert();
     }
   }
   if (displayQueue==NULL || _locked) return;
@@ -931,6 +927,14 @@ void Display::_volume() {
     _setReturnTicker(3);
     _nums->setText(config.store.volume, numtxtFmt);
   }
+/// tried here...
+//#if DSP_INVERT_QUIRK
+  // Some ILI9488 clones misread a pixel byte issued during the volume redraw as the
+  // INVON/INVOFF command and latch inversion. Re-assert the correct polarity after every
+  // volume draw so the panel self-heals. Guarded by DSP_INVERT_QUIRK so this compiles
+  // only for the affected panels (a no-op on all other displays).
+  //display.invert();
+//#endif
 }
 
 void Display::flip() { dsp.flip(); }

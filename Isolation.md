@@ -69,7 +69,7 @@ for the amplifier.
 
 You may use any I2S decoder and amplifier you like for this build.
 
-- [Budget Isolation Schematic](docs/notebooks/budget_isolation.jpg)
+- [Budget Isolation Schematic](docs/notebooks/budget_isolation.jpg) (made with [draw.io](https://www.drawio.com/))
 
 ### Parts List
 

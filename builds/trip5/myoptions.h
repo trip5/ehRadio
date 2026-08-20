@@ -345,6 +345,7 @@
 
 // Clock:
 //#define CLOCKFONT CHUNKY6
+//#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
 
 // Transform:

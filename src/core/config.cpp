@@ -393,7 +393,6 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.flipscreen, (bool)SCREEN_FLIP);
     display.flip();
     saveValue(&store.invertdisplay, (bool)SCREEN_INVERT);
-    display.invert();
     saveValue(&store.inverttitle, INVERT_TITLE);
     saveValue(&store.themeId, (uint8_t)0);
     display.applyTheme(0);

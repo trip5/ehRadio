@@ -21,11 +21,26 @@ jobs:
 
       - name: Download and update timezones.json if changed
         run: |
+          set -euo pipefail
           TARGET_FILE="data/www/timezones.json"
           TMP_FILE="${TARGET_FILE}.tmp"
           URL="https://raw.githubusercontent.com/trip5/timezones.json/master/timezones.json"
           mkdir -p data/www
-          curl -L -s -o "$TMP_FILE" "$URL"
+
+          # Fail fast on HTTP errors (e.g. 503 HTML pages) and retry transient failures.
+          curl -fSsL \
+            --connect-timeout 15 \
+            --max-time 120 \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-connrefused \
+            --retry-all-errors \
+            -o "$TMP_FILE" \
+            "$URL"
+
+          # Never promote a download unless it is real, non-empty JSON.
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); assert isinstance(d, dict) and len(d) > 0' "$TMP_FILE"
+
           if [ ! -f "$TARGET_FILE" ] || ! cmp -s "$TARGET_FILE" "$TMP_FILE"; then
             echo "timezones.json is new or has changed. Updating."
             mv "$TMP_FILE" "$TARGET_FILE"

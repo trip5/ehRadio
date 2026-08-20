@@ -122,6 +122,8 @@ void ticks() {
       netserver.setRSSI(WiFi.RSSI());
       netserver.requestOnChange(NRSSI, 0);
       display.putRequest(DSPRSSI, netserver.getRSSI());
+    } else if (network.status == SDOFFLINE) {
+      display.putRequest(DSPRSSI, 0);  // no RSSI offline, but keeps the buffer bar refreshed
     }
     #ifdef USE_SD
       { static uint32_t _lastCheckSD = 0;
@@ -303,6 +305,7 @@ bool MyNetwork::wifiBegin(bool silent) {
       while (WiFi.status() != WL_CONNECTED) {
         if (!silent) SERIALLOGDOT();
         delay(500);
+        network.loopImprov();
         if (LED_PIN!=255 && !silent) digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         errcnt++;
         if (errcnt > WIFI_ATTEMPTS) {

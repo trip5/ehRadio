@@ -316,6 +316,8 @@ void Startup::getRequiredFiles() {
       if (!success) {
         display.updateProgress(l10n(L10N_MSG_UPD_FAILED), 0.0f);
         delay(3000);
+        if (config.getMode() == PM_SDCARD) config.store.play_mode = PM_WEB; // Force away from SD mode so playback can't escape LOST
+        player.sendCommand({PR_STOP, 0});
         display.putRequest(NEWMODE, LOST);
         delete updater;
         return;

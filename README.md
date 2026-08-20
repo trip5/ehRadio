@@ -129,7 +129,7 @@ There are tools in the codebase to assist with translation work but hand-editing
 
 When in doubt or having issues, check the serial output.  Serial output logs show a lot of useful information.
 Add `#define ALL_DEBUG_LOGS` to your `myoptions.h` to view extended diagnostic information.
-Connecting via telnet will also show serial logs.
+Connecting to the radio via telnet will also show serial logs.
 
 ---
 
@@ -196,6 +196,7 @@ Below here are some sketches and helpful hints to building one of the "prebuilt"
 If you already have a good idea on how the hardware works and would just like to use a prebuilt binary,
 check out the [Releases](https://github.com/trip5/ehRadio/releases/) and click on a link to open the generator with that binary's profile,
 which includes hardware needed, pins to connect, and more.
+There is also a `no_display` build here if you just wish to test functionality.
 
 Note that if following this path, you don't necessarily to attach all peripherals (rotary, buttons, IR Receiver, SD card, display).
 The radio needs only the ESP board and the audio decoder to function... although your WebUI may show links to peripherals that don't exist.
@@ -313,6 +314,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
+| 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |
 | 2026.07.31 | Layouts and Themes changeable while running, various fixes to touchscreen, font glyph fallback behaviour, battery functions simplified, playlist verification, localization 100%? |

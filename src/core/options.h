@@ -56,16 +56,17 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #define DSP_ILI9488     7 // 480x320 (default)
 #define DSP_ILI9486     8 // 480x320 (default) (not fully tested - see notes inside the library regarding gamma correction)
 #define DSP_NOKIA5110   9 // 84x48 (fixed in displayN5110.h)
-#define DSP_SH1106      10 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SH1107      11 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1305     12 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1306     13 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1322     14 // 256x64 (default): SPI
-#define DSP_SSD1327     15 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_ST7735      16 // 160x128 / 128x128 / 160x80 (dimensions derived from DTYPE in displayST7735.h)
-#define DSP_ST7789      17 // 320x240 (default)
-#define DSP_ST7796      18 // 480x320 (default)
-#define DSP_ST7920      19 // 128x64 (fixed in displayST7920.h)
+#define DSP_NV3007      10 // 428x142 (fixed in displayNV3007.h)
+#define DSP_SH1106      11 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SH1107      12 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1305     13 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1306     14 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1322     15 // 256x64 (default): SPI
+#define DSP_SSD1327     16 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_ST7735      17 // 160x128 / 128x128 / 160x80 (dimensions derived from DTYPE in displayST7735.h)
+#define DSP_ST7789      18 // 320x240 (default)
+#define DSP_ST7796      19 // 480x320 (default)
+#define DSP_ST7920      20 // 128x64 (fixed in displayST7920.h)
 
 /* Define your display as #define DSP_MODEL DSP_ILI9488 */
 
@@ -86,21 +87,7 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 // Some displays have a constructor that does NOT accept dimensions - they have fixed values in their display*.h header (see notes above)
 // These values are consumed by dspconf.h (conf file) and dspfont.h (fonts/bootlogo).
 
-#if DSP_MODEL==DSP_ILI9225
-  #ifndef DSP_WIDTH
-    #define DSP_WIDTH  220
-  #endif
-  #ifndef DSP_HEIGHT
-    #define DSP_HEIGHT 176
-  #endif
-#elif DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ST7796
-  #ifndef DSP_WIDTH
-    #define DSP_WIDTH  480
-  #endif
-  #ifndef DSP_HEIGHT
-    #define DSP_HEIGHT 320
-  #endif
-#elif DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
+#if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
   #ifndef DSP_WIDTH
     #define DSP_WIDTH  128
   #endif

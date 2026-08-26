@@ -43,7 +43,8 @@
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
-      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.gc9a01a}"
   },
@@ -63,13 +64,11 @@
   {
     "name": "ILI9225 (SPI 220x176 TFT)",
     "type": "SPI",
-    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\nSupported resolutions: 480x320, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128",
+    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI",
     "define": "DSP_MODEL DSP_ILI9225",
     "pins": [ "TFT_DC" ],
     "defines": [
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
-      { "define": "DSP_WIDTH", "type": "numeric", "default": 220, "optional": true, "comment": "override default width (220)" },
-      { "define": "DSP_HEIGHT", "type": "numeric", "default": 176, "optional": true, "comment": "override default height (176)" },
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "optional": true, "comment": "enable screen dimming (depends on brightness pin)" },
@@ -93,15 +92,13 @@
     "lib_deps": "${library.ili9341}"
   },
   {
-    "name": "ILI9488 (SPI TFT)",
+    "name": "ILI9488 (SPI 480x320 TFT)",
     "type": "SPI",
-    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\nDefault resolution: 480x320\nSupported resolutions: 480x320, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128",
+    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI",
     "define": "DSP_MODEL DSP_ILI9488",
     "pins": [ "TFT_DC" ],
     "defines": [
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
-      { "define": "DSP_WIDTH", "type": "numeric", "default": 480, "optional": true, "comment": "override default width (480)" },
-      { "define": "DSP_HEIGHT", "type": "numeric", "default": 320, "optional": true, "comment": "override default height (320)" },
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
@@ -111,15 +108,13 @@
     "build_src_filter": "+<libraries/ILI9488/*>"
   },
   {
-    "name": "ILI9486 (SPI TFT)",
+    "name": "ILI9486 (SPI 480x320 TFT)",
     "type": "SPI",
-    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\nDefault resolution: 480x320\nSupported resolutions: 480x320, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128\n⚠ Untested! Use ILI9488 unless you know what you're doing\nSee notes inside the library regarding gamma correction",
+    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\n⚠ Untested! Use ILI9488 unless you know what you're doing\nSee notes inside the library regarding gamma correction",
     "define": "DSP_MODEL DSP_ILI9486",
     "pins": [ "TFT_DC" ],
     "defines": [
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
-      { "define": "DSP_WIDTH", "type": "numeric", "default": 480, "optional": true, "comment": "override default width (480)" },
-      { "define": "DSP_HEIGHT", "type": "numeric", "default": 320, "optional": true, "comment": "override default height (320)" },
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
@@ -141,6 +136,22 @@
     "lib_deps": "${library.n5110}"
   },
   {
+    "name": "NV3007 (SPI 428x142 TFT)",
+    "type": "SPI",
+    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\n1⚠ Untested! Needs hardware verification",
+    "define": "DSP_MODEL DSP_NV3007",
+    "pins": [ "TFT_DC" ],
+    "defines": [
+      { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
+      { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+    ],
+    "build_src_filter": "+<libraries/NV3007/Adafruit_NV3007.cpp>",
+    "lib_deps": "${library.st7789}"
+  },
+  {
     "name": "SH1106 (I2C OLED)",
     "type": "I2C",
     "info": "Default resolution: 128x64\nSupported resolutions: 256x64, 128x128, 128x64, or 128x32",
@@ -149,7 +160,8 @@
     "defines": [
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.sh110x}"
   },
@@ -163,7 +175,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.sh110x}"
   },
@@ -176,7 +189,8 @@
     "defines": [
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.sh110x}"
   },
@@ -190,7 +204,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.sh110x}"
   },
@@ -203,7 +218,8 @@
     "defines": [
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1305}"
   },
@@ -217,7 +233,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1305}"
   },
@@ -230,7 +247,8 @@
     "defines": [
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1306}"
   },
@@ -244,7 +262,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1306}"
   },
@@ -258,7 +277,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 256, "optional": true, "comment": "override default width (256)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "build_src_filter": "+<libraries/SSD1322/*>"
   },
@@ -271,7 +291,8 @@
     "defines": [
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "I2C_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1327}"
   },
@@ -285,7 +306,8 @@
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "DSP_WIDTH", "type": "numeric", "default": 128, "optional": true, "comment": "override default width (128)" },
       { "define": "DSP_HEIGHT", "type": "numeric", "default": 64, "optional": true, "comment": "override default height (64)" },
-      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" }
+      { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.ssd1327}"
   },
@@ -296,10 +318,12 @@
     "define": "DSP_MODEL DSP_ST7735",
     "pins": [ "TFT_DC" ],
     "defines": [
+      { "define": "DTYPE", "type": "enum", "options": ["INITR_BLACKTAB", "INITR_GREENTAB", "INITR_REDTAB", "INITR_144GREENTAB", "INITR_MINI160x80"], "default": "INITR_BLACKTAB" },
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
-      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height so only INITR_144GREENTAB)" }
     ],
     "lib_deps": "${library.st7735}"
   },
@@ -316,20 +340,19 @@
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},
-      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" }
+      { "define": "DSP_INVERT_QUIRK", "type": "boolean", "default": false, "optional": true, "comment": "fixes display inversion quirk (very common)" },
+      { "define": "ROTATE_90", "type": "boolean", "default": false, "optional": true, "comment": "rotates display 90° (width MUST equal height)" }
     ],
     "lib_deps": "${library.st7789}"
   },
   {
-    "name": "ST7796 (SPI TFT)",
+    "name": "ST7796 (SPI 480x320 TFT)",
     "type": "SPI",
-    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI\nDefault resolution: 480x320\nSupported resolutions: 480x320, 320x240, 284x76, 240x240, 220x176, 160x128, 160x80, or 128x128",
+    "info": "Uses SPI Bus A Pins: SPIA_SCK & SPIA_MOSI",
     "define": "DSP_MODEL DSP_ST7796",
     "pins": [ "TFT_DC" ],
     "defines": [
       { "define": "TFT_CS", "type": "pin", "default": 255, "optional": false, "comment": "pin CS is attached to (255 = tied to GND)" },
-      { "define": "DSP_WIDTH", "type": "numeric", "default": 480, "optional": true, "comment": "override default width (480)" },
-      { "define": "DSP_HEIGHT", "type": "numeric", "default": 320, "optional": true, "comment": "override default height (320)" },
       { "define": "TFT_RST", "type": "pin", "default": -1, "optional": true, "comment": "pin RST is attached to (-1 = EN pin)" },
       { "define": "BRIGHTNESS_PIN", "type": "pin", "default": 255, "optional": true, "comment": "pin that controls brightness / backlight (255 = unused)" },
       { "define": "DSP_DIMMING_ENABLED", "type": "boolean", "default": true, "comment": "enable screen dimming (depends on brightness pin)"},

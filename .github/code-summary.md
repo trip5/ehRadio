@@ -702,6 +702,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - init hardware
   - draw primitives/text/pages
   - sleep/wake/flip/invert where supported
+- `flip()` maps `config.store.flipscreen` to `setRotation(...)`. Rotation values follow the Adafruit GFX convention (0=0°, 1=90°, 2=180°, 3=270°) relative to each controller's native orientation. `ROTATE_90` (optional, for square panels) is applied only when `DSP_WIDTH==DSP_HEIGHT` and adds 90° to that controller's normal base rotation.
 - Files include:
   - `displayST7735*`, `displayST7789*`, `displayST7796*`
   - `displayILI9341*`, `displayILI9488*`, `displayILI9225*`

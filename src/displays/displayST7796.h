@@ -5,6 +5,11 @@
 #include <Adafruit_GFX.h>
 #include "../libraries/Adafruit_ST7796S/Adafruit_ST7796S_kbv.h"
 
+// ST7796 — hardware-fixed resolution.
+#undef DSP_WIDTH
+#undef DSP_HEIGHT
+#define DSP_WIDTH  480
+#define DSP_HEIGHT 320
 #define DISPLAY_MODEL_NAME "ST7796S"
 
 typedef GFXcanvas16 Canvas;

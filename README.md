@@ -249,7 +249,7 @@ Edzelf was probably the first to work on the idea of an ESP-based radio with [Es
 [April 4, 2016](https://github.com/Edzelf/Esp-radio/tree/0a53a03c2301e9e5f0bfaee418942be67739dee0) which included audio decoding with a VS1053 decoder, built on a ESP8266.
 
 Edzelf then made [ESP32-Radio](https://github.com/Edzelf/ESP32-Radio/), with his first release on [May 23, 2017](https://github.com/Edzelf/ESP32-Radio/tree/c268677dd8e46db2b7a8bfbd12a131c169e32019).
-Later, [ESP32Radio-V2](https://github.com/Edzelf/ESP32Radio-V2/) was created on [October 4, 2021](https://github.com/Edzelf/ESP32Radio-V2/tree/81ea92481eb36e49c8983e9dd1e5a34fecca73a9) and includes I2C audio decoding (see below).
+Later, [ESP32Radio-V2](https://github.com/Edzelf/ESP32Radio-V2/) was created on [October 4, 2021](https://github.com/Edzelf/ESP32Radio-V2/tree/81ea92481eb36e49c8983e9dd1e5a34fecca73a9) and includes I2S audio decoding (see below).
 Edzelf still maintains ESP32Radio-V2.
 
 karawin began work on [Ka-Radio](https://github.com/karawin/Ka-Radio) with his first Github submission [June 15, 2016](https://github.com/karawin/Ka-Radio/tree/13df16e5bd4dcf646ebfa6ffbb1eeb43173d2093) for VS1053 and ESP8266.
@@ -314,6 +314,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
+| 2026.08.26 | NV3007 added, `ROTATE_90` for square displays fixed, generator & display resolutions fixed |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

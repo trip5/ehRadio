@@ -9,7 +9,7 @@
 #define DSP_HEIGHT      142
 #define TFT_FRAMEWDT    4
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
-#define bootLogoTop     28
+#define BOOTLOGOTOP     28
 
 // Trip5 Note: This conf file was imported but remains un-implemented and un-tested...
 // check displayOLED128x64 if needing to share IP & RSSI with Weather & Battery

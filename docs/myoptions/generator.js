@@ -2600,13 +2600,16 @@ function getFile(type) {
     var content2 = generatePlatformioIni();
     downloadFile('platformio.ini', content2);
   }
+  window.location.href = buildShareUrl();
 }
 
 function copyFile(type) {
   var content = type === 'options' ? generateOptionsH() : generatePlatformioIni();
   navigator.clipboard.writeText(content).then(function() {
+    window.location.href = buildShareUrl();
     showAlert('info', type === 'options' ? 'myoptions.h copied to clipboard!' : 'platformio.ini copied to clipboard!', 2500);
   }, function() {
+    window.location.href = buildShareUrl();
     showAlert('error', 'Could not copy to clipboard.', 3000);
   });
 }
@@ -2624,10 +2627,14 @@ function downloadFile(filename, text) {
 // ============================================================
 // Copy link (state -> LZ-string -> URL hash)
 // ============================================================
-function copyLink() {
+function buildShareUrl() {
   var state = serializeState();
   var compressed = LZString.compressToBase64(JSON.stringify(state));
-  var url = window.location.href.split('#')[0] + '#' + encodeURIComponent(compressed);
+  return window.location.href.split('#')[0] + '#' + encodeURIComponent(compressed);
+}
+
+function copyLink() {
+  var url = buildShareUrl();
 
   if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
     window.location.href = url;

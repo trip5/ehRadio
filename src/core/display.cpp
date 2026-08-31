@@ -735,6 +735,7 @@ void Display::loop() {
         case PSTART: _layoutChange(true);   break;
         case PSTOP:  _layoutChange(false);  break;
         case DSP_START: _start();  break;
+        case APPLYSTATE: _applyState(); break;
         case NEWIP: {
           if (_volip) {
               if (network.status == SDOFFLINE) {
@@ -927,14 +928,6 @@ void Display::_volume() {
     _setReturnTicker(3);
     _nums->setText(config.store.volume, numtxtFmt);
   }
-/// tried here...
-//#if DSP_INVERT_QUIRK
-  // Some ILI9488 clones misread a pixel byte issued during the volume redraw as the
-  // INVON/INVOFF command and latch inversion. Re-assert the correct polarity after every
-  // volume draw so the panel self-heals. Guarded by DSP_INVERT_QUIRK so this compiles
-  // only for the affected panels (a no-op on all other displays).
-  //display.invert();
-//#endif
 }
 
 void Display::flip() { dsp.flip(); }
@@ -968,28 +961,37 @@ void Display::_reinitWidgets() {
       _title2 = new ScrollWidget("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
       pages[PG_PLAYER]->addWidget(_title2);
     } else _title2->init("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+  } else if (_title2) {
+    pages[PG_PLAYER]->removeWidget(_title2);
+    _title2 = nullptr;
   }
   if (vuConf_ptr->textsize > 0) {
     if (!_vuwidget) {
       _vuwidget = new VuWidget(*vuConf_ptr, *bandsConf_ptr, config.theme.vumax, config.theme.vumin, config.theme.background);
       pages[PG_PLAYER]->addWidget(_vuwidget);
     } else _vuwidget->init(*vuConf_ptr, *bandsConf_ptr, config.theme.vumax, config.theme.vumin, config.theme.background);
+  } else if (_vuwidget) {
+    pages[PG_PLAYER]->removeWidget(_vuwidget);
+    _vuwidget = nullptr;
   }
   if (weatherConf_ptr->buffsize > 0) {
     if (!_weather) {
       _weather = new ScrollWidget("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
       pages[PG_PLAYER]->addWidget(_weather);
     } else _weather->init("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
+  } else if (_weather) {
+    pages[PG_PLAYER]->removeWidget(_weather);
+    _weather = nullptr;
   }
   if (fullbitrateConf_ptr->dimension > 0) {
     if (!_fullbitrate) {
-      if (_bitrate) { pages[PG_PLAYER]->removeWidget(_bitrate); delete _bitrate; _bitrate = nullptr; }
+      if (_bitrate) { pages[PG_PLAYER]->removeWidget(_bitrate); _bitrate = nullptr; }
       _fullbitrate = new BitrateWidget(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
       pages[PG_PLAYER]->addWidget(_fullbitrate);
     } else _fullbitrate->init(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
   } else {
     if (!_bitrate) {
-      if (_fullbitrate) { pages[PG_PLAYER]->removeWidget(_fullbitrate); delete _fullbitrate; _fullbitrate = nullptr; }
+      if (_fullbitrate) { pages[PG_PLAYER]->removeWidget(_fullbitrate); _fullbitrate = nullptr; }
       _bitrate = new TextWidget(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
       pages[PG_PLAYER]->addWidget(_bitrate);
     } else _bitrate->init(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
@@ -1001,6 +1003,9 @@ void Display::_reinitWidgets() {
       _volbar = new SliderWidget(*volbarConf_ptr, config.theme.volbarin, config.theme.background, VOLUME_SCALE, config.theme.volbarout);
       _footer->addWidget(_volbar);
     } else _volbar->init(*volbarConf_ptr, config.theme.volbarin, config.theme.background, VOLUME_SCALE, config.theme.volbarout);
+  } else if (_volbar) {
+    _footer->removeWidget(_volbar);
+    _volbar = nullptr;
   }
   if (bufferbarConf_ptr->height > 0) {
     _bufferbarMax = 1024 * BUFFERBAR_VISUAL_FULL_KB;
@@ -1008,30 +1013,45 @@ void Display::_reinitWidgets() {
       _bufferbar = new SliderWidget(*bufferbarConf_ptr, config.theme.buffer, config.theme.background, _bufferbarMax);
       _footer->addWidget(_bufferbar);
     } else _bufferbar->init(*bufferbarConf_ptr, config.theme.buffer, config.theme.background, _bufferbarMax);
+  } else if (_bufferbar) {
+    _footer->removeWidget(_bufferbar);
+    _bufferbar = nullptr;
   }
   if (voltxtConf_ptr->textsize > 0) {
     if (!_voltxt) {
       _voltxt = new TextWidget(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
       _footer->addWidget(_voltxt);
     } else _voltxt->init(*voltxtConf_ptr, 10, false, config.theme.vol, config.theme.background);
+  } else if (_voltxt) {
+    _footer->removeWidget(_voltxt);
+    _voltxt = nullptr;
   }
   if (iptxtConf_ptr->textsize > 0) {
     if (!_volip) {
       _volip = new TextWidget(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);
       _footer->addWidget(_volip);
     } else _volip->init(*iptxtConf_ptr, 48, false, config.theme.ip, config.theme.background);
+  } else if (_volip) {
+    _footer->removeWidget(_volip);
+    _volip = nullptr;
   }
   if (rssiConf_ptr->textsize > 0) {
     if (!_rssi) {
       _rssi = new TextWidget(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
       _footer->addWidget(_rssi);
     } else _rssi->init(*rssiConf_ptr, 20, false, config.theme.rssi, config.theme.background);
+  } else if (_rssi) {
+    _footer->removeWidget(_rssi);
+    _rssi = nullptr;
   }
   if (batteryConf_ptr->textsize > 0) {
     if (!_battery) {
       _battery = new TextWidget(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
       _footer->addWidget(_battery);
     } else _battery->init(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
+  } else if (_battery) {
+    _footer->removeWidget(_battery);
+    _battery = nullptr;
   }
   _nums->init(*numConf_ptr, 10, false, config.theme.digit, config.theme.background);
   // Background fills
@@ -1100,7 +1120,7 @@ void Display::_applyState() {
 void Display::applyLayout(uint8_t id) {
   if (id >= layoutCount) return;
   config.store.layoutId = id;
-  _applyState();
+  putRequest(APPLYSTATE);
 }
 
 uint8_t Display::getLayoutCount() { return layoutCount; }
@@ -1108,7 +1128,7 @@ uint8_t Display::getLayoutCount() { return layoutCount; }
 void Display::applyTheme(uint8_t id) {
   if (id >= sizeof(_themes)/sizeof(_themes[0])) return;
   config.store.themeId = id;
-  _applyState();
+  putRequest(APPLYSTATE);
 }
 
 uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
@@ -1145,7 +1165,7 @@ String Display::getThemeListJson() { return _themeListJson; }
 String Display::getLayoutListJson() { return _layoutListJson; }
 
 void Display::applyInvertTitle() {
-  _applyState();
+  putRequest(APPLYSTATE);
 }
 
 void Display::invert() { dsp.invert(); }

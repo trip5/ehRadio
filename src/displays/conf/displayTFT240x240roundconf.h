@@ -11,7 +11,6 @@
   #define RSSI_DIGIT      true
 #endif
 #define BOOTLOGOTOP     68
-#define BOOMBOX_STYLE
 
 const BootData _bootConfig PROGMEM = {
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */

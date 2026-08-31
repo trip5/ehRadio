@@ -388,15 +388,62 @@ table.stations .importantmessage { color: var(--accent-color) !important; font-s
 }
 /* Below will force smaller displays to fit */
 @media screen and (max-width: 375px) {
-  #settingscontent, .navigation, #playerwrap, #pleditorwrap, .quicksearchtable { zoom: 80%; -moz-transform: scale(0.8); }
+  /* Player page (standard sizing in place of the old zoom:80% hack) */
+  #playerwrap #nameset { font-size: 16px; margin-top: 6px; }
+  #playerwrap #meta { font-size: 12px; margin-bottom: 8px; }
+  #playerwrap .gb { width: 36px; height: 36px; }
+  #playerwrap .gb svg { width: 22px; }
+  #playerwrap .gb.nb svg { width: 29px; }
+  #playerwrap .gb.active.nb svg { width: 26px; }
+  #playerwrap .fb { font-size: 13px; min-width: 64px; padding: 6px 4px; margin: 3px; }
+  #playerwrap #info, #playerwrap #info > .infoitem { font-size: 12px; }
+  #playerwrap #info > .infoitem { min-width: 90px; padding: 0 3px; }
+  #playerwrap #playlist li span.text { font-size: 16px; padding: 6px 0 6px 10px; }
+  #playerwrap #playlist li span.count { font-size: 12px; padding: 0 6px; }
   #copy { font-size: 12px; padding-top: 4px; }
+  /* Settings page */
+  #settingscontent section { padding: 12px 12px 20px 12px; }
+  #settingscontent section .title span, #settingscontent .row-title span { font-size: 15px; }
+  #settingscontent input[type=text], #settingscontent select[type=text],
+  #settingscontent input[type=password], #settingscontent input[type=number] { font-size: 16px; padding: 4px 8px; }
+  #settingscontent .fb { font-size: 13px; min-width: 64px; padding: 6px 4px; }
+  .navigation { font-size: 13px; }
+  /* Playlist editor */
+  #pleditorwrap h2 { font-size: 18px; line-height: 26px; }
+  #pleditorwrap .pleitem input { font-size: 19px; }
+  #pleditorwrap .pleitem span { font-size: 12px; padding: 0 4px; }
+  #pleditorwrap .pleitem span.pleplay { font-size: 13px !important; }
+  /* Search & curated quick buttons */
+  .quicksearchtable .quicksearch { font-size: 13px; }
   .sort-row { font-size: 10px; }
   .sort-row input[type="radio"] { margin-right: 0; }
   #loadListsBtn, #replaceBtn, #mergeBtn { font-size: 11px ;}
 }
 /* And the big displays get zoomed too */
 @media screen and (min-width: 600px) and (max-width: 899px) {
-  #settingscontent, .navigation, #playerwrap, #pleditorwrap, .quicksearchtable { zoom: 125%; -moz-transform: scale(1.25); }
+  /* Enlarged UI (standard sizing in place of the old zoom:125% hack) */
+  #playerwrap #nameset { font-size: 25px; }
+  #playerwrap #meta { font-size: 18px; }
+  #playerwrap .gb { width: 55px; height: 55px; }
+  #playerwrap .gb svg { width: 35px; }
+  #playerwrap .gb.nb svg { width: 45px; }
+  #playerwrap .gb.active.nb svg { width: 40px; }
+  #playerwrap .fb { font-size: 20px; min-width: 100px; padding: 10px 24px; }
+  #playerwrap #info, #playerwrap #info > .infoitem { font-size: 18px; }
+  #playerwrap #playlist li span.text { font-size: 25px; }
+  #playerwrap #playlist li span.count { font-size: 18px; }
+  #settingscontent section { padding: 24px 24px 34px 24px; }
+  #settingscontent section .title span, #settingscontent .row-title span { font-size: 23px; }
+  #settingscontent input[type=text], #settingscontent select[type=text],
+  #settingscontent input[type=password], #settingscontent input[type=number] { font-size: 25px; padding: 8px 14px; }
+  #settingscontent .fb { font-size: 20px; min-width: 100px; }
+  .navigation { font-size: 20px; }
+  #pleditorwrap h2 { font-size: 28px; }
+  #pleditorwrap .pleitem input { font-size: 30px; }
+  #pleditorwrap .pleitem span { font-size: 18px; }
+  #pleditorwrap .pleitem span.pleplay { font-size: 20px !important; }
+  .quicksearchtable .quicksearch { font-size: 20px; }
+  #irremote .irbutton { width: 42px; height: 42px; font-size: 19px; line-height: 38px; }
   #playerwrap, #pleditorwrap { padding-bottom: 20px; }
   #copy { font-size: 16px; padding-top: 10px; padding-bottom: 10px; }
   .plename { flex: 5 1 0!important; }
@@ -406,10 +453,31 @@ table.stations .importantmessage { color: var(--accent-color) !important; font-s
   .quicksearchtable { border-spacing: 2px; }
   .sort-row { font-size: 16px; }
   .sort-row input[type="radio"] { margin-right: 10px; }
-  #irremote { zoom: 105%; -moz-transform: scale(1.05); }
 }
 @media screen and (min-width: 900px) and (max-width: 1200px) {
-  #settingscontent, .navigation, #playerwrap, #pleditorwrap, .quicksearchtable { zoom: 150%; -moz-transform: scale(1.5); }
+  /* Enlarged UI (standard sizing in place of the old zoom:150% hack) */
+  #playerwrap #nameset { font-size: 30px; }
+  #playerwrap #meta { font-size: 21px; }
+  #playerwrap .gb { width: 66px; height: 66px; }
+  #playerwrap .gb svg { width: 42px; }
+  #playerwrap .gb.nb svg { width: 54px; }
+  #playerwrap .gb.active.nb svg { width: 48px; }
+  #playerwrap .fb { font-size: 24px; min-width: 120px; padding: 12px 28px; }
+  #playerwrap #info, #playerwrap #info > .infoitem { font-size: 21px; }
+  #playerwrap #playlist li span.text { font-size: 30px; }
+  #playerwrap #playlist li span.count { font-size: 21px; }
+  #settingscontent section { padding: 28px 28px 38px 28px; }
+  #settingscontent section .title span, #settingscontent .row-title span { font-size: 27px; }
+  #settingscontent input[type=text], #settingscontent select[type=text],
+  #settingscontent input[type=password], #settingscontent input[type=number] { font-size: 30px; padding: 10px 16px; }
+  #settingscontent .fb { font-size: 24px; min-width: 120px; }
+  .navigation { font-size: 24px; }
+  #pleditorwrap h2 { font-size: 33px; }
+  #pleditorwrap .pleitem input { font-size: 36px; }
+  #pleditorwrap .pleitem span { font-size: 21px; }
+  #pleditorwrap .pleitem span.pleplay { font-size: 24px !important; }
+  .quicksearchtable .quicksearch { font-size: 24px; }
+  #irremote .irbutton { width: 44px; height: 44px; font-size: 20px; line-height: 40px; }
   #playerwrap, #pleditorwrap { padding-bottom: 20px; }
   #copy { font-size: 16px; padding-top: 10px; padding-bottom: 10px; }
   .plename { flex: 7 1 0!important; }
@@ -419,7 +487,6 @@ table.stations .importantmessage { color: var(--accent-color) !important; font-s
   .quicksearchtable { border-spacing: 2px; }
   .sort-row { font-size: 16px; }
   .sort-row input[type="radio"] { margin-right: 10px; }
-  #irremote { zoom: 110%; -moz-transform: scale(1.10); }
 }
 /* iPad (all models) */
 @media only screen and (min-device-width: 768px) and (max-device-width: 1024px) and (orientation: portrait),

@@ -242,11 +242,6 @@ void Adafruit_NV3007::setRotation(uint8_t m) {
   case 3:
     madctl = ST77XX_MADCTL_MX | ST77XX_MADCTL_MV | ST77XX_MADCTL_RGB;
     _xstart = 0;
-    // NOTE (kc-dev): the original code uses _ystart = 14 here while the
-    // symmetric case 1 uses _ystart = 12. This 2px asymmetry may be a typo
-    // or a deliberate correction for the 270° orientation. If the flipped
-    // landscape is vertically shifted by ~2 pixels, try changing 14 -> 12
-    // to match case 1.
     _ystart = 14;
     _width = windowHeight; // 428
     _height = windowWidth; // 142

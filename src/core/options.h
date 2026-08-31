@@ -207,8 +207,9 @@ https://trip5.github.io/ehRadio/myoptions/generator.html
 #ifndef RSSI_STEPS
   #define RSSI_STEPS -50,-60,-70,-80
 #endif
-/* Use #define BIG_BOOT_LOGO with big displays (480x320) displays if you want a bigger boot logo */
-#if DSP_WIDTH >= 480
+
+/* Big displays (480x320) get a bigger boot logo ( but can be disabled with #define BIG_BOOT_LOGO false)*/
+#if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ST7796
   #ifndef BIG_BOOT_LOGO
     #if defined(CONFIG_IDF_TARGET_ESP32) // ESP32 is already low on flash size and this is huge
       #define BIG_BOOT_LOGO false

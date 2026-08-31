@@ -44,7 +44,7 @@ input[type=file]{color:#ccc;} input[type=file]::file-selector-button, input[type
 input[type=submit]{font-size:18px; padding:8px 26px; margin-top:10px; font-family:Times;} span{color:#ccc} .flex{display:flex; justify-content: space-around;margin-top:10px;}
 input[type=text],input[type=password]{width:170px; background:#272727; color:#eecccc; padding:6px 12px; font-size:20px; border:#2d2d2d 1px solid; margin:4px 0 0 4px; border-radius:4px; outline:none;}
 select{background:#272727; color:#eecccc; padding:4px 8px; font-size:16px; border:#2d2d2d 1px solid; border-radius:4px; margin-left:8px;}
-@media screen and (max-width:480px) {section{zoom:0.7; -moz-transform:scale(0.7);}}
+@media screen and (max-width:480px) {section{font-size:14px; max-width:100%; padding:10px;} h2{font-size:18px;} input[type=file]::file-selector-button, input[type=submit]{font-size:14px; padding:4px 12px; margin:0 3px;} input[type=text],input[type=password]{font-size:15px; width:140px; padding:4px 8px;} select{font-size:14px;} a{font-size:12px;}}
 </style>
 <script type="text/javascript" src="/variables.js"></script>
 <script type="text/javascript" src="/locale.js"></script>

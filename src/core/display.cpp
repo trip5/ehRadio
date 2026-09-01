@@ -268,6 +268,7 @@ void Display::_buildPager() {
     updConf.widget.top = max<int16_t>(0, updConf.widget.top - CHARHEIGHT);
     _updLabel = new ScrollWidget("  ", updConf,
                                  config.theme.title1, config.theme.background);
+    _updLabel->lock(true);   // don't paint the label's background band unless updating
 
     // compute bar width once
     {

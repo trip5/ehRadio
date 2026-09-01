@@ -314,7 +314,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.08.30 | NV3007 added, `ROTATE_90` for square displays, generator & display resolutions, Firefox rendering |
+| 2026.09.01 `dev` | NV3007 added, `ROTATE_90` for square displays, generator & display resolutions, Firefox rendering, volume page |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

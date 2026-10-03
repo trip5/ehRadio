@@ -53,7 +53,7 @@ EXAMPLES:
     py www_tool.py de_DE --ndiff --translate --clean --sort
 
     # Merge a contributor's partial file (only their keys), then tidy the file
-    py www_tool.py ro_RO --merge changes.json --clean --sort
+    py www_tool.py ru_RU --merge changes.json --clean --sort
 
     # Collect every key the locales still lack into a template for the translators
     py www_tool.py * --newkeys --sort

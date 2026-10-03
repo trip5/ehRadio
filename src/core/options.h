@@ -5,6 +5,7 @@
 #define RADIOVERSION "2026.08.19"
 
 /*******************************************************
+ 
 THIS FILE IS THE DEFINITIVE HANDLER OF COMPILE OPTIONS.
 Most macros used in the codebase are here somewhere.
 There are notes and options and examples that can be
@@ -17,8 +18,6 @@ You can use the myoptions.h and platformio.ini generator:
 https://trip5.github.io/ehRadio/myoptions/generator.html
 or examine the examples in builds/trip5 and make your own!
 
-mytheme.h is no longer compiled in - if you have a
-custom theme, use importtheme.py in src/display folder
 ********************************************************/
 
 #if __has_include("../../myoptions.h")
@@ -28,13 +27,6 @@ custom theme, use importtheme.py in src/display folder
 #if !(defined(ARDUINO_ESP32_DEV) || defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV))
   #error define error in platformio.ini: only ARDUINO_ESP32_DEV, ARDUINO_ESP32S3_DEV, or ARDUINO_ESP32C3_DEV boards are supported
 #endif
-
-
-/*******************************************************
-Use this tool to setup connections:
-https://trip5.github.io/ehRadio/myoptions/generator.html
-(a basic tool and not definitive for all possible configurations)
-********************************************************/
 
 
 /* ============================== DISPLAY ============================== */

@@ -389,12 +389,6 @@ IR receivers like the VS1838 are cheap and work well.  You may need a pullup res
 An SD card reader may be added to the build. It is recommended to be wary of SPI SD readers built onto displays.
 Although some may work, it is well-known that some may be lacking proper resistors or will get signal interferance because it is forced onto the same SPI bus as the display.
 
-### Special Note Regarding `/ehradio.data`
-
-This folder contains special index files to enable faster file-seeking during playback.
-
-If needing to move your files from one SD card to another (or re-formatting), remove this folder.
-
 ### SPI SD card module
 
 Although these modules (with a power regulator and a 74VHCT125A buffer) are better-suited when sharing the SPI bus with another device,
@@ -444,8 +438,9 @@ Always format the SD card with FAT32.
 
 #### Cluster Size
 
-Although you may have no issues playing files from an SD card,
-if encountering issues with uploads (especially with an SPI-based module), there may be an easy fix available.
+Even if you have no issues playing files from an SD card,
+you may encounter issues with uploads (especially with an SPI-based reader module).
+There may be an easy fix available.
 
 Format the SD card using Use a 512-byte cluster as the "allocation unit size" (cluster size).
 
@@ -457,23 +452,24 @@ If you check the serial log, you will see `errno 5` short writes of a few hundre
 a card that is "a few KB behind" on every attempt, and eventually a file that cannot advance at all.
 card formatted with 512-byte allocation units uploads cleanly, one attempt per file, with nothing to recover.
 
-When switching to SD File Manager you can see which your SD card has:
+When switching to SD File Manager you can also see in the serial log the size your SD card is using:
 ```
 Open (SPI transport, SD mounted, type 3, 15279 MB, Allocation unit size: 512 bytes)
 ```
 
-The official "SD Card Formatter" utility uses a larger cluster size by default, so it this utility is not
+The official "SD Card Formatter" utility uses a larger cluster size by default, so this utility is not
 a recommended method of preparing your card for use.
 
-Windows disk format may object to formatting larger SD cards with FAT-32 but the command line
+Windows disk format may object to formatting larger SD cards with FAT32 but the command line
 `format Z: /A:512 /FS:FAT32 /X /Q` will work (change `Z` to the drive letter).
 
 Most Sandisk SD cards do not seem to experience issues regarding cluster size and do not require this type of formatting.
 
-#### Other SD Issues
+### Special Note Regarding `/ehradio.data`
 
-If still having problems after using 512-byte clusters, or experiencing random problems with the SD card,
-try a different SD card, preferably from a different brand.
+This folder contains special index files to enable faster file-seeking during playback.
+
+If needing to move your files from one SD card to another (or re-formatting), remove this folder.
 
 ### File Encoding
 
@@ -481,6 +477,11 @@ It is recommended to encode files on SD card using MP3 at a constant bit rate of
 to avoid system stress and get maximum compatibility with the decoders.
 ABR and CBR encoding may work (mostly) but may also result in pops and clicks.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
+
+### Other SD Issues
+
+If still having problems after using 512-byte clusters, or experiencing random problems with the SD card,
+try a different SD card, preferably from a different brand.
 
 ### SD Offline Mode
 

@@ -1,25 +1,29 @@
 #ifndef options_overrides_h
 #define options_overrides_h
 
-/* ============================== LIBRARY OVERRIDES ============================== */
-// this is the safe way to get a library override into the library...
-// using adding myoptions.h can cause issues
-// Add to platformio.ini: build_flags = -include src/core/options_overrides.h
+/*******************************************************
 
-// Any includes here must carefully use #ifndef here and in options.h
-// so they stay out of each other's way!
+THIS FILE IS DIRECTLY PULLED IN BY PLATFORMIO COMPILER
+This is the safe way to tweak values in certain libraries
+Trying to add options.h to pio directly can cause issues
 
+Add to platformio.ini:
+build_flags = -include src/core/options_overrides.h
+
+Any includes here must carefully use #ifndef here and
+in options.h so they stay out of each other's way!
+
+********************************************************/
 
 #if __has_include("../../myoptions.h")
-  #include "../../myoptions.h" // Need it for defined 
+  #include "../../myoptions.h" // Need it to check if VS1053 is in the build
 #endif
-// we need this to determine VS1053 build...
 #ifndef VS1053_CS
   #define VS1053_CS 255
 #endif
 
-// ...so this can determine what core Network services are on
-// The following tree is duplicated in options.h AND options_overrides.h so if changes are needed, change both files
+// And this determines what core Network services are on
+// The following tree is duplicated in options_system.h AND options_overrides.h so if changes are needed, change both files
 #if defined(CONFIG_FREERTOS_UNICORE)
   #ifdef NETWORK_CORE // need this extra check because both files may be pulled into the build
     #if NETWORK_CORE!=0

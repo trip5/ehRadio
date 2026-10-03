@@ -52,6 +52,7 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
   - playlists can be edited, imported, exported to files
   - playlists can be imported, merged, and shared via [webstations](https://github.com/trip5/webstations) curated lists
   - radio station streams can be directly added to using [Radio-browser](https://www.radio-browser.info/) API search
+  - upload files directly using the SD Card Manager
 
 - [Web flasher](https://trip5.github.io/ehRadio/firmware.html) & Internet OTA updates
   - make getting a new version easy-peasy

@@ -57,7 +57,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { 6, 62, 2, WA_RIGHT },
+        //.bitrateConf         = { 6, 62, 2, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         .voltxtConf          = { 0, DSP_HEIGHT-38, 2, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },
         .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-38, 2, WA_LEFT },
@@ -65,7 +66,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 200, 0, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT*2, 230, 0, WA_RIGHT },
         .vuConf              = { TFT_FRAMEWDT, 136, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 32, 130, 4, 2, 10 },
@@ -97,7 +98,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { 6, 62, 2, WA_RIGHT },
+        //.bitrateConf         = { 6, 62, 2, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         .voltxtConf          = { 0, DSP_HEIGHT-38, 2, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },
         .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-38, 2, WA_LEFT },
@@ -105,7 +107,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 200, 0, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT*2, 230, 0, WA_RIGHT },
         .vuConf              = { TFT_FRAMEWDT, 161, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 25, 130, 17, 3, 10 },
@@ -137,7 +139,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 138, 0, WA_LEFT }, DSP_WIDTH, 36, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { TFT_FRAMEWDT, 145, 2, WA_RIGHT },
+        //.bitrateConf         = { TFT_FRAMEWDT, 145, 2, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { 310 ,282, 2, WA_LEFT };
         .voltxtConf          = { 0, 282, 2, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, DSP_HEIGHT-38, 2, WA_LEFT },
@@ -146,7 +149,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 200, 70, WA_CENTER },
         .clockConf           = { 10, 215, 2, WA_RIGHT },
         .vuConf              = { 35, 259, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         // ??? namedayConf   = { TFT_FRAMEWDT, 175, 2, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT, 226, 1, WA_LEFT };
         .fullbitrateConf     = {{ 10, 148, 2, WA_RIGHT }, 60 },

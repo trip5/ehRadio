@@ -78,7 +78,7 @@ const LayoutData _layouts[] PROGMEM = {
         // .clockConf         = { 6, 34, 2, WA_CENTER },
         //.vuConf              = { }, // unused
         .vuConf              = { DSP_WIDTH/2+4, DSP_HEIGHT/2-7, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 11, 121, 7, 1, 25 },

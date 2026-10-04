@@ -51,7 +51,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { 70, 191, 1, WA_LEFT },
+        //.bitrateConf         = { 70, 191, 1, WA_LEFT },
+        .bitrateConf         = { }, // unused
         .voltxtConf          = { 0, 214, 1, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, 214, 1, WA_LEFT },
         .iptxtConf           = { TFT_FRAMEWDT, 214, 1, WA_LEFT },
@@ -59,7 +60,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 150, 0, WA_CENTER },
         .clockConf           = { 8, 176, 0, WA_RIGHT },
         .vuConf              = { TFT_FRAMEWDT, 100, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-34, 43, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 24, 100, 4, 2, 10 },
@@ -91,7 +92,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { },
         .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { TFT_FRAMEWDT, 148, 1, WA_RIGHT },
+        //.bitrateConf         = { TFT_FRAMEWDT, 148, 1, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { 210 ,214, 1, WA_LEFT };
         .voltxtConf          = { 0, 214, 1, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, 214, 1, WA_LEFT },
@@ -100,7 +102,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 120+30, 0, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT, 170, 1, WA_RIGHT },
         .vuConf              = { 24, 198, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         // ??? namedayConf   = { TFT_FRAMEWDT, 139, 1, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT *2, 169, 1, WA_LEFT };
         .fullbitrateConf     = {{ 8, 124, 2, WA_LEFT }, 41 },

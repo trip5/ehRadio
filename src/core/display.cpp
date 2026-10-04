@@ -349,7 +349,8 @@ void Display::_buildPager() {
   if (fullbitrateConf_ptr->dimension > 0) {
     _fullbitrate = new BitrateWidget(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
     pages[PG_PLAYER]->addWidget(_fullbitrate);
-  } else if (bitrateConf_ptr->textsize > 0) {
+  }
+  if (bitrateConf_ptr->textsize > 0) {
     _bitrate = new TextWidget(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
     pages[PG_PLAYER]->addWidget(_bitrate);
   }
@@ -1227,24 +1228,28 @@ void Display::_reinitWidgets() {
       showByLayout(_weather);
     }
   } else hideByLayout(_weather);
+  // Two independent widgets, not alternatives: the layout may ask for the bitrate text, the codec badge, both
+  // or neither, and the one it does not ask for is hidden, never freed.  Nothing is deleted here on purpose -
+  // the page owns the widgets it holds and DspTask may be inside one - and this pair is what used to reboot the
+  // board: Page::removeWidget() already deletes, and the removed widget was deleted a second time on top.
   if (fullbitrateInLayout()) {
     if (!_fullbitrate) {
-      if (_bitrate) { pages[PG_PLAYER]->removeWidget(_bitrate); delete _bitrate; _bitrate = nullptr; }
       _fullbitrate = new BitrateWidget(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
       pages[PG_PLAYER]->addWidget(_fullbitrate);
-    } else _fullbitrate->init(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
-  } else {
-    if (_fullbitrate) { pages[PG_PLAYER]->removeWidget(_fullbitrate); delete _fullbitrate; _fullbitrate = nullptr; }
-    if (bitrateInLayout()) {
-      if (!_bitrate) {
-        _bitrate = new TextWidget(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
-        pages[PG_PLAYER]->addWidget(_bitrate);
-      } else {
-        _bitrate->init(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
-        showByLayout(_bitrate);
-      }
-    } else hideByLayout(_bitrate);
-  }
+    } else {
+      _fullbitrate->init(*fullbitrateConf_ptr, config.theme.bitrate, config.theme.background);
+      showByLayout(_fullbitrate);
+    }
+  } else hideByLayout(_fullbitrate);
+  if (bitrateInLayout()) {
+    if (!_bitrate) {
+      _bitrate = new TextWidget(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
+      pages[PG_PLAYER]->addWidget(_bitrate);
+    } else {
+      _bitrate->init(*bitrateConf_ptr, 30, false, config.theme.bitrate, config.theme.background);
+      showByLayout(_bitrate);
+    }
+  } else hideByLayout(_bitrate);
 
   // --- Footer widgets (lazy-create if newly enabled) ---
   if (volbarInLayout()) {

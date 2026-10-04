@@ -60,7 +60,7 @@ const LayoutData _layouts[] PROGMEM = {
         .numConf             = { 0, 120+30, 0, WA_CENTER },
         .clockConf           = { 0, 168, 0, WA_RIGHT },
         .vuConf              = { TFT_FRAMEWDT, 94, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 100, 20, 10, 2, 10 },

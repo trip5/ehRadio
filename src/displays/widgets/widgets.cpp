@@ -966,6 +966,11 @@ void BitrateWidget::_charSize(uint8_t textsize, uint8_t& width, uint16_t& height
 }
 
 void BitrateWidget::_draw(){
+  // A hidden badge is still handed setBitrate() and setFormat() on every DBITRATE, and the _clear() below is not
+  // gated the way the text path's paint is, so without this a layout that asks for no badge would have a
+  // background rectangle painted where the badge would have been.  _locked is deliberately not tested: the text
+  // path ignores it too, because the OTA label relies on a locked widget still drawing.
+  if (!_active) return;
   _clear();
   if(!_active || (_format == BF_UNKNOWN && _bitrate==0)) return;
   dsp.drawRect(_config.left, _config.top, _dimension, _dimension, _fgcolor);

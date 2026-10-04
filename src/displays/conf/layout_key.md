@@ -134,7 +134,7 @@ title*, so a setup screen looks the same whatever layout is selected. It is the 
 The last five are **rectangles**: `width` and `height` can be anything — a `1` makes a line, a large
 pair makes a panel or a band — and `outlined` decides between a solid fill and just its frame (above).
 `false` is what every conf writes today, so an existing layout keeps the pixels it always had.
-| `bitrateConf` | Widget | Bitrate text (replaced by a codec badge if `fullbitrateConf` is set) |
+| `bitrateConf` | Widget | Bitrate text (independent of the codec badge: a layout may have either, both or neither) |
 | `voltxtConf` | Widget | Volume number |
 | `batteryConf` | Widget | Battery |
 | `iptxtConf` | Widget | IP address |
@@ -182,7 +182,7 @@ The player page's own pass, in the order it draws — each entry covers the ones
 | 3 | station name | `metaConf` |
 | 4 | title 1, then title 2 | `title1Conf`, `title2Conf` |
 | 5 | weather | `weatherConf` |
-| 6 | codec badge, or bitrate text when there is no badge | `fullbitrateConf`, else `bitrateConf` |
+| 6 | codec badge, then the bitrate text | `fullbitrateConf`, then `bitrateConf` |
 | 7 | VU | `vuConf` |
 | 8 | clock | `clockConf` |
 | 9 | footer row: volume bar and number, IP, battery, signal, buffer bar | `volbarConf`, `voltxtConf`, `iptxtConf`, `batteryConf`, `rssiConf`, `bufferbarConf` |

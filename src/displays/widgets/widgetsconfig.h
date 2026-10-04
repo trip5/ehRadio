@@ -117,7 +117,7 @@ struct LayoutData {
     WidgetConfig numConf;
     WidgetConfig clockConf;
     WidgetConfig vuConf;
-    /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+    /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
     BitrateConfig fullbitrateConf;
     /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
     VUBandsConfig bandsConf;

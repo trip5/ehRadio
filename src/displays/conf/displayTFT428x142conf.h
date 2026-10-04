@@ -63,7 +63,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { TFT_FRAMEWDT+120, DSP_HEIGHT-27, 2, WA_RIGHT },
+        //.bitrateConf         = { TFT_FRAMEWDT+120, DSP_HEIGHT-27, 2, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { 316, DSP_HEIGHT-27, 2, WA_LEFT };
         .voltxtConf          = { 230, DSP_HEIGHT+27, 2, WA_LEFT },
         .batteryConf         = { }, // <--------- NEEDS EDITING!
@@ -74,7 +75,7 @@ const LayoutData _layouts[] PROGMEM = {
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
         .clockConf           = { TFT_FRAMEWDT, 82, 1, WA_RIGHT },
         .vuConf              = { TFT_FRAMEWDT, DSP_HEIGHT-27, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 200, 6, 2, 2, 30 },
@@ -106,7 +107,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { }, // unused
         .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { TFT_FRAMEWDT+120, DSP_HEIGHT-27, 2, WA_RIGHT },
+        //.bitrateConf         = { TFT_FRAMEWDT+120, DSP_HEIGHT-27, 2, WA_RIGHT },
+        .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { 316, DSP_HEIGHT-27, 2, WA_LEFT };
         .voltxtConf          = { 230, DSP_HEIGHT+27, 2, WA_LEFT },
         .batteryConf         = { }, // <--------- NEEDS EDITING!
@@ -117,7 +119,7 @@ const LayoutData _layouts[] PROGMEM = {
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
         .clockConf           = { TFT_FRAMEWDT, 82, 1, WA_RIGHT },
         .vuConf              = { 24, 190, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 130, 5, 4, 2, 20 },
@@ -151,7 +153,8 @@ const LayoutData _layouts[] PROGMEM = {
         .overLineConf        = { },
         .playlBGConf         = {{ 0, 26, 0, WA_LEFT }, DSP_WIDTH, 12, false },
         /* WIDGETS             { left, top, fontsize, align } */
-        .bitrateConf         = { TFT_FRAMEWDT+31, 100-10-10, 2, WA_LEFT },
+        //.bitrateConf         = { TFT_FRAMEWDT+31, 100-10-10, 2, WA_LEFT },
+        .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { TFT_FRAMEWDT+125, 100-10-10, 2, WA_LEFT };
         .voltxtConf          = { TFT_FRAMEWDT+197, 100-10-10, 2, WA_LEFT },
         .batteryConf         = { }, // <--------- NEEDS EDITING!
@@ -162,7 +165,7 @@ const LayoutData _layouts[] PROGMEM = {
         // ??? namedayConf   = { TFT_FRAMEWDT, 175, 2, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT *2, 226, 1, WA_LEFT };
         .vuConf              = { 2, DSP_HEIGHT-26, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ 8, 104-10-10, 1, WA_LEFT }, 41 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { DSP_WIDTH/2-TFT_FRAMEWDT*2-2, 7, TFT_FRAMEWDT*2+4, 1, 17 },

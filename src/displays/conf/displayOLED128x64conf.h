@@ -74,7 +74,7 @@ const LayoutData _layouts[] PROGMEM = {
         .clockConf           = { TFT_FRAMEWDT, 37+FONTSHIFT_Y, 0, WA_CENTER },
         //.vuConf              = { }, // unused
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 7, 54+FONTSHIFT_X*2-1, 1, 1, 10 },
@@ -115,7 +115,7 @@ const LayoutData _layouts[] PROGMEM = {
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT, 37+FONTSHIFT_Y, 0, WA_CENTER },
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 8, MAX_WIDTH-(TFT_FRAMEWDT*2), 1, 1, 10 },
@@ -158,7 +158,7 @@ const LayoutData _layouts[] PROGMEM = {
         .clockConf           = { TFT_FRAMEWDT, 35+FONTSHIFT_Y, 0, WA_CENTER },
         //.vuConf              = { }, // unused
         .vuConf              = { TFT_FRAMEWDT, 35, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 7, 54+FONTSHIFT_X*2-1, 1, 1, 10 },
@@ -201,7 +201,7 @@ const LayoutData _layouts[] PROGMEM = {
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
         .clockConf           = { TFT_FRAMEWDT, 35+FONTSHIFT_Y, 0, WA_CENTER },
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} - if empty, bitrateConf will be used instead */
+        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { DSP_WIDTH/2-TFT_FRAMEWDT*2, 11, 2, 1, 16 },

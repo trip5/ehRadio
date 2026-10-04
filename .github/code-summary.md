@@ -2950,8 +2950,15 @@ must test — never a coordinate, since `{0,0}` is a legitimate position:
 | `FillConfig` | `widget`, `width`, `height`, `outlined` | `height > 0` |
 | `BitrateConfig` | `widget`, `dimension` | `dimension > 0` |
 
-`_fullbitrate` and `_bitrate` are alternatives: an empty `.fullbitrateConf` falls back to `.bitrateConf`, and
-`_reinitWidgets` must tear down whichever one is no longer wanted even when the replacement config is itself empty.
+`_fullbitrate` and `_bitrate` are **independent**, not alternatives: the badge is drawn when
+`fullbitrateConf.dimension > 0`, the text when `bitrateConf.textsize > 0`, both when a layout fills both, neither
+when it fills neither. Neither is ever deleted - `_reinitWidgets()` hides the one a layout does not ask for with
+`hideByLayout()`, like every other optional widget - and `Page::removeWidget()` deletes the widget it is handed, so a
+caller that removes one and then deletes it too is a **double free**. That pair was the last widget still deleted on
+a switch, and it is why switching between a `.bitrateConf` layout and a `.fullbitrateConf` one rebooted the board
+(`CORRUPT HEAP` / `multi_heap_free` assert). `BitrateWidget::_draw()` also returns early on `!_active` now: a hidden
+badge still receives `setBitrate()`/`setFormat()` on every `DBITRATE`, and its `_draw()` opens with an ungated
+`_clear()` that would otherwise paint a background square where the badge would have been.
 
 ## VU Widget Rendering (TFT vs OLED, and the runtime style)
 

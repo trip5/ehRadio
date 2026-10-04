@@ -756,6 +756,17 @@ void NetServer::processQueue() {
           snprintf(wsbuf, sizeof(wsbuf), "{\"playlistready\":true}");
         #endif
         break;
+      // The manager page follows the device on this instead of polling it, which is why the state is the MANAGER's
+      // and not the play mode: the page is only valid while the manager is up, whatever the radio is playing.
+      // Broadcast on enter and leave, and sent to a client the moment it connects, so a page opened later still
+      // learns the state.  No manager in the build, no reason for a page to stay: 0.
+      case SDMANACTIVE:
+        #ifdef USE_SD
+          snprintf(wsbuf, sizeof(wsbuf), "{\"sdmanactive\":%d}", filemanager.active() ? 1 : 0);
+        #else
+          snprintf(wsbuf, sizeof(wsbuf), "{\"sdmanactive\":0}");
+        #endif
+        break;
       case CURATED_INDEX_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_index_done\":true}"); break;
       case CURATED_PLAYLIST_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_playlist_done\":true}"); break;
       case CURATED_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_failed\":true}"); break;
@@ -942,6 +953,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         FUNCTIONLOG("Websocket", "client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
         // Send current battery status to the newly connected client immediately
         netserver.requestOnChange(GETBATTERY, client->id());
+        // And the file manager's state: a page that opened while the manager was already up is told so instead of
+        // waiting for a broadcast it missed.
+        netserver.requestOnChange(SDMANACTIVE, client->id());
         break;
     case WS_EVT_DISCONNECT: FUNCTIONLOG("Websocket", "client #%u disconnected", client->id()); break;
     case WS_EVT_DATA: netserver.onWsMessage(arg, data, len, client->id()); break;

@@ -98,7 +98,9 @@ class FileManager {
     // True between entering the mode and leaving it: Done, the idle timeout, or the card leaving the slot.
     bool active() const { return _active; }
 
-    void enter();   // GET /sdman - mounts if needed, blocks the player, starts the idle clock
+    // GET /sdman - true when the mode is open afterwards, false when no card could be mounted (nothing is stopped,
+    // nothing is displayed, the mode stays closed).  Blocks the player and starts the idle clock on success.
+    bool enter();
     // Unblocks the player and restores the display; under SmartStart it gives the audio back too. resumeAudio=false
     // for the one exit with nothing to resume (the card left the slot); `why` is named in the close's single line.
     void leave(bool resumeAudio = true, const char *why = "on request");

@@ -166,7 +166,8 @@
       case 'not_found':
       case 'no_dir':
       case 'no_parent':     return t('msg_file_folder_not_found', 'File/folder not found.');
-      case 'no_card':       return t('msg_no_sd', 'No SD card is mounted.');
+      // There is no no_card message: the device refuses to open the mode at all, so the page has left the manager
+      // before a message could be shown (see leaveManager()).
       case 'bad_name':      return t('msg_name_not_allowed', 'That name is not allowed.');
       case 'not_dir':       return t('msg_not_folder', 'That is not a folder.');
       case 'write_failed':  return t('msg_write_failed', 'The card refused a write - it may be full or faulty.');
@@ -183,6 +184,24 @@
       case 'not_active':    return t('msg_sd_file_manager_closed', 'SD File Manager was closed.');
       default:              return t('msg_operation_failed', 'The operation failed.');
     }
+  }
+
+  // A card that cannot be mounted ends the manager on both sides: the device refuses to open the mode at all, so
+  // there is nothing left for this page to do here. Back to "/", which the device serves as the web UI.
+  function leaveManager() {
+    window.location.replace('/');
+  }
+
+  // Ask for the mode back after the device's idle clock closed it under the page. Resolves true when it opened, false
+  // when it refused because no card could be mounted - in which case the page has already left.
+  function reenterManager() {
+    return fetch('/sdman/enter').then(function (r) {
+      if (r.ok) return true;
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (j.error === 'no_card') leaveManager();
+        return false;
+      });
+    }).catch(function () { return false; });
   }
 
   function post(url, body) {
@@ -328,9 +347,10 @@
       return r.json().catch(function () { return { ok: false, error: 'bad_response' }; });
     }).then(function (j) {
       // The mode times out after SDMAN_AUTO_EXIT_MS with no requests; a tab still open means the user is here, so ask
-      // for the mode back once and carry on rather than showing an error.
+      // for the mode back once and carry on rather than showing an error. A card-less device refuses that, and
+      // reenterManager() has already taken the page back to "/".
       if (!j.ok && j.error === 'not_active' && !retried) {
-        return fetch('/sdman/enter').then(function () { return load(path, keepScroll, true); });
+        return reenterManager().then(function (opened) { if (opened) return load(path, keepScroll, true); });
       }
       // A listing is refused while another is in flight or while an upload is writing: the device asking the page to
       // come back, not a failure, so it retries quietly. That is what makes a second tab harmless.
@@ -339,13 +359,10 @@
         return;
       }
       if (!j.ok) {
+        // No card: the manager cannot exist, so the page leaves instead of reporting a failure it cannot fix.
+        if (j.error === 'no_card') { leaveManager(); return; }
         notice(errText(j.error), true);
-        if (j.error === 'no_card') {
-          box.innerHTML = '<li class="pleitem sdnotice"><a href="/">'
-                        + esc(t('btn_back', 'Back to the player')) + '</a></li>';
-        } else {
-          box.innerHTML = '';
-        }
+        box.innerHTML = '';
         return;
       }
       state.path = j.path || path;
@@ -362,8 +379,11 @@
 
   function loadInfo() {
     return fetch('/sdman/info').then(function (r) { return r.json(); }).then(function (j) {
-      if (!j.ok) return;
-      if (!j.mounted) { notice(errText('no_card'), true); return; }
+      // This is the page's only poll (a click, a keystroke), so it is also where a card pulled from the slot is
+      // noticed: the device has closed the mode by then and answers no_card.
+      if (!j.ok) { if (j.error === 'no_card') leaveManager(); return; }
+      // The mode is open but the card is not mounted: the manager has nothing to show, so leave the same way.
+      if (!j.mounted) { leaveManager(); return; }
       scheduleIdleReload(j.idle);
       state.card = t('msg_sd_used', 'Used {0} of {1}', fmtSize(j.used), fmtSize(j.total));
       // The allocation unit is still carried for reference, though nothing on the page acts on it now.
@@ -489,7 +509,8 @@
     state.batch = true; // holds the idle redirect and keepAlive() for the whole batch, not just one file
     // The mode may have timed out while this page sat idle (its clock is three minutes), so a batch started after a
     // quiet spell would meet a closed manager on its FIRST file. The not_active branch in xhr.onload is the other half.
-    fetch('/sdman/enter').catch(function () {});
+    // A refused re-entry (no card) takes the page back to "/" instead of starting a batch that cannot run.
+    reenterManager();
 
     // Send one file again FROM THE START: the device cannot put back bytes it no longer holds, but the BROWSER still
     // has them, and the failures are per-TRANSFER rather than a rate. A fresh attempt has a real chance.
@@ -680,17 +701,17 @@
         if (j.ok && j.skipped) skipped++;   // the race case: the device refused it after all
         // Remember what the device can vouch for, so a retry costs the remainder instead of the whole file.
         if (!j.ok && j.landed) landedAt[f.name] = j.landed;
+        // A card that is gone cannot take the batch: the page leaves through leaveManager() and the batch ends.
+        if (!j.ok && j.error === 'no_card') { leaveManager(); return; }
         // THE MODE HAD ENDED UNDER THE BATCH - usually its own idle timeout, since the manager lives only while
         // requests arrive. The LISTING has always recovered by asking for the mode again; the UPLOAD used to end the
         // whole batch. So it does what the listing does: ask once and send this file again - nothing of it was written.
         if (!j.ok && j.error === 'not_active' && !reentered) {
           reentered = true;
-          fetch('/sdman/enter').then(function () {
+          reenterManager().then(function (opened) {
+            if (!opened) { finish('', true); return; }   // no card: the mode cannot come back, so the batch is over
             i--;          // the same file again: the refusal happened before any chunk was stored
             next();
-          }).catch(function () {
-            notice(errText('not_active'), true);
-            finish('', true);
           });
           return;
         }
@@ -778,12 +799,34 @@
     if (state.entries.length && !selection().length) render();
   };
 
+  // Follow the device instead of polling it: the manager's own open/closed state arrives on the WebSocket the player
+  // page already uses, so an ejection, Done, the idle timeout, or a close driven from another tab moves this tab too,
+  // with no request of its own. The 0 is honoured only once a 1 has been seen - the connect-time push reports the
+  // state as it is, and a socket that comes up a moment before /sdman/enter would otherwise bounce the user straight
+  // back out. If the socket never opens, every action still answers no_card and this page follows on that instead.
+  var managerWasOpen = false;
+  try {
+    var sock = new WebSocket('ws://' + window.location.host + '/ws');
+    sock.onmessage = function (e) {
+      var j;
+      try { j = JSON.parse(e.data); } catch (err) { return; }
+      if (typeof j.sdmanactive === 'undefined') return;
+      if (j.sdmanactive) { managerWasOpen = true; return; }
+      if (managerWasOpen) leaveManager();
+    };
+  } catch (err) { /* no push here: the no_card paths above still return the page when the card goes */ }
+
   // Open the mode and stay on this address - the device redirects "/" here while the mode is open, so there is no
   // hand-over to the root. The listing always starts at the card's root.
   fetch('/sdman/enter').then(function (r) { return r.json(); }).catch(function () {
     return { ok: false, error: 'bad_response' };
   }).then(function (j) {
-    if (!j.ok) { notice(errText(j.error), true); return; }
+    if (!j.ok) {
+      // Arriving with no card is refused by the device: back to "/" rather than showing a manager that cannot work.
+      if (j.error === 'no_card') { leaveManager(); return; }
+      notice(errText(j.error), true);
+      return;
+    }
     return load('/').then(loadInfo);
   });
 })();

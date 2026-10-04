@@ -110,9 +110,12 @@ static int jsonEscapeTo(char *dst, size_t room, const char *src) {
 
 // Every route except the two entry points needs the mode open; without it a page left in a tab would browse
 // the card with playback unblocked, which is the one thing the mode exists to prevent.
+// Two reasons are told apart so the page can react: no_card means a card could not be mounted and the page must
+// leave the manager, not_active means the session ended (Done, idle timeout) and a page that meant to be here
+// may re-enter.
 static bool requireActive(AsyncWebServerRequest *request) {
   if (filemanager.active()) return true;
-  sendError(request, 409, "not_active");
+  sendError(request, 409, sdman.ready ? "not_active" : "no_card");
   return false;
 }
 
@@ -205,9 +208,11 @@ static bool removeRecursive(const String &path) {
 // well as the address on the display.  Idempotent.  No route at bare "/sdman" (a plain URI matches an exact path OR a
 // prefix plus "/", so it would answer every sibling), and no network test - _switchMode() already refuses a change
 // unless the status is CONNECTED or SDOFFLINE, and NetServer::begin() returns before the server when offline.
+// A refusal is answered 409 no_card, which the page treats as "leave the manager": otherwise every action on a
+// card-less device re-opened the mode and pulled the radio out of web mode.
 static void hEnterApi(AsyncWebServerRequest *request) {
-  filemanager.enter();
-  sendOk(request);
+  if (filemanager.enter()) sendOk(request);
+  else sendError(request, 409, "no_card");
 }
 
 // POST /sdman/done - the Done button at the foot of the page.
@@ -1382,7 +1387,15 @@ uint32_t FileManager::idleRemainingMs() const {
   return SDMAN_AUTO_EXIT_MS - elapsed;
 }
 
-void FileManager::enter() {
+bool FileManager::enter() {
+  // A mount from scratch comes FIRST, so a device with no card refuses the mode before it disturbs anything: the
+  // player keeps playing and the display stays where it was. An ALREADY mounted card cannot take this path - the
+  // player may be reading it, and the step-down below discards every handle, which is why the stop comes first there.
+  const bool needMount = !sdman.ready;
+  if (needMount && !sdman.start(SDSPISPEED_MANAGER)) {
+    FUNCTIONLOG("SDFileManager", "Open refused - no card could be mounted");
+    return false;
+  }
   // The stop and the capture belong to the transition INTO the mode, because the page calls this route on load and
   // again after it replaces itself with "/". _wasPlaying is remembered because the mode is not a play button, and the
   // stop is what lets the manager assume nothing is reading the card.
@@ -1393,13 +1406,15 @@ void FileManager::enter() {
     // corrupted the heap. stopSync() is the order changeMode() uses; _wasPlaying must be read before it.
     player.stopSync();
   }
-  // Mount on demand, after the stop so it cannot fight the player for the volume. THIS IS THE ONLY SPEED CHANGE A
-  // SESSION HAS: ensureSpeed() moves to SDSPISPEED_MANAGER and remounts if it must, and leave() puts it back.
-  if (!sdman.ready) sdman.start(SDSPISPEED_MANAGER);
-  else sdman.ensureSpeed(SDSPISPEED_MANAGER);
+  // THIS IS THE ONLY SPEED CHANGE A SESSION HAS: ensureSpeed() moves to SDSPISPEED_MANAGER and remounts if it must,
+  // and leave() puts it back. Skipped when the mount above already happened at the manager speed.
+  if (!needMount) sdman.ensureSpeed(SDSPISPEED_MANAGER);
   _lastActivity = millis();
-  if (_active) return;
+  if (_active) return true;
   _active = true;
+  // Every open page is told, so the manager's page can arm itself on it (it leaves again on the 0 below); the
+  // idempotent call above has already returned, so a second tab does not re-broadcast.
+  netserver.requestOnChange(SDMANACTIVE, 0);
   display.putRequest(NEWMODE, SDMAN);
   #if defined(SD_USE_MMC)
     const char* transport = "MMC";
@@ -1417,6 +1432,7 @@ void FileManager::enter() {
   FUNCTIONLOG("SDFileManager", "Open (%s transport, SD %s, type %d, %lu MB, Allocation unit size: %s)", transport,
               sdman.ready ? "mounted" : "NOT mounted", (int)sdman.cardType(),
               (unsigned long)(sdman.cardSize() / (1024ULL * 1024ULL)), au);
+  return true;
 }
 
 void FileManager::leave(bool resumeAudio, const char *why) {
@@ -1428,6 +1444,10 @@ void FileManager::leave(bool resumeAudio, const char *why) {
   discardResume();
   _active = false;
   _busy = false;   // backstop: a handler that died mid-operation must not be able to lock the mode closed
+  // ONE place for every close - Done, the idle timeout, the card leaving the slot, a close driven from another tab -
+  // so the manager's page can never be left showing a session that has ended.  Sent here, past the early return
+  // above, because reaching this line IS the transition.
+  netserver.requestOnChange(SDMANACTIVE, 0);
   // Hand the card back at the PLAYER's clock: a session may have stepped down and the player's reads want the high
   // speed. This is the second boundary a remount is allowed at; skipped when the card has already left the slot.
   // Any handle the manager still holds is closed first, as in enter(): a listing keeps its directory open across the

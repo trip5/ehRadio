@@ -1579,10 +1579,14 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - Runtime-only browse/edit mode for the SD card, compiled under `#ifdef USE_SD`. The header owns `SDMAN_AUTO_EXIT_MS`
   (default 180000), guarded by `#ifndef` there rather than added to `options.h` (Rule #3), so a `myoptions.h` can still
   override it; the card-probe macros belong to `sdmanager.h`, which owns the probe.
-- `FileManager filemanager;` is the global instance. `enter()` stops the player, mounts the card if needed, sets the
-  active flag and asks the display for `SDMAN`; `leave(bool resumeAudio = true)` clears the flag, asks for `PLAYER`,
-  grants the presence grace and - under SmartStart - gives the audio back; `loop()` (called from `main.cpp`) asks the
-  shared debounced probe, redraws the countdown once a second and runs the idle timeout.
+- `FileManager filemanager;` is the global instance. `enter()` returns bool and stops the player, mounts the card if
+  needed, sets the active flag and asks the display for `SDMAN`; `leave(bool resumeAudio = true)` clears the flag, asks
+  for `PLAYER`, grants the presence grace and - under SmartStart - gives the audio back; `loop()` (called from
+  `main.cpp`) asks the shared debounced probe, redraws the countdown once a second and runs the idle timeout.
+- **A mount from scratch refuses the mode when there is no card.** `enter()` returns false, logs one line and does
+  nothing else - no stop, no display change, no `_active` - so the player keeps playing and the display stays put.
+  `hEnterApi()` answers 409 `no_card` for that. The mount is attempted BEFORE the stop only on this path: an already
+  mounted card must not be remounted until the player is stopped, because the step-down discards every handle.
 - **The mode hands playback back on exit, but only what it took.** `enter()` records `player.isRunning()` in
   `_wasPlaying`, **on the transition into the mode only**, because SmartStart must not turn the user's own stop into
   playback - the manager is not a play button. The transition-only part is not tidiness: loading the page more than
@@ -1727,7 +1731,22 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   the page then parsed that route's redirect as JSON. `/sdman/enter` is the only way in.
 - Routes: `/sdman/enter` (GET), `/sdman/done` (POST), `/sdman/info`, `/sdman/list`, `/sdman/mkdir`, `/sdman/rename`,
   `/sdman/move`, `/sdman/delete` (POST, selection in the body), `/sdman/download`, `/sdman/upload` (POST with its own
-  chunk handler). Every handler except `enter`/`done` calls `requireActive()`, which answers 409 `not_active`.
+  chunk handler). Every handler except `enter`/`done` calls `requireActive()`, which answers 409 `not_active` when the
+  session ended, or 409 `no_card` when no card is mounted - the page re-enters on the first and leaves the manager on
+  the second.
+- **The manager's page follows the device over the WebSocket, so nothing polls it.** `SDMANACTIVE` (a new
+  `requestType_e`) carries `{"sdmanactive":0|1}` built from `filemanager.active()`: `enter()` broadcasts it once
+  `_active` is true and `leave()` once the exit is real, so EVERY close is covered by one line in one place - Done,
+  the idle timeout, the card leaving the slot, a close driven from another tab or from the box. A client that
+  connects is sent the current value in `onWsEvent` beside `GETBATTERY`, which is what arms a page that opened while
+  the manager was already up. `sdmanager.html` opens `ws://<host>/ws` and returns to "/" on the 1 -> 0 transition
+  ONLY: the connect-time push reports the state as it is, so a page told only 0 - its socket came up a moment before
+  its own `/sdman/enter` - never acts, and a user who opened the manager while the radio was on a web stream is not
+  bounced out. `playermode` was deliberately not reused for this: the play mode is not the manager's state, and
+  `leave()` even forces the play mode back to `PM_SDCARD`, so the page could not tell the two apart. Polling was
+  rejected outright: `/sdman/info` touches the idle clock (that is what `keepAlive()` is for), so a timer on it would
+  hold the manager open for ever and defeat `SDMAN_AUTO_EXIT_MS`. The `no_card` request paths stay as the fallback
+  for a socket that never comes up.
 - Mutations are POST-only and each one calls `invalidateSdIndex()` (removes `INDEX_SD_PATH`), so playlists and the SD
   index are rebuilt rather than trusted after an edit.
 - `/` and `/data` (and anything under it) are protected: no create, rename, move, delete or upload there; browsing
@@ -2065,9 +2084,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     `GETPLAYERMODE` report and returns WITHOUT changing the mode, and the page only acted on a mode report it could
     see had CHANGED. It now also acts on the report where it did NOT change, but only while a switch is outstanding
     (`_switching`): that combination IS the refusal. The FIRST report after a page load is the one that must not be
-    mistaken for it, which is what `_modeKnown` is for, and the mode the page ASKED for (`_switchWanted`) is compared
-    rather than assumed - asking for the mode we are already in is a no-op, not a failure, and must never raise "no
-    SD card". The wait ends, the list is refetched and the user is told.
+    mistaken for it, which is what `_modeKnown` is for. The wait ends, the lock is dropped and the list is refetched.
+    It used to raise an alert ("No SD card is mounted.") for the switch the page had ASKED for (`_switchWanted`), and
+    that pop-up is gone: the device has already shown why it refused, and the SD File Manager now refuses to open at
+    all without a card (`no_card` -> the page leaves), so the alert only repeated what the display and the manager page
+    both say. `_switchWanted` went with it; a no-op switch (asking for the mode we are already in) is handled the same
+    way as a refusal.
   - **THREE SMALL UI FIXES, and the rule they follow.** (1) A plain `input[type=checkbox]` - the only control the
     browser still drew for itself, used by the SD manager's Select All and the editor's per-row flags - is themed with
     one `accent-color` rule, which colours the box AND the tick and follows the theme because it reads the same custom
@@ -2381,6 +2403,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     (`Cluster assembly off: the allocation unit is 512 bytes, so one write is already one unit`), and 24 files (a 1 MB
     text log, an 11.8 MB exe, a 9.4 MB exe, a 12.4 MB zip among them) all landed on the first attempt with zero rescues
     at 82-95 KB/s.
+  - **The 8 KB-cluster card is the OTHER end, and it is why the correction chain exists.** A field run of a 2.1 MB zip
+    (9 attempts over 55 s, 37 KB/s overall) refused a chunk on nearly every transfer - `errno 5`, the rescue of it
+    refused too, `0 of 8192` written - and every attempt was salvaged by the chain around it: the verify caught the card
+    64 KB behind once, the stall release handed the transfer back, and each retry sent only the remainder (`Upload
+    stopped at N bytes with M verified ... Resuming at M`).  The unit decides SPEED, not correctness, and a card that
+    refuses writes needs this chain, not a formatter.
   - **The throughput ladder:** 512 B ~90 KB/s; 2 KB 164-181 KB/s (409-550 KB/s inside the writes); 64 KB ~190 KB/s
     overall (~1000 KB/s inside). Neither large unit refuses, so the difference is the COMMAND RATE (one CMD24 per 512
     bytes against one CMD25 per cluster), and the unit decides SPEED, not correctness. At 2 KB and above the card is not
@@ -2415,7 +2443,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   batch with "SD File Manager was closed." on the first such refusal, while the LISTING had always recovered by asking
   for the mode again.  `startUpload()` now pokes `/sdman/enter` before the batch (the common case, gone), and a
   `not_active` upload asks for the mode once and re-sends the same file - nothing of it was written, so nothing is
-  lost.  A second refusal is real and still ends the batch.
+  lost.  A second refusal is real and still ends the batch.  A refusal that is instead `no_card` is terminal: the same
+  answer reaches the page from `/sdman/enter`, `/sdman/list`, `/sdman/info` and the upload, and each one calls
+  `leaveManager()`, so a card pulled from the slot takes the tab back to "/" instead of reporting a failure it cannot
+  fix.
 - **Log conventions in `filemanager.cpp`, settled in the field.** (1) `ERRORLOG` is for a LOSS only - a failure with
   nothing vouchable and no partial kept - because that is the only thing the user has to act on; every recoverable
   failure is an ordinary `FUNCTIONLOG` line, which is what stopped a batch of fully-recovered transfers reading as a

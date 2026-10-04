@@ -17,15 +17,14 @@ public:
   void getDefaultPlaylist();
   void cleanStaleSearchResults();
   bool servicesBusy() const { return _servicesBusy; } // true only while the services task is actually downloading
-  /* Created but not finished: the task may still be parked (SD playback or the manager), counting down, or
-     downloading.  Unlike servicesBusy() this covers the whole window, which is what a caller needs to hold a job
-     back until the services are out of the way. */
+  // Created but not finished: the task may still be parked (SD playback or the manager), counting down, or downloading.
+  // Unlike servicesBusy() this covers the whole window, which is what a caller needs to hold a job back.
   bool servicesPending() const { return _services == SVC_WILL_RUN; }
   bool safeMode() const { return _safeMode; }
-  /* The boot-mode glyph drawn at the end of the boot dots line: the SD pair when the card is the source, PAUSE
-     for a boot that never proved itself, PLAY for smart start, VOL_75 otherwise. Read it where the boot screen is
-     built - checkSafeMode() clears bootStableMarker moments later (the order is in setup()), so a later read
-     reports the wrong thing. The literal that comes back is kept by the widget, so it must never become dynamic. */
+  // The boot-mode glyph drawn at the end of the boot dots line: the SD pair when the card is the source, PAUSE for a
+  // boot that never proved itself, PLAY for smart start, VOL_75 otherwise. Read it where the boot screen is built -
+  // checkSafeMode() clears bootStableMarker moments later, so a later read reports the wrong thing. The literal that
+  // comes back is kept by the widget, so it must never become dynamic.
   const char* icon() const;
 
 private:

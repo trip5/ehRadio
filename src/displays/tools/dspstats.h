@@ -41,8 +41,7 @@
   extern volatile uint32_t cmPushCount;
   extern volatile uint8_t  cmDspCore;
 
-  /* The task passes its own core in, so the figure can never be mislabelled even
-     if the task is ever pinned somewhere else. */
+  // The task passes its own core in, so the figure can never be mislabelled even if the task is pinned elsewhere.
   static inline void cmCountDspLoop(uint8_t core) { cmDspLoopCount++; cmDspCore = core; }
   static inline void cmCountGlyph()       { cmGlyphCount++; }
   static inline void cmCountPreTextCall() { cmPreTextCalls++; }

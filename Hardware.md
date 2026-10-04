@@ -430,46 +430,9 @@ They do not have to be high-end.
 
 Smaller sizes (32GB and smaller) may also work better and be faster to navigate.
 
-### SD Card Format
-
-#### Filesystem
-
 Always format the SD card with FAT32.
 
-#### Cluster Size
-
-Even if you have no issues playing files from an SD card,
-you may encounter issues with uploads (especially with an SPI-based reader module).
-There may be an easy fix available.
-
-Format the SD card using Use a 512-byte cluster as the "allocation unit size" (cluster size).
-
-When uploading files, they are written to SD as quickly as possibly, ***in 512-byte chunks.***
-A card formatted with the Windows default (8 KB or larger cluster sizes) may seemingly work for a bit,
-then refuse almost every chunk afterwards.
-
-If you check the serial log, you will see `errno 5` short writes of a few hundred bytes,
-a card that is "a few KB behind" on every attempt, and eventually a file that cannot advance at all.
-card formatted with 512-byte allocation units uploads cleanly, one attempt per file, with nothing to recover.
-
-When switching to SD File Manager you can also see in the serial log the size your SD card is using:
-```
-Open (SPI transport, SD mounted, type 3, 15279 MB, Allocation unit size: 512 bytes)
-```
-
-The official "SD Card Formatter" utility uses a larger cluster size by default, so this utility is not
-a recommended method of preparing your card for use.
-
-Windows disk format may object to formatting larger SD cards with FAT32 but the command line
-`format Z: /A:512 /FS:FAT32 /X /Q` will work (change `Z` to the drive letter).
-
-Most Sandisk SD cards do not seem to experience issues regarding cluster size and do not require this type of formatting.
-
-### Special Note Regarding `/ehradio.data`
-
-This folder contains special index files to enable faster file-seeking during playback.
-
-If needing to move your files from one SD card to another (or re-formatting), remove this folder.
+If experiencing random problems with the SD card, try a different SD card, preferably from a different brand.
 
 ### File Encoding
 
@@ -477,11 +440,6 @@ It is recommended to encode files on SD card using MP3 at a constant bit rate of
 to avoid system stress and get maximum compatibility with the decoders.
 ABR and CBR encoding may work (mostly) but may also result in pops and clicks.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
-
-### Other SD Issues
-
-If still having problems after using 512-byte clusters, or experiencing random problems with the SD card,
-try a different SD card, preferably from a different brand.
 
 ### SD Offline Mode
 
@@ -494,6 +452,13 @@ If you wish to use a special pin, add something like `#define SDOFFLINE_BTN 2` o
 
 Remember that certain GPIOs may cause issues if held while powering-up (so best not to attach buttons to `GPIO0` or `GPIO3`).
 Most users will not remember the difference between "shortly after power-up" and "during power-up".
+
+### Special Note Regarding `/ehradio.data`
+
+This folder contains special index files to enable faster file-seeking during playback.
+
+If moving your files from one SD card to another, remove this folder.
+
 
 ---
 

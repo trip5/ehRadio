@@ -53,9 +53,9 @@ struct MoveConfig {
   int16_t width;
 };
 
-/* Ids are persisted in config.store.vustyle and are the keys in /visuals.json, so they must never be
-   renumbered: a new style is only ever appended, before VU_STYLE_COUNT.  The label a style shows the
-   user lives beside the code that draws it, in the /visuals.json table in netserver.cpp. */
+// Ids are persisted in config.store.vustyle and are the keys in /visuals.json, so they must never be renumbered: a new
+// style is only ever appended, before VU_STYLE_COUNT. The label a style shows the user lives beside the code that
+// draws it, in the /visuals.json table in netserver.cpp.
 enum vuStyle_e : uint8_t {
   VU_STYLE_BARS = 0,          // the segmented original bar VU inherited from yoRadio - "Bars"
   VU_STYLE_DIGITAL_LED,       // the same painter, lit boundary snapped to whole segments - "Digital LED"

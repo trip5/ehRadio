@@ -26,8 +26,7 @@
 
 SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
 
-/* PSRAM usage tracking — set by subsystems, consumed by Core Monitor */
-size_t psramFrameBufferBytes = 0;
+size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
 
 #ifdef CORE_MONITOR
   // The counters themselves are declared in displays/tools/dspstats.h
@@ -46,11 +45,8 @@ void setup() {
   #endif
   Serial.begin(115200);
   #if (CORE_DEBUG_LEVEL > 0) || defined(ALL_DEBUG_LOGS)
-    // A crash needs the same wait as a cold boot.  esp_reset_reason() after a panic is ESP_RST_PANIC (or one of the
-    // WDT reasons) rather than ESP_RST_POWERON, so without this the crash summary below would be printed before the
-    // host terminal had attached and the burst would be clipped.  "A core dump is waiting" is therefore the third
-    // reason to hold the boot here - and it is the one that the log ring needs, since a crash is only reported on
-    // the boot AFTER it.
+    // A crash needs the same wait as a cold boot: after a panic esp_reset_reason() is not ESP_RST_POWERON, so
+    // without this the summary would print before the host terminal attached.  A crash reports on the NEXT boot.
     const bool dumpedCrash = crashDumpAvailable();
     if (dumpedCrash || esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_EXT) { // poweron boot or a crash
       delay(1000);
@@ -210,10 +206,8 @@ logRingFlush(); // drain log ring
     uint32_t cmDur = micros() - cmLoopStart;
     if (cmDur > cmMaxMainLoop) cmMaxMainLoop = cmDur;
     if (millis() - cmLastPrint >= 5000) {
-      /* Rates are per MEASURED second.  The window is 5000ms PLUS the time this block spends
-         printing, and cmLastPrint is only stamped at the end of it, so the old fixed "/5"
-         inflated every figure by 5-7% - a display task sitting on its 10ms DSP_TASK_DELAY
-         floor reported 107 loops/s when its ceiling is 100. */
+      // Rates are per MEASURED second: the window is 5000ms plus this block's own printing time, stamped at the
+      // end of it, so a fixed "/5" inflated every figure by 5-7%.
       const uint32_t elapsed = (uint32_t)(millis() - cmLastPrint);
       const float perSec = 1000.0f / (float)(elapsed ? elapsed : 1);
       uint32_t d = cmDspLoopCount;  cmDspLoopCount = 0;
@@ -224,19 +218,14 @@ logRingFlush(); // drain log ring
       uint32_t ph = cmPreTextHits;  cmPreTextHits = 0;
       uint32_t fi = cmFillCount;    cmFillCount = 0;
       uint32_t pu = cmPushCount;    cmPushCount = 0;
-      /* Both figures are per TASK and each is labelled with the core that task runs on.
-         Field 1 is the display task, field 2 is this Arduino loop().  The old "Core0"/"Core1"
-         prefixes were ordinal only - they put core 0's subsystem names on the display task's
-         counter, so a display-task change looked like a core-0 regression. */
+      // Both figures are per TASK, labelled with the core each one runs on: field 1 the display task, field 2 this loop.
       FUNCTIONLOG("Core.monitor", "DspTask(core%u) loops/s: %u (%.2fms/loop), Main(core%u) loops/s: %u (%.2fms/loop), Max Main Loop Time: %.3fms, Free Heap: %u",
           (unsigned)cmDspCore,
           (unsigned)(d * perSec), d ? (float)elapsed / (float)d : 0.0f,
           (unsigned)xPortGetCoreID(),
           (unsigned)(m * perSec), m ? (float)elapsed / (float)m : 0.0f,
           mx / 1000.0f, (unsigned)ESP.getFreeHeap());
-      /* What the display task actually did with the time.  glyphs and preText calls are both
-         "work units per second": they measure volume, and the hit rate says how much of the
-         resolution was answered without walking the fold chain. */
+      // What the display task did with the time: work units per second, and the preText hit rate.
       FUNCTIONLOG("Core.monitor", "DspTask work/s: glyphs %u, fills %u, preText %u (hit %u%%), fb flushes %u (%.2f/loop)",
           (unsigned)(gl * perSec), (unsigned)(fi * perSec), (unsigned)(pc * perSec),
           pc ? (unsigned)(ph * 100UL / pc) : 0U,

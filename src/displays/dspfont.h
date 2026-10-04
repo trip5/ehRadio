@@ -28,11 +28,10 @@
   #define DisplayFont MatrixChunky8x6
 #endif
 
-/* --- ACTIVE FONT ACCESSOR ---
-/* The one place the active display font is chosen, so runtime font switching changes only
-   this function - see plans/runtime-font-switching.md for the obligations that come with
-   it.  Any font returned here must stay on the 6x8 metric class (xAdvance 6, yAdvance 8):
-   widget layout comes from CHARWIDTH/CHARHEIGHT, not from the font. */
+// --- ACTIVE FONT ACCESSOR ---
+// The one place the active display font is chosen, so runtime font switching changes only this function - see
+// plans/runtime-font-switching.md for the obligations that come with it. Any font returned here must stay on the
+// 6x8 metric class (xAdvance 6, yAdvance 8): widget layout comes from CHARWIDTH/CHARHEIGHT, not from the font.
 inline const GFXfont *displayFont() { return &DisplayFont; }
 
 /* --- TIME_SIZE --- */

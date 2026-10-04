@@ -20,26 +20,19 @@
 #include "../displays/tools/pretext.h"
 
 bool clockTrustworthy() {
-  /* The clock may only print a time the device can stand behind.  Two ways it could not, and both were visible at
-     boot on this hardware:
-       1. Nothing has set the time yet.  network.timeinfo is a zeroed struct then, i.e. the year 1900 - so 1901 or
-          less IS the "never set" state, and it is what the no-RTC radio showed as 00:00 until the first doSync()
-          landed.  A device that never syncs never leaves that state, so no arbitrary epoch floor is needed: the
-          zeroed struct is its own marker.
-       2. The RTC and the clock disagree.  RTC::getTime()/setTime() carry whatever zone the chip happens to hold, so
-          a chip set by another tool (or set before the timezone was changed) holds UTC - which is indistinguishable
-          from a correct time, right year and right minute - and only an agreement test catches it.  That is the UTC
-          step the RTC radio showed between 00:00 and the local time.
-     When the system clock itself is unset there is nothing to agree WITH.  Offline with an RTC that is the SD-offline
-     case, where the chip is the only time source there will ever be - the year test above has already rejected a
-     zeroed chip, so the chip is trusted there.  Online it is NOT trusted, and that is the whole point: the agreement
-     test needs a local zone to exist, and the timezone only arrives with configTzTime() at the WiFi-connect event. */
+  // The clock may only print a time the device can stand behind. Two ways it could not, both visible at boot:
+  //   1. Nothing has set the time yet - network.timeinfo is a zeroed struct, i.e. year 1900, so 1901 or less IS the
+  //      "never set" state and no arbitrary epoch floor is needed: the zeroed struct is its own marker.
+  //   2. The RTC and the clock disagree. RTC::getTime()/setTime() carry whatever zone the chip holds, so a chip set by
+  //      another tool (or before the timezone changed) holds UTC - indistinguishable from a correct time except by an
+  //      agreement test, which is the UTC step the RTC radio showed.
+  // When the system clock itself is unset there is nothing to agree WITH: offline with an RTC (the SD-offline case) the
+  // chip is the only source and is trusted, the year test above having already rejected a zeroed chip; online it is NOT
+  // trusted, because the agreement test needs a local zone and the timezone only arrives at the WiFi-connect event.
   if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
-  /* Before the system clock is real, `localtime()` has no timezone to apply, so a chip holding UTC agrees with it
-     perfectly and its value would be printed as if it were local - which is exactly the UTC step the RTC radio still
-     showed.  Until then the chip is only trusted offline.  "Real" needs a floor: before SNTP the system clock is
-     seconds since boot, a valid-looking positive time_t that cannot be told from a date any other way.  One year of
-     epoch is the smallest honest floor - far above any uptime, far below any real date. */
+  // Before the system clock is real, `localtime()` has no timezone to apply, so a chip holding UTC agrees with it
+  // perfectly - the UTC step above. Until then the chip is only trusted offline. "Real" needs a floor: before SNTP the
+  // clock is seconds since boot, a valid-looking positive time_t, so one year of epoch is the smallest honest floor.
   const time_t now = time(nullptr);
   const bool sysClockSet = (now > 31536000);
   if (!sysClockSet) return network.status == SDOFFLINE;

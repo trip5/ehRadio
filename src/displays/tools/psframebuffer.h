@@ -8,7 +8,7 @@
 #include "pretext.h"                   // preText() pipeline
 #include "dspstats.h"                  // Core Monitor counters
 
-/* PSRAM framebuffer size tracker — updated by psFrameBuffer on allocation */
+// PSRAM framebuffer size tracker — updated by psFrameBuffer on allocation
 extern size_t psramFrameBufferBytes;
 
 class  psFrameBuffer : public Adafruit_GFX {
@@ -24,8 +24,8 @@ class  psFrameBuffer : public Adafruit_GFX {
       return 1;
     }
 
-    /* Reset the UTF-8 decoder state so a partial sequence from a previous
-       print() call does not corrupt the first glyph of the next frame. */
+    // Reset the UTF-8 decoder state so a partial sequence from a previous print() call does not corrupt the first
+    // glyph of the next frame.
     void resetUTF8() { _utf8_remaining = 0; }
 
     psFrameBuffer(int16_t w, int16_t h):Adafruit_GFX(w, h){ setTextWrap(false); cp437(true); }

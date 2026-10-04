@@ -17,10 +17,9 @@ bool crashDumpAvailable() {
   return esp_core_dump_image_check() == ESP_OK;
 }
 
-/* One crash, one block of lines.  Everything printed is either directly usable (the addresses go straight into
-   addr2line) or needed to place it (the ELF SHA256 says which build the addresses belong to, the task name says
-   where it happened).  The dump is then erased, otherwise every later boot - clean ones included - would report the
-   same crash again and the log would read as if the device were failing continuously. */
+// One crash, one block of lines. Everything printed is either directly usable (the addresses go straight into
+// addr2line) or needed to place it (the ELF SHA256 says which build, the task name says where). The dump is then
+// erased, or every later boot - clean ones included - would report the same crash again.
 void crashDumpReport() {
   size_t addr = 0, size = 0;
   if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) return;

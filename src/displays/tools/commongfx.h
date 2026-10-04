@@ -122,8 +122,8 @@ class DspCore: public yoDisplay {
       return 1;
     }
 
-    /* Reset the UTF-8 decoder state so a partial sequence from a previous
-       print() call does not corrupt the first glyph of the next frame. */
+    // Reset the UTF-8 decoder state so a partial sequence from a previous print() call does not corrupt the first
+    // glyph of the next frame.
     void resetUTF8() { _utf8_remaining = 0; }
 
   private:

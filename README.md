@@ -21,7 +21,7 @@ Some libraries may only be available from [Platformio Registry](https://registry
 If you have zero desire to use VS Code but still want to build a radio, that's OK, too.
 I would suggest you read the documentation a bit to make sure you get the right firmware for your radio.
 
-ehRadio is a fork of [ёRadio](https://github.com/e2002/yoradio/) / yoRadio v0.9.533 and would not exist without
+ehRadio was forked from [ёRadio](https://github.com/e2002/yoradio/) / yoRadio v0.9.533 and would not exist without
 the years of work e2002 put into it.  Read [A History of ESP Radios](#a-history-of-esp-radios) for more.
 
 ---
@@ -31,7 +31,7 @@ the years of work e2002 put into it.  Read [A History of ESP Radios](#a-history-
 ehRadio is focused on increasing usability for a non-builder / non-coder while at the same time
 stressing future-compatibility for builders (starting with the ESP32-S3 and future ESP boards).
 
-ehRadio inherits a lot from ёRadio, but improvements have been made to many functions.
+ehRadio inherits a lot from ёRadio, but improvements have been made to make it more usable, more stable, and more customizable.
 
 ### Features For Users
 
@@ -150,7 +150,7 @@ In simple terms, the app will send out a request over the network which devices 
 
 For devices without a display, this would make connecting to the WebUI extremely simple.
 
-Read more about how it works and get the app[here](https://trip5.github.io/eh-Device-Scanner/).
+Read more about how it works and get the app [here](https://trip5.github.io/eh-Device-Scanner/).
 
 ---
 
@@ -173,7 +173,7 @@ To enter a special SD-card only mode (with network functionality disabled), hold
 It is not necessary to hold this button while powering-up, and actually could cause issues if the builder put that button on a strapping pin.
 
 You can also enter this mode by pressing the play button, clicking a rotary encoder button, or tapping the touch screen
-in AP/Improv Mode or when you see `* LOST *`, which will trigger a reboot.
+in AP/Improv Mode or when you see `LOST`, which will trigger a reboot.
 
 An RTC module is required for the time to be displayed in this mode.
 Otherwise, the clock will not be shown.
@@ -339,7 +339,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.10.02 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), LCD displays removed, SD File Manager (and fixes to SD Mode), SDMMC, Boot speed improved, major work on layouts and VU: OLEDs now can get VU, timing fixed, bar orientation, peak bars, visualizations added (I2S gets more), fixes to: SSD1322 & SSD1327 (thanks kle7rx!) `ROTATE_90` for square displays, TFT display resolutions, volume page, Firefox mobile, IR code overhauled and mute/power added, recover from network stack crashes, Wi-fi and stream reconnects improved, library change: `elims/PsychicMqttClient` & MQTT/HA better (state topic, availability with last will, mode/ip topics, playlist revision), NV3007 added (work in progress) |
+| 2026.10.03 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), LCD displays removed, SD File Manager (and fixes to SD Mode), SDMMC, Boot speed improved, major work on layouts and VU: OLEDs now can get VU, timing fixed, bar orientation, peak bars, visualizations added (I2S gets more), fixes to: SSD1322 & SSD1327 (thanks kle7rx!) `ROTATE_90` for square displays, TFT display resolutions, volume page, Firefox mobile, IR code overhauled and mute/power added, recover from network stack crashes, Wi-fi and stream reconnects improved, library change: `elims/PsychicMqttClient` & MQTT/HA better (state topic, availability with last will, mode/ip topics, playlist revision), NV3007 added (work in progress) |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

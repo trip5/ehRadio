@@ -398,10 +398,9 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/", HTTP_ANY, handleIndex);
   webserver.on("/ready", HTTP_GET, handleReady);
   #ifdef SAVE_LOGS_TO_FS
-    /* The saved log ring, oldest file first (logging.h).  Both spellings: /log is the friendly one, /log.txt
-       is what a curl or an old bookmark carries.  Neither shadows the other - this router matches an exact
-       path, or that path followed by "/", which is why a bare /sdman route is impossible for the manager.
-       /logclear does not collide with /log either: it is a different path, not that path plus "/". */
+    // The saved log ring, oldest file first (logging.h). Both spellings: /log is the friendly one, /log.txt is what a
+    // curl or an old bookmark carries. This router matches an exact path or that path plus "/", so neither shadows the
+    // other and a bare /sdman route is impossible for the manager; /logclear is a different path, not /log plus "/".
     webserver.on("/log", HTTP_GET, handleLog);
     webserver.on("/log.txt", HTTP_GET, handleLog);
     webserver.on("/logclear", HTTP_GET, handleLogClear);

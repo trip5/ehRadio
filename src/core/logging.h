@@ -75,15 +75,14 @@ void configTimeLogReset();
     serialLogDot(); \
   } while (0)
 
-/* A bare blank line with no prefix, for separating groups of related reports
-   (the Core Monitor uses it between cycles).  Unlike SERIALLOGDOT(), this one
-   reaches telnet as well as serial. */
+// A bare blank line with no prefix, for separating groups of related reports (the Core Monitor uses it between
+// cycles). Unlike SERIALLOGDOT(), this one reaches telnet as well as serial.
 #define SERIALLOGLF() \
   do { \
     serialLogLf(); \
   } while (0)
 
-/* Boot stage timing - no-ops without BOOTLOG_TIME, since the functions compile to empty bodies. */
+// Boot stage timing - no-ops without BOOTLOG_TIME, since the functions compile to empty bodies.
 #define BOOTTIMELOG(name) \
   do { \
     bootTimeLog(name); \

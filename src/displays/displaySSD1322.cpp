@@ -13,7 +13,7 @@ void DspCore::initDisplay() {
 #if !OLED_GREYSCALE
   #include "tools/oledcolorfix.h"
 #else
-  /* Ordered to match theme_t in core/config.h */
+  // Ordered to match theme_t in core/config.h
     config.theme.background = TFT_BG;
     config.theme.meta       = GRAY_9;
     config.theme.metabg     = TFT_BG;

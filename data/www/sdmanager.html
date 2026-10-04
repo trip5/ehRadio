@@ -55,32 +55,21 @@
 
 <script src="locale.js"></script>
 <script>
-/* SD card file manager.  Every /sdman/* route is on the device; the sorting happens here, because the device
-   streams a directory once and does not sort it.  The page keeps its own address for the whole session: the
-   device redirects "/" here while the mode is open, so a bookmark, a second tab or a captive-portal redirect
-   still lands on the manager rather than on a player whose buttons are all refused.  Deliberately its own
-   address and not "/": handing itself over to the root made every reload a navigation whose result depended
-   on the device's mode at that instant, and left the page unbookmarkable.  With no network it is reachable in
-   AP mode too, where the card is simply portable storage.
-
-   Translation calls go straight to t(), never through a wrapper of our own: src/locale/www_tool.py collects
-   keys by scanning for the two-argument call written with literal strings, so a wrapper would make every
-   string here invisible to it - and its --clean pass would then delete the keys as unused, which is exactly
-   what happened once already.  Do not write that call form into a comment either: the scanner cannot tell
-   prose from code, and this very paragraph once produced a bogus key. */
+// SD card file manager. Every /sdman/* route is on the device; the sorting happens here, because the device streams
+// a directory once and does not sort it. The page keeps its own address for the session - the device redirects "/"
+// here while the mode is open - and is reachable in AP mode too, where the card is simply portable storage.
+// Never route t() through a wrapper, and never write the literal two-argument call in a comment: src/locale/www_tool.py
+// scans for that form, so a wrapper hides every string from it and prose in a comment invents a bogus key.
 (function () {
   'use strict';
 
   var state = { path: '/', entries: [], sortKey: 'n', sortDir: 1, armed: false, arming: false, card: '', locked: false, uploading: false, busy: false,
                 notice: { text: '', error: false, sticky: false } };
-  /* True for the WHOLE of an upload batch, not per file.  state.uploading is cleared between files - finish()
-     runs and clears it before next() sets it again - and both the idle redirect and keepAlive() have to hold for
-     that gap too, or one of them acts while a batch is still running. */
+  // True for the WHOLE of an upload batch, not per file: state.uploading is cleared between files, and both the idle
+  // redirect and keepAlive() must hold across that gap too.
   state.batch = false;
 
-  /* The download glyph is the one the curated list uses (see the source reference there, svgviewer.dev).
-     The rename glyph is a filled drawing, so it follows the project's .fill convention rather than .stroke:
-     stroke rules would render it as an outline of outline paths. */
+  // The rename glyph is a filled drawing, so it follows the project's .fill convention rather than .stroke.
   var SVG_RENAME = '<svg viewBox="0 0 20 20" class="fill"><path d="M17,20H1c-0.6,0-1-0.4-1-1V3c0-0.6,0.4-1,1-1h9v2H2v14h14v-8h2v9C18,19.6,17.6,20,17,20z"/><path d="M9.3,10.7c-0.4-0.4-0.4-1,0-1.4l9-9c0.4-0.4,1-0.4,1.4,0s0.4,1,0,1.4l-9,9C10.3,11.1,9.7,11.1,9.3,10.7z"/></svg>';
   var SVG_LOAD   = '<svg viewBox="0 0 24 24" class="stroke"><path d="m19 14-7 7-7-7m7 7V3"/></svg>';
   var SVG_UP     = '<svg viewBox="0 0 24 24" class="stroke"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
@@ -90,8 +79,7 @@
   function join(dir, name) { return (dir === '/' ? '' : dir) + '/' + name; }
   function parentOf(p) { var i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.substring(0, i); }
 
-  /* Entities are assembled from pieces rather than written out, because a literal entity in this file is
-     rewritten by the tooling that copies it around, which would silently corrupt the replacements. */
+  // Entities are assembled from pieces: a literal entity in this file is rewritten by the tooling that copies it.
   var AMP = '&' + 'amp;', LT = '&' + 'lt;', GT = '&' + 'gt;', QUOT = '&' + 'quot;', APOS = '&' + '#39;';
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -106,11 +94,8 @@
     return (i ? b.toFixed(1) : String(b)) + ' ' + u[i];
   }
 
-  /* The overlay has two shapes because its work does.  busy() is the one-line form a rename, delete or mkdir uses
-     ("Working...", "Deleting..."); busyUpload() is the three-line form an upload gets - the operation and its
-     position in the batch as the headline, the file being sent as a detail under it, and the part of it that is up
-     on the last line.  Only the percentage changes while a transfer runs, so the progress callback writes one line
-     and the other two are set once, before the request goes out. */
+  // The overlay has two shapes because its work does: busy() is the one-line form a rename, delete or mkdir uses, and
+  // busyUpload() the three-line form an upload gets. Only the percentage changes while a transfer runs.
   function busy(on, text) {
     $('progress').classList.toggle('hidden', !on);
     $('progresstext').classList.remove('upload');
@@ -119,19 +104,15 @@
     $('progresspct').textContent = '';
     _pctName = '';   // a new operation starts the upload bar's high-water mark over
     _pctHigh = -1;
-    /* While an operation runs, the whole button row is inert and dimmed - the same look the controls have inside the
-       protected folder - and the Delete button drops its "Delete 3?" wording: the count belongs to the press that
-       armed it, not to the seconds the request takes. */
+    // While an operation runs the whole button row is inert and dimmed, and Delete drops its "Delete 3?" wording:
+    // the count belongs to the press that armed it.
     state.busy = !!on;
     document.body.classList.toggle('busy', !!on);
     if (on) armDelete(false);
   }
 
-  /* The upload bar and its percentage only ever move FORWARD, for the file they belong to.  A retry resumes from the
-     figure the device vouched for, which is at or below the highest this bar already drew - so drawing it would walk
-     the bar backwards and read as lost progress, which is exactly what it looked like.  The figure is frozen at the
-     last good value and simply carries on when the retry climbs past it.  The high-water mark is keyed to the file
-     NAME, so the next file of the batch starts from nothing. */
+  // The upload bar and its percentage only ever move FORWARD for the file they belong to: a retry resumes below the
+  // high-water mark, so drawing it would walk the bar backwards and read as lost progress. The mark is keyed to the NAME.
   var _pctName = '', _pctHigh = -1;
   function busyUpload(step, name, pct) {
     $('progress').classList.remove('hidden');
@@ -146,26 +127,18 @@
     $('progresspct').textContent = (_pctHigh >= 0) ? _pctHigh + '%' : '';
   }
 
-  /* The listing has a spinner of its own inside the list, so it must NOT raise the full-screen overlay - but the
-     controls above it are just as inert while the folder is being walked: a Done pressed now closes the mode out
-     from under the request, and a Rename, Delete or Mkdir would act on a list that is no longer on screen.  It is
-     counted because the not_active path calls load() again from inside load(), and the inner request must not lower
-     the outer one's guard. */
+  // The listing has a spinner of its own inside the list, so it must not raise the full-screen overlay - but the
+  // controls above it are just as inert. It is counted because the not_active path calls load() from inside load().
   var _listing = 0;
   function listing(on) {
     _listing = Math.max(0, _listing + (on ? 1 : -1));
     document.body.classList.toggle('listing', _listing > 0);
   }
 
-  /* The message slot lives in state, not in the element.  Two places used to empty it deliberately - the render
-     that follows every listing, and the listing's own success path - so a report was erased milliseconds after
-     being written: the skipped list, every mutation's answer, and a delete's failures all went that way.  A message
-     now holds its place until another message replaces it, or until the user leaves the folder.  No timer: a
-     message that vanishes while it is being read is the bug this exists to fix. */
-  /* `html` is for our OWN composed strings only - the SPI marker message carries a link that must be clickable.  It
-     is an explicit flag rather than a guess, and every caller that passes it must escape anything not of our making:
-     the filename in the abandonment notice is escaped with esc() at that call site.  Everything else stays
-     textContent, which cannot inject anything at all. */
+  // The message slot lives in state, not in the element: a report must hold its place until another replaces it, or
+  // until the user leaves the folder. No timer - a message that vanishes while it is read is the bug this fixes.
+  // `html` is for our OWN composed strings only, an explicit flag rather than a guess; every caller that passes it
+  // must escape anything not of our making. Everything else stays textContent, which cannot inject anything.
   function notice(msg, isError, sticky, html) {
     state.notice = { text: msg || '', error: !!isError, sticky: !!sticky, html: !!html };
     paintNotice();
@@ -180,22 +153,14 @@
     n.style.borderColor = (state.notice.text && state.notice.error) ? '#d33' : '';
   }
 
-  /* Server error codes to something the user can act on.  A switch rather than a key/value table, so every
-     message sits inside a literal two-argument call carrying its own strings - the only form the key collector
-     in src/locale/www_tool.py can see.  Writing that call form out in a comment is a trap of its own: the
-     scanner cannot tell prose from code, and this comment used to invent a bogus entry in every locale. */
+  // Server error codes to something the user can act on: a switch rather than a table, so every message sits inside a
+  // literal two-argument t() call - the only form the collector in src/locale/www_tool.py can see.
   function errText(code) {
     switch (code) {
-      /* in_use and not_connected have no case of their own.  in_use can only be reached by a race against the
-         stop that entering the mode performs, and not_connected went with the AP-mode restriction, so both
-         fall through to the general failure.  The device still refuses both; it reports them the same way.
-
-         not_found, no_dir and no_parent are one answer on purpose.  The device tells them apart for its own log -
-         a stale item, an upload target folder that went away, a parent folder that went away - but to the user
-         they are all the same situation: the path named is not on the card, so the listing on screen is out of
-         date.  What to do about it is identical, and one message is one message to translate. */
+      // in_use and not_connected fall through to the general failure: the first is a race against the stop entering
+      // the mode performs, the second went with the AP-mode restriction. not_found, no_dir and no_parent are one
+      // answer on purpose: to the user the named path is simply not on the card, so the listing is out of date.
       case 'protected':     return t('msg_item_protected', 'That item is protected and cannot be changed.');
-      case 'spi_blocked':   return t('msg_spi_upload_marker', 'This SD card has problems with uploads on an SPI reader.');
       case 'exists':        return t('msg_file_folder_exists', 'File/folder with that name already exists.');
       case 'no_space':      return t('msg_sd_no_space', 'There is not enough space on the card.');
       case 'not_found':
@@ -205,20 +170,15 @@
       case 'bad_name':      return t('msg_name_not_allowed', 'That name is not allowed.');
       case 'not_dir':       return t('msg_not_folder', 'That is not a folder.');
       case 'write_failed':  return t('msg_write_failed', 'The card refused a write - it may be full or faulty.');
-      /* The device caught the card falling behind what the writes claimed, so those bytes are gone and the file is
-         only recoverable by sending it again from the start - which is what the uploader does with this reason.
-         The advice to the user is the same as a refused write, so it is the same text; the two are told apart on
-         the wire and in the device log, which is where the difference matters. */
+      // The card fell behind what the writes claimed, so those bytes are gone and the file must be sent again - the
+      // same advice as a refused write, told apart on the wire and in the device log.
       case 'card_lagging':  return t('msg_write_failed', 'The card refused a write - it may be full or faulty.');
       case 'cut_off':       return t('msg_upload_cut_off', 'The upload was cut off before it finished.');
-      /* The device refused an offset it could not vouch for, so the figure this page was holding is stale.  The
-         uploader answers by dropping it and sending the whole file, which is why the advice is the plain write
-         failure: the user only ever sees this if that attempt failed too. */
+      // The device refused an offset it could not vouch for, so the page's figure was stale and the whole file is
+      // sent; the user sees this only if that attempt failed too.
       case 'resume_refused': return t('msg_write_failed', 'The card refused a write - it may be full or faulty.');
       case 'uploading':     return t('msg_file_upload_in_progress', 'An upload is in progress - wait for it to finish.');
-      /* A delete batch holds the mode too, so a Done press from another tab is refused the same way.  Reusing the
-         upload key would be dishonest about what is running; this key has no translation yet and falls back to the
-         English default until the locale tooling picks it up. */
+      // A delete batch holds the mode too; this key falls back to the English default until the locale tooling picks it up.
       case 'busy':          return t('msg_file_delete_in_progress', 'A delete is in progress - wait for it to finish.');
       case 'not_active':    return t('msg_sd_file_manager_closed', 'SD File Manager was closed.');
       default:              return t('msg_operation_failed', 'The operation failed.');
@@ -235,21 +195,15 @@
     $('sdmanpath').textContent = state.path + (state.card ? '  \u00b7  ' + state.card : '');
   }
 
-  /* Every response carries the mode's remaining idle time, so the tab can end itself at the same moment the
-     device does rather than sitting on a stale screen until the next click.  The reload is deliberately a
-     couple of seconds late: firing exactly at zero could arrive before the device has processed its own
-     timeout, land back in the manager and start the cycle again. */
+  // Every response carries the mode's remaining idle time, so the tab can end itself when the device does. The reload
+  // is deliberately a couple of seconds late: firing at zero could arrive before the device's own timeout.
   var idleTimer = null;
   function scheduleIdleReload(ms) {
     if (idleTimer) window.clearTimeout(idleTimer);
     idleTimer = null;
     if (!ms) return;
-    /* The guard is checked when the timer FIRES, not only when it is armed, and that distinction is the whole
-       point.  Arming happens on the first /sdman/info of the session and the delay is the device's entire idle
-       window, so a batch that was still running when it expired used to be navigated away from - which aborted the
-       in-flight upload and left the device waiting for a browser that had gone.  That is exactly what the log
-       showed: a healthy transfer (writes succeeding, no failure reason) going silent for the full stall window,
-       with the batch ending after one file.  The next response re-arms it, so returning here costs nothing. */
+    // The guard is checked when the timer FIRES, not only when armed: arming happens on the first /sdman/info of the
+    // session, so a batch still running when it expired used to be navigated away from, aborting the upload.
     idleTimer = window.setTimeout(function () {
       idleTimer = null;
       if (state.uploading || state.batch) return;
@@ -257,12 +211,9 @@
     }, ms + 2000);
   }
 
-  /* Choosing a file can take minutes in a dialog the device cannot see, so the user's own activity is reported
-     as it happens: /sdman/info touches the device's clock and hands the remaining time back to
-     scheduleIdleReload() above, so both ends count from the same value.  A click always pings, because it is a
-     deliberate act and the only signal a picker leaves behind - one second apart at worst, which is ahead of a
-     display that only counts whole seconds.  Keys are throttled instead, because they arrive in runs.  Both are
-     deliberate rather than a timer, so an unattended tab is still timed out, which is what the countdown is for. */
+  // Choosing a file can take minutes in a dialog the device cannot see, so user activity is reported as it happens:
+  // /sdman/info touches the device's clock and returns the remaining time to scheduleIdleReload(). A click always
+  // pings; keys are throttled because they arrive in runs.
   var _lastPing = 0;
   function keepAlive(minGap) {
     if (state.uploading || state.batch) return;   // an upload's own chunks are the touch, at a far higher rate
@@ -289,44 +240,34 @@
     return out;
   }
 
-  /* The Delete button is a two-step control: the first press only arms it and says so, and presses within the
-     next second are ignored, so a double-tap cannot delete anything by accident. */
+  // The Delete button is a two-step control: the first press only arms it and says so, and presses within the next
+  // second are ignored, so a double-tap cannot delete anything by accident.
   function armDelete(armed) {
     state.armed = armed;
     var d = $('sdmanDelete'), n = selection().length;
     d.removeAttribute('data-i18n');
-    /* The count belongs to the confirmation step.  The first press says only Delete - it does nothing yet -
-       and the press that will actually remove something reports how many it is about to remove. */
+    // The count belongs to the confirmation step; the first press says only Delete and does nothing yet.
     d.textContent = (armed && n) ? t('btn_delete_n', 'Delete {0}?', n) : t('btn_delete', 'Delete');
     d.classList.toggle('off', state.locked || !n);
   }
 
-  /* The whole directory is rendered at once and the list scrolls.  There is no paging anywhere: not on the
-     device, which streams every entry in one response, and not here, so select-all means the whole folder
-     rather than the part of it a page happened to show. */
+  // The whole directory is rendered at once and the list scrolls: there is no paging anywhere, not on the device
+  // (which streams every entry in one response) and not here, so select-all means the whole folder.
   function render() {
     renderPath();
 
-    /* The data folder holds the derived playlist, the SD index and the saved credentials, and the device refuses
-       every change inside it.  Rather than offer controls that would only be rejected, they are dimmed and made
-       inert here - while browsing INTO the folder stays allowed, because seeing what is in it is the point.
-       The name must match SD_DATA_DIR in src/core/config.h.  `/data` is NOT locked: it is what that folder was
-       called before the rename, nothing reads it any more, and the user must be able to delete it from here.
-       This is UX only - the DEVICE is the real guard, and the root's own delete is refused there by name. */
+    // The data folder holds the derived playlist, the SD index and the credentials, and the device refuses every
+    // change inside it, so the controls are dimmed here while browsing in stays allowed. The name must match
+    // SD_DATA_DIR; /data is NOT locked (the old name), and the user may delete it. UX only - the DEVICE is the guard.
     var locked = (state.path === '/ehradio.data' || state.path.indexOf('/ehradio.data/') === 0);
     state.locked = locked;
-    /* THE SPI MARKER blocks UPLOADS, and only uploads - the device refuses every upload on a marked card while it
-       still allows folders and deletes - so the Upload labels dim card-wide while New Folder and Delete keep
-       working.  Dimming all of them, as the folder protection does, would be the page telling a lie. */
-    var noUpload = locked || !!state.spiBlocked;
+    // Uploads are dimmed only where the folder itself is protected; New Folder and Delete keep working.
+    var noUpload = locked;
 
     var html = '';
     if (state.path !== '/') {
-      /* The tip is built with t() as the row is drawn, exactly like the rename and download tips, and the row
-         deliberately carries no data-i18n.  data-i18n was worse than useless here: the key collector in
-         src/locale/www_tool.py reads the attribute, then everything up to the next ">", then the text up to
-         the next "<" - and inside a concatenation that next ">" is the one closing the attribute, so the tool
-         recorded the following concatenation fragment as this string's source text in every locale. */
+      // The tip is built with t() as the row is drawn, exactly like the rename and download tips. The row carries no
+      // data-i18n: inside a concatenation the collector's "up to the next '>'" rule recorded a fragment as the string.
       html += '<li class="pleitem sdup" data-up="' + esc(parentOf(state.path)) + '">'
             + '<span class="sdico"><span class="sdiconbtn" title="'
             + esc(t('ttl_up', 'Up one level')) + '">' + SVG_UP + '</span></span>'
@@ -337,9 +278,8 @@
     for (var i = 0; i < state.entries.length; i++) {
       var e = state.entries[i];
       var full = join(state.path, e.n);
-      /* Every control carries the name or path it acts on as its title, so which row a control belongs to
-         is checkable on hover rather than assumed.  The rename and download tips name a file, so they are
-         built with t() as the rows are rendered. */
+      // Every control carries the name or path it acts on as its title, so which row a control belongs to is
+      // checkable on hover. The rename and download tips are built with t() as the rows are rendered.
       var renameCell = locked
         ? '<span class="sdiconbtn off">' + SVG_RENAME + '</span>'
         : '<span class="sdiconbtn" data-act="rename" title="'
@@ -355,8 +295,7 @@
             + SVG_LOAD + '</a>') + '</span>'
             + '</li>';
     }
-    /* Folders are rendered in full, so an empty one really is empty rather than a page of one, and the notice
-       applies at any depth instead of only at the root. */
+    // Folders are rendered in full, so an empty one really is empty and the notice applies at any depth.
     if (!state.entries.length) {
       html += '<li class="pleitem sdnotice">' + esc(t('msg_folder_empty', 'This folder is empty')) + '</li>';
     }
@@ -368,13 +307,9 @@
     $('selectAllCheckbox').checked = false;
     $('selectAllCheckbox').disabled = locked;
     armDelete(false);
-    /* The banner is derived from the state rather than an event: it shows while it applies and goes when it stops,
-       and it is flagged as an error so it wears the same red border as a failure - the reader is being told why the
-       work cannot be done.  The MARKER comes first because it is the more specific answer and it applies everywhere
-       on the card, not only in one folder.  An event message in the slot is left alone. */
-    if (state.spiBlocked) notice(spiMarkerNotice(), true, true, true);
-    else if (state.auWarn) notice(spiAuWarnNotice(), true, true, true);
-    else if (locked) notice(t('msg_folder_protected', 'This folder is protected.'), true, true);
+    // The banner is derived from the state rather than an event, and is flagged as an error so it wears the same red
+    // border as a failure. An event message already in the slot is left alone.
+    if (locked) notice(t('msg_folder_protected', 'This folder is protected.'), true, true);
     else if (state.notice.sticky) notice('');
     else paintNotice();
   }
@@ -383,10 +318,8 @@
     var box = $('pleditorcontent');
     var wasScroll = keepScroll ? box.scrollTop : 0;
     box.innerHTML = '<li class="pleitem sdnotice"><span class="plloader"><span class="loader"></span></span></li>';
-    /* The row is inert for as long as the folder is being walked, and `release` drops that on every way out of this
-       function: the success path, each of the returns below, the catch, and the not_active retry (which calls load()
-       again, so the inner call's release lowers the count and this one lowers the outer).  Disarming here as well
-       because the selection is about to be replaced - a "Delete 3?" label would be counting a list that is gone. */
+    // The row is inert while the folder is walked, and `release` drops that on every way out: the success path, the
+    // returns, the catch and the not_active retry. Disarmed here too, because the selection is about to be replaced.
     listing(true);
     armDelete(false);
     function release() { listing(false); }
@@ -394,14 +327,13 @@
     return fetch('/sdman/list?path=' + enc(path)).then(function (r) {
       return r.json().catch(function () { return { ok: false, error: 'bad_response' }; });
     }).then(function (j) {
-      /* The mode times out after SDMAN_AUTO_EXIT_MS with no requests.  A tab that is still open means the
-         user is still here, so ask for the mode back once and carry on rather than showing an error. */
+      // The mode times out after SDMAN_AUTO_EXIT_MS with no requests; a tab still open means the user is here, so ask
+      // for the mode back once and carry on rather than showing an error.
       if (!j.ok && j.error === 'not_active' && !retried) {
         return fetch('/sdman/enter').then(function () { return load(path, keepScroll, true); });
       }
-      /* A listing is refused while another one is in flight, or while an upload is writing (409 busy/uploading).
-         That is the device asking the page to come back, not a failure, so it retries quietly a few times instead
-         of putting an error in the slot - which is what makes a second tab harmless. */
+      // A listing is refused while another is in flight or while an upload is writing: the device asking the page to
+      // come back, not a failure, so it retries quietly. That is what makes a second tab harmless.
       if (!j.ok && (j.error === 'busy' || j.error === 'uploading') && (busyTries || 0) < 4) {
         window.setTimeout(function () { load(path, keepScroll, retried, (busyTries || 0) + 1); }, 1200);
         return;
@@ -428,55 +360,15 @@
     }).then(release, release);
   }
 
-  /* The marker message, and the ONE place its wording lives.  The first line is a locale key so it can be
-     translated; the URL is hardware documentation and stays as it is, so it is appended rather than translated. */
-  var SPI_MARKER_URL = 'https://trip5.github.io/ehRadio/Hardware/#sd-card-format';
-  /* HTML, because that link MUST be clickable: it is the explanation of what just happened and what the user can do
-     about it.  The sentence comes from the locale and the URL is a constant of ours, so there is nothing unescaped in
-     it - and a caller adding a filename escapes it itself (see cardFault).  Passed to notice() with its html flag.
-     THE REMEDY APPEARS ONLY WHEN IT APPLIES.  A card formatted with a large allocation unit is the usual cause of this
-     failure and 512-byte units fix it - but telling a card that is ALREADY formatted that way to format itself is
-     nonsense, so the sentence is added only when the device reports a figure that is not 512.  0 means the device
-     could not read it, and unknown says nothing rather than guessing. */
-  function spiMarkerNotice() {
-    var s = t('msg_spi_upload_marker', 'This SD card has problems with uploads on an SPI reader.');
-    if (state.au && state.au !== 512) {
-      s += ' ' + t('msg_format_au_512', 'Format this card with 512-byte allocation units to enable uploads.');
-    }
-    return s + ' <a href="' + SPI_MARKER_URL + '" target="_blank" rel="noopener">' + SPI_MARKER_URL + '</a>';
-  }
-
-  /* THE ADVICE THAT COMES BEFORE THE VERDICT.  The marker above is what a card gets when it has already failed; this
-     is what it gets when it is merely STRUGGLING, while uploads still work.  The trigger is the resumes - see
-     AU_WARN_RESUMES - and it is deliberately a warning and not a block: a slow card is still a usable card, and the
-     field showed exactly that, a cheap card at 16 KB allocation units landing every file at 73-86 KB/s while the same
-     card at 8 KB lost them.  Same slot and same styling as the marker so the two read as one voice, and the URL is
-     the same page. */
-  function spiAuWarnNotice() {
-    return t('msg_format_au_512_advice', 'To improve reliability of this SD card, please format it with 512-byte allocation units.')
-           + ' <a href="' + SPI_MARKER_URL + '" target="_blank" rel="noopener">' + SPI_MARKER_URL + '</a>';
-  }
-
   function loadInfo() {
     return fetch('/sdman/info').then(function (r) { return r.json(); }).then(function (j) {
       if (!j.ok) return;
       if (!j.mounted) { notice(errText('no_card'), true); return; }
       scheduleIdleReload(j.idle);
       state.card = t('msg_sd_used', 'Used {0} of {1}', fmtSize(j.used), fmtSize(j.total));
-      /* The transport decides whether a card-side failure may WRITE the marker at all, and the marker decides
-         whether the Upload buttons are offered.  A change re-renders, because `locked` and the labels are painted
-         from the listing rather than from an event. */
-      if (state.isSpi === undefined) state.isSpi = (j.spi !== false);
-      /* The marker decides whether the Upload buttons are offered, and the ALLOCATION UNIT decides whether the remedy
-         sentence belongs in the notice.  Either one changing re-renders, because both are painted from the listing
-         rather than from an event - and the first load can finish after the listing has already been drawn. */
-      var blocked = !!j.spimarker;
+      // The allocation unit is still carried for reference, though nothing on the page acts on it now.
       var au = j.au || 0;
-      if (blocked !== state.spiBlocked || au !== state.au) {
-        state.spiBlocked = blocked;
-        state.au = au;
-        if (state.entries.length) render();
-      }
+      if (au !== state.au) state.au = au;
       renderPath();
     }).catch(function () {});
   }
@@ -503,13 +395,11 @@
     var paths = selection();
     if (!paths.length) return;
     busy(true, t('msg_deleting', 'Deleting...'));
-    /* One request for the whole selection, so a multi-delete costs one walk of the card and one reload
-       instead of one of each per file. */
+    // One request for the whole selection, so a multi-delete costs one walk of the card and one reload.
     post('/sdman/delete', paths.join('\n')).then(function (j) {
       busy(false);
-      /* One count, one message.  The device still separates a refused removal from a failed one in its log,
-         but the page does not split hairs over why something stayed.  refused is read as well as failed, so a
-         selection the device refused outright - nothing deleted, ok still false - is reported too. */
+      // One count, one message. refused is read as well as failed, so a selection the device refused outright -
+      // nothing deleted, ok still false - is reported too.
       var gone = (j.failed || 0) + (j.refused || 0);
       notice(gone ? t('msg_delete_failed', '{0} could not be deleted.', gone) : '', gone > 0);
       return load(state.path, true);
@@ -518,8 +408,8 @@
 
   /* ---- events ------------------------------------------------------------------------------------- */
 
-  /* Browsing is the deliberate action that clears a message: leaving the folder changes the context, while ticking
-     a box or re-sorting does not, so those leave a message in place to be read. */
+  // Browsing is the deliberate action that clears a message: leaving the folder changes the context, while ticking a
+  // box or re-sorting leaves a message in place to be read.
   $('pleditorcontent').addEventListener('click', function (ev) {
     var li = ev.target.closest('li.pleitem');
     if (!li) return;
@@ -541,11 +431,8 @@
     armDelete(false);
   };
 
-  /* Every button under the list is a deliberate action, so pressing any of them clears the message first: the answer
-     to the action about to be taken is never sitting beside the answer to the last one, and a batch that went through
-     cleanly leaves nothing behind.  The protected folder dims these buttons, so there is nothing stale to clear in
-     /data.  Capture phase on purpose - the clear must run before the button's own handler, or a handler reporting
-     synchronously would have its message wiped by this. */
+  // Every button under the list clears the message first, so the answer to the action about to be taken is never
+  // beside the answer to the last one. Capture phase on purpose: the clear must run before the button's own handler.
   $('pleditorwrap').querySelector('.formbuttons').addEventListener('click', function () { notice(''); }, true);
 
   $('sdmanDelete').onclick = function () {
@@ -569,25 +456,19 @@
     mutate('/sdman/mkdir?path=' + enc(join(state.path, nn)));
   };
 
-  /* Uploads go one file per request, as multipart: one request per file keeps the device's upload handler
-     unambiguous about where a file starts, and XHR is what can report progress on the way up.
-
-     Both upload buttons run this.  Replace leaves the device's default alone: the target is opened for
-     writing, which truncates, so an existing name is overwritten.  Skip Existing asks for skip=1, and the
-     device then leaves an existing name untouched and reports it instead of writing.  A name that is not
-     there yet is written either way. */
-  /* How long one file may make no progress at all before the page gives up on it and moves on.  The device's own
-     deadline is longer on purpose: that one ends the transfer, this one keeps the batch alive. */
+  // Uploads go one file per request, as multipart: one request per file keeps the device's upload handler
+  // unambiguous about where a file starts, and XHR is what can report progress on the way up.
+  // Both upload buttons run this. Replace leaves the device's default alone - the target is opened for writing, which
+  // truncates, so an existing name is overwritten. Skip Existing asks for skip=1, and the device leaves it untouched.
+  // How long one file may make no progress before the page gives up and moves on; the device's own deadline is longer.
   var UPLOAD_STALL_MS = 20000;
 
   function startUpload(input) {
-    if (state.locked || state.spiBlocked) return;
+    if (state.locked) return;
     var chosen = input.files;
     if (!chosen || !chosen.length) return;
-    /* Snapshot the selection BEFORE clearing the input.  input.files is not a copy in every browser: Chromium
-       hands back the same live FileList and input.value = '' empties it in place, so a loop that went on
-       reading that FileList found it empty and sent no request at all - no upload, no device log line, no
-       error on screen.  Firefox returned a fresh list, which is why only Chromium was affected. */
+    // Snapshot the selection BEFORE clearing the input: Chromium hands back the same live FileList and
+    // input.value = '' empties it in place, so a loop reading it found nothing and sent no request at all.
     var files = [];
     for (var k = 0; k < chosen.length; k++) files.push(chosen[k]);
     input.value = '';
@@ -596,48 +477,30 @@
     var failed = 0;
     var lastErr = '';
     var i = 0;
+    var reentered = false;   // the mode was asked for again ONCE after a not_active refusal - see xhr.onload
     /* Per file, for the whole batch: how many attempts it has had, how many of those went NOWHERE, and the figure
        the device could vouch for at its last failure.  That last one is what decides whether a retry is counted -
        see retryWholeFile(). */
     var tries = {};
     var stalledTries = {};
     var progressAt = {};
-    /* name -> the byte offset the device can VOUCH for in that file.  The whole of the resume protocol on this
-       side: the device sends it with a card-side failure, and the next attempt sends only f.slice(landed). */
+    // name -> the byte offset the device can VOUCH for in that file; the next attempt sends only f.slice(landed).
     var landedAt = {};
     state.batch = true; // holds the idle redirect and keepAlive() for the whole batch, not just one file
+    // The mode may have timed out while this page sat idle (its clock is three minutes), so a batch started after a
+    // quiet spell would meet a closed manager on its FIRST file. The not_active branch in xhr.onload is the other half.
+    fetch('/sdman/enter').catch(function () {});
 
-    /* Send one file again FROM THE START.  This is the answer to what the field logs settled: the device cannot put
-       back bytes it no longer holds - they belong to chunks that are already gone - but the BROWSER still has them,
-       and the failures are per-TRANSFER rather than a rate.  In one 14-file batch nine files landed with ZERO
-       rescues while three needed 26, 53 and 26.  A fresh attempt has a real chance where patching bytes in place
-       cannot succeed. */
-    /* THE BUDGET COUNTS ATTEMPTS THAT WENT NOWHERE, NOT ATTEMPTS.  Resume-on-retry changed both what a failure
-       costs and what it means: every attempt that advanced the verified position did real work and left the file
-       that much closer to done, so giving up there throws away the progress just made.  A field run lost the LAST
-       file of a batch exactly that way - 2.85 MB, then 3.43 MB, then 6.47 MB of a 6.96 MB file, the third attempt
-       ending 490 KB from the end - because that third failure spent a budget of two retries that has nothing to do
-       with how far the file got.  Teardrops is the same file one attempt luckier: a final check 48 KB short, then a
-       lagging card, then it landed on its third attempt.
-       So a retry whose figure moved forward by PROGRESS_BYTES or more is FREE, and only one that gained less spends
-       one of MAX_STALLED_TRIES.  THAT IS ONE: a file that goes nowhere on a retry is a file this card cannot take -
-       the field showed the same few kilobytes re-sent for ever, at ten different clocks - so one extra try is enough
-       to rule out a hiccup.  A second one only costs the user another second before the batch is abandoned.
-       MAX_ATTEMPTS is the ceiling over both, so no file can loop for ever. */
+    // Send one file again FROM THE START: the device cannot put back bytes it no longer holds, but the BROWSER still
+    // has them, and the failures are per-TRANSFER rather than a rate. A fresh attempt has a real chance.
+    // THE BUDGET COUNTS ATTEMPTS THAT WENT NOWHERE, NOT ATTEMPTS: resume-on-retry means every attempt that advanced
+    // the verified position did real work, so giving up there throws away the progress just made. A retry whose figure
+    // moved by PROGRESS_BYTES or more is FREE; one that gained less spends one of MAX_STALLED_TRIES. MAX_ATTEMPTS
+    // bounds the loop whatever happens.
     var PROGRESS_BYTES = 32768;
     var MAX_STALLED_TRIES = 3;
-    /* THE ADVICE THRESHOLD.  A card whose allocation unit is larger than 512 bytes is the card that struggles - but
-       struggling is not failing, and a slow card is still a working card, so this is a warning and never a block.
-       Three resumed attempts is the line: every clean run in the field needed ZERO, so three is already past normal,
-       and the 16 KB cheap card that this advice is written for spent resumes on nearly every file it took.  The
-       warning is a SESSION state rather than a per-file one, so once raised it stays up for the whole visit. */
-    var AU_WARN_RESUMES = 3;
-    var auResumes = 0;
-    /* The attempt ceiling SCALES WITH THE FILE.  A budget card in the field advances about 256 KB per attempt before
-       it refuses a chunk, so a 10 MB file needs roughly forty attempts - and a flat ceiling of eight threw away files
-       that still had megabytes to send (Infinity at 2.78 MB, Shelter at 3.04, Intro at 4.04).  The guard that ends a
-       hopeless file is MAX_STALLED_TRIES, which is size-independent: attempts that moved the file nowhere.  The floor
-       keeps small files from being cut short, and MAX_ATTEMPTS_HARD bounds the loop whatever happens. */
+    // The attempt ceiling SCALES WITH THE FILE: a budget card advances ~256 KB per attempt before refusing, so a 10 MB
+    // file needs ~40 attempts. The guard that ends a hopeless file is MAX_STALLED_TRIES, which is size-independent.
     var MAX_ATTEMPTS = 8;
     var ATTEMPT_BYTES = 262144;
     var MAX_ATTEMPTS_HARD = 200;
@@ -645,21 +508,17 @@
       var cap = Math.max(MAX_ATTEMPTS, Math.ceil((size || 0) / ATTEMPT_BYTES));
       return Math.min(cap, MAX_ATTEMPTS_HARD);
     }
-    /* Reasons that mean the file is not on the card and is worth sending again: the device refused a write it could
-       not repair, or it caught the card falling behind what the writes claimed.  A refusal this page caused itself
-       is deliberately not in here. */
+    // Reasons that mean the file is not on the card and is worth sending again: the device refused a write it could
+    // not repair, or caught the card falling behind. A refusal this page caused itself is deliberately not in here.
     var RETRYABLE = { write_failed: 1, card_lagging: 1, cut_off: 1, bad_response: 1, resume_refused: 1 };
-    /* The subset of those that blames the CARD.  When one of these exhausts the retry budget the WHOLE BATCH is
-       abandoned: a card that cannot finish one file will not finish the next thirteen, and the field runs showed
-       precisely that - file after file, each burning its budget and discarding its partial.  `bad_response` (a
-       dropped socket) is deliberately NOT here; that is a network hiccup and costs only the file it happened to. */
+    // The subset that blames the CARD: when one of these exhausts the retry budget the WHOLE BATCH is abandoned, since
+    // a card that cannot finish one file will not finish the next. bad_response is a network hiccup and is not here.
     var CARD_FAULT = { write_failed: 1, card_lagging: 1, cut_off: 1, resume_refused: 1 };
     function retryWholeFile(name, size) {
       var had = tries[name] || 0;
       if (had >= attemptCeiling(size)) return false;
-      /* The figure is read BEFORE the attempt is counted, and kept for the next failure of this name: what matters
-         is the step this attempt made, not where the file stands.  A failure that came with no figure at all (a
-         dropped socket) leaves it where it was and is therefore counted as having gone nowhere. */
+      // The figure is read BEFORE the attempt is counted, and kept for the next failure of this name: what matters is
+      // the step this attempt made. A failure with no figure at all is counted as having gone nowhere.
       var figure = landedAt[name] || 0;
       var moved = figure - (progressAt[name] || 0);
       tries[name] = had + 1;
@@ -671,12 +530,9 @@
       return true;
     }
 
-    /* A failed transfer's handle stays open until the device's own stall branch closes it, and that is also the
-       moment the resume offset is recorded.  A retry sent before it would be taken as a FRESH file: the target would
-       be truncated and the tail we are holding would be written at offset zero, which is a corrupt file rather than
-       a resume.  So the retry asks first and sends nothing until the answer says nothing is open.
-       In the ordinary case this costs one cheap request: a transfer that ended properly released the handle before
-       it answered, and the device answers this shape of the request without touching the card at all. */
+    // A failed transfer's handle stays open until the device's own stall branch closes it, which is also when the
+    // resume offset is recorded. A retry sent before that would be taken as a FRESH file and corrupt the target, so
+    // the retry asks first. In the ordinary case this costs one cheap request.
     var RELEASE_WAIT_MS = 20000;
     function waitForRelease(f, then) {
       var deadline = Date.now() + RELEASE_WAIT_MS;
@@ -686,9 +542,8 @@
           .then(function (j) {
             if (j && j.ok && !j.open) { then(); return; }
             if (Date.now() < deadline) { window.setTimeout(ask, 1000); return; }
-            /* It refused to let go.  Sending the whole file is still CORRECT - it is what a fresh request does, and
-               the device truncates before it writes - so the batch keeps moving rather than stalling on one file.
-               The offset goes with it: the device would refuse one it cannot vouch for. */
+            // It refused to let go. Sending the whole file is still CORRECT - a fresh request truncates before it
+            // writes - so the batch keeps moving. The offset goes with it: the device would refuse one it cannot vouch for.
             delete landedAt[f.name];
             then();
           })
@@ -700,10 +555,8 @@
       })();
     }
 
-    /* One summary for the whole batch, and the same two keys whatever the count is - no singular form to keep in
-       step with a plural one.  The count is in the text, and the last failure's reason rides along so a number is
-       never left unexplained.  Nothing is reported per file: the slot holds one message, so it would only be
-       replaced by the next file's. */
+    // One summary for the whole batch, with the same two keys whatever the count is; the last failure's reason rides
+    // along so a number is never left unexplained. Nothing is reported per file: the slot holds one message.
     function uploadSummary() {
       var parts = [];
       if (failed) {
@@ -727,35 +580,27 @@
       for (;;) {
         if (i >= files.length) { done(); return; }
         f = files[i++];
-        /* Skip Existing is decided HERE, against the folder already on screen, so a name that is already
-           there costs no transfer at all.  Uploading it and letting the device refuse the first chunk was the
-           old behaviour: the browser commits the whole multipart body before the answer comes back, so the
-           file went up the wire only to be thrown away.  The device still checks as well, which is what covers
-           a name created since this listing was fetched - the race this pre-check cannot see. */
-        /* ...but never for a file we are holding a resume offset for: the copy that "already exists" there is the
-           half-written one the DEVICE kept for this retry, so skipping it throws away the very thing that would
-           have made the transfer cheap.  The device applies the same rule, which matters because this pre-check
-           never reaches it. */
+        // Skip Existing is decided HERE, against the folder already on screen, so a name that is already there costs
+        // no transfer - the browser commits the whole body before the answer comes back. The device still checks too,
+        // which covers a name created since the listing was fetched.
+        // ...but never for a file we hold a resume offset for: the copy that "already exists" is the half-written one
+        // the DEVICE kept for this retry, so skipping it throws away the cheap path.
         if (skip && !landedAt[f.name] && existsInFolder(f.name)) { skipped++; continue; }
         /* The position in the batch, so a long upload set says where it is: the headline reads "Uploading 2/32". */
         label = i + '/' + files.length;
         break;
       }
       var xhr = new XMLHttpRequest();
-      /* Every way this file's request can end lands in finish(): a response, a dropped connection, a timeout, our
-         own abort.  state.uploading is cleared on all of them, because that flag is what dims the button row and
-         blocks the idle redirect - a batch that died without onload used to leave the page inert with no way out
-         but a reload, while the device still counted its open handle as an upload in progress. */
+      // Every way this file's request can end lands in finish(): a response, a dropped connection, a timeout, our own
+      // abort. state.uploading is cleared on all of them - it dims the button row and blocks the idle redirect.
       var ended = false;
       var stalled = false;   // the progress watchdog aborted this file, so onabort must retry rather than count it out
       var deviceLost = false; // the device said the transfer is lost: the abort came from us, and the retry resumes
       var probing = false;    // one device poll in flight at a time
       var watch = 0;
       function stopWatch() { if (watch) { window.clearInterval(watch); watch = 0; } }
-      /* The device knows the instant a transfer is lost, and without this the page would not learn it until the
-         request ENDED - which is the whole cost of a failure, because the browser goes on pushing the rest of the
-         file up the wire while every byte of it is dropped.  So the watchdog asks, every tick, and ends the
-         transfer itself when the answer is "lost". */
+      // The device knows the instant a transfer is lost, and without this the page would not learn it until the
+      // request ENDED - the whole cost of a failure, as the browser keeps pushing bytes that are all dropped.
       function pollDevice() {
         if (probing || ended) return;
         probing = true;
@@ -764,71 +609,40 @@
           .then(function (j) {
             probing = false;
             if (ended || !j || !j.ok || !j.lost) return;
-            /* The offset belongs to a NAME.  One transfer is in flight at a time, but a late answer must never be
-               written into another file's resume slot. */
+            // The offset belongs to a NAME: a late answer must never be written into another file's resume slot.
             var base = String(j.up || '');
             if (base.slice(base.lastIndexOf('/') + 1) !== f.name) return;
             if (j.landed) landedAt[f.name] = j.landed;
             deviceLost = true;
-            /* Freeze on what the CARD holds.  From here the request is being thrown away, so showing what the
-               browser had pushed would be a lie - and the retry's bar starts from exactly this figure. */
+            // Freeze on what the CARD holds: from here the request is being thrown away, so showing what the browser
+            // pushed would be a lie - and the retry's bar starts from this figure.
             busyUpload(label, f.name, Math.round((j.landed || 0) * 100 / f.size) + '%');
             xhr.abort();   // onabort reports write_failed, which is retryable, so only the remainder goes up
           })
           .catch(function () { probing = false; });
       }
-      /* THE CARD COULD NOT FINISH THIS FILE, SO IT WILL NOT FINISH THE REST.  Stop the batch and say so in the one
-         slot there is, rather than grinding through thirteen more files and discarding a partial on every one.
-         done() already releases everything a batch owns - the flags, the overlay, the idle hold - and refreshes the
-         listing, so the message is set AFTER it: the summary done() raises would otherwise replace ours. */
+      // THE CARD COULD NOT FINISH THIS FILE, SO IT WILL NOT FINISH THE REST: stop the batch and say so rather than
+      // grinding through the rest. done() releases everything a batch owns, so the message is set AFTER it.
       function cardFault(reason) {
         var name = f ? f.name : '';
-        /* ESCAPED, because this notice is HTML for the link's sake and the filename is not ours. */
+        /* ESCAPED, since a filename is not ours and this notice goes into the slot as text. */
         var where = name ? ' (' + esc(name) + ')' : '';
         done();
-        /* THE ANSWER IS THE MARKER MESSAGE, not "the card looks faulty": it is the same explanation the user meets
-           if they come back with this card, and it points at the hardware page.  Then, ON SPI ONLY, the verdict is
-           WRITTEN to the card, so it survives a different browser or a re-plug - and the Upload buttons lock at
-           once rather than after the next listing.  An SDMMC card is never marked: the device's route ignores it. */
-        notice(spiMarkerNotice() + where, true, true, true);
-        if (state.isSpi && !state.spiBlocked) {
-          post('/sdman/spimarker').then(function () {
-            state.spiBlocked = true;
-            if (state.entries.length) render();
-            notice(spiMarkerNotice() + where, true, true, true);
-          }).catch(function () {});
-        }
+        // The plain answer: there is no verdict to give, and the reason is already named in the device's own log.
+        notice(t('msg_write_failed', 'The card refused a write - it may be full or faulty.') + where, true, true, true);
       }
       function finish(err, stop) {
         if (ended) return;
         ended = true;
         stopWatch();
-        /* The device refused an offset it could not vouch for - the transfer that offset belonged to had already
-           been released by the device's own stall branch, so the file it points into is no longer the one being
-           continued.  It refuses rather than splice our tail onto the front of a fresh file, so the retry has to be
-           the WHOLE file: forgetting the figure is what makes it that. */
+        // The device refused an offset it could not vouch for - the transfer it belonged to had already been released,
+        // so the retry must be the WHOLE file: forgetting the figure is what makes it that.
         if (err === 'resume_refused') delete landedAt[f.name];
-        /* A retryable failure is not a failure yet: the same file goes up again - from the figure the device
-           vouched for, so what is re-sent is the remainder rather than the whole thing - and the budget it spends is
-           counted by PROGRESS, not by attempts (see retryWholeFile).  Only a spent budget counts it as a failure,
-           and only then does it reach the summary.  Everything funnels through here (a response, a dropped socket, a
-           timeout, the device poll's abort), so the network case and the card case follow one rule instead of two. */
+        // A retryable failure is not a failure yet: the same file goes up again from the figure the device vouched
+        // for, and the budget it spends is counted by PROGRESS, not by attempts. Everything funnels through here.
         if (err && !stop && RETRYABLE[err] && retryWholeFile(f.name, f.size)) {
-          /* A card that keeps wanting resumes is telling us its allocation unit is too large for an SPI reader.
-             Count them and, once they stack up, say so - in the same slot and styling the marker uses, so the two
-             read as one voice - while leaving the transfer itself alone.  Only a card whose unit is NOT already 512
-             is told to reformat: a card already at 512 has a different problem and the advice would be wrong. */
-          auResumes++;
-          if (!state.auWarn && state.au && state.au !== 512 && auResumes >= AU_WARN_RESUMES) {
-            state.auWarn = true;
-            notice(spiAuWarnNotice(), true, true, true);
-          }
-          /* Nothing goes into the message slot here.  A failure that is about to be resumed is not news the user
-             can act on, and the slot holds ONE line: a file's worth of "trying again" notices only crowded it out
-             and then sat there as a stale error on a batch that landed everything.  The recovery is visible where
-             the work is instead - the file name stays up and the bar now falls to the figure the card actually
-             holds, so the retry is seen climbing from there rather than restarting at nothing.  The slot is left
-             free for the one thing that IS a report: the batch summary at the end. */
+          // Nothing goes into the message slot here: a failure about to be resumed is not news, and the slot holds one
+          // line. The recovery is visible in the bar, which falls to the figure the card holds and climbs from there.
           state.uploading = false;
           /* i-- so next() picks the same file.  The wait is what makes that resume legal - see waitForRelease. */
           waitForRelease(f, function () { i--; next(); });
@@ -836,18 +650,16 @@
         }
         if (err) {
           failed++; lastErr = err;
-          /* The retry budget is spent and the CARD is the reason: there is no hope for this file, and none for the
-             ones behind it either.  Stop the batch here - that is the one honest answer. */
+          // The retry budget is spent and the CARD is the reason: there is no hope for this file, and none behind it.
           if (CARD_FAULT[err]) { cardFault(err); return; }
         }
         state.uploading = false;
         if (stop) { done(); return; }
         next();
       }
-      /* Resume: send only what the device does not already have, when it has told us a position it can vouch for.
-         The slice is taken here, so the device's side is one parameter - no piece boundaries, no reassembly, no
-         ordering: the file still goes up as ONE request.  A stale or unusable figure falls back to the whole
-         file, and the device refuses an offset it cannot vouch for rather than guessing. */
+      // Resume: send only what the device does not already have, when it has told us a position it can vouch for. The
+      // slice is taken here, so the device's side is one parameter, and the file still goes up as ONE request. A stale
+      // figure falls back to the whole file.
       var from = landedAt[f.name] || 0;
       if (!(from > 0) || from >= f.size) from = 0;
       xhr.open('POST', '/sdman/upload?path=' + enc(state.path) + '&name=' + enc(f.name)
@@ -856,9 +668,8 @@
       xhr.upload.onprogress = function (e) {
         lastMove = Date.now();
         if (!e.lengthComputable) return;
-        /* The bar counts what the FILE has, not what this request has.  A resumed attempt is a slice, so its own
-           loaded/total starts at nothing while the file is already part way there - measured that way the bar fell
-           back to the beginning on every retry and disagreed with the figure the device had just frozen it at. */
+        // The bar counts what the FILE has, not what this request has: a resumed attempt is a slice, so its own
+        // loaded/total starts at nothing and the bar would fall back on every retry.
         var done = from ? from + e.loaded : e.loaded;
         var whole = from ? f.size : e.total;
         busyUpload(label, f.name, Math.round(done * 100 / whole) + '%');
@@ -869,9 +680,20 @@
         if (j.ok && j.skipped) skipped++;   // the race case: the device refused it after all
         // Remember what the device can vouch for, so a retry costs the remainder instead of the whole file.
         if (!j.ok && j.landed) landedAt[f.name] = j.landed;
-        /* The mode ended under the batch - its own stall deadline, a Done from another tab.  Every remaining file
-           would be refused the same way, so the batch stops here and says so instead of sending a dozen more
-           requests at a manager nobody is in. */
+        // THE MODE HAD ENDED UNDER THE BATCH - usually its own idle timeout, since the manager lives only while
+        // requests arrive. The LISTING has always recovered by asking for the mode again; the UPLOAD used to end the
+        // whole batch. So it does what the listing does: ask once and send this file again - nothing of it was written.
+        if (!j.ok && j.error === 'not_active' && !reentered) {
+          reentered = true;
+          fetch('/sdman/enter').then(function () {
+            i--;          // the same file again: the refusal happened before any chunk was stored
+            next();
+          }).catch(function () {
+            notice(errText('not_active'), true);
+            finish('', true);
+          });
+          return;
+        }
         if (!j.ok && j.error === 'not_active') {
           notice(errText('not_active'), true);
           finish('', true);
@@ -880,30 +702,25 @@
         finish(j.ok ? '' : j.error, false);
       };
       xhr.onerror = function () {
-        /* A dropped connection used to end the whole batch - which is how a 14-file job stopped after three or six
-           files with nothing at all in the device log.  It is now just another retryable failure, and finish()
-           decides whether the file goes up again, so this and the card-side failures share one rule.  The retry
-           runs from a timer, so this attempt is over before the next one starts: the device keeps ONE open handle,
-           and a second request for the same target would close the first one's file under it. */
+        // A dropped connection used to end the whole batch; it is now just another retryable failure, decided by
+        // finish(), so this and the card-side failures share one rule. The retry runs from a timer, so this attempt is
+        // over before the next starts - the device keeps ONE open handle.
         finish('bad_response', false);
       };
-      /* Both of these exist so a batch can never be left half-alive: an abort or a timeout that only reached the
-         console used to leave state.uploading set and the overlay up for ever. */
+      // These exist so a batch can never be left half-alive: an abort or timeout that only reached the console used to
+      // leave state.uploading set and the overlay up for ever.
       xhr.ontimeout = function () { finish('bad_response', false); };
       xhr.onabort   = function () {
-        /* Two callers abort here and the reason decides what the retry does.  The device poll saw that the transfer
-           is lost: that is a card-side failure like any other, so it reports write_failed and the retry resumes from
-           the figure the device gave.  The progress watchdog gave up on a transfer that stopped moving: cut_off,
-           which is retryable too.  Either way one file goes up again and the batch carries on - one unreadable file
-           must not take the other thirteen with it, which is what "1 file landed then nothing" was. */
+        // Two callers abort here and the reason decides the retry: the device poll saw the transfer lost, so
+        // write_failed and the retry resumes from the figure given; the progress watchdog gave up on a stalled
+        // transfer, so cut_off. Either way one file goes up again and the batch carries on.
         finish(deviceLost ? 'write_failed' : (stalled ? 'cut_off' : ''), false);
       };
       busyUpload(label, f.name, '0%');
       var fd = new FormData();
       fd.append('file', from ? f.slice(from) : f, f.name);
-      /* A watchdog on PROGRESS, because there is no event for "the transfer has stopped moving".  The device does
-         not answer until the last byte, so xhr.timeout cannot see it, and nothing else fires - which is how a batch
-         ended after one file while the device waited out its own deadline for a browser that had stopped sending. */
+      // A watchdog on PROGRESS, because there is no event for "the transfer has stopped moving": the device does not
+      // answer until the last byte, so xhr.timeout cannot see it and nothing else fires.
       watch = window.setInterval(function () {
         if (ended) { stopWatch(); return; }
         if (!deviceLost) pollDevice();   // ends the transfer the moment the device says it is lost
@@ -918,9 +735,8 @@
     next();
   }
 
-  /* Case-insensitive test against the folder the page is showing.  FATFS compares names case-insensitively,
-     so "SONG.MP3" and "song.mp3" are one file to the card and must be one file here too.  A directory of the
-     same name counts as well, because the device's own check (sdman.exists) does not care which it is. */
+  // Case-insensitive test against the folder on screen: FATFS compares names case-insensitively, so "SONG.MP3" and
+  // "song.mp3" are one file. A directory of the same name counts too, because sdman.exists does not care which it is.
   function existsInFolder(name) {
     var want = String(name).toLowerCase();
     for (var k = 0; k < state.entries.length; k++) {
@@ -929,8 +745,7 @@
     }
     return false;
   }
-  /* The click that opens a picker is the start of a wait the device cannot see; the document-level keepAlive()
-     above reports it, so these two only have to start the transfer. */
+  // The document-level keepAlive() reports the picker's wait, so these two only have to start the transfer.
   $('sdmanupload').onchange = function () { startUpload(this); };
   $('sdmanuploadskip').onchange = function () { startUpload(this); };
 
@@ -944,11 +759,9 @@
   $('sdmanSortName').onclick = function () { toggleSort('n'); };
   $('sdmanSortSize').onclick = function () { toggleSort('s'); };
 
-  /* Done closes the mode on the device and hands "/" back to whatever serves it - the player in station mode,
-     the AP settings page when the device has no network.  The answer has to be read rather than assumed now:
-     the device refuses while a file is mid-write, because closing removes the half-written file.  A success ends
-     in the redirect the device sends, which fetch has already followed by the time this runs - so a 200 means
-     closed, and anything else means refused with the reason in the body. */
+  // Done closes the mode on the device and hands "/" back - the player in station mode, the AP settings page with no
+  // network. The answer has to be read rather than assumed: the device refuses while a file is mid-write, so a 200
+  // means closed and anything else means refused with the reason in the body.
   $('sdmanDone').onclick = function () {
     fetch('/sdman/done', { method: 'POST' }).then(function (r) {
       if (r.ok) { window.location.replace('/'); return; }
@@ -957,19 +770,16 @@
     }).catch(function () { window.location.replace('/'); });
   };
 
-  /* locale.js fetches locale.json and then calls applyI18n().  The tooltips are built with t() as the rows
-     are rendered, so wrap it to re-render once the translations have actually arrived - otherwise a page
-     that rendered before the fetch finished would keep English tooltips.  Skipped while anything is ticked,
-     so an in-progress selection is never thrown away by a re-render. */
+  // locale.js fetches locale.json and then calls applyI18n(); the tooltips are built with t() as the rows render, so
+  // wrap it to re-render once translations arrive. Skipped while anything is ticked, so a selection is not thrown away.
   var _applyI18n = window.applyI18n;
   window.applyI18n = function (root) {
     if (typeof _applyI18n === 'function') _applyI18n(root);
     if (state.entries.length && !selection().length) render();
   };
 
-  /* Open the mode and stay on this address - the device redirects "/" here for as long as the mode is open,
-     so there is no hand-over to the root and no navigation to depend on.  The listing itself always starts
-     at the card's root. */
+  // Open the mode and stay on this address - the device redirects "/" here while the mode is open, so there is no
+  // hand-over to the root. The listing always starts at the card's root.
   fetch('/sdman/enter').then(function (r) { return r.json(); }).catch(function () {
     return { ok: false, error: 'bad_response' };
   }).then(function (j) {

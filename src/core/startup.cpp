@@ -32,9 +32,8 @@ void Startup::checkSafeMode() {
   _bootStablePending = true;
 }
 
-/* The boot-mode glyph for the boot screen line. Deliberately a plain read of the state, with no caching here:
-   the caller samples it once, before checkSafeMode() above clears bootStableMarker, so the glyph reports how
-   the previous boot ended rather than "in progress". Moving this call earlier or later changes what it means. */
+// The boot-mode glyph for the boot screen line. Deliberately a plain read of the state, with no caching: the caller
+// samples it once, before checkSafeMode() clears bootStableMarker, so the glyph reports how the previous boot ended.
 const char* Startup::icon() const {
   if (network.offlineMode || config.store.SDoffline) return "\030\031";  // SD_A + SD_B
   if (!config.store.bootStableMarker)                return "\034";      // PAUSE (safe mode)
@@ -77,10 +76,9 @@ void Startup::loop() {
     }
     return;
   }
-  /* The services can stay suspended for the whole boot - SD mode parks them - and a boot that only parked
-     them is as safe as one that never had them: the downloads are the risk, and they never ran. Without this
-     an SD boot stayed unproven, and the next boot came up in safe mode, which forces web mode, so SD mode
-     could never survive a restart. */
+  // The services can stay suspended for the whole boot (SD mode parks them), and a boot that only parked them is as
+  // safe as one that never had them: the downloads are the risk and they never ran. Without this, SD mode could never
+  // survive a restart - the next boot came up in safe mode, which forces web mode.
   if (_services == SVC_WILL_RUN && cardInUse() &&
       (millis() - _bootStartMs) > ((STARTUP_ASYNC_SERVICES_DELAY + BOOT_STABLE_TIME) * 1000UL)) {
     // BOOT_STABLE_TIME, as in the other reasons here: the configured wait, not the elapsed time.
@@ -129,9 +127,8 @@ void Startup::checkLittleFSandVer() {
   bool fsReady = LittleFS.begin(false, FS_MOUNT_POINT, FS_MAX_OPEN_FILES, FS_PARTITION_LABEL); // Try mounting without formatting first; if that fails, format explicitly.
   if (!fsReady) {
     BOOTLOG("LittleFS not formatted, formatting now (please be patient)...");
-    /* Say so on the panel before the format starts. display.init() has already run in setup() and the boot screen
-       is up, so the request is handled by the display task while this one blocks on flash erases. putRequest()
-       only queues, hence the pause: without it the format can start first and the message is never seen. */
+    // Say so on the panel before the format starts: display.init() has run and the boot screen is up, so the display
+    // task handles the request while this one blocks on flash erases. putRequest() only queues, hence the pause.
     display.putRequest(FORMATTING, 0);
     delay(50);
     fsReady = LittleFS.begin(true, FS_MOUNT_POINT, FS_MAX_OPEN_FILES, FS_PARTITION_LABEL);

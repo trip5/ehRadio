@@ -194,11 +194,12 @@ void Player::loop() {
       }
       #ifdef USE_SD
         case PR_CHECKSD: {
-          if (config.getMode()==PM_SDCARD) {
-            if (!sdman.cardPresent()) {
-              sdman.stop();
-              config.changeMode(PM_WEB);
-            }
+          // Debounced: one failed raw read is a busy card, not a removal, and acting on it dropped the mode to web
+          // right after the SD File Manager closed on a freshly remounted card.
+          if (config.getMode()==PM_SDCARD && !sdman.cardPresentStable()) {
+            FUNCTIONLOG("SD", "Card gone for %u checks - leaving SD mode", (unsigned)sdman.cardGoneStrikes());
+            sdman.stop();
+            config.changeMode(PM_WEB);
           }
           break;
         }
@@ -464,7 +465,7 @@ uint8_t Player::volToI2S(uint8_t volume) {
     float vnorm = (float)volume / (float)maxIn; // 0..1
     if (vnorm < 0.0f) vnorm = 0.0f;
     if (vnorm > 1.0f) vnorm = 1.0f;
-    /* Apply gamma curve (sqrt) to make low volumes more audible and top end less aggressive */
+    // Apply a gamma curve (sqrt) to make low volumes more audible and the top end less aggressive
     const float gamma = 0.5f;
     float vout = powf(vnorm, gamma);
     int vol = (int)(vout * (float)VOLUME_SCALE + 0.5f);

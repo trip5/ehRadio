@@ -340,7 +340,7 @@
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */
-#define ALL_DEBUG_LOGS
+//#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
 //#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 //#define BOOTLOG_TIME

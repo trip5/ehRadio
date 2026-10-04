@@ -199,10 +199,9 @@ void AudioHandlers::handleInfo(const char* info) {
   if (strstr(info, "format is vorbis") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); }
   if (strstr(info, "format is opus") != NULL) { config.setBitrateFormat(BF_OPU); display.putRequest(DBITRATE); }
   if (strstr(info, "skip metadata") != NULL) config.setTitle(config.station.name);
-  /* Belt and braces only: the connecting placeholder is owned by Player::loop(),
-     which clears it from player state because this message is not emitted on every
-     library route (an HLS playlist stream never sends it).  Kept because on the
-     routes that DO announce it, this clears the placeholder a loop earlier. */
+  // Belt and braces only: the connecting placeholder is owned by Player::loop(), which clears it from player state
+  // because this message is not emitted on every library route (an HLS playlist stream never sends it). Kept because on
+  // the routes that DO announce it, this clears the placeholder a loop earlier.
   if (strstr(info, "stream ready") != NULL) {
     if (strcmp_P(config.station.title, l10n(L10N_MSG_CONNECT)) == 0) config.setTitle("");
   }

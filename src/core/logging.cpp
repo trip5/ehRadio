@@ -134,11 +134,10 @@ void serialLogLf() {
   serialLog("%s", ""); // blank line (or line-ending)
 }
 
-/* Boot stage timing - see logging.h.  Three separate stamps on purpose: each helper measures against its own previous
-   call, so the config and LittleFS markers that appear inside a setup() stage do not disturb the setup() deltas (a single
-   shared stamp would silently redefine every number in the log).  Both the log line and the stamp sit inside the
-   #ifdef, so without BOOTLOG_TIME these are empty calls: the boot log carries no stage lines at all and nothing else
-   changes.  This file includes options.h, which is the only route by which the define reaches a translation unit. */
+// Boot stage timing - see logging.h. Three separate stamps on purpose: each helper measures against its own previous
+// call, so the config and LittleFS markers inside a setup() stage do not disturb the setup() deltas (a single shared
+// stamp would redefine every number in the log). Both the line and the stamp sit inside the #ifdef, so without
+// BOOTLOG_TIME these are empty calls: no stage lines, and nothing else changes.
 #ifdef BOOTLOG_TIME
   static uint32_t _bootTimeAt = 0;    // last BOOTTIMELOG   marker
   static uint32_t _fsTimeAt = 0;  // last LITTLEFSTIMELOG marker

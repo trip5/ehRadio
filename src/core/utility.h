@@ -14,7 +14,7 @@ bool clockTrustworthy();
    ANY interaction (button press release, rotary turn) wakes the device.
    If no pins are RTC-capable, deep sleep is disabled (no way to wake). */
 
-/* Per-board RTC GPIO validator — true if pin 'p' is RTC-capable for the target chip */
+// Per-board RTC GPIO validator — true if pin 'p' is RTC-capable for the target chip
 #if defined(ARDUINO_ESP32_DEV)
   #define _IS_RTC(p) ((p)==0||(p)==2||(p)==4||((p)>=12&&(p)<=15)||((p)>=25&&(p)<=27)||((p)>=32&&(p)<=39))
 #elif defined(ARDUINO_ESP32S3_DEV)
@@ -23,7 +23,7 @@ bool clockTrustworthy();
   #define _IS_RTC(p) ((p)!=255)  // any input-capable GPIO works with esp_deep_sleep_enable_gpio_wakeup
 #endif
 
-/* Build individual wake bits: only include pins on RTC GPIOs; skip pins left at 255 */
+// Build individual wake bits: only include pins on RTC GPIOs; skip pins left at 255
 #if _IS_RTC(ENC_DT)
   #define _WENC_DT     (1ULL << ENC_DT)
 #else
@@ -90,12 +90,12 @@ bool clockTrustworthy();
   #define _WTS_INT     0ULL
 #endif
 
-/* Final GPIO mask — OR of all valid wake pins */
+// Final GPIO mask — OR of all valid wake pins
 #define WAKE_GPIO_MASK (_WENC_DT | _WENC_CLK | _WENC_SW | _WENC2_DT | _WENC2_CLK | _WENC2_SW | \
                         _WBTN_PREV | _WBTN_PLAY | _WBTN_NEXT | _WBTN_UP | _WBTN_DOWN | _WBTN_MODE | \
                         _WTS_INT)
 
-/* Block deep sleep when no physical wake source exists */
+// Block deep sleep when no physical wake source exists
 #if WAKE_GPIO_MASK == 0
   #define DEEP_SLEEP_DISABLE
 #endif

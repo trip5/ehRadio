@@ -15,8 +15,8 @@ class Page {
     ~Page();
     void loop();
     Widget& addWidget(Widget* widget);
-    /* Same, but in front of everything already on the page.  A widget created later - when a layout switch
-       brings one in - would otherwise be appended and painted over what is already there. */
+    // Same, but in front of everything already on the page. A widget created later - when a layout switch brings one
+    // in - would otherwise be appended and painted over what is already there.
     Widget& addWidgetFirst(Widget* widget);
     bool removeWidget(Widget* widget);
     Page& addPage(Page* page);

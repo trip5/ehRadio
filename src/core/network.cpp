@@ -14,6 +14,7 @@
 #include "network.h"
 #include "player.h"
 #include "rtcsupport.h"
+#include "sdmanager.h"
 #include "startup.h"
 #include "telnet.h"
 #include "utility.h"
@@ -171,7 +172,10 @@ void ticks() {
       { static uint32_t _lastCheckSD = 0;
         if (millis() - _lastCheckSD >= 2000) {
           _lastCheckSD = millis();
-          if (config.getMode()==PM_SDCARD && display.mode()!=SDCHANGE) player.sendCommand({PR_CHECKSD, 0});
+          // The manager's own loop asks the same question; SDManager debounces it, and the grace window after a
+          // manager session keeps the first raw read off a card that was just written to and remounted.
+          if (config.getMode()==PM_SDCARD && display.mode()!=SDCHANGE && sdman.presenceProbeAllowed())
+            player.sendCommand({PR_CHECKSD, 0});
         }
       }
       #if SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255

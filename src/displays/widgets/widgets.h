@@ -25,11 +25,11 @@ class Widget{
     void setAlign(WidgetAlign align){
       _config.align = align;
     }
-    /* _present = the active layout provides this widget, set only by hideByLayout()/showByLayout().
-       It outranks _active, which Pager::setPage() re-activates on every mode change. */
+    // _present = the active layout provides this widget, set only by hideByLayout()/showByLayout(). It outranks
+    // _active, which Pager::setPage() re-activates on every mode change.
     void setActive(bool act, bool clr=false) { if(act && !_present) return; _active = act; if(_active && !_locked) _draw(); if(clr && !_locked) _clear(); }
-    /* Locking is always allowed; unlocking a widget the layout dropped is not.  Once absent, nothing
-       but showByLayout() can make it draw again. */
+    // Locking is always allowed; unlocking a widget the layout dropped is not. Once absent, nothing but
+    // showByLayout() can make it draw again.
     void lock(bool lck=true) { if(!lck && !_present) return; _locked = lck; if(_locked) _reset(); if(_locked && _active) _clear();  }
     void unlock() { if(_present) _locked = false; }
     bool locked() { return _locked; }
@@ -73,24 +73,23 @@ class TextWidget: public Widget {
     ~TextWidget();
     using Widget::init;
     void init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor);
-    /* Virtual because a subclass held as a TextWidget* must still be entered through its own overloads. The boot
-       line is exactly that case: it is a ScrollWidget kept in a TextWidget*, and only ScrollWidget::setText() sets
-       _doscroll and measures with its own _charWidth. Bound statically, the base ran instead, so the scroll state
-       was never initialised and an over-long string was painted at the underflowed centre offset - invisible. */
+    // Virtual because a subclass held as a TextWidget* must still be entered through its own overloads. The boot line
+    // is that case: a ScrollWidget kept in a TextWidget*, where only ScrollWidget::setText() sets _doscroll and
+    // measures with its own _charWidth. Bound statically, the base ran instead, so the scroll state was never
+    // initialised and an over-long string was painted at the underflowed centre offset - invisible.
     virtual void setText(const char* txt);
     virtual void setText(int val, const char *format);
     virtual void setText(const char* txt, const char *format);
-    /* Paints the CURRENT text again, whether or not it has changed.  setText() deliberately does nothing when the
-       string it is handed is the one already up, which is right for a value that only moves on events and wrong for
-       a line something else may paint over: the blank of the SD manager's countdown was issued once and never
-       repeated, so the old value stayed on the panel. */
+    // Paints the CURRENT text again, whether or not it has changed. setText() deliberately does nothing when the
+    // string is the one already up, which is right for a value that only moves on events and wrong for a line
+    // something else may paint over: the SD manager's countdown blank was issued once and never repeated.
     void repaint();
     bool uppercase() { return _uppercase; }
   protected:
     char *_text = nullptr;
     char *_oldtext = nullptr;
     bool _uppercase;
-    /* Initialised, so a widget that has never been init()'d is inert rather than full of stack garbage. */
+    // Initialised, so a widget that has never been init()'d is inert rather than full of stack garbage.
     uint8_t _charWidth = 0;
     uint16_t  _buffsize = 0, _textwidth = 0, _oldtextwidth = 0, _oldleft = 0, _textheight = 0;
   protected:
@@ -178,10 +177,10 @@ class NumWidget: public TextWidget {
 class ProgressWidget: public TextWidget {
   public:
     ProgressWidget() {}
-    /* pconf.width is the whole line budget in characters, frame included: the dot runway is what remains of it
-       after the frame, so a conf author only has to know how many characters this line may occupy on their
-       panel. Both glyphs are used exactly as given and must outlive the widget - each is a string literal, the
-       speaker from display.cpp and the boot-mode glyph from startup.icon(). */
+    // pconf.width is the whole line budget in characters, frame included: the dot runway is what remains after the
+    // frame, so a conf author only has to know how many characters this line may occupy. Both glyphs are used exactly
+    // as given and must outlive the widget - each is a string literal, the speaker from display.cpp and the boot-mode
+    // glyph from startup.icon().
     ProgressWidget(WidgetConfig conf, ProgressConfig pconf, uint16_t fgcolor, uint16_t bgcolor,
                    const char* frameLeft = nullptr, const char* frameGlyph = nullptr) {
       init(conf, pconf, fgcolor, bgcolor, frameLeft, frameGlyph);
@@ -191,18 +190,18 @@ class ProgressWidget: public TextWidget {
               const char* frameLeft = nullptr, const char* frameGlyph = nullptr);
     void loop();
   protected:
-    /* Full paint, and the only path that draws the two static glyphs: activation, layout changes and screensaver
-       restarts come through here, while the animation itself paints single cells in _progress(). That split is
-       what keeps a TFT from flashing the whole line - the glyphs never change, so they are never redrawn. */
+    // Full paint, and the only path that draws the two static glyphs: activation, layout changes and screensaver
+    // restarts come through here, while the animation paints single cells in _progress(). That split keeps a TFT from
+    // flashing the whole line - the glyphs never change, so they are never redrawn.
     void _draw();
   private:
-    /* The two glyphs framing the line. Both are string literals owned by the caller - the speaker from
-       display.cpp and the boot-mode glyph from startup.icon() - so no copy of either is kept here. */
+    // The two glyphs framing the line. Both are string literals owned by the caller - the speaker from display.cpp
+    // and the boot-mode glyph from startup.icon() - so no copy of either is kept here.
     const char* _frameL = nullptr;
     const char* _frameR = nullptr;
-    /* The runway in CHARACTERS. Both glyphs count as one character each however many bytes they are: the SD pair
-       renders one column wider than the rest and that is invisible on a single row of pixels. The buffer is sized
-       separately in BYTES, because a U+00B7 dot is two of them and a character count cuts the line mid-dot. */
+    // The runway in CHARACTERS. Both glyphs count as one character each however many bytes they are: the SD pair
+    // renders one column wider and that is invisible on a single row. The buffer is sized separately in BYTES,
+    // because a U+00B7 dot is two of them and a character count cuts the line mid-dot.
     uint16_t _runway = 0;
     uint16_t _fieldX = 0;                  // x of the first dot column, recorded by the last full paint
     uint16_t _oldLead = 0, _oldDots = 0;   // what the last painted frame showed, for the cell delta

@@ -6,7 +6,7 @@
 
 enum requestType_e : uint8_t  { PLAYLIST=1, STATION=2, STATIONNAME=3, ITEM=4, TITLE=5, VOLUME=6, NRSSI=7, BITRATE=8, MODE=9, EQUALIZER=10, BALANCE=11, PLAYLISTSAVED=12, GETINDEX=13, GETACTIVE=14, GETSYSTEM=15, GETSCREEN=16, GETLOCALE=17, GETWEATHER=18, GETCONTROLS=19, DSPON=20, SDPOS=21, SDLEN=22, SDSHUFFLE=23, SDINIT=24, GETPLAYERMODE=25, CHANGEMODE=26, SEARCH_DONE=27, SEARCH_FAILED=28, CURATED_INDEX_DONE=29, CURATED_PLAYLIST_DONE=30, CURATED_FAILED=31, GETMQTT=32, GETBATTERY=33, ARTWORK=34, PLAYLISTREADY=35 };
 
-/* PSRAM-backed static file cache entry */
+// PSRAM-backed static file cache entry
 struct CachedFile {
     char path[32];          /* URL path e.g. "/script.js" */
     const char* data;       /* PSRAM pointer (plain data, or NULL) */
@@ -16,7 +16,7 @@ struct CachedFile {
     const char* contentType; /* MIME type string */
 };
 
-/* PSRAM-backed static file cache — loads all WebUI files from LittleFS once at boot */
+// PSRAM-backed static file cache — loads all WebUI files from LittleFS once at boot
 class StaticFileCache {
 public:
     StaticFileCache() : count(0) { memset(entries, 0, sizeof(entries)); }

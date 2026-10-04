@@ -45,8 +45,8 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
   _bands = bands;
   _rotate = rotateVU_ptr ? *rotateVU_ptr : false;
   #if defined(DSP_TFT)
-    /* TFT transfers the whole widget in one SPI burst, so it needs an intermediate
-       canvas.  OLED panels own their framebuffer and are drawn to directly. */
+    // TFT transfers the whole widget in one SPI burst, so it needs an intermediate canvas. OLED panels own
+    // their framebuffer and are drawn to directly.
     if (_canvas) { delete _canvas; _canvas = nullptr; }
     if (_rotate) _canvas = new Canvas(_bands.height, _bands.width * 2 + _bands.space);
     else         _canvas = new Canvas(_bands.width * 2 + _bands.space, _bands.height);
@@ -54,13 +54,11 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
 }
 
 
-/* LED steps.  The segment grid is anchored at the start of the axis _drawBand() walks, and the lit
-   region is a PREFIX of that stack for most families but a SUFFIX of it for the BoomBox's left
-   channel, so the two snap opposite ends.  Both are pure functions of the value, which is what makes
-   the fall stay snapped: the boundary holds on its grid line and then drops a whole segment.
-
-   Only the DRAWN value is quantised.  _levels() keeps the raw meas, because the fade accumulators
-   carry sub-pixel remainders and the peak's high-water mark depends on the exact minimum. */
+// LED steps. The segment grid is anchored at the start of the axis _drawBand() walks, and the lit region is a
+// PREFIX of that stack for most families but a SUFFIX for the BoomBox's left channel, so the two snap opposite ends.
+// Both are pure functions of the value, which is what keeps the fall snapped: the boundary holds on its grid line and
+// then drops a whole segment. Only the DRAWN value is quantised - _levels() keeps the raw meas, because the fade
+// accumulators carry sub-pixel remainders and the peak's high-water mark depends on the exact minimum.
 static inline uint16_t vuSnapLit(uint16_t meas, uint16_t step, uint16_t len) {
   if (step < 2 || meas > len) return meas;
   uint16_t lit = len - meas;                 // the lit length; round it UP so the tip's segment lights
@@ -73,15 +71,11 @@ static inline uint16_t vuSnapClear(uint16_t meas, uint16_t step) {
 }
 
 bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
-  /* TFT renders into the canvas that is blitted at the end; OLED has no canvas, writes straight to
-     the panel buffer, and so needs the widget origin added.  A zero dimension is a no-op, which keeps
-     the callers from each testing for degenerate rects.
-
-     Everything is CLIPPED to the box here.  This is the one place that knows the pixel surface, and
-     the per-frame fill covers exactly _cw x _ch - so a fill that reaches outside is painted once per
-     frame and erased by nothing, leaving a permanent mark on the panel (an even-height history strip
-     did exactly that, one row below its box).  Clipping here rather than in each painter's arithmetic
-     also keeps a style from writing past the TFT canvas. */
+  // TFT renders into the canvas blitted at the end; OLED has no canvas, writes straight to the panel buffer, and so
+  // needs the widget origin added. A zero dimension is a no-op, which keeps callers from each testing for degenerate
+  // rects. Everything is CLIPPED to the box here: this is the one place that knows the pixel surface, and the
+  // per-frame fill covers exactly _cw x _ch, so a fill that reaches outside is painted once per frame and erased by
+  // nothing, leaving a permanent mark (an even-height history strip did exactly that).
   if (!w || !h) return false;
   if (x >= _cw || y >= _ch) return false;
   if ((uint32_t)x + w > _cw) w = (uint16_t)(_cw - x);
@@ -101,9 +95,9 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
 void VuWidget::_draw(){
   if(!_active || _locked) return;
 
-  /* Resolve the box once, exactly as the single-style widget always did, so every style works from
-     the same numbers.  rotateVU is what says which bandsConf axis is the level axis: it is read here
-     for every style, while boomboxVU below is a bar-family flag only. */
+  // Resolve the box once, exactly as the single-style widget always did, so every style works from the same numbers.
+  // rotateVU says which bandsConf axis is the level axis: read here for every style, while boomboxVU is a bar-family
+  // flag only.
   if (!_rotate && _config.align) { _len = _bands.width;  _thk = _bands.height; }
   else                           { _len = _bands.height; _thk = _bands.width;  }
   if (_rotate) { _cw = _len; _ch = _bands.width * 2 + _bands.space; }
@@ -122,10 +116,9 @@ void VuWidget::_draw(){
     case VU_STYLE_SPECTRUM_MIRROR:  _drawSpectrumMirror();  break;
     case VU_STYLE_WAVE:             _drawWave();            break;
     case VU_STYLE_LISSAJOUS:        _drawLissajous();       break;
-    /* Only an unknown id, or a style this build cannot draw, reaches the bars - including a stored id
-       from before Spectrum A was removed.  The two sample styles are deliberately not a fallback from a
-       painter that has no data: a dropped capture frame (a torn seqlock read) must leave the frame
-       alone, not flash the bars for one refresh. */
+    // Only an unknown id, or a style this build cannot draw, reaches the bars - including a stored id from before
+    // Spectrum A was removed. The two sample styles are deliberately not a fallback from a painter that has no data:
+    // a dropped capture frame (a torn seqlock read) must leave the frame alone, not flash the bars for one refresh.
     default:                  _drawBars(false);     break;
   }
 
@@ -135,7 +128,7 @@ void VuWidget::_draw(){
     dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
     dsp.endWrite();
   #endif
-  /* OLED needs no blit here - DspCore::loop() flushes the panel buffer. */
+  // OLED needs no blit here - DspCore::loop() flushes the panel buffer.
 }
 
 void VuWidget::_drawBars(bool led){
@@ -162,9 +155,9 @@ void VuWidget::_drawBars(bool led){
   }
 
   for (int i = 0; i < len; i += step) {
-    /* Clamp the last segment to len.  The loop bound only guarantees a segment STARTS before len,
-       and anything drawn past the box can never be erased - the fills and _clear() all stop at len.
-       Clamp, not skip, so the bar tip still reaches len - 1.  Only the last pass can overshoot. */
+    // Clamp the last segment to len. The loop bound only guarantees a segment STARTS before len, and anything drawn
+    // past the box can never be erased - the fills and _clear() all stop at len. Clamp, not skip, so the bar tip still
+    // reaches len - 1; only the last pass can overshoot.
     uint16_t hh = h;
     if ((uint16_t)(i + hh) > len) hh = len - i;
     uint16_t colorL, colorR;
@@ -200,15 +193,14 @@ void VuWidget::_drawBars(bool led){
     _fillLocal(thk + _bands.space, 0, thk, measR, _bgcolor);
   }
 
-  /* Peak markers.  Drawn after the clears so they survive them, and before the
-     blit.  Each one sits in the cleared strip just beyond its channel's high-water
-     mark.  Clamping to peakThk reserves the outermost pixels of the widget, which
-     is what keeps the marker inside the .bandsConf footprint. */
+  // Peak markers. Drawn after the clears so they survive them, and before the blit. Each sits in the cleared strip
+  // just beyond its channel's high-water mark. Clamping to peakThk reserves the outermost pixels of the widget, which
+  // keeps the marker inside the .bandsConf footprint.
   if (config.store.vupeak) {
     uint16_t peakThk = (uint16_t)((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000);
     if (peakThk < 1) peakThk = 1;
-    /* Collapse the 0xFFFF sentinel and clamp BEFORE snapping: a snap can move a marker down to the
-       quiet end, and a negative x would wrap in the fillRect below. */
+    // Collapse the 0xFFFF sentinel and clamp BEFORE snapping: a snap can move a marker down to the quiet end, and a
+    // negative x would wrap in the fillRect below.
     uint16_t pkL = (_peakL < peakThk || _peakL > len) ? peakThk : _peakL;
     uint16_t pkR = (_peakR < peakThk || _peakR > len) ? peakThk : _peakR;
     if (led) {
@@ -243,34 +235,26 @@ void VuWidget::_drawBars(bool led){
   }
 }
 
-/* ---- Shared geometry for the non-bar painters -------------------------------------------------
-   Every style except the bar family draws time or frequency along the AREA's width and splits the
-   area's height between the channels.  The area is _cw x _ch, which _draw() has already derived from
-   bandsConf using the two layout booleans - so that is all the booleans are for here.  Nothing below
-   transposes, on any layout family: the OLED, the portrait TFT box and the BoomBox ribbon all get the
-   same picture, and the side-by-side channel arrangement of the aligned family is a bar-family concern
-   only.  The bar painters keep their own mapping in _drawBand(). */
+// ---- Shared geometry for the non-bar painters ----
+// Every style except the bar family draws time or frequency along the AREA's width and splits the area's height
+// between the channels. The area is _cw x _ch, which _draw() has already derived from bandsConf using the two layout
+// booleans. Nothing below transposes, on any layout family: the OLED, the portrait TFT box and the BoomBox ribbon all
+// get the same picture, and the side-by-side channel arrangement is a bar-family concern only (the bar painters keep
+// their own mapping in _drawBand()).
 
-/* Thickness of a reference line and of a trace: 1 px on a compact area, 2 px once there is room for it.
-   Sized by the area's HEIGHT - the axis the thickness is perpendicular to - and NOT by the length of
-   the axis the line runs along.  The axis-length form was the peak marker's own formula, and it made
-   the two OLED layouts disagree on the same panel: both areas are 15 px tall, but Big VU's level axis
-   is 126 px against Default's 44, so it drew a 2 px line where the other drew 1 px.  The peak markers
-   keep the axis-length rule, which is right for them - they annotate a bar and scale with it; a
-   reference line and a trace belong to the area instead.
-
-   48 px is where a second pixel stops being a large fraction of the height: the 130 px TFT areas and
-   the 67 px rotated one get 2 px, the 15 px OLED areas and the 7 px BoomBox ribbon get 1 px. */
+// Thickness of a reference line and of a trace: 1 px on a compact area, 2 px once there is room. Sized by the area's
+// HEIGHT - the axis the thickness is perpendicular to - and NOT by the length of the axis the line runs along (the
+// axis-length form made the two OLED layouts disagree on the same panel: both areas are 15 px tall, but Big VU's
+// level axis is 126 px against Default's 44). The peak markers keep the axis-length rule, which is right for them.
+// 48 px is where a second pixel stops being a large fraction of the height.
 uint16_t VuWidget::_stroke() const {
   return (_ch >= 48) ? 2 : 1;
 }
 
-/* The meter's calibration as a display gain: 65536 / vuThreshold in 8.8 fixed point, so 256 is unity.
-   config.vuThreshold is the loudest the stream has been in units of sample / 128, so this puts that
-   content at full scale - the same reference the level bars drive to, and the same one the spectrum
-   uses.  Without it the sample styles are an absolute reading of raw int16: music sits far below full
-   scale, so a trace hugs the middle of the area and can never reach the hot zone.  An uncalibrated
-   meter reads 0 and maps to unity, which is honest rather than wildly amplified. */
+// The meter's calibration as a display gain: 65536 / vuThreshold in 8.8 fixed point, so 256 is unity.
+// config.vuThreshold is the loudest the stream has been in units of sample / 128, so this puts that content at full
+// scale - the same reference the level bars and the spectrum drive to. Without it the sample styles are an absolute
+// reading of raw int16 and a trace hugs the middle of the area; an uncalibrated meter reads 0 and maps to unity.
 uint16_t VuWidget::_waveGain() const {
   const uint16_t ref = config.vuThreshold ? config.vuThreshold : 256;
   uint32_t g = (256u * 256u) / ref;
@@ -280,24 +264,21 @@ uint16_t VuWidget::_waveGain() const {
 }
 
 void VuWidget::_centreCross() {
-  /* One line across the middle of the area and one down it, meeting at the centre: two fills, and it
-     is what a border was only standing in for - with no signal the trace sits flat ON the axis, so
-     silence reads as a flat line rather than an empty box.  Deliberately 1 px, not the trace
-     thickness: the graticule is a reference, and at the data weight it reads as heavy as the data.
-     Painted first, so the trace overdraws it.
-     It is reference geometry, so the existing VU Meter Peaks switch owns it - the same checkbox that
-     owns the level peak markers.  The spectrum's baseline and the history strip's divider are
-     deliberately NOT gated with it: those two are what their bars and traces grow out of, so hiding
-     them would leave the data with nothing to read it against. */
+  // One line across the middle of the area and one down it, meeting at the centre: two fills, and it is what a
+  // border was only standing in for - with no signal the trace sits flat ON the axis, so silence reads as a flat
+  // line rather than an empty box. Deliberately 1 px, not the trace thickness: the graticule is a reference, and at
+  // the data weight it reads as heavy as the data. Painted first, so the trace overdraws it. It is reference
+  // geometry, so the existing VU Meter Peaks switch owns it - the same checkbox that owns the level peak markers.
+  // The spectrum's baseline and the history strip's divider are deliberately NOT gated with it: those two are what
+  // their bars and traces grow out of, so hiding them would leave the data with nothing to read it against.
   if (!config.store.vupeak) return;
   _fillLocal(0, _ch / 2, _cw, 1, _vuaxiscolor);
   _fillLocal(_cw / 2, 0, 1, _ch, _vuaxiscolor);
 }
 
-/* vumin for the body, vumax once an element reaches into the outer HOTSEG segments of its own axis -
-   the same figure the bar family uses at the loud end, so a hot tip means the same thing everywhere.
-   `len` and `full` are lengths in that axis' pixels, which is why the non-bar styles pass their own
-   channel's available span rather than the level axis. */
+// vumin for the body, vumax once an element reaches into the outer HOTSEG segments of its own axis - the same
+// figure the bar family uses at the loud end, so a hot tip means the same thing everywhere. `len` and `full` are
+// lengths in that axis' pixels, which is why the non-bar styles pass their own channel's available span.
 uint16_t VuWidget::_hotColor(uint16_t len, uint16_t full) {
   const uint16_t seg = (_bands.perheight && full) ? (uint16_t)(full / _bands.perheight) : 1;
   return (((uint32_t)len + (uint32_t)seg * 3) > full) ? _vumaxcolor : _vumincolor;
@@ -307,13 +288,13 @@ uint16_t VuWidget::_bandColor(uint16_t lvl) {
   return _hotColor(lvl, _len);
 }
 
-/* MIN_PX per bar, a real gap between them, and the count cut until it fits, capped PER CHANNEL.  Both
-   channels use the same N so their bands line up. */
+// MIN_PX per bar, a real gap between them, and the count cut until it fits, capped PER CHANNEL. Both channels use the
+// same N so their bands line up.
 uint8_t VuWidget::_bandCount(uint16_t span, uint16_t *barW, uint16_t *gap) const {
   const uint16_t minw = VU_SPECTRUM_MIN_PX ? VU_SPECTRUM_MIN_PX : 1;
-  /* Its own tunable, NOT bandsConf.space: that value is the gap between the two meter strips - 4 px on
-     the TFT Default layout and 17 px on the rotated one - and using it as an inter-bar gap left 15 bars
-     of 4 px on the first box and only 7 bars on the second. */
+  // Its own tunable, NOT bandsConf.space: that value is the gap between the two meter strips (4 px on the TFT Default
+  // layout, 17 px on the rotated one), and using it as an inter-bar gap left 15 bars on the first box and only 7 on
+  // the second.
   const uint16_t g = VU_SPECTRUM_SPACE_PX ? VU_SPECTRUM_SPACE_PX : 1;
   uint16_t n = (uint16_t)((span + g) / (minw + g));
   if (n < 1) n = 1;
@@ -324,13 +305,11 @@ uint8_t VuWidget::_bandCount(uint16_t span, uint16_t *barW, uint16_t *gap) const
   return (uint8_t)n;
 }
 
-/* The synthesised spectrum: the level spread across the bands with a fixed tilt plus a deterministic
-   wobble so it does not look frozen.  This is NOT a measurement, and it is no longer labelled as one:
-   the style is called Spectrum Reflect on every backend.
-   The bands are in the same units the real source returns - 0..255, where 255 is a full-height bar -
-   so the painter has one conversion and the two sources are interchangeable.  There are no
-   frequencies here to place, so the tilt runs across the band index; the log edges live with the
-   transform in the audio library, where the same N arrives. */
+// The synthesised spectrum: the level spread across the bands with a fixed tilt plus a deterministic wobble so it
+// does not look frozen. This is NOT a measurement, and it is not labelled as one: the style is called Spectrum
+// Reflect on every backend. The bands are in the same units the real source returns (0..255, 255 a full-height bar),
+// so the painter has one conversion and the two sources are interchangeable. There are no frequencies here to place,
+// so the tilt runs across the band index; the log edges live with the transform in the audio library.
 void VuWidget::_synthBands(uint8_t *out, uint8_t n, uint16_t lvl) {
   const uint16_t span = _len ? _len : 1;
   const uint16_t lvl255 = (uint16_t)((uint32_t)lvl * 255 / span);   // level px -> the 0..255 band scale
@@ -349,11 +328,9 @@ void VuWidget::_drawHistory(){
   const uint16_t th = _stroke();
   const uint16_t half = hgt / 2;
   const uint16_t lineY = (half > th / 2) ? (uint16_t)(half - th / 2) : 0;
-  /* Space a channel has, measured outward from the divider's outer edge.  It is the SMALLER of the two
-     halves, not half the height: on an even height the divider row and its thickness come out of the
-     lower half, so the R trace was drawn one row past the bottom of the box - a line the area fill
-     never reaches.  An even 10 px box showed it; the 15 px boxes were fine, which is why only one
-     layout did. */
+  // Space a channel has, measured outward from the divider's outer edge. It is the SMALLER of the two halves, not
+  // half the height: on an even height the divider row and its thickness come out of the lower half, so the R trace
+  // was drawn one row past the bottom of the box - a line the area fill never reaches. An even 10 px box showed it.
   const uint16_t below = (hgt > (uint16_t)(lineY + th)) ? (uint16_t)(hgt - lineY - th) : 0;
   uint16_t band = (lineY < below) ? lineY : below;
   if (!band) band = 1;
@@ -366,15 +343,12 @@ void VuWidget::_drawHistory(){
   nb = full / colW;                          // colW was floored, so this stays inside the cap
   if (!nb) nb = 1;
 
-  /* One column per VU_REFRESH_MS of WALL CLOCK, not per redraw.  The duty limiter makes the redraw
-     rate vary with what the frame costs, and a strip that advanced one column per frame would then
-     have a time axis that stretched with the load.  The columns owed since the last frame are pushed
-     at once instead, and because every column is repainted from the ring below the scroll advances by
-     exactly that many columns.
-     Shifting two rows of at most 100 bytes is cheaper than a ring plus index arithmetic, and it keeps
-     the drawing a plain left-to-right scan.
-     The levels are held as 0..255 rather than in axis pixels: the ring is one byte per channel per
-     column and the level axis on a BoomBox layout is 404 px, which does not fit in a byte. */
+  // One column per VU_REFRESH_MS of WALL CLOCK, not per redraw: the duty limiter makes the redraw rate vary with what
+  // the frame costs, and a strip that advanced one column per frame would have a time axis that stretched with the
+  // load. The columns owed since the last frame are pushed at once, and because every column is repainted from the
+  // ring below, the scroll advances by exactly that many columns. Shifting two rows of at most 100 bytes is cheaper
+  // than a ring plus index arithmetic. The levels are held as 0..255 rather than in axis pixels: the ring is one byte
+  // per channel per column and the level axis on a BoomBox layout is 404 px, which does not fit in a byte.
   const uint32_t tickMs = VU_REFRESH_MS ? VU_REFRESH_MS : 1;
   const uint32_t now = millis();
   uint32_t adv = 1;
@@ -393,19 +367,16 @@ void VuWidget::_drawHistory(){
   memmove(&_histR[0], &_histR[adv], nb - adv);
   for (uint16_t k = (uint16_t)(nb - adv); k < nb; k++) { _histL[k] = lvL; _histR[k] = lvR; }
 
-  /* Tick thickness is the trace thickness - the same figure the waveform and the Lissajous use, so the
-     three trace styles match.  It used to be band / 4, which on the 130 px TFT area was a 16 px band of
-     colour per column: the space a channel has is not a useful measure of how thick a trace should be. */
+  // Tick thickness is the trace thickness - the same figure the waveform and the Lissajous use, so the three trace
+  // styles match. It used to be band / 4, which on the 130 px TFT area was a 16 px band of colour per column.
   uint16_t tick = _stroke();
   if (tick > band) tick = band;
   if (tick < 1) tick = 1;
   const uint16_t levelSpan = (band > tick) ? (uint16_t)(band - tick) : 1;
 
-  /* The middle line, and the fill, are the two halves of the vupeak switch in this style - and they are
-     opposites: with it on you get the line and the bare traces, with it off you get the filled form and
-     no line.  Painting the line first keeps it under the data either way.
-     The line is REFERENCE GEOMETRY, so it is drawn in vuaxis; the data it sits under is drawn in the
-     vumin/vumax trace colours below. */
+  // The middle line, and the fill, are the two halves of the vupeak switch in this style, and they are opposites:
+  // with it on you get the line and the bare traces, with it off the filled form and no line. Painting the line first
+  // keeps it under the data. The line is REFERENCE GEOMETRY, so it is drawn in vuaxis.
   if (config.store.vupeak) _fillLocal(0, lineY, full, th, _vuaxiscolor);
 
   uint16_t prevYL = 0, prevYR = 0;
@@ -415,30 +386,27 @@ void VuWidget::_drawHistory(){
     const uint16_t lvL = _histL[i], lvR = _histR[i];
     const uint16_t pxL = (uint16_t)(((uint32_t)lvL * levelSpan) / 255);
     const uint16_t pxR = (uint16_t)(((uint32_t)lvR * levelSpan) / 255);
-    /* Silence sits on the divider for both channels: L grows up out of it, R grows down. */
+    // Silence sits on the divider for both channels: L grows up out of it, R grows down.
     const uint16_t yL = (pxL + tick <= lineY) ? (uint16_t)(lineY - pxL - tick) : 0;
     const uint16_t yR = (uint16_t)(lineY + th + pxR);
     const uint16_t colourL = _hotColor(pxL, band), colourR = _hotColor(pxR, band);
-    /* The fill is the other half of the switch, and it is DATA rather than a reference line: drawn in
-       the trace colours, each half by its own channel's level, so it fills in green and only runs hot
-       once that channel does.  It goes down first so the traces overdraw it.
-
-       Either half of the switch draws exactly TWO rects per column, and the bare tick fills are folded
-       into them: the filled form runs from the L tip through the divider to the R tip, which contains
-       both ticks, and a joined run spans the previous tick to this one, which does too.  Only a column
-       with no predecessor to join to is drawn as two bare ticks.  The fills are visible in the
-       WIDGET_DEBUG report as fills/frame, which is what made the redundancy worth finding. */
+    // The fill is the other half of the switch, and it is DATA rather than a reference line: drawn in the trace
+    // colours, each half by its own channel's level, so it fills in green and only runs hot once that channel does.
+    // It goes down first so the traces overdraw it.
+    // Either half of the switch draws exactly TWO rects per column, and the bare tick fills are folded into them:
+    // the filled form runs from the L tip through the divider to the R tip, which contains both ticks, and a joined
+    // run spans the previous tick to this one, which does too. Only a column with no predecessor to join to is drawn
+    // as two bare ticks. The fills show in the WIDGET_DEBUG report as fills/frame, which made the redundancy worth
+    // finding.
     if (!config.store.vupeak) {
       const uint16_t mid = (uint16_t)(lineY + th / 2);
       const uint16_t bottom = (uint16_t)(yR + tick);
       if (mid > yL)     _fillLocal(x, yL, colW, (uint16_t)(mid - yL), colourL);
       if (bottom > mid) _fillLocal(x, mid, colW, (uint16_t)(bottom - mid), colourR);
     } else if (havePrev) {
-      /* Switch on: the bare traces are joined column to column in BOTH directions - the run from the
-         previous tick to this one, which is simply the union of the two ticks and the gap between them.
-         Without it a tick only 2 px tall on a 2-4 px column pitch reads as a row of dashes.  Joining
-         only the rises was a placeholder on review; a trace that connects going up but not coming down
-         is not what a trace looks like. */
+      // Switch on: the bare traces are joined column to column in BOTH directions - the run from the previous tick
+      // to this one is the union of the two ticks and the gap between them. Without it a 2 px tick on a 2-4 px column
+      // pitch reads as a row of dashes; joining only the rises is not what a trace looks like.
       const uint16_t topL = (yL < prevYL) ? yL : prevYL;
       const uint16_t botL = (uint16_t)(((yL > prevYL) ? yL : prevYL) + tick);
       _fillLocal(x, topL, colW, (uint16_t)(botL - topL), colourL);
@@ -453,35 +421,33 @@ void VuWidget::_drawHistory(){
   }
 }
 
-/* ---- Spectrum Reflect ---------------------------------------------------------------------------
-   Frequency along the area's width, both channels ascending left to right, and the divider between
-   them is the baseline: L's bands rise above it, R's descend below it.  Both grow OUTWARD from it,
-   which is what makes the two halves read as one instrument reflected about the line. */
+// ---- Spectrum Reflect ----
+// Frequency along the area's width, both channels ascending left to right, and the divider between them is the
+// baseline: L's bands rise above it, R's descend below it, both growing OUTWARD, which makes the two halves read as
+// one instrument reflected about the line.
 
 void VuWidget::_drawSpectrumReflect(){
   const uint16_t full = _cw;
   const uint16_t th = _stroke();
   const uint16_t half = _ch / 2;
   const uint16_t lineY = (half > th / 2) ? (uint16_t)(half - th / 2) : 0;
-  /* Space a channel has, measured outward from the baseline's outer edge - the SMALLER of the two
-     halves, for the same reason as the history strip: on an even height the divider row and its
-     thickness come out of the descending half, so R's bars would be drawn one row past the bottom. */
+  // Space a channel has, measured outward from the baseline's outer edge - the SMALLER of the two halves, for the
+  // same reason as the history strip: on an even height the divider row and its thickness come out of the descending
+  // half, so R's bars would be drawn one row past the bottom.
   const uint16_t below = (_ch > (uint16_t)(lineY + th)) ? (uint16_t)(_ch - lineY - th) : 0;
   uint16_t band = (lineY < below) ? lineY : below;
   if (!band) band = 1;
 
   uint16_t barW = 1, gap = 1;
   const uint8_t n = _bandCount(full, &barW, &gap);
-  /* barW is floored, so the bars never fill the area exactly.  Centre the block instead of leaving the
-     remainder against the right edge, so they sit symmetrically under the baseline. */
+  // barW is floored, so the bars never fill the area exactly. Centre the block instead of leaving the remainder
+  // against the right edge, so they sit symmetrically under the baseline.
   const uint16_t used = (uint16_t)((uint32_t)n * barW + (uint32_t)((n > 1) ? (n - 1) : 0) * gap);
   const uint16_t x0 = (used < full) ? (uint16_t)((full - used) / 2) : 0;
 
-  /* The baseline is half of what the vupeak switch does here; the other half is the bar colouring
-     below.  With it on you get the line and bars split into a vumin body with a vumax tip; with it off
-     you get no line and whole bars that are one colour.
-     The line itself is REFERENCE GEOMETRY, so it is drawn in vuaxis; the bars it separates are DATA
-     and keep the vumin/vumax trace colours. */
+  // The baseline is half of what the vupeak switch does here; the other half is the bar colouring below. With it on
+  // you get the line and bars split into a vumin body with a vumax tip; with it off, no line and whole bars of one
+  // colour. The line is REFERENCE GEOMETRY so it is drawn in vuaxis; the bars are DATA, in the trace colours.
   if (config.store.vupeak) _fillLocal(0, lineY, full, th, _vuaxiscolor);
 
   const uint16_t seg = (_bands.perheight && band) ? (uint16_t)(band / _bands.perheight) : 1;
@@ -489,10 +455,9 @@ void VuWidget::_drawSpectrumReflect(){
   const uint16_t span = _len ? _len : 1;
   const uint16_t lvL = span - _measL, lvR = span - _measR;
   uint8_t bands[VU_SPECTRUM_MAX_CHANNELS];
-  /* The real transform when the audio backend can offer one, the labelled simulation when it cannot
-     (a VS1053 build), so the geometry below is written once and both sources feed it.  A false return
-     can also mean "this frame's window was published under us", in which case the simulation fills in
-     for one refresh rather than the box going blank. */
+  // The real transform when the audio backend can offer one, the labelled simulation when it cannot (a VS1053 build),
+  // so the geometry below is written once and both sources feed it. A false return can also mean "this frame's window
+  // was published under us", in which case the simulation fills in for one refresh rather than the box going blank.
   uint8_t realBands[VU_SPECTRUM_MAX_CHANNELS * 2];
   const bool haveReal = player.getSpectrum(realBands, n);
 
@@ -502,18 +467,18 @@ void VuWidget::_drawSpectrumReflect(){
     } else {
       _synthBands(bands, n, (ch ? lvR : lvL));
     }
-    /* L's bars end AT the baseline and R's start there. */
+    // L's bars end AT the baseline and R's start there.
     const uint16_t base = ch ? (uint16_t)(lineY + th) : lineY;
     for (uint8_t b = 0; b < n; b++) {
       const uint16_t x = (uint16_t)(x0 + (uint16_t)b * (barW + gap));
       if ((uint32_t)x + barW > full) break;
-      /* 255 in the band scale is a full-height bar, which is one channel's whole span. */
+      // 255 in the band scale is a full-height bar, which is one channel's whole span.
       uint16_t h = (uint16_t)(((uint32_t)bands[b] * band) / 255);
       if (!h) h = 1;
       if (config.store.vupeak) {
-        /* Annotated: the baseline is drawn, so the bar is split at the hot zone - a vumin body with the
-           outer HOTSEG segments of the axis in vumax.  A bar that does not reach the hot zone has no tip
-           at all, which is the same threshold the plain rule uses, so the two agree at the boundary. */
+        // Annotated: the baseline is drawn, so the bar is split at the hot zone - a vumin body with the outer HOTSEG
+        // segments of the axis in vumax. A bar that does not reach the hot zone has no tip, the same threshold the
+        // plain rule uses, so the two agree at the boundary.
         const uint16_t tipStart = (band > hot) ? (uint16_t)(band - hot) : 0;
         const uint16_t tip = (h > tipStart) ? (uint16_t)(h - tipStart) : 0;
         const uint16_t body = (uint16_t)(h - tip);
@@ -525,7 +490,7 @@ void VuWidget::_drawSpectrumReflect(){
           if (tip)  _fillLocal(x, (uint16_t)(base - h), barW, tip, _vumaxcolor);
         }
       } else {
-        /* Plain: no baseline, and the bar is one colour - vumax once it reaches the hot zone. */
+        // Plain: no baseline, and the bar is one colour - vumax once it reaches the hot zone.
         const uint16_t y = ch ? base : (uint16_t)(base - h);
         _fillLocal(x, y, barW, h, _hotColor(h, band));
       }
@@ -533,40 +498,37 @@ void VuWidget::_drawSpectrumReflect(){
   }
 }
 
-/* ---- Spectrum Mirror ----------------------------------------------------------------------------
-   The same two measurements laid out the other way round: a half of the width each instead of one
-   above the other, and the whole height instead of half of it.  Both channels run low-to-high away
-   from the divider, so the bass meets in the middle: R is the right half and already runs that way,
-   L is the left half drawn backwards.  Both low ends sit against the divider. */
+// ---- Spectrum Mirror ----
+// The same two measurements the other way round: a half of the width each instead of one above the other, and the
+// whole height instead of half. Both channels run low-to-high away from the divider, so the bass meets in the middle:
+// R is the right half and already runs that way, L is the left half drawn backwards, both low ends against the divider.
 
 void VuWidget::_drawSpectrumMirror(){
   const uint16_t th = _stroke();
   const uint16_t halfW = _cw / 2;
-  /* The height the bars grow into: above the bottom line when it is drawn, the whole box when it is
-     not - the same reservation _drawSpectrumReflect() makes at its baseline, moved to the bottom edge. */
+  // The height the bars grow into: above the bottom line when it is drawn, the whole box when it is not - the same
+  // reservation _drawSpectrumReflect() makes at its baseline, moved to the bottom edge.
   const uint16_t avail = (config.store.vupeak && _ch > th) ? (uint16_t)(_ch - th) : _ch;
   const uint16_t axis = avail ? avail : 1;
-  /* The divider and the daylight around it.  The blocks are placed from the DIVIDER outwards rather
-     than centred in their own halves: centring each half looks even-handed, but the line's own pixel
-     comes out of the right half, so the left kept two pixels of daylight and the right only one.
-     Anchoring on the line gives it the same clearance on both sides - 1 + the line + 1, so 3 px of
-     clear space where the line is one pixel thick and 4 px where it is two. */
+  // The divider and the daylight around it. The blocks are placed from the DIVIDER outwards rather than centred in
+  // their own halves: centring each half looks even-handed, but the line's own pixel comes out of the right half, so
+  // the left kept two pixels of daylight and the right only one. Anchoring on the line gives the same clearance on
+  // both sides - 1 + the line + 1, so 3 px where the line is one pixel thick and 4 px where it is two.
   const uint16_t day = 1;
   const uint16_t xd = (uint16_t)(halfW - th / 2);            // the divider's left edge
   const uint16_t innerGap = config.store.vupeak ? day : 0;   // no line drawn, no reservation made
   const uint16_t leftRoom  = (xd > innerGap) ? (uint16_t)(xd - innerGap) : 0;
   const uint16_t rightRoom = (_cw > (uint16_t)(xd + th + innerGap)) ? (uint16_t)(_cw - xd - th - innerGap) : 0;
-  /* The tighter of the two, so one block width fits on both sides of the line. */
+  // The tighter of the two, so one block width fits on both sides of the line.
   const uint16_t bandSpan = (leftRoom < rightRoom) ? leftRoom : rightRoom;
 
   uint16_t barW = 1, gap = 1;
   const uint8_t n = _bandCount(bandSpan, &barW, &gap);   // `bandSpan`, not `span`: that is the level span
   const uint16_t used = (uint16_t)((uint32_t)n * barW + (uint32_t)((n > 1) ? (n - 1) : 0) * gap);
 
-  /* The two reference lines this style reads against: the bottom edge the bars grow from, and the
-     divider the two halves meet on.  Painted first, so a bar overdraws them where it touches.
-     Both are REFERENCE GEOMETRY, so they are drawn in vuaxis; the bars are DATA and keep the
-     vumin/vumax trace colours. */
+  // The two reference lines this style reads against: the bottom edge the bars grow from, and the divider the two
+  // halves meet on. Painted first, so a bar overdraws them where it touches. Both are REFERENCE GEOMETRY, so they are
+  // drawn in vuaxis; the bars are DATA and keep the vumin/vumax trace colours.
   if (config.store.vupeak) {
     if (_ch > th) _fillLocal(0, (uint16_t)(_ch - th), _cw, th, _vuaxiscolor);
     _fillLocal(xd, 0, th, _ch, _vuaxiscolor);
@@ -587,8 +549,8 @@ void VuWidget::_drawSpectrumMirror(){
       _synthBands(bands, n, (ch ? lvR : lvL));
     }
     const bool mirrored = (ch == 0);                  // L is the left half, drawn back to front
-    /* Placed from the line: the left block ends innerGap before it and the right one starts innerGap
-       after it, both the same width, so the daylight around the line matches. */
+    // Placed from the line: the left block ends innerGap before it and the right one starts innerGap after it, both
+    // the same width, so the daylight around the line matches.
     const uint16_t xStart = mirrored
         ? ((xd > (uint16_t)(innerGap + used)) ? (uint16_t)(xd - innerGap - used) : 0)
         : (uint16_t)(xd + th + innerGap);
@@ -600,8 +562,8 @@ void VuWidget::_drawSpectrumMirror(){
       uint16_t h = (uint16_t)(((uint32_t)bands[b] * axis) / 255);
       if (!h) h = 1;
       if (config.store.vupeak) {
-        /* Annotated like the Spectrum: the bottom line is drawn, so each bar is a vumin body with the
-           outer HOTSEG segments of the axis in vumax. */
+        // Annotated like the Spectrum: the bottom line is drawn, so each bar is a vumin body with the outer HOTSEG
+        // segments of the axis in vumax.
         const uint16_t tipStart = (axis > hot) ? (uint16_t)(axis - hot) : 0;
         const uint16_t tip = (h > tipStart) ? (uint16_t)(h - tipStart) : 0;
         const uint16_t body = (uint16_t)(h - tip);
@@ -614,16 +576,13 @@ void VuWidget::_drawSpectrumMirror(){
   }
 }
 
-/* ---- Waveform and Lissajous -------------------------------------------------------------------
-   Both plot against the centre cross, so the origin is where the two axes meet: the waveform measures
-   its amplitude up and down from the horizontal axis and walks the time window left to right, and the
-   Lissajous is a point cloud around the same point with X from the left channel and Y from the right.
-   Neither transposes, and both take their samples from the audio library, which returns false on a
-   backend that has no PCM.
-
-   The scratch is a file-static rather than a widget member so it comes out of .bss instead of the heap:
-   widgets are heap-allocated, and the heap is what the boot-time services exhaust.  It exists only where
-   PCM can, so a VS1053 build carries neither the buffer nor the two painter bodies. */
+// ---- Waveform and Lissajous ----
+// Both plot against the centre cross, so the origin is where the two axes meet: the waveform measures its amplitude
+// up and down from the horizontal axis and walks the time window left to right, and the Lissajous is a point cloud
+// around the same point with X from the left channel and Y from the right. Neither transposes, and both take their
+// samples from the audio library, which returns false on a backend that has no PCM.
+// The scratch is a file-static rather than a widget member so it comes out of .bss instead of the heap: widgets are
+// heap-allocated, and the heap is what the boot-time services exhaust. It exists only where PCM can.
 
 #if defined(USE_AUDIO_I2S)
 static int16_t vuSampleBuf[VU_CAPTURE_SAMPLES * 2];
@@ -635,7 +594,7 @@ void VuWidget::_drawWave() {
 #else
   const uint16_t full = _cw, hgt = _ch;
   if (full < 2 || hgt < 2) return;
-  /* One column per pixel of the time axis, and never more than the capture holds. */
+  // One column per pixel of the time axis, and never more than the capture holds.
   const uint16_t n = (full < VU_CAPTURE_SAMPLES) ? full : VU_CAPTURE_SAMPLES;
 
   _centreCross();
@@ -657,12 +616,11 @@ void VuWidget::_drawWave() {
     const uint16_t top = (uint16_t)((yA > th / 2) ? (yA - th / 2) : 0);
     uint16_t h = (uint16_t)(yB - yA + th);
     if ((uint32_t)top + h > hgt) h = (uint16_t)(hgt - top);
-    /* The column advances one pixel per sample but is th wide, so consecutive columns overlap and the
-       trace reads as a line th px thick rather than a one pixel thread. */
+    // The column advances one pixel per sample but is th wide, so consecutive columns overlap and the trace reads as
+    // a line th px thick rather than a one pixel thread.
     const uint16_t w = (uint16_t)((i + th <= full) ? th : 1);
-    /* The hot rule is the level bar's, one dimension over: the outer HOTSEG * step px either side of
-       the axis are vumax, everything nearer it is vumin.  Measured on the GAINED amplitude, which is
-       what makes a loud passage light the edges of the trace instead of never reaching them. */
+    // The hot rule is the level bar's, one dimension over: the outer HOTSEG * step px either side of the axis are
+    // vumax, everything nearer is vumin, measured on the GAINED amplitude so a loud passage lights the trace edges.
     const uint32_t amp = (uint32_t)(vg < 0 ? -vg : vg);
     uint32_t lvl = amp * (uint32_t)mid / 32768;
     if (lvl > mid) lvl = mid;
@@ -678,8 +636,8 @@ void VuWidget::_drawLissajous() {
 #else
   const uint16_t full = _cw, hgt = _ch;
   if (full < 2 || hgt < 2) return;
-  /* A scatter rather than a column per pixel, so it wants many more points than the waveform: 256
-     pairs is ~5.8 ms of audio, which is enough to show a phase shape without turning into fog. */
+  // A scatter rather than a column per pixel, so it wants many more points than the waveform: 256 pairs is ~5.8 ms
+  // of audio, enough to show a phase shape without turning into fog.
   const uint16_t n = (VU_CAPTURE_SAMPLES < 256) ? VU_CAPTURE_SAMPLES : 256;
 
   _centreCross();
@@ -688,15 +646,14 @@ void VuWidget::_drawLissajous() {
   const uint16_t th = _stroke();
   const uint16_t gain = _waveGain();
   const uint16_t halfW = full / 2, halfH = hgt / 2;
-  /* Each channel gets its own half axis, so equal amplitudes in both trace a line corner to corner
-     rather than a line that only fills the shorter dimension. */
+  // Each channel gets its own half axis, so equal amplitudes in both trace a line corner to corner rather than a
+  // line that only fills the shorter dimension.
   const uint16_t spreadL = halfW ? halfW : 1, spreadR = halfH ? halfH : 1;
   const uint16_t xMax = (full > th) ? (uint16_t)(full - th) : 0;
   const uint16_t yMax = (hgt > th) ? (uint16_t)(hgt - th) : 0;
-  /* The beam, not a scatter: every pair is joined to the one before it, which is what makes the shape
-     close on itself like an X-Y vectorscope instead of reading as a cloud of dots.  The joint is a
-     stepped line - one fill per pixel of the longer axis - rather than a Bresenham, because the
-     drawing primitive here is a rect and at these sizes the eye cannot tell the difference. */
+  // The beam, not a scatter: every pair is joined to the one before it, which makes the shape close on itself like an
+  // X-Y vectorscope instead of reading as a cloud of dots. The joint is a stepped line - one fill per pixel of the
+  // longer axis - rather than a Bresenham, because the primitive here is a rect and at these sizes the eye cannot tell.
   uint16_t prevX = 0, prevY = 0;
   bool havePrev = false;
   const uint32_t seg = _bands.perheight ? (uint32_t)_bands.perheight : 1;
@@ -711,9 +668,9 @@ void VuWidget::_drawLissajous() {
     if (x > (int32_t)xMax) x = (int32_t)xMax;
     if (y < 0) y = 0;
     if (y > (int32_t)yMax) y = (int32_t)yMax;
-    /* Hot when the beam is out in the outer HOTSEG segments of the box, measured proportionally on
-       whichever axis it is furthest out on.  A single min(halfW, halfH) scale, as the first cut had
-       it, can never go hot at the left or right edge of a wide box however loud the signal is. */
+    // Hot when the beam is out in the outer HOTSEG segments of the box, measured proportionally on whichever axis it
+    // is furthest out on. A single min(halfW, halfH) scale, as the first cut had, can never go hot at the left or
+    // right edge of a wide box however loud the signal is.
     const uint32_t dx = (uint32_t)((x > (int32_t)halfW) ? (x - (int32_t)halfW) : ((int32_t)halfW - x));
     const uint32_t dy = (uint32_t)((y > (int32_t)halfH) ? (y - (int32_t)halfH) : ((int32_t)halfH - y));
     const bool hot = (dx * seg > (uint32_t)halfW * hotNum) || (dy * seg > (uint32_t)halfH * hotNum);
@@ -736,9 +693,8 @@ void VuWidget::_drawLissajous() {
 #endif // USE_AUDIO_I2S
 }
 
-/* Advance cur toward limit at speed px/second.  The remainder is carried in acc so a rate
-   that works out to less than one pixel per frame still progresses, which is what makes the
-   44 px OLED bar and the 200 px boombox bar spend the same time on the way down. */
+// Advance cur toward limit at speed px/second. The remainder is carried in acc so a rate below one pixel per frame
+// still progresses, which is what makes the 44 px OLED bar and the 200 px boombox bar spend the same time falling.
 static uint16_t vuFadeUp(uint16_t cur, uint16_t limit, uint16_t speed, uint32_t &acc, uint32_t dt) {
   if (cur >= limit) { acc = 0; return limit; }
   acc += (uint32_t)speed * dt;              // px * ms
@@ -757,17 +713,15 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
   uint8_t L = (vulevel >> 8) & 0xFF;
   uint8_t R = vulevel & 0xFF;
 
-  /* Time base.  Counting the fade in display ticks made the same number behave completely
-     differently on every panel and every bar length.  dt is clamped so a long stall (a page
-     switch, an OTA write) cannot make the bar jump. */
+  // Time base. Counting the fade in display ticks made the same number behave differently on every panel and bar
+  // length. dt is clamped so a long stall (a page switch, an OTA write) cannot make the bar jump.
   bool first = (_lastMs == 0);
   uint32_t now = millis();
   uint32_t dt = first ? 0 : (now - _lastMs);
   _lastMs = now ? now : 1;                  // keep it non-zero so "first" stays one-shot
   if (dt > 250) dt = 250;
 
-  /* px/second derived from the bar length, so every bar falls in VU_FADE_MS regardless of
-     how long it is or which panel it is on. */
+  // px/second derived from the bar length, so every bar falls in VU_FADE_MS regardless of how long it is or its panel.
   uint16_t fadePxSec = (uint32_t)len * 1000 / VU_FADE_MS;
   if (fadePxSec < 1) fadePxSec = 1;
   uint16_t peakPxSec = fadePxSec / VU_PEAK_FADE_DIV;
@@ -775,13 +729,13 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
 
   bool played = player.isRunning();
   if (first) {
-    /* First frame after init or unlock: adopt the live level rather than sweeping in. */
+    // First frame after init or unlock: adopt the live level rather than sweeping in.
     mL = played ? (uint16_t)L : len;
     mR = played ? (uint16_t)R : len;
     _accL = _accR = 0;
   } else if (played) {
-    /* Attack stays instant and unthrottled - a louder reading snaps the bar out at once.
-       Only the receding (quieter) direction is rate limited. */
+    // Attack stays instant and unthrottled - a louder reading snaps the bar out at once. Only the receding (quieter)
+    // direction is rate limited.
     if (mL < L) mL = vuFadeUp(mL, L, fadePxSec, _accL, dt);
     else        { mL = L; _accL = 0; }
     if (mR < R) mR = vuFadeUp(mR, R, fadePxSec, _accR, dt);
@@ -795,16 +749,13 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
   measL = mL;
   measR = mR;
 
-  /* Peak markers.  meas is the length CLEARED from the loud end, so the loudest recent
-     reading is the SMALLEST meas seen.  0xFFFF is the "not set yet" sentinel, and the snap
-     branch collapses it on the first call, which is also why _holdL/_holdR are always armed
-     before they are read. */
+  // Peak markers. meas is the length CLEARED from the loud end, so the loudest recent reading is the SMALLEST meas
+  // seen. 0xFFFF is the "not set yet" sentinel, and the snap branch collapses it on the first call, which is why
+  // _holdL/_holdR are always armed before they are read.
   if (!config.store.vupeak) { _peakL = _peakR = 0xFFFF; return; }
-  /* A new high snaps the marker out and re-arms the hold; the decay only starts once that hold
-     has expired.  A level that merely stays put does not re-arm it, so VU_PEAK_FREEZE_MS is
-     really "how long the marker stays parked after the level starts falling".  If the marker
-     ever ends up behind the bar tip, the next frame's snap test pulls it forward and re-arms
-     the hold, which is what pins it to a sustained loud passage. */
+  // A new high snaps the marker out and re-arms the hold; the decay only starts once that hold has expired. A level
+  // that merely stays put does not re-arm it, so VU_PEAK_FREEZE_MS is really "how long the marker stays parked after
+  // the level starts falling". If the marker ends up behind the bar tip, the next frame's snap pulls it forward.
   if (mL < _peakL) { _peakL = mL; _accPL = 0; _holdL = now; }
   else if ((now - _holdL) >= VU_PEAK_FREEZE_MS)
     _peakL = vuFadeUp(_peakL, len, peakPxSec, _accPL, dt);
@@ -839,29 +790,18 @@ void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
 }
 
 void VuWidget::loop(){
-  /* Duty limiter.  The display task runs every DSP_TASK_DELAY (10 ms) and the widget used to redraw
-     on every one of those, which was both wasteful and the reason the fade looked instant on fast
-     panels.
-
-     VU_REFRESH_MS is the FLOOR on the interval, that is the ceiling on the frame rate, and it is
-     chosen to keep up with the audio core's 30-50 levels per second: go much slower and the peak
-     marker starts missing transients.  The interval then stretches to whatever the recent frames
-     actually cost, so the widget spends at most 1/VU_DUTY_FACTOR of its time drawing and a heavier
-     style, or the same style in a bigger box, is paced out rather than left to eat CPU the network
-     stack needs.  This replaces VU_SAMPLE_REFRESH_DIV, which was a fixed guess at which styles were
-     heavy and by how much, and it covers every style rather than the one class of them we happened to
-     notice.
-
-     The cost is smoothed so that a single late frame cannot pin the interval and a single quick one
-     cannot reopen the throttle.  The sample styles need no special case for their time constants: the
-     waveform and the Lissajous both plot the whole capture window every frame, so their shapes are
-     set by the capture, not by how often it is drawn - only the refresh rate changes.  The history
-     strip is the one that does care, and it advances on wall clock in _drawHistory().
-
-     _redrawMs is this limiter's own timestamp, deliberately separate from _lastMs: that one belongs
-     to the fade maths, and while they shared a variable a frame skipped here showed up there as a
-     doubled dt.  On OLED the panel flush is paid by the display task after _draw() returns, so the
-     figure timed here is the widget's own cost; on TFT the blit is inside _draw() and is measured. */
+  // Duty limiter. The display task runs every DSP_TASK_DELAY (10 ms) and the widget used to redraw on every one,
+  // which was wasteful and made the fade look instant on fast panels. VU_REFRESH_MS is the FLOOR on the interval (the
+  // ceiling on the frame rate), chosen to keep up with the audio core's 30-50 levels per second: go much slower and
+  // the peak marker starts missing transients. The interval then stretches to what the recent frames cost, so the
+  // widget spends at most 1/VU_DUTY_FACTOR of its time drawing and a heavier style is paced out rather than left to
+  // eat CPU the network stack needs. This replaces VU_SAMPLE_REFRESH_DIV, a fixed guess at which styles were heavy.
+  // The cost is smoothed so a single late frame cannot pin the interval and a single quick one cannot reopen the
+  // throttle. The sample styles need no special case: the waveform and the Lissajous plot the whole capture every
+  // frame, so their shapes are set by the capture, not by the refresh rate; the history strip advances on wall clock.
+  // _redrawMs is deliberately separate from _lastMs: while they shared a variable, a frame skipped here showed up
+  // there as a doubled dt. On OLED the panel flush is paid after _draw() returns, so the figure timed is the widget's
+  // own cost; on TFT the blit is inside _draw() and is measured.
   const uint32_t now = millis();
   if (_redrawMs && (now - _redrawMs) < _intervalMs) return;
   _redrawMs = now;
@@ -874,13 +814,10 @@ void VuWidget::loop(){
   const uint32_t cost = micros() - t0;
   _drawUs = (_drawUs * 3u + cost) / 4u;              // a quarter of every new sample
 
-  /* While the startup services are downloading, the network core is holding up to three TLS sessions
-     and the audio stream is usually up as well, so the floor is raised and every style redraws
-     VU_STARTUP_SERVICES_DIV times slower until they finish.  That is the same order as the fixed
-     VU_SAMPLE_REFRESH_DIV the sample styles used to have, but applied to whichever style is on screen
-     and only for the length of the window that actually needs the CPU.  The flag is the work itself,
-     not "until the boot is stable": in SD playback the services can stay parked for the whole session
-     and the display must not be slowed for that. */
+  // While the startup services are downloading, the network core holds up to three TLS sessions and the audio stream
+  // is usually up, so the floor is raised and every style redraws VU_STARTUP_SERVICES_DIV times slower until they
+  // finish. The flag is the work itself, not "until the boot is stable": in SD playback the services can stay parked
+  // for the whole session and the display must not be slowed for that.
   uint32_t floorMs = VU_REFRESH_MS ? VU_REFRESH_MS : 1;
   if (startup.servicesBusy()) {
     const uint32_t div = (VU_STARTUP_SERVICES_DIV > 1) ? (uint32_t)VU_STARTUP_SERVICES_DIV : 1u;
@@ -894,9 +831,8 @@ void VuWidget::loop(){
   _intervalMs = interval;
 
   #ifdef WIDGET_DEBUG
-    /* Same shape as the Core Monitor's report: counters accumulated over the window, printed every
-       5 s and then zeroed.  fills/frame is the number that says whether a style is drawing rects it
-       does not need; the draw time says whether the box is simply too big for the panel. */
+    // Same shape as the Core Monitor's report: counters accumulated over the window, printed every 5 s and zeroed.
+    // fills/frame says whether a style is drawing rects it does not need; the draw time whether the box is too big.
     _dbgFrames++; _dbgFills += _fills; _dbgDrawUs += cost;
     if (cost > _dbgPeakUs) _dbgPeakUs = cost;
     const uint32_t elapsed = now - _dbgLogMs;
@@ -924,9 +860,8 @@ void VuWidget::_clear(){
 }
 
 void VuWidget::_reset(){
-  /* Widget::lock() and Widget::moveTo() call this.  Dropping the high-water marks makes the
-     marker restart at the bar tip, and clearing _lastMs makes the next frame adopt the live
-     level instead of fading in from a stale position. */
+  // Widget::lock() and Widget::moveTo() call this. Dropping the high-water marks makes the marker restart at the bar
+  // tip, and clearing _lastMs makes the next frame adopt the live level instead of fading in from a stale position.
   _peakL = _peakR = 0xFFFF;
   _accL = _accR = _accPL = _accPR = 0;
   _holdL = _holdR = 0;

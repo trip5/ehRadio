@@ -3,9 +3,8 @@
 #include "common.h"
 
 #if IR_PIN!=255
-  /* IR button BEHAVIOUR ids.
-     These are not storage indexes: IR codes live in the named fields of Config::irstore and are
-     selected by name ("power", "n7", ...) through the irKeyMap table in config.cpp. */
+  // IR button BEHAVIOUR ids. These are not storage indexes: IR codes live in the named fields of Config::irstore and
+  // are selected by name ("power", "n7", ...) through the irKeyMap table in config.cpp.
   enum irAction_e : uint8_t {
     IRACT_POWER=0, IRACT_MUTE=1, IRACT_UP=2, IRACT_DOWN=3, IRACT_PREV=4,
     IRACT_NEXT=5, IRACT_PLAY=6, IRACT_MODE=7, IRACT_HASH=8, IRACT_DIGIT=9

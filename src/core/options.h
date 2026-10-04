@@ -151,9 +151,7 @@ or examine the examples in builds/trip5 and make your own!
   #endif
 #endif
 
-/* Can the display be dimmed? If it is set to true but the Brightness Pin is not set... */
-/* This enables / disables the ability, not the default option DIMMING_ENABLED */
-
+/* Can the display be dimmed? This enables / disables the ability */
 #if defined(DSP_DIMMING_ENABLED) && DSP_DIMMING_ENABLED && BRIGHTNESS_PIN==255
   #warning DSP_DIMMING_ENABLED is true but BRIGHTNESS_PIN is not set so setting DSP_DIMMING_ENABLED false
   #undef DSP_DIMMING_ENABLED

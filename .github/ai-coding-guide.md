@@ -15,7 +15,7 @@
 ## ⚠️ Critical Rules
 
 > **These rules are HARD CONSTRAINTS, not guidelines. Violating any rule is an error.**
-> Before making ANY edit or suggesting code, mentally validate against ALL 5 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
+> Before making ANY edit or suggesting code, mentally validate against ALL 6 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
 
 **Rule #1**: **Plan Mode for Large Changes**
 - For changes spanning **more than 50 lines** (summed across ALL files in the change), you **MUST STOP** and inform the user:  
@@ -53,6 +53,13 @@
   - Do **not** add general rules or subsystem documentation there; that belongs in `code-summary.md` (Rule #4).
   - Do read it before editing an affected area, and **update or close an existing entry** if your change fixes it or alters the code that entry describes.
 
+**Rule #6**: **Comments State Facts, Briefly**
+- **`//` is the default comment.** A block gets a 1-3 line summary above it; a call gets a short trailing `//` when its name does not already say what happened.
+- **`/* */` has exactly three uses**: a section TITLE (`/* ==== Upload ==== */`), a header saying what the next long block does, and code kept but not used (tested and switched off).
+- **No narration, no history, no measurements.** Why something is the way it is, what was measured, and what was tried belong in `.github/code-summary.md`.
+- **Never document what is not in the code.** Deleted code is not commented about, and a replaced mechanism is not described; a retired mechanism worth not repeating gets at most two lines - what was tried, and the result.
+- **A comment that restates the code is not a comment.** If the name says it, delete it. The same discipline applies to `code-summary.md`: facts, not commentary.
+
 **Enforcement and AI Behavior**
 - Always validate proposed changes against these rules **before every action**.
 - For Rule #1 and Rule #2 violations: Explain which rule is violated and wait for user confirmation.
@@ -63,6 +70,35 @@
   3. Touching `myoptions.h`, `options.h`, or `platformio.ini`? → Get explicit confirmation (Rule #3)
   4. Affecting external contracts/APIs/storage keys? → Update `code-summary.md` (Rule #4)
   5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first (Rule #5)
+  6. Writing a comment longer than three lines? → It belongs in `code-summary.md`, or it is four shorter comments (Rule #6)
+
+## Comment Style
+
+- **`//` over `/* */`.** The block form is for a TITLE (`/* ==== Upload ==== */`, as in `style.css` and `src/core/options.h`), for a header saying what the next long block does, and for keeping code that was tested and is not wanted. Nothing else.
+- **One to three lines.** A block gets a short summary above it, and a call gets a short trailing note only if it needs one. A comment that runs past three lines is either a reason for `code-summary.md` or four shorter comments.
+- **Code and `code-summary.md` divide the work.** The code says WHAT and stays quiet; `code-summary.md` says WHY, and carries the measurements, the history and the traps. A paragraph explaining a decision is in the wrong file.
+- **Nothing about what is gone.** A deleted line is not described and a replaced mechanism is not mourned. The one exception is a failed experiment worth not repeating, and that gets a line or two - what was tried, and the result.
+- **The variable name documents itself.** Most declarations need no comment at all, and the ones that do want a trailing note rather than a block above them.
+- **Examples:**
+
+  ```c
+  /* PSRAM usage tracking - set by subsystems, consumed by Core Monitor */
+  size_t psramFrameBufferBytes = 0;
+  ```
+  becomes
+  ```c
+  size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
+  ```
+
+  ```c
+  // Alignment to a sector could not help: the card's cluster was 8 KB, sixteen sectors, so a write
+  // rounded to 512 bytes never changed how the file system programmed a cluster.  Measured on the
+  // same 14-file batch: 12 then 17 failed transfers aligned, 7 then 7 as they arrived... (20 lines)
+  ```
+  becomes a note in `code-summary.md`, and at most this in the code:
+  ```c
+  // Sector alignment was tried and failed: the unit that matters is the CLUSTER, not the sector.
+  ```
 
 ## Project Structure
 - **Config Cascade**: `platformio.ini` (env #define) → `myoptions.h` (hardware profile, user defaults) → `options.h` (fallback defaults for anything undefined). Third-party libraries are their own translation units and never see this cascade: the few values they must agree with us about live in `src/core/options_overrides.h`, which `platformio.ini` force-includes into every TU.

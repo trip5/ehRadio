@@ -349,8 +349,8 @@ void ScrollWidget::_draw() {
       const char* _scursor = utf8_offset(_sep, sepOffset);
       snprintf(_window, _width / _charWidth * 4 + 1, "%s%s", _scursor, _text);
     }
-    /* Truncate to visible character count so a multi-byte UTF-8 sequence
-       straddling the window edge doesn't leave an orphan lead byte. */
+    // Truncate to visible character count so a multi-byte UTF-8 sequence straddling the window edge does not leave
+    // an orphan lead byte.
     { uint16_t maxVis = _width / _charWidth;
       if (utf8_strlen(_window) > maxVis) {
         char *cut = (char*)utf8_offset(_window, maxVis);
@@ -417,10 +417,9 @@ bool ScrollWidget::_checkDelay(int m, uint32_t &tstamp) {
 }
 
 void ScrollWidget::_reset(){
-  /* Widget::lock() calls this, and hideByLayout() locks a widget the layout omits - which is a widget
-     whose init() never ran, so _fb is null.  Bail before touching it: nothing is on screen, and the
-     framebuffer below was never created.  A widget the layout DOES provide has always been through
-     init(), so _fb exists on every path that reaches the rest of this function. */
+  // Widget::lock() calls this, and hideByLayout() locks a widget the layout omits - one whose init() never ran, so
+  // _fb is null. Bail before touching it: nothing is on screen and the framebuffer was never created. A widget the
+  // layout DOES provide has always been through init(), so _fb exists on every path that reaches the rest.
   if(!_present) return;
   dsp.setScrollId(NULL);
   _x = _fb && _fb->ready()?0:_config.left;
@@ -577,10 +576,10 @@ void NumWidget::_draw() {
 /**************************
       PROGRESS WIDGET
  **************************/
-/* One blob element, appended one at a time so no format string ever has to reason about byte precision.
-   \026 is the VOL_75 wave glyph from icons.h: an ICON codepoint, so it is drawn on the same seven-row grid as
-   the speaker and the boot glyph at either end, unlike a font bullet whose own vertical metrics sit off centre
-   against them. One byte, so characters and bytes coincide here. */
+// One blob element, appended one at a time so no format string has to reason about byte precision. \026 is the
+// VOL_75 wave glyph from icons.h: an ICON codepoint, so it is drawn on the same seven-row grid as the speaker and
+// the boot glyph at either end, unlike a font bullet whose vertical metrics sit off centre against them. One byte,
+// so characters and bytes coincide here.
 static const char PROGRESS_DOT[] = "\026";
 #define PROGRESS_DOT_BYTES 1
 
@@ -596,16 +595,16 @@ void ProgressWidget::init(WidgetConfig conf, ProgressConfig pconf, uint16_t fgco
   _oldLead = _oldDots = 0;
   _painted = false;
   _runway = (pconf.width > 2) ? (uint16_t)(pconf.width - 2) : 1;
-  /* BYTES, not characters: every dot in the runway costs one byte more than the column it occupies. The size has
-     to be right before this call and nothing may be assigned after it - TextWidget::init() ends in
-     Widget::init(), which zeroes _width. */
+  // BYTES, not characters: every dot in the runway costs one byte more than the column it occupies. The size has to
+  // be right before this call and nothing may be assigned after it - TextWidget::init() ends in Widget::init(), which
+  // zeroes _width.
   const uint16_t bufbytes = (uint16_t)(strlen(_frameL) + _runway + strlen(_frameR)
                                        + _barwidth * (PROGRESS_DOT_BYTES - 1) + 1);
   TextWidget::init(conf, bufbytes, false, fgcolor, bgcolor);
 }
 
-/* Where the blob sits on this frame: it grows in at the speaker, slides right one column per frame, and then its
-   head is eaten at the far end - the dots disappearing into the boot glyph. */
+// Where the blob sits on this frame: it grows in at the speaker, slides right one column per frame, and then its head
+// is eaten at the far end - the dots disappearing into the boot glyph.
 void ProgressWidget::_blob(uint16_t& lead, uint16_t& dots) const {
   lead = (_pg <= _barwidth) ? 0 : (uint16_t)(_pg - _barwidth);
   if (lead > _runway) lead = _runway;
@@ -613,8 +612,8 @@ void ProgressWidget::_blob(uint16_t& lead, uint16_t& dots) const {
   if (dots > (uint16_t)(_runway - lead)) dots = (uint16_t)(_runway - lead);
 }
 
-/* One column of the runway: the middle dot, or the background that erases one. Deliberately cell sized, because
-   this is what stops a TFT flashing the whole line eleven times a second. */
+// One column of the runway: the middle dot, or the background that erases one. Deliberately cell sized, because this
+// stops a TFT flashing the whole line eleven times a second.
 void ProgressWidget::_dotCell(uint16_t col, bool on) {
   const uint16_t x = (uint16_t)(_fieldX + col * _charWidth);
   if (on) {
@@ -628,10 +627,10 @@ void ProgressWidget::_dotCell(uint16_t col, bool on) {
   }
 }
 
-/* Full paint: the speaker, the runway with the blob where it belongs, the boot glyph. Only activation and layout
-   changes come through here, so the two static glyphs are drawn once and then left alone. Character columns are
-   placed exactly as _dotCell() places them - _realLeft() plus one _charWidth per character - which is what keeps
-   the dots from shifting when a full paint replaces a delta one. */
+// Full paint: the speaker, the runway with the blob where it belongs, the boot glyph. Only activation and layout
+// changes come through here, so the two static glyphs are drawn once and then left alone. Character columns are
+// placed exactly as _dotCell() places them - _realLeft() plus one _charWidth per character - which keeps the dots
+// from shifting when a full paint replaces a delta one.
 void ProgressWidget::_draw() {
   if (!_active || _text == nullptr || _buffsize == 0) return;
   uint16_t lead = 0, dots = 0;
@@ -645,8 +644,8 @@ void ProgressWidget::_draw() {
   snprintf(_text + n, _buffsize - n, "%*s%s", (int)(_runway - lead - dots), "", _frameR);
   _textwidth = (uint16_t)(utf8_strlen(_text) * _charWidth);
   _fieldX = (uint16_t)(_realLeft() + strlen(_frameL) * _charWidth);
-  /* The erase below covers the whole line, so it does not need the old bounds - but keep TextWidget's own
-     bookkeeping in step for anything that reads it */
+  // The erase below covers the whole line, so it does not need the old bounds - but keep TextWidget's own bookkeeping
+  // in step for anything that reads it
   _oldtextwidth = _textwidth;
   _oldleft = _realLeft();
   dsp.fillRect(_realLeft(), _config.top, _textwidth, _textheight, _bgcolor);
@@ -660,13 +659,13 @@ void ProgressWidget::_progress() {
   if (_buffsize == 0 || _runway == 0) return;   // init() has not run: stay inert
   if (!_painted) { _draw(); return; }           // never delta-paint against a picture we did not paint
   _pg++;
-  /* The single dot at the far end is the last frame of the cycle, so the next one is the blank frame - stopping a
-     frame earlier than the runway would is what keeps that to ONE blank frame instead of two. */
+  // The single dot at the far end is the last frame of the cycle, so the next one is the blank frame - stopping a
+  // frame earlier than the runway would is what keeps that to ONE blank frame instead of two.
   if (_pg > (uint8_t)(_runway + _barwidth - 1)) _pg = 0;
   uint16_t lead = 0, dots = 0;
   _blob(lead, dots);
-  /* Only the cells this frame and the last one disagree about are touched: at most two of them, against a
-     whole-line erase plus fourteen glyph writes before. The static glyphs are never part of this. */
+  // Only the cells this frame and the last one disagree about are touched: at most two of them, against a whole-line
+  // erase plus fourteen glyph writes before. The static glyphs are never part of this.
   for (uint16_t c = _oldLead; c < (uint16_t)(_oldLead + _oldDots); c++)
     if (c < lead || c >= (uint16_t)(lead + dots)) _dotCell(c, false);
   for (uint16_t c = lead; c < (uint16_t)(lead + dots); c++)
@@ -778,11 +777,11 @@ Adafruit_GFX& ClockWidget::getRealDsp(){
 }
 
 void ClockWidget::_printClock(bool force){
-  /* The one place the time reaches the screen, whichever caller arrived: the tick-driven draw(), the forced _draw()
-     that Pager::setPage() and the layout helpers use, and the screensaver.  Nothing is printed until the device has a
-     time it can stand behind (clockTrustworthy() in utility.cpp) - a zeroed timeinfo prints 00:00 and a chip in
-     another zone prints a plausible-looking wrong time, which is what the bouncing clock at boot was.  The first
-     genuine paint needs no help: ticks() and doSync() both request CLOCK the moment they have something to show. */
+  // The one place the time reaches the screen, whichever caller arrived: the tick-driven draw(), the forced _draw()
+  // that Pager::setPage() and the layout helpers use, and the screensaver. Nothing is printed until the device has a
+  // time it can stand behind (clockTrustworthy() in utility.cpp) - a zeroed timeinfo prints 00:00 and a chip in another
+  // zone prints a plausible-looking wrong time. The first genuine paint needs no help: ticks() and doSync() both
+  // request CLOCK the moment they have something to show.
   if (!clockTrustworthy()) return;
   auto& gfx = getRealDsp();
   gfx.setTextSize(Clock_GFXfontPtr==nullptr?TIME_SIZE:1);
@@ -895,8 +894,8 @@ void ClockWidget::_printClock(bool force){
 }
 
 void ClockWidget::_clearClock(){
-  /* Nothing to clear when the layout omits the clock: the geometry used below is only valid after
-     init(), so clearing would fill a rectangle at indeterminate coordinates. */
+  // Nothing to clear when the layout omits the clock: the geometry below is only valid after init(), so clearing
+  // would fill a rectangle at indeterminate coordinates.
   if(!_present) return;
   uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
   #ifdef PSFBUFFER
@@ -921,10 +920,9 @@ void ClockWidget::_draw(){
 
 void ClockWidget::_reset(){
   if(!_present) return;   // omit-by-layout: _fb was never created, so there is nothing to reset
-  /* _getTimeBounds() derives _clockleft/_clockwidth from _config.left and align, and _left() returns
-     _clockleft on non-framebuffer builds - so this has to run on every display, not just PSFBUFFER
-     ones, or a moveTo()'s horizontal component is silently ignored (the vertical one works, because
-     _top() reads _config.top directly). */
+  // _getTimeBounds() derives _clockleft/_clockwidth from _config.left and align, and _left() returns _clockleft on
+  // non-framebuffer builds - so this has to run on every display, not just PSFBUFFER ones, or a moveTo()'s horizontal
+  // component is silently ignored (the vertical one works, because _top() reads _config.top directly).
   _getTimeBounds();
   #ifdef PSFBUFFER
     if(_fb && _fb->ready()) {

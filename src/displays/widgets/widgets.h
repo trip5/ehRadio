@@ -92,6 +92,9 @@ class TextWidget: public Widget {
     // Initialised, so a widget that has never been init()'d is inert rather than full of stack garbage.
     uint8_t _charWidth = 0;
     uint16_t  _buffsize = 0, _textwidth = 0, _oldtextwidth = 0, _oldleft = 0, _textheight = 0;
+    // True once _paint() has put text on the panel, so the erase knows whether the recorded old rectangle
+    // means anything - see _paint().  Not _painted: ProgressWidget has one of those of its own.
+    bool _textPainted = false;
   protected:
     void _paint();
     void _draw();

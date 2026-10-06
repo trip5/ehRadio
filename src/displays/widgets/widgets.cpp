@@ -68,6 +68,7 @@ void TextWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uin
   memset(_oldtext, 0, _buffsize);
   _charSize(_config.textsize, _charWidth, _textheight);
   _textwidth = _oldtextwidth = _oldleft = 0;
+  _textPainted = false;   // a re-init is a new layout: the old rectangle no longer describes where this widget is
   _uppercase = uppercase;
 }
 
@@ -105,10 +106,22 @@ void TextWidget::repaint() {
 }
 
 // Clears where the previous picture was, then draws the current text there.  Split out of setText() so both
-// entries reach the same code: the erase uses the OLD rectangle, because the new one may be narrower and would
-// leave the tail of the old string behind.
+// entries reach the same code.  The erase covers the UNION of the old and the new rectangle: the new one may be
+// narrower, and it may also start further left, and in that case anchoring max(old, new) at min(old, new) left
+// the old tail past the anchor on screen - pixels nobody erased.  The first paint has no old rectangle to
+// honour, which is what _painted records: x == 0 is a legal place for a widget to be, so it cannot be the
+// "nothing drawn yet" marker.
 void TextWidget::_paint() {
-  if (_active) dsp.fillRect(_oldleft == 0 ? _realLeft() : min(_oldleft, _realLeft()),  _config.top, max(_oldtextwidth, _textwidth), _textheight, _bgcolor);
+  if (_active) {
+    const uint16_t left = _realLeft();
+    uint16_t from = left, to = (uint16_t)(left + _textwidth);
+    if (_textPainted) {
+      from = min(_oldleft, left);
+      to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
+    }
+    dsp.fillRect(from, _config.top, (uint16_t)(to - from), _textheight, _bgcolor);
+  }
+  _textPainted = true;
   _oldtextwidth = _textwidth;
   _oldleft = _realLeft();
   if (_active) _draw();

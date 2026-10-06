@@ -2,7 +2,7 @@
 #define font_h
 
 #if CLOCKFONT == CHUNKY6_PX
-  #include "Trip5/Chunky6_15_px.h"
+  #include "Trip5/Chunky6px_15.h"
 #elif CLOCKFONT == CHUNKY6
   #include "Trip5/Chunky6_15.h"
 #elif CLOCKFONT == LED

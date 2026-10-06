@@ -148,7 +148,7 @@ Checking this will ensure it connects to the AP that has the strongest signal.
 Although the radio can also advertise itself on the network using mDNS, ehDP ensures an easy way to connect to the radio's WebUI using an app.
 In simple terms, the app will send out a request over the network which devices with a WebUI can respond to.
 
-For devices without a display, this would make connecting to the WebUI extremely simple.
+For devices without a display, this makes connecting to the WebUI extremely simple.
 
 Read more about how it works and get the app [here](https://trip5.github.io/eh-Device-Scanner/).
 
@@ -339,7 +339,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.10.03 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), LCD displays removed, SD File Manager (and fixes to SD Mode), SDMMC, Boot speed improved, major work on layouts and VU: OLEDs now can get VU, timing fixed, bar orientation, peak bars, visualizations added (I2S gets more), fixes to: SSD1322 & SSD1327 (thanks kle7rx!) `ROTATE_90` for square displays, TFT display resolutions, volume page, Firefox mobile, IR code overhauled and mute/power added, recover from network stack crashes, Wi-fi and stream reconnects improved, library change: `elims/PsychicMqttClient` & MQTT/HA better (state topic, availability with last will, mode/ip topics, playlist revision), NV3007 added (work in progress) |
+| 2026.10.03 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), LCD displays removed, SD File Manager (and fixes to SD Mode), SDMMC, Boot speed improved, major work on layouts and VU (all displays!), timing fixed, bar orientation, peak bars, visualizations added (I2S gets more), fixes to: SSD1322 & SSD1327 (thanks kle7rx!) `ROTATE_90` for square displays, TFT display resolutions, volume page, Firefox mobile, IR code overhauled and mute/power added, recover from network stack crashes, Wi-fi and stream reconnects improved, library change: `elims/PsychicMqttClient` & MQTT/HA better (state topic, availability with last will, mode/ip topics, playlist revision), NV3007 added (work in progress) |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

@@ -222,10 +222,10 @@ or examine the examples in builds/trip5 and make your own!
 
 /* This makes the characters get an LED/VFD background color that makes it look like a real clock (only has an effect on color displays) */
 #ifndef CLOCKGLOW // CLOCKGLOW uses a special character to color COLOR_CLOCK_BG behind the clock for a glow effect
-  #if CLOCKFONT == YO_MONO || CLOCKFONT == CHUNKY6_PX || CLOCKFONT ==  LED
+  #if CLOCKFONT == CHUNKY6 // with CHUNKY6, this effect looks not great
+    #define CLOCKGLOW false
+  #else //CLOCKFONT == YO_MONO || CLOCKFONT == CHUNKY6_PX || CLOCKFONT ==  LED
     #define CLOCKGLOW true
-  #else
-    #define CLOCKGLOW false // with CHUNKY6, this effect looks not great
   #endif
 #endif
 

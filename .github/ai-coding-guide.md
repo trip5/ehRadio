@@ -15,7 +15,7 @@
 ## ⚠️ Critical Rules
 
 > **These rules are HARD CONSTRAINTS, not guidelines. Violating any rule is an error.**
-> Before making ANY edit or suggesting code, mentally validate against ALL 6 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
+> Before making ANY edit or suggesting code, mentally validate against ALL 7 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
 
 **Rule #1**: **Plan Mode for Large Changes**
 - For changes spanning **more than 50 lines** (summed across ALL files in the change), you **MUST STOP** and inform the user:  
@@ -46,6 +46,7 @@
 - For any non-trivial change (beyond an isolated one-line fix), first determine whether it touches the firmware:
   - **Firmware files** = any `*.c`, `*.cpp`, `*.h` file anywhere in the repo, plus anything under `src/`, `libraries/`, or `data/`.
   - **If the change touches ANY firmware file**: You **MUST READ** `.github/code-summary.md` before writing code. Also check `.github/code-issues.md` for known issues in the affected area.
+  - **Search `plans/` for a plan covering the area**, whatever kind of file it touches. A previous plan carries the exact detail - the numbers, the API quirk, the ordering rule - that `code-summary.md` deliberately does not (Rule #7).
   - **If the change touches ONLY non-firmware files** (workflows, docs, build scripts, config generators, Home Assistant, images, etc.): `code-summary.md` review is **NOT** required. Still check `code-issues.md` if relevant.
   - **One-line/trivial fixes** (typos, formatting) are exempt regardless of file type.
 - **What `.github/code-issues.md` is for**: it tracks **open** issues that still need investigation, or that are blocked — for example, waiting on hardware the maintainer does not own. It is **not** a changelog.
@@ -56,9 +57,18 @@
 **Rule #6**: **Comments State Facts, Briefly**
 - **`//` is the default comment.** A block gets a 1-3 line summary above it; a call gets a short trailing `//` when its name does not already say what happened.
 - **`/* */` has exactly three uses**: a section TITLE (`/* ==== Upload ==== */`), a header saying what the next long block does, and code kept but not used (tested and switched off).
-- **No narration, no history, no measurements.** Why something is the way it is, what was measured, and what was tried belong in `.github/code-summary.md`.
+- **No narration, no history, no measurements.** Why something is the way it is belongs in `.github/code-summary.md`; what was measured, what was tried and what was rejected belong in the plan file for that change (Rule #7). If it is not in the code, it does not belong in the summary.
 - **Never document what is not in the code.** Deleted code is not commented about, and a replaced mechanism is not described; a retired mechanism worth not repeating gets at most two lines - what was tried, and the result.
 - **A comment that restates the code is not a comment.** If the name says it, delete it. The same discipline applies to `code-summary.md`: facts, not commentary.
+
+**Rule #7**: **Plan Files Are Working Memory**
+- A conversation can be compacted; `plans/` cannot. For any change large enough to need a plan (Rule #1), write it to `plans/<topic>.md` **before** the first edit, and keep it updated **as you implement** - not afterwards.
+- Record what the code actually turned out to be, not only what was intended: the symptom that started it, the options rejected and why, the measurements, the traps, the files and line anchors. That is the detail which will not fit in a comment (Rule #6) and does not belong in `code-summary.md` (Rule #4).
+- Where the implementation proves the plan wrong, **correct the plan**. A plan still describing the design that was intended, after the code went another way, is worse than no plan - the next session will trust it. Corrections are dated; history is not rewritten.
+- Mark the plan implemented when it is, with the state of the verification (built, flashed, retested by the user) and what remains open.
+- The split is: **comments** say what the code does, beside it; **`code-summary.md`** says what the code *is*; **`plans/`** says why this change went the way it did and what was tried. Do not duplicate - link.
+- **Check `plans/` during any code inquiry** - before investigating, answering or proposing - and read the plan that covers the area first. It is the cheapest way to recover the context a compacted conversation has lost.
+- A change that qualifies under Rule #2 needs no plan file.
 
 **Enforcement and AI Behavior**
 - Always validate proposed changes against these rules **before every action**.
@@ -69,8 +79,9 @@
   2. More than 1 file (not a .cpp/.h pair)? → Plan mode required (Rule #2)
   3. Touching `myoptions.h`, `options.h`, or `platformio.ini`? → Get explicit confirmation (Rule #3)
   4. Affecting external contracts/APIs/storage keys? → Update `code-summary.md` (Rule #4)
-  5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first (Rule #5)
+  5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first, and search `plans/` for the area (Rule #5)
   6. Writing a comment longer than three lines? → It belongs in `code-summary.md`, or it is four shorter comments (Rule #6)
+  7. Planning a change that needs more than a one-file edit? → Write it to `plans/` first, and keep it current as the code lands (Rule #7)
 
 ## Comment Style
 

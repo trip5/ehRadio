@@ -4,36 +4,17 @@ This folder ONLY contains fonts used by the clock (and on the volume page screen
 
 First, the breakdown of what I found in the yoRadio codebase (and the initial Chunky fonts I added later):
 
-font15 = Chunky6_15, Chunky6_15_px
-displaySH1106.h
-displaySSD1306.h
-displaySSD1305.h
-
-font19 = DS_DIGI/DS_DIGI15pt7b, DS_DIGI/DS_DIGI15pt7b_mono
-...nothing?  Maybe this font was meant for the displays that now use the font15 sizes...
-
-font35 = DS_DIGI/DS_DIGI28pt7b, DS_DIGI/DS_DIGI28pt7b_mono, Chunky6_35, Chunky6_35_px
-displayGC9106.h
-displayILI9225.h
-displaySSD1322.h
-displaySSD1327.h
-displayST7735.h
-displayST7789.h (for DSP_ST7789_76)
-
-font52 = DS_DIGI/DS_DIGI42pt7b, DS_DIGI/DS_DIGI42pt7b_mono, Chunky6_15, Chunky6_15_px
-displayGC9A01A.h
-displayILI9341.h
-displayST7789.h (for regular DSP_ST7789_76)
-
-font70: DS_DIGI/DS_DIGI56pt7b, DS_DIGI/DS_DIGI56pt7b_mono, Chunky6_15, Chunky6_15_px
-displayILI9488.h
-displayST7796.h
-
 The DS_DIGI fonts marked as 56pt7b actual height: 70 pixels / width: 54 pixels (colon: 24) - non-mono 1 is 29px
                          ...42pt7b actual height: 52 pixels / width: 40 pixels (colon: 15) - non-mono 1 is 15px
                          ...28pt7b actual height: 35 pixels / width: 27 pixels (colon: 11) - non-mono 1 is 12px
                          ...15pt7b actual height: 19 pixels / width: 14 pixels (colon: 6) - non-mono 1 is 6px
 So likely the point size relates to the true type font it was derived from (which may include below the baseline).
+
+Original length of "00:00" was...
+                              ...for 70 pixels: 240 pixels
+                              ...for 52 pixels: 175
+                              ...for 35 pixels: 119
+                              ...for 19 pixels: 62
 
 The link https://tchapi.github.io/Adafruit-GFX-Font-Customiser/ originally appeared in the comments for the font*.h files.
 It is a font editor but not enjoyable to use.
@@ -41,7 +22,6 @@ It is a font editor but not enjoyable to use.
 Chunky6 is a Trip5 font designed for pixel displays: https://github.com/trip5/Matrix-Fonts
 
 Let's generate a font from a PNG using my own tool to make the "0123456789:" graphic: https://trip5.github.io/Matrix-Fonts/renderer.html -
-note that the PNG was edited using Windows Paint to make sure the characters were a bit center-right.
 This tool can be used on ANY BDF font (a python script is also available in that repository).
 
 Numbers are a fixed-width and the colon is half of that width - this including spaces.  The result is the total width will be divisible by 21.
@@ -49,7 +29,7 @@ Note that it adds a 1 or 2 pixel border all around and we then add black borders
 so that there are equal numbers of black pixels left-right and top-bottom, odd ones getting extra space on left and bottom...
 
 Or more simply, every digit needs to fit into the following patterns (pixel sizes), with the colon being half of the width of a digit:
-Size (height) x width: 70 x 56, 52 x 40, 35 x 28, 15 x 12.
+Size (height) x width: 70 x 56, 52 x 40, 35 x 28, 15 x 12...  28, 21, 8 pixel heights added later.
 
 Chunky6_70:    pixel size 14
 Chunky6_70_px: pixel size 11 + 3 pixels space
@@ -69,19 +49,33 @@ Chunky6_35_px: pixel size 6 + 1 pixels space
         width: 4 (includes 1 empty column) * 7 = 28 pixels (per digit) x 10.5 = 294 pixels
 - Time is longer than DS_DIGI28pt7b_mono by 7 pixels
 
+
+*Chunky6_28:    pixel size 5
+Chunky6_15_px: pixel size 5 + 1 pixels space
+       height: 5 * 5 = 25 pixels
+        width: 4 (includes 1 empty column) * 5 = 20 pixels (per digit) x 10.5 = 210 pixels
+
+*Chunky6_21:    pixel size 4
+Chunky6_15_px: pixel size 3 + 1 pixels space
+       height: 5 * 4 = 20 pixels
+        width: 4 (includes 1 empty column) * 4 = 16 pixels (per digit) x 10.5 = 168 pixels
+
 Chunky6_15:    pixel size 3
 Chunky6_15_px: pixel size 2 + 1 pixels space
        height: 5 * 3 = 15 pixels
         width: 4 (includes 1 empty column) * 3 = 12 pixels (per digit) x 10.5 = 126 pixels
 - Time is shorter than DS_DIGI15pt7b_mono by 8 pixels
 
-This is the tool that can converts the PNG to a .h font file:
-py .\png_to_gfxfont.py Chunky6_70_px.png Chunky6_70_px.h --glow-char /
+*Chunky6_8:    pixel size 1
+Chunky6_8_px: pixel size 2 + 1 pixels space
+       height: 5 * 1 = 5 pixels
+        width: 4 (includes 1 empty column) * 1 = 4 pixels (per digit) x 10.5 = 42 pixels
+
 
 That glow-char switch makes the "glow" character (the residual "LED" behind the character).
 No extra glyph is needed for that... the script will extrapolate the special character.
 If no glow character is needed or desired, 
-The DS_DIGI characters are 7-segment characters so they just the "8" character.
+The DS_DIGI characters are 7-segment characters so they could just use the "8" character.
 
 There is some risk that these slightly wider fonts may not fully fit on all displays...
 

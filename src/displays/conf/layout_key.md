@@ -390,6 +390,33 @@ That is a real behaviour, not "unused". It is why an empty `MoveConfig` is worth
 
 ## 8. Quirks worth knowing
 
+### `left`, `top` and `align`
+
+- **`align` is `0` / `1` / `2`** — `WA_LEFT`, `WA_CENTER`, `WA_RIGHT`. A field left out is `0`, so a
+  conf that never mentions `align` is left-aligned. What `left` then measures from is §4.
+- **Only the text widgets and the clock read `align`.** The rectangles (`FillConfig`), the two
+  sliders and the codec badge ignore it and always put `left` where it says; on the VU it is an
+  orientation switch instead (below). A `WA_CENTER` written on a `metaBGConf`, a `bandsConf` or a
+  `bitrateConf` therefore does nothing at all.
+- **The clock's `top` is the *bottom* of its digits, not the top.** The clock font draws its glyphs
+  *above* the cursor, so the digits occupy `top - height … top - 1`, and a larger `top` moves the
+  clock **down**. Every other widget's `top` is where its text begins. That is why the clock tops in
+  the confs look so large (230 on a 320 px panel).
+- **A line that actually scrolls ignores `align`.** It starts at its window's left edge and travels;
+  `align` only decides where a line short enough *not* to scroll is placed. So changing `align` on a
+  long station name changes nothing.
+- **`WA_RIGHT` is not the same on the two screen families.** On a framebuffer (TFT) build the text
+  is right-aligned inside the widget's own window; on an OLED build it is right-aligned on the
+  *screen*, `left` px in from the edge. With a window at the margin the two agree, which is how the
+  shipped confs get away with it.
+- **Text wider than its window parks at the very left edge** (`x = 0`) rather than overflowing, so an
+  over-long string reads as "drawn in the wrong place" rather than as nothing.
+- **A MOVE's `width` replaces the widget's own.** After a MOVE the widget's span — and so what
+  `WA_CENTER` centres inside — is the MOVE's rectangle; moving back restores the conf's `width`.
+  `width = -1` means "do not move" and the whole entry `{ }` means "yield to the VU" (§7).
+
+### The rest
+
 - **`fontsize` is a 6x8 cell multiplier**, not points.
 - **`TFT_FRAMEWDT` is a margin**, not a width, despite the name.
 - **`uppercase` does nothing.** Use `PRETEXT_ALLCAPS` in `myoptions.h` instead.

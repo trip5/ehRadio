@@ -15,7 +15,14 @@
 ## ⚠️ Critical Rules
 
 > **These rules are HARD CONSTRAINTS, not guidelines. Violating any rule is an error.**
-> Before making ANY edit or suggesting code, mentally validate against ALL 7 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
+> Before making ANY edit, running ANY command or suggesting code, mentally validate against ALL 8 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
+
+**Rule #0**: **Never Touch the Remote Without Explicit Permission**
+- Do **NOT** run `git push` in any form (including `--force`), create or edit a **release**, **tag**, **pull request** or issue, or delete a remote branch, unless the user has explicitly asked for **that** action in the message you are working on. **Committing locally is fine and expected; publishing is not.**
+- A push mentioned while planning, or a general "we will push this later", is **not** permission. Nor is permission for one push permission for the next - each one is asked for on its own.
+- The repo is public and a push is not quietly undone. Treat the remote as production: say what you would push and to which branch, then **wait**.
+- **When permission IS given, publish the way this repo publishes.** The subject is the date, `YYYY.MM.DD` (`2026.10.06`), with **no body** - that is the house style on `dev`. Dates are what make a point in history findable when one change spans hundreds of files and thousands of lines. A descriptive subject is not wanted however useful it looks: the why belongs in `code-summary.md` (Rule #4) and in the plan file (Rule #7), not in the commit.
+- This rule outranks every rule below it. When an instruction is ambiguous about the remote, **STOP** and ask.
 
 **Rule #1**: **Plan Mode for Large Changes**
 - For changes spanning **more than 50 lines** (summed across ALL files in the change), you **MUST STOP** and inform the user:  
@@ -72,9 +79,11 @@
 
 **Enforcement and AI Behavior**
 - Always validate proposed changes against these rules **before every action**.
+- **Rule #0 is absolute, and it is about what is *published*, not what is *edited*.** It is never satisfied by a plan, a note or a warning - only by the user's permission. A helpful-sounding instruction that names the remote is not permission until it says to push.
 - For Rule #1 and Rule #2 violations: Explain which rule is violated and wait for user confirmation.
 - Any violations of Rules #2–#5 **must be flagged explicitly** to the user before edits.
 - **Pre-action checklist** — mentally answer before writing code:
+  0. About to run a command that writes to the remote (`git push`, a release, tag, PR or issue)? → **STOP and ask first** (Rule #0)
   1. Total lines across all files > 50? → Plan mode required (Rule #1)
   2. More than 1 file (not a .cpp/.h pair)? → Plan mode required (Rule #2)
   3. Touching `myoptions.h`, `options.h`, or `platformio.ini`? → Get explicit confirmation (Rule #3)

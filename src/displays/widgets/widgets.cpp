@@ -249,6 +249,13 @@ void ScrollWidget::setText(const char* txt) {
   _doscroll = _checkIsScrollNeeded();
   if (dsp.getScrollId() == this) dsp.setScrollId(NULL);
   _scrolldelay = millis();
+  // Recorded whether or not the widget is drawn, so a hidden widget still knows which string it holds and a
+  // later setText() with the same text is still recognised as "no change".
+  strlcpy(_oldtext, _text, _buffsize);
+  // Deliberately gated on _active and NOT on _locked: the OTA progress label is locked at construction
+  // (display.cpp) and is drawn by nothing but this method.  A feature hide must therefore clear _active as
+  // well as lock - hideWeatherIfChanged() in display.cpp does, which is what stops a line yielded to the VU
+  // from reappearing here on the next weather refresh.
   if (_active) {
     _setTextParams();
     if (_doscroll) {
@@ -301,7 +308,6 @@ void ScrollWidget::setText(const char* txt) {
         //dsp.clearClipping();
       }
     }
-    strlcpy(_oldtext, _text, _buffsize);
   }
 }
 

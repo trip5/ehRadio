@@ -145,6 +145,18 @@ static void lockIfChanged(Widget* w, bool hide) { if (w && w->locked() != hide) 
 
 // Coming back from hidden needs an explicit redraw: unlock() does not draw, and the clock only ticks seconds.
 static void redrawIfVisible(Widget* w) { if (w && !w->locked()) w->setActive(true); }
+
+// The weather's hide is the one that has to clear _active as well as _locked.  ScrollWidget::setText()
+// paints inline and, deliberately, consults only _active - the OTA progress label is locked at
+// construction and is drawn by nothing but setText() - so a lock on its own is undone by the next
+// weather refresh, which is how a line yielded to the VU reappears over the bitrate or the badge.
+// The clock, the buffer bar and the VU keep using lockIfChanged(): their draw paths all test _locked.
+// Order matters - lock(true) clears while the widget is still active, then the flag goes.
+static void hideWeatherIfChanged(Widget* w, bool hide) {
+  if (!w || w->locked() == hide) return;
+  if (hide) { w->lock(true); w->setActive(false); }
+  else      { w->lock(false); w->setActive(true); }   // re-show draws the text setText() kept recording
+}
 #endif
 
 QueueHandle_t displayQueue;
@@ -519,7 +531,7 @@ void Display::_start() {
   
   if (_bufferbar)  _bufferbar->lock(!bufferbarInLayout() || !config.store.bufferbar);
   
-  lockIfChanged(_weather, _weatherHidden());
+  hideWeatherIfChanged(_weather, _weatherHidden());
   if (_weather && config.store.showweather && network.status != SDOFFLINE) network.buildWeatherString();
 
   // lockIfChanged, then clear() so an already-inactive clock is erased too.
@@ -837,11 +849,10 @@ void Display::_layoutChange(bool played) {
   }
   // Lock state last, from one definition.  lock() erases, so a yielded widget really disappears.
   const bool clockWasHidden = (_clock && _clock->locked());
-  const bool weatherWasHidden = (_weather && _weather->locked());
   lockIfChanged(_clock, _clockHidden());
-  lockIfChanged(_weather, _weatherHidden());
+  // The weather re-shows through hideWeatherIfChanged() itself, so it needs no redrawIfVisible() here.
+  hideWeatherIfChanged(_weather, _weatherHidden());
   if (clockWasHidden)   redrawIfVisible(_clock);     // full _printClock(true), not just the seconds
-  if (weatherWasHidden) redrawIfVisible(_weather);
 }
 
 #ifdef USE_SD
@@ -930,7 +941,7 @@ void Display::loop() {
           break;
         }
         case SHOWWEATHER: {
-          lockIfChanged(_weather, _weatherHidden());
+          hideWeatherIfChanged(_weather, _weatherHidden());
           if (!config.store.showweather) {
             if (_weather) _weather->setText("");
             if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
@@ -1374,7 +1385,7 @@ void Display::_applyState() {
   // Re-apply every feature lock: _reinitWidgets() may just have shown a widget the layout brought back.
   if (_vuwidget)  _vuwidget->lock(!vuInLayout() || !config.store.vumeter || !player.isRunning());
   // Mirrors SHOWWEATHER exactly, including the shared-row suppression, so a switch cannot drop it mid-overlay.
-  lockIfChanged(_weather, _weatherHidden());
+  hideWeatherIfChanged(_weather, _weatherHidden());
   if (_bufferbar) _bufferbar->lock(!bufferbarInLayout() || !config.store.bufferbar);
   // The clock's feature lock must be re-applied too, or a `{}` clockMove layout stays visible.
   lockIfChanged(_clock, _clockHidden());

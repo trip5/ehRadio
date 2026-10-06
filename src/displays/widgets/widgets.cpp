@@ -146,7 +146,16 @@ uint16_t TextWidget::_realLeft(bool w_fb) {
   // clean off the panel - which reads as "nothing was drawn" rather than as "drawn in the wrong place".  Park it
   // at the edge instead.  A ScrollWidget with a too-long string never reaches here: it scrolls in _draw().
   switch (_config.align) {
-    case WA_CENTER: return (_textwidth >= realwidth)?0:(uint16_t)((realwidth - _textwidth) / 2); break;
+    case WA_CENTER: {
+      // Centred in the widget's own span when it has one, and on the screen when it has not.  A scroll brings a
+      // span (its width) and a MOVE hands one over, and in that span `left` is the left edge - which is what
+      // lets weatherMove/weatherMoveVU shift a centred line clear of the VU rather than doing nothing at all.
+      // Without a span there is nothing for `left` to be the edge of, so it stays inert, exactly as before; the
+      // clock is the one that has always done something else, centring on the screen and adding `left`.
+      const uint16_t span  = (_width > 0) ? _width : realwidth;
+      const uint16_t start = (_width > 0) ? offset : 0;
+      return (_textwidth >= span) ? 0 : (uint16_t)(start + (span - _textwidth) / 2);
+    }
     case WA_RIGHT: return ((uint32_t)_textwidth + offset >= realwidth)?0:(uint16_t)(realwidth - _textwidth - offset); break;
     default: return offset; break;
   }
@@ -225,8 +234,10 @@ void ScrollWidget::init(const char* separator, ScrollConfig conf, uint16_t fgcol
   #ifdef PSFBUFFER
     if (_fb) _fb->freeBuffer();
     else     _fb = new psFrameBuffer(dsp.width(), dsp.height());
-    uint16_t _rl = (_config.align==WA_CENTER)?(dsp.width()-_width)/2:_config.left;
-    _fb->begin(&dsp, _rl, _config.top, _width, _textheight, _bgcolor);
+    // The window always starts where the conf - or a MOVE - puts it; `align` is what places the TEXT inside it,
+    // in _realLeft(true).  Centring the window on the screen instead is what made `left` inert for a centred
+    // scroll, and it is also why the erase rectangle and the printed text could disagree.
+    _fb->begin(&dsp, _config.left, _config.top, _width, _textheight, _bgcolor);
   #endif
 }
 
@@ -446,8 +457,8 @@ void ScrollWidget::_reset(){
   _doscroll = _checkIsScrollNeeded();
   #ifdef PSFBUFFER
     _fb->freeBuffer();
-    uint16_t _rl = (_config.align==WA_CENTER)?(dsp.width()-_width)/2:_config.left;
-    _fb->begin(&dsp, _rl, _config.top, _width, _textheight, _bgcolor);
+    // See init(): the window is at `left`, and `align` places the text inside it.
+    _fb->begin(&dsp, _config.left, _config.top, _width, _textheight, _bgcolor);
   #endif
 }
 

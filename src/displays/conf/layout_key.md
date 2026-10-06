@@ -212,7 +212,18 @@ repaints — so a rule that must last belongs where the layout has nothing updat
 
 ## 4. What the numbers mean
 
-- **`left` / `top`** are pixels from the top-left corner of the screen.
+- **`left` / `top`** are pixels from the top-left corner of the screen. `top` always means the same
+  thing; **what `left` measures from depends on `align`**:
+
+  | `align` | where the widget goes |
+  |---|---|
+  | `WA_LEFT` | the text starts at `left` |
+  | `WA_RIGHT` | the text ends `left` px from the right edge |
+  | `WA_CENTER` | centred inside the widget's own **span** — a scroll's `width`, or the width a MOVE gives it — so there `left` is the span's left edge. A widget with no span is centred on the screen and `left` does nothing |
+
+  The clock is the deliberate exception: it centres on the screen and *adds* `left`
+  ([`_getTimeBounds()`](../widgets/widgets.cpp)), so a clock MOVE has always moved and a weather MOVE
+  with `WA_CENTER` used not to. That is why `weatherMoveVU` used to look inert; see §7.
 - **`fontsize` is a multiplier of a 6x8 character cell**, not a point size. So `1` gives a 6x8
   cell, `2` gives 12x16. That is why the confs are full of odd-looking positions.
 - **`MAX_WIDTH`** is the usable width inside the border margin, and **`TFT_FRAMEWDT`** is that

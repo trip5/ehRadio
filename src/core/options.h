@@ -195,40 +195,6 @@ or examine the examples in builds/trip5 and make your own!
   #endif
 #endif
 
-/* Define your display font as: #define DISPLAYFONT X11       */
-#define MATRIXLIGHT     0
-#define MATRIXCHUNKY    1
-#define X11             2   // Unix X11 6x9 fixed-width
-
-#ifndef DISPLAYFONT
-  #define DISPLAYFONT MATRIXCHUNKY
-#endif
-
-/* Define your clock/volume page font as #define CLOCKFONT CHUNKY6 */
-#define YO_MONO         0  // Default modern yoRadio 7-Segment font (monospaced)
-#define CHUNKY6_PX      1  // Default (spacing pixels) - great on color screens
-#define CHUNKY6         2  // Really heavy looking - great on mono screens
-#define LED             3  // A 7-Segment LED font
-
-/* Chunky6 with spaces between pixels is the default (except on OLEDs) */
-#ifndef CLOCKFONT
-  #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
-  // note that using YO_MONO on the above list of displays will revert to the display font.
-    #define CLOCKFONT CHUNKY6
-  #else
-    #define CLOCKFONT CHUNKY6_PX
-  #endif
-#endif
-
-/* This makes the characters get an LED/VFD background color that makes it look like a real clock (only has an effect on color displays) */
-#ifndef CLOCKGLOW // CLOCKGLOW uses a special character to color COLOR_CLOCK_BG behind the clock for a glow effect
-  #if CLOCKFONT == CHUNKY6 // with CHUNKY6, this effect looks not great
-    #define CLOCKGLOW false
-  #else //CLOCKFONT == YO_MONO || CLOCKFONT == CHUNKY6_PX || CLOCKFONT ==  LED
-    #define CLOCKGLOW true
-  #endif
-#endif
-
 /* Playlist Mode: some displays have trouble displaying the fancy "fade" playlist - this list may be incomplete */
 // ILI9488 uses 24 bits per pixel instead of 16 or 8, resulting in a 33% slower refresh rate... making a nasty slowdown on a big display when it needs to redraw the entire screen
 // use PLAYLIST_MODE_PAGED true if your display has issues on the playlist screen or if you just want to use page mode (but it doesn't scroll long station names)
@@ -1474,11 +1440,41 @@ or examine the examples in builds/trip5 and make your own!
     #define INVERT_TITLE false
   #endif
 #endif
+// A note here that layouts and themes cannot be given a default... sorry!
+/* Define your display font as: #define DISPLAYFONT X11       */
+#define MATRIXLIGHT     0
+#define MATRIXCHUNKY    1
+#define X11             2   // Unix X11 6x9 fixed-width
+#ifndef DISPLAYFONT
+  #define DISPLAYFONT MATRIXCHUNKY
+#endif
+/* Define your clock/volume page font preferences as #define CLOCKFONT CHUNKY6 */
+// One style per folder in displays/clockfonts. The values are the index of the style in dspfont.h's _clockFontStyles[],
+#define LEDCLOCK        0  // A 7-Segment LED font
+#define YO_MONO         0  // The classic yoRadio font was removed and replaced with LEDCLOCK
+#define CHUNKY6_PX      1  // Default (spacing pixels) - great on color screens
+#define CHUNKY6PX       1  // An alias for above...
+#define CHUNKY6         2  // Really heavy looking - great on mono screens
+#ifndef CLOCKFONT
+  #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
+    #define CLOCKFONT CHUNKY6 // OLEDs
+  #else
+    #define CLOCKFONT CHUNKY6PX
+  #endif
+#endif
 #ifndef NUMBERED_PLAYLIST
   #define NUMBERED_PLAYLIST false
 #endif
 #ifndef CLOCK_TWELVE
   #define CLOCK_TWELVE false
+#endif
+/* This makes the characters get an LED/VFD background color that makes it look like a real clock (only has an effect on color displays) */
+#ifndef CLOCKGLOW // CLOCKGLOW uses a special character to color COLOR_CLOCK_BG behind the clock for a glow effect
+  #if CLOCKFONT == CHUNKY6 // with CHUNKY6, this effect looks not great
+    #define CLOCKGLOW false
+  #else // All other fonts look great!
+    #define CLOCKGLOW true
+  #endif
 #endif
 #ifndef VOLUME_PAGE
   #define VOLUME_PAGE false

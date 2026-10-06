@@ -226,6 +226,12 @@ repaints — so a rule that must last belongs where the layout has nothing updat
   with `WA_CENTER` used not to. That is why `weatherMoveVU` used to look inert; see §7.
 - **`fontsize` is a multiplier of a 6x8 character cell**, not a point size. So `1` gives a 6x8
   cell, `2` gives 12x16. That is why the confs are full of odd-looking positions.
+- **`clockConf` and `numConf` are the exception to that: there `fontsize` is a clock SIZE INDEX.**
+  `0` draws with the system font (all the 128x32 panel does), and `1..4` are 15, 35, 52 and 70 px
+  taken from `clockfonts/<Style>/`. It used to be `TIME_SIZE`, a single number for the whole build
+  derived from `DSP_HEIGHT`; it is the layout's own value now, so a layout can size its clock and its
+  number page independently. The value each shipped layout carries is what the old `DSP_HEIGHT` rule
+  produced for that panel, so nothing moved.
 - **`MAX_WIDTH`** is the usable width inside the border margin, and **`TFT_FRAMEWDT`** is that
   margin — left/right inset in pixels, despite the name. On the 128x64 OLED the margin is 1 px,
   which keeps text off the very first and last pixel column.
@@ -233,15 +239,32 @@ repaints — so a rule that must last belongs where the layout has nothing updat
 - **Scroll speed** is `scrolldelta * 1000 / scrolltime` pixels per second. The shipped confs for
   the 128x64 OLED scroll the title at 50 px/s and the playlist at 150 px/s.
 
-### `FONTSHIFT` and the clock font
+### The two clock transforms: `fullClock` and `seconds`
 
-`FONTSHIFT` nudges things down to make room for the tall clock font. It is `15` with the default
-`CHUNKY6` clock font and `0` when `CLOCKFONT` is `YO_MONO`, and the shipped confs apply it to
-`numConf.top`, `clockConf.top` and `vuConf.top` only.
+Both used to be derived from the panel — the divider/day/date column was "the clock size is 52 or 70,
+or the model is an ILI9225", and the seconds block was "this size has a seconds font". They are
+per-layout booleans now, and they are the first two entries of the TRANSFORMS group:
 
-With the default font the clock and the VU sit at `y = 38 + 15 = 53` on a 64 px panel — the last
-11 rows. That is worth knowing before you place anything else down there. Whether a given
-`FONTSHIFT` looks right is empirical: only a flash proves it.
+| transform | what it adds |
+|---|---|
+| `fullClock` | the divider and the day/date column right of the time |
+| `seconds` | the seconds block right of the time |
+
+Which layouts want which, and why, is worked through in `plans/font-overhaul.md` §2.11. The one that
+catches people out is that **the same clock size can go either way**: the 35 px TFT family shows
+neither, while the ILI9225 — a 35 px panel too — shows both.
+
+### `FONTSHIFT` / `CLOCKSHIFT`
+
+These were `#if CLOCKFONT == YO_MONO` nudges in two confs
+(`displayOLED128x64conf.h`, `displayOLED256x64conf.h`) that moved `numConf.top`, `clockConf.top`,
+`vuConf.top`, `bandsConf.height` and `clockMove` to make room for YO_MONO's glyphs. **The `#if` blocks
+are gone with the font and their `#else` values are baked in** — `FONTSHIFT_X 0`, `FONTSHIFT_Y 15`
+there; `CLOCKSHIFT_X 0`, `CLOCKSHIFT_Y 0` there — because the clock font is a runtime choice now, so a
+conf cannot branch on it.
+
+The 128x64 OLED's `FONTSHIFT_Y = 15` is the one worth knowing before placing anything at the bottom:
+it puts the clock and the VU at `y = 38 + 15 = 53` on a 64 px panel, the last 11 rows.
 
 ---
 
@@ -258,7 +281,7 @@ What that looks like per type:
 
 | Type | Off when… |
 |---|---|
-| `WidgetConfig` | `fontsize` is 0 — **except the clock and the digits**, see below |
+| `WidgetConfig` | `fontsize` is 0 — **except `clockConf` and `numConf`**, where presence is "any field non-zero", see below |
 | `ScrollConfig` | `buffsize` is 0 (and `fontsize` is 0) |
 | `FillConfig` | `height` is 0 |
 | `BitrateConfig` | `dimension` is 0 |
@@ -267,9 +290,10 @@ Never use a position to decide this: `{ 0, 0 }` is a perfectly valid place to pu
 
 ### The clock and the digits are the exception
 
-`clockConf` and `numConf` ignore `fontsize` completely — they draw with a special clock font, so
-a valid clock can have `fontsize = 0`. They count as "present" when **any** of their four fields
-is non-zero. Two consequences:
+`clockConf` and `numConf` count as "present" when **any** of their four fields is non-zero, not when
+`fontsize` is. And `fontsize` is not a text size there at all — it is the clock size index, where **`0`
+is a meaningful value** (draw with the system font, which is what the 128x32 panel does). Two
+consequences:
 
 - `{ }` still means "no clock", as you would expect.
 - To put a clock at the very top-left corner you must set a fourth field, for example

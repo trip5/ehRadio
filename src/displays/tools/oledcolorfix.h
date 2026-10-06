@@ -24,11 +24,13 @@
   config.theme.clock      = TFT_FG;
   config.theme.clockbg    = TFT_BG;
   config.theme.seconds    = TFT_FG;
+  config.theme.secondsbg  = TFT_BG;
   config.theme.dow        = TFT_FG;
   config.theme.date       = TFT_FG;
   config.theme.clockss    = TFT_FG;
   config.theme.clockbgss  = TFT_BG;
   config.theme.secondsss  = TFT_FG;
+  config.theme.secondsbgss = TFT_BG;
   config.theme.dowss      = TFT_FG;
   config.theme.datess     = TFT_FG;
   config.theme.buffer     = TFT_FG;

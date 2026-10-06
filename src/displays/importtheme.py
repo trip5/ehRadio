@@ -68,8 +68,8 @@ FIELD_ORDER = [
     'background', 'meta', 'metabg', 'metafill',
     'title1', 'title2', 'digit', 'div', 'line', 'weather', 'vuaxis',
     'vupeak', 'vumax', 'vumin',
-    'clock', 'clockbg', 'seconds', 'dow', 'date',
-    'clockss', 'clockbgss', 'secondsss', 'dowss', 'datess',
+    'clock', 'clockbg', 'seconds', 'secondsbg', 'dow', 'date',
+    'clockss', 'clockbgss', 'secondsss', 'secondsbgss', 'dowss', 'datess',
     'buffer', 'ip', 'vol', 'rssi', 'battery', 'bitrate',
     'volbarout', 'volbarin',
     'plcurrent', 'plcurrentbg', 'plcurrentfill',
@@ -98,6 +98,8 @@ COMPUTED_FALLBACK = [
     ('dowss',     'dow',     0.50),   # 50% of dow
     ('datess',    'date',    0.50),   # 50% of date
     ('clockbgss', 'clockss', 0.15),   # 15% of clockss (resolved above)
+    ('secondsbg',   'seconds',   0.15),   # 15% of seconds
+    ('secondsbgss', 'secondsss', 0.15),   # 15% of secondsss (resolved above)
 ]
 
 # Computed values that are derived by a stated rule rather than guessed, so they are emitted

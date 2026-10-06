@@ -79,11 +79,13 @@ struct theme_t {
   uint16_t clock;
   uint16_t clockbg;
   uint16_t seconds;
+  uint16_t secondsbg;
   uint16_t dow;
   uint16_t date;
   uint16_t clockss;
   uint16_t clockbgss;
   uint16_t secondsss;
+  uint16_t secondsbgss;
   uint16_t dowss;
   uint16_t datess;
   uint16_t buffer;
@@ -140,6 +142,12 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      vumeter = SHOW_VU_METER;
   bool      vupeak = SHOW_VU_PEAK;
   uint8_t   vustyle = VU_STYLE_DEFAULT;   // which visualiser the VU box draws; see vuStyle_e
+  // Fonts are a runtime choice now (plans/font-overhaul.md), so these macros are only the boot defaults:
+  // systemFontId indexes _systemFonts/_systemFontNames in dspfont.h, clockFontId is the clock *style* (its
+  // size comes from the layout), and clockglow is the LED/VFD background behind the clock digits.
+  uint8_t   systemFontId = DISPLAYFONT;
+  uint8_t   clockFontId = CLOCKFONT;
+  bool      clockglow = CLOCKGLOW;
   uint8_t   brightness = SCREEN_BRIGHTNESS;
   bool      dimmingEnabled = DIMMING_ENABLED;
   uint16_t  dimmingTimeout = DIMMING_TIMEOUT;

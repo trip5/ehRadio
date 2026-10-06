@@ -58,8 +58,10 @@ const LayoutData _layouts[] PROGMEM = {
         .iptxtConf           = { }, // unused
         // .iptxtConf           = { 0, 64-11, 1, WA_LEFT },
         .rssiConf            = { 0, 64-11, 1, WA_RIGHT },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
         .numConf             = { 0, 12, 0, WA_CENTER },
-        .clockConf           = { 0,  1, 0, WA_RIGHT },
+        .clockConf           = { 0, 1, 0, WA_RIGHT },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { }, // unused
         // .vuConf            = { 1, 28, 1, WA_LEFT },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
@@ -71,11 +73,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = false, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = false, // VU rotated 90 degrees
-        .shareWeatherIP      = false, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = false, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = false, // IP and weather share the same row
+        .shareBattRSSI       = false, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
 };
 

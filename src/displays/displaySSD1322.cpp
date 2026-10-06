@@ -31,11 +31,13 @@ void DspCore::initDisplay() {
     config.theme.clock      = TFT_FG;
     config.theme.clockbg    = GRAY_1;
     config.theme.seconds    = GRAY_9;
+    config.theme.secondsbg  = GRAY_1;   // mirrors clockbg, as oledcolorfix.h does
     config.theme.dow        = GRAY_7;
     config.theme.date       = GRAY_7;
     config.theme.clockss    = TFT_FG;
     config.theme.clockbgss  = GRAY_1;
     config.theme.secondsss  = GRAY_9;
+    config.theme.secondsbgss = GRAY_1;
     config.theme.dowss      = GRAY_7;
     config.theme.datess     = GRAY_7;
     config.theme.buffer     = TFT_FG;

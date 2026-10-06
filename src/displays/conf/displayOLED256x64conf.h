@@ -9,20 +9,6 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define BOOTLOGOTOP     8
 
-/* YO_MONO's glyphs sit a little narrower and lower than the chunky fonts, so its
-   clock wants a small nudge right and up.  Two shifts, one per axis, so the
-   .clockConf below stays one line for every font.
-
-   THIS DEFINITELY NEEDS TO BE REMOVED IF WE ALTER HOW CLOCK LOCATION IS DETERMINED */
-
-#if CLOCKFONT == YO_MONO
-  #define CLOCKSHIFT_X 4
-  #define CLOCKSHIFT_Y -1
-#else
-  #define CLOCKSHIFT_X 0
-  #define CLOCKSHIFT_Y 0
-#endif
-
 const BootData _bootConfig PROGMEM = {
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .apTitleConf         = {{ TFT_FRAMEWDT+1, TFT_FRAMEWDT+1, 1, WA_CENTER }, 140, false, MAX_WIDTH-2, 0, 1, SCROLLTIME },
@@ -73,9 +59,11 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { }, // <--------- NEEDS EDITING!
         .iptxtConf           = { 0, 64-13, 1, WA_LEFT },
         .rssiConf            = { 0, 64-12-10, 1, WA_LEFT },
-        .numConf             = { TFT_FRAMEWDT, 57, 0, WA_CENTER },
-        .clockConf           = { CLOCKSHIFT_X, 58 + CLOCKSHIFT_Y, 0, WA_RIGHT },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { TFT_FRAMEWDT, 57, 2, WA_CENTER },
+        .clockConf           = { 0, 58, 2, WA_RIGHT },
         // .clockConf         = { 6, 34, 2, WA_CENTER },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         //.vuConf              = { }, // unused
         .vuConf              = { DSP_WIDTH/2+4, DSP_HEIGHT/2-7, 1, WA_CENTER },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
@@ -87,11 +75,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = false, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = true, // VU rotated 90 degrees
-        .shareWeatherIP      = true, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = true, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = true, // IP and weather share the same row
+        .shareBattRSSI       = true, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
 };
 

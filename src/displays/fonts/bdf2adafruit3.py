@@ -503,8 +503,13 @@ def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
                 (offset, TARGET_W, TARGET_H, TARGET_W, g.xoffs, -TARGET_H)
             )
 
-    # Write bitmap data
-    lines.append(f'const uint8_t {prefix}Bitmaps[] PROGMEM = {{')
+    # Write bitmap data.
+    # `extern` on all three definitions is deliberate and load-bearing: a namespace-scope const array has
+    # INTERNAL linkage, so every translation unit that includes this header would get its own private copy in
+    # flash.  With `extern` the data has external linkage, so the header is included from exactly one .cpp and
+    # every other unit declares it (see fonts.cpp and dspfont.h).  Measured on the linked ELF before the fix:
+    # each font was in the image twice, ~39 KB wasted for the three system fonts.
+    lines.append(f'extern const uint8_t {prefix}Bitmaps[] PROGMEM = {{')
     for i in range(0, len(all_bitmaps), 12):
         chunk = all_bitmaps[i:i + 12]
         hex_vals = ', '.join(f'0x{b:02X}' for b in chunk)
@@ -513,7 +518,7 @@ def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
     lines.append('')
 
     # Write glyph descriptors
-    lines.append(f'const GFXglyph {prefix}Glyphs[] PROGMEM = {{')
+    lines.append(f'extern const GFXglyph {prefix}Glyphs[] PROGMEM = {{')
     for desc, cp in zip(glyph_descriptors, range(first_cp, last_cp + 1)):
         offset, w, h, adv, xo, yo = desc
         g = glyphs_dict.get(cp)
@@ -526,7 +531,7 @@ def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
     lines.append('')
 
     # GFXfont struct
-    lines.append(f'const GFXfont {prefix} PROGMEM = {{')
+    lines.append(f'extern const GFXfont {prefix} PROGMEM = {{')
     lines.append(f'    (uint8_t *){prefix}Bitmaps,')
     lines.append(f'    (GFXglyph *){prefix}Glyphs,')
     lines.append(f'    0x{first_cp:04X},  /* first */')

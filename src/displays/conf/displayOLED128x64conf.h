@@ -9,16 +9,6 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define BOOTLOGOTOP     8
 
-// THIS DEFINITELY NEEDS TO BE REMOVED IF WE ALTER HOW CLOCK LOCATION IS DETERMINED
-
-#if CLOCKFONT == YO_MONO
-  #define FONTSHIFT_X -3
-  #define FONTSHIFT_Y 1
-#else
-  #define FONTSHIFT_X 0
-  #define FONTSHIFT_Y 15
-#endif
-
 const BootData _bootConfig PROGMEM = {
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 2, WA_CENTER }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
@@ -69,25 +59,29 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { 0, 64-9, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-9, 1, WA_LEFT },
         .rssiConf            = { 0, 64-9, 1, WA_RIGHT },
-        .numConf             = { 0, 29+FONTSHIFT_Y, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { 0, 44, 1, WA_CENTER },
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT, 37+FONTSHIFT_Y, 0, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT, 52, 1, WA_CENTER },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         //.vuConf              = { }, // unused
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_LEFT },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
-        .bandsConf           = { 7, 54+FONTSHIFT_X*2-1, 1, 1, 10 },
+        .bandsConf           = { 7, 54-1, 1, 1, 10 },
         /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { TFT_FRAMEWDT+(54/2)+1+FONTSHIFT_X, 37+FONTSHIFT_Y, 0 },
+        .clockMove           = { TFT_FRAMEWDT+(54/2)+1-2, 52, 0 },
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
-        .rotateVU            = true,
-        .shareWeatherIP      = true,
-        .shareBattRSSI       = true,
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = true, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
+        .rotateVU            = true, // VU rotated 90 degrees
+        .shareWeatherIP      = true, // IP and weather share the same row
+        .shareBattRSSI       = true, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Big VU
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
@@ -111,9 +105,11 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { 0, 64-9, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-9, 1, WA_LEFT },
         .rssiConf            = { 0, 64-9, 1, WA_RIGHT },
-        .numConf             = { 0, 29+FONTSHIFT_Y, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { 0, 44, 1, WA_CENTER },
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT, 37+FONTSHIFT_Y, 0, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT, 52, 1, WA_CENTER },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_LEFT },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
@@ -124,11 +120,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
-        .rotateVU            = true,
-        .shareWeatherIP      = true,
-        .shareBattRSSI       = true,
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = true, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
+        .rotateVU            = true, // VU rotated 90 degrees
+        .shareWeatherIP      = true, // IP and weather share the same row
+        .shareBattRSSI       = true, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Compact
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
@@ -153,27 +151,31 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { 0, 64-10, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-10, 1, WA_LEFT },
         .rssiConf            = { 0, 64-10, 1, WA_RIGHT },
-        .numConf             = { 0, 26+FONTSHIFT_Y, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { 0, 41, 1, WA_CENTER },
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT, 35+FONTSHIFT_Y, 0, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT, 50, 1, WA_CENTER },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         //.vuConf              = { }, // unused
         .vuConf              = { TFT_FRAMEWDT, 35, 1, WA_LEFT },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
-        .bandsConf           = { 7, 54+FONTSHIFT_X*2-1, 1, 1, 10 },
+        .bandsConf           = { 7, 54-1, 1, 1, 10 },
         /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { TFT_FRAMEWDT+(54/2)+1+FONTSHIFT_X, 35+FONTSHIFT_Y, 0 },
+        .clockMove           = { TFT_FRAMEWDT+(54/2)+1, 50, 0 },
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = true, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
         /* Rotated so the bands run horizontally: ch = width*2+space = 15px tall and
            cw = height = 44px long, fitting the y=38..54 line beside the clock */
-        .rotateVU            = true,
-        .shareWeatherIP      = true, // IP and weather share the bottom row
+        .rotateVU            = true, // VU rotated 90 degrees
+        .shareWeatherIP      = true, // IP and weather share the same row
         .shareBattRSSI       = true, // RSSI and battery share the same row
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Minimal
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
@@ -197,9 +199,11 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { 0, 64-10, 1, WA_RIGHT },
         .iptxtConf           = { TFT_FRAMEWDT, 64-10, 1, WA_LEFT },
         .rssiConf            = { 0, 64-10, 1, WA_RIGHT },
-        .numConf             = { 0, 26+FONTSHIFT_Y, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { 0, 41, 1, WA_CENTER },
         //.clockConf           = { TFT_FRAMEWDT, 38+FONTSHIFT, 0, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT, 35+FONTSHIFT_Y, 0, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT, 50, 1, WA_CENTER },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { TFT_FRAMEWDT, 37, 1, WA_CENTER },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
@@ -210,11 +214,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = true,
-        .rotateVU            = false,
-        .shareWeatherIP      = true, // IP and weather share the bottom row
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = true, // the seconds block right of the time
+        .boomboxVU           = true, // VU drawn as a "boombox" horizontal meter
+        .rotateVU            = false, // VU rotated 90 degrees
+        .shareWeatherIP      = true, // IP and weather share the same row
         .shareBattRSSI       = true, // RSSI and battery share the same row
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
 };
 

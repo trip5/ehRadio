@@ -9,14 +9,13 @@
 // ==========================================================================
 // Selects the display driver header, sets the feature flags — PSFBUFFER for the
 // TFT class, DSP_OLED for the monochrome class — then delegates
-// font/bootlogo/TIME_SIZE to dspfont.h and conf file selection to dspconf.h.
+// the font and bootlogo tables to dspfont.h and conf file selection to dspconf.h.
 //
 // One #elif branch per DSP_MODEL (controller). Resolution variants and
 // interface variants (I2C) are handled by downstream files.
 // ==========================================================================
 
 #if DSP_MODEL==DSP_DUMMY
-  #define DSP_NOT_FLIPPED
   #define DISPLAY_MODEL_NAME "None"
 
 #elif DSP_MODEL==DSP_GC9A01A

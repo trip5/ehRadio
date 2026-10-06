@@ -21,6 +21,8 @@ if (document.readyState === 'loading') {
     loadThemes();
     loadLayouts();
     loadVisuals();
+    loadSystemFonts();
+    loadClockFonts();
     loadTimezones();
     loadLocales();
     loadDisplayLocales();
@@ -33,6 +35,8 @@ if (document.readyState === 'loading') {
   loadThemes();
   loadLayouts();
   loadVisuals();
+  loadSystemFonts();
+  loadClockFonts();
   loadTimezones();
   loadLocales();
   loadDisplayLocales();
@@ -43,7 +47,9 @@ if (document.readyState === 'loading') {
 
 /** THEME & LAYOUT dropdowns **/
 let themeData = null, layoutData = null, visualsData = null;
+let systemFontData = null, clockFontData = null;
 let pendingThemeId = null, pendingLayoutId = null, pendingVustyle = null;
+let pendingSystemFontId = null, pendingClockFontId = null;
 
 async function loadThemes() {
   try {
@@ -89,6 +95,36 @@ async function loadVisuals() {
   } catch(e) { console.error('Failed to load visuals:', e); }
 }
 
+/* The two font lists come from the device as well, built from the tables it compiled in
+   (Display::_buildJsonCache), so a font that is not in the build cannot appear in the list. */
+async function loadSystemFonts() {
+  try {
+    const r = await fetch('fonts.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    systemFontData = await r.json();
+    populateNamedDropdown('systemFontId', systemFontData);
+    if (pendingSystemFontId !== null) {
+      const sel = getId('systemFontId');
+      if (sel) sel.value = pendingSystemFontId;
+      pendingSystemFontId = null;
+    }
+  } catch(e) { console.error('Failed to load fonts:', e); }
+}
+
+async function loadClockFonts() {
+  try {
+    const r = await fetch('clockfonts.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    clockFontData = await r.json();
+    populateNamedDropdown('clockFontId', clockFontData);
+    if (pendingClockFontId !== null) {
+      const sel = getId('clockFontId');
+      if (sel) sel.value = pendingClockFontId;
+      pendingClockFontId = null;
+    }
+  } catch(e) { console.error('Failed to load clock fonts:', e); }
+}
+
 function populateNamedDropdown(elemId, data) {
   const sel = getId(elemId);
   if (!sel) return;
@@ -103,7 +139,8 @@ function populateNamedDropdown(elemId, data) {
     if (sel.dataset.prev !== sel.value) {
       /* The element id and the command are not the same string (themeId/theme, layoutId/layout), so
          map them explicitly instead of deriving one from the other. */
-      const cmdMap = { themeId: 'theme', layoutId: 'layout', vustyle: 'vustyle' };
+      const cmdMap = { themeId: 'theme', layoutId: 'layout', vustyle: 'vustyle',
+                       systemFontId: 'sysfont', clockFontId: 'clockfont' };
       const cmd = cmdMap[elemId] || elemId;
       websocket.send(`${cmd}=${sel.value}`);
       sel.dataset.prev = sel.value;
@@ -126,6 +163,14 @@ window.afterSetupElement = (function(orig) {
     if (id === 'vustyle') {
       if (visualsData) getId('vustyle').value = value;
       else pendingVustyle = value;
+    }
+    if (id === 'systemFontId') {
+      if (systemFontData) getId('systemFontId').value = value;
+      else pendingSystemFontId = value;
+    }
+    if (id === 'clockFontId') {
+      if (clockFontData) getId('clockFontId').value = value;
+      else pendingClockFontId = value;
     }
   };
 })(window.afterSetupElement);

@@ -151,8 +151,11 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "inverttitle"))   { config.saveValueButWait(&config.store.inverttitle, static_cast<bool>(atoi(value)), 5000); display.applyTheme(config.store.themeId); return true; }
   if (cmdIs(command, "layout"))        { uint8_t id = constrain(atoi(value), 0, display.getLayoutCount() - 1); config.saveValueButWait(&config.store.layoutId, id, 5000); display.applyLayout(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "theme"))         { uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1); config.saveValueButWait(&config.store.themeId, id, 5000); display.applyTheme(id); return true; }
+  if (cmdIs(command, "sysfont"))       { display.applySystemFont((uint8_t)constrain(atoi(value), 0, 15)); config.saveValueButWait(&config.store.systemFontId, config.store.systemFontId, 5000); netserver.requestOnChange(GETACTIVE, 0); return true; }
+  if (cmdIs(command, "clockfont"))     { display.applyClockFont((uint8_t)constrain(atoi(value), 0, 15)); config.saveValueButWait(&config.store.clockFontId, config.store.clockFontId, 5000); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "clock12"))       { config.saveValueButWait(&config.store.clock12, static_cast<bool>(atoi(value)), 5000); display.putRequest(CLOCK); return true; }
+  if (cmdIs(command, "clockglow"))     { config.saveValueButWait(&config.store.clockglow, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
   if (cmdIs(command, "volumepage"))    { config.saveValueButWait(&config.store.volumepage, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "bufferbar"))     { config.saveValueButWait(&config.store.bufferbar, static_cast<bool>(atoi(value)), 5000); display.putRequest(SHOWBUFFERBAR); return true; }
   if (cmdIs(command, "vumeter"))       { config.saveValueButWait(&config.store.vumeter, static_cast<bool>(atoi(value)), 5000); display.putRequest(SHOWVUMETER); return true; }

@@ -70,10 +70,12 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { }, // <--------- NEEDS EDITING!
         .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-27, 2, WA_CENTER },
         .rssiConf            = { TFT_FRAMEWDT+4, DSP_HEIGHT-27, 2, WA_RIGHT },
-        .numConf             = { TFT_FRAMEWDT, 95, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { TFT_FRAMEWDT, 95, 2, WA_CENTER },
         // ??? namedayConf   = { TFT_FRAMEWDT, 239, 1, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
-        .clockConf           = { TFT_FRAMEWDT, 82, 1, WA_RIGHT },
+        .clockConf           = { TFT_FRAMEWDT, 82, 2, WA_RIGHT },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { TFT_FRAMEWDT, DSP_HEIGHT-27, 1, WA_CENTER },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
@@ -84,11 +86,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 10, DSP_HEIGHT-50, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, DSP_HEIGHT-50, MAX_WIDTH },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = false, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = false, // VU rotated 90 degrees
-        .shareWeatherIP      = false, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = false, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = false, // IP and weather share the same row
+        .shareBattRSSI       = false, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // krzxsiek (BoomBox)
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
@@ -114,10 +118,12 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { }, // <--------- NEEDS EDITING!
         .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-27, 2, WA_CENTER },
         .rssiConf            = { TFT_FRAMEWDT+4, DSP_HEIGHT-27, 2, WA_RIGHT },
-        .numConf             = { TFT_FRAMEWDT, 95, 0, WA_CENTER },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { TFT_FRAMEWDT, 95, 2, WA_CENTER },
         // ??? namedayConf   = { TFT_FRAMEWDT, 239, 1, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT *2, 269, 1, WA_LEFT };
-        .clockConf           = { TFT_FRAMEWDT, 82, 1, WA_RIGHT },
+        .clockConf           = { TFT_FRAMEWDT, 82, 2, WA_RIGHT },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { 24, 190, 1, WA_CENTER },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{ 210, DSP_HEIGHT-29, 2, WA_LEFT }, 50 },
@@ -128,12 +134,14 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 10, DSP_HEIGHT-50, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, DSP_HEIGHT-50, MAX_WIDTH },
         /* TRANSFORMS          boolean */
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = false, // the seconds block right of the time
         /* BOOMBOX VU: middle-out */
-        .boomboxVU           = true,
+        .boomboxVU           = true, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = false, // VU rotated 90 degrees
-        .shareWeatherIP      = false, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = false, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = false, // IP and weather share the same row
+        .shareBattRSSI       = false, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // krzxsiek kopia
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
@@ -160,8 +168,10 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { }, // <--------- NEEDS EDITING!
         .iptxtConf           = { TFT_FRAMEWDT, 100-12, 1, WA_RIGHT },
         .rssiConf            = { TFT_FRAMEWDT+1, 100-10-10, 2, WA_LEFT },
-        .numConf             = { TFT_FRAMEWDT, 105, 0, WA_CENTER },
-        .clockConf           = { 0, 80, 0, WA_RIGHT },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { TFT_FRAMEWDT, 105, 2, WA_CENTER },
+        .clockConf           = { 0, 80, 2, WA_RIGHT },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         // ??? namedayConf   = { TFT_FRAMEWDT, 175, 2, WA_LEFT };
         // ??? dateConf      = { TFT_FRAMEWDT *2, 226, 1, WA_LEFT };
         .vuConf              = { 2, DSP_HEIGHT-26, 1, WA_CENTER },
@@ -174,12 +184,14 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { 0, 0, -1 },
         .weatherMoveVU       = { 0, 0, -1 },
         /* TRANSFORMS          boolean */
+        .fullClock           = false, // the divider and the day/date column right of the time
+        .seconds             = false, // the seconds block right of the time
         /* BOOMBOX VU: middle-out */
-        .boomboxVU           = true,
+        .boomboxVU           = true, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = false, // VU rotated 90 degrees
-        .shareWeatherIP      = false, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = false, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = false, // IP and weather share the same row
+        .shareBattRSSI       = false, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
 };
 // ******************** CHECK ALL const char LINES CAREFULLY! ********************

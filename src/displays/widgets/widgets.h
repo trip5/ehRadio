@@ -166,6 +166,17 @@ class SliderWidget: public Widget {
     void _reset();
 };
 
+// The clock font a widget is drawing with, resolved from its own WidgetConfig.textsize.  This is a
+// struct rather than three globals because a layout sizes the clock (clockConf) and the number page
+// (numConf) independently now, so there is no single "current" clock font any more.  textsize is the
+// SIZE INDEX, not a pixel height: 0 is the system font (font stays nullptr and the built-in cell is
+// used at textPx = 1), and 1..4 are 15, 35, 52 and 70 px — see clockSizePx() in dspfont.h.
+struct ClockFontSel {
+  const GFXfont* font;    // nullptr for index 0 — draw with the display font
+  uint8_t        index;   // 0..4, what the layout asked for
+  uint8_t        textPx;  // the built-in cell's multiplier when font is nullptr (always 1)
+};
+
 class NumWidget: public TextWidget {
   public:
     using Widget::init;
@@ -173,6 +184,7 @@ class NumWidget: public TextWidget {
     void setText(const char* txt) override;
     void setText(int val, const char *format) override;
   protected:
+    ClockFontSel _cf {nullptr, 0, 1};
     void _getBounds();
     void _draw();
 };
@@ -236,12 +248,34 @@ class ClockWidget: public Widget {
   protected:
     char  _timebuffer[20]="00:00";
     char _tmp[64], _datebuf[30];
+    // The size INDEX (0..4), not a pixel height and no longer TIME_SIZE/17.  It is the built-in
+    // font's textSize for the day-of-week string and the multiplier behind _space and _clockheight.
     uint8_t _superfont;
+    // The two shapes the clock draws with, built in init() from the active style's ONE glow
+    // character (ClockFontStyle.glowChar): the clock's <g><g>:<g><g>, which is ALSO its width
+    // template, and the seconds' <g><g>.  Arrays, not pointers, because the character is a runtime
+    // value.  The initialisers are the size-index-0 case — no clock font to ask, so the digit '0'
+    // stands in, which every system font is guaranteed to have at CHARWIDTH; there the clock is
+    // drawn by the display font and the string is only ever measured, never printed.
+    char _glow[6] = "00:00";
+    char _glowSec[3] = "00";
+    // The seconds block's width IN PIXELS, measured in _getTimeBounds() from the SECONDS font's own
+    // advances.  It used to be computed as CHARWIDTH * _superfont * 2, which was right for every
+    // rung until the 10 px one arrived: a digit's width is not proportional to its height (8 px ->
+    // 6, 10 px -> 8, 15 px -> 12, 21 px -> 18, 28 px -> 24), so measuring is the only safe rule -
+    // the same reason the clock's own width is measured from its glow string rather than assumed.
+    uint16_t _secwidth = 0;
+    // The clock font resolved from this widget's own clockConf.textsize.
+    ClockFontSel _cf {nullptr, 0, 1};
     uint16_t _clockleft, _clockwidth, _timewidth, _dotsleft, _linesleft;
     uint8_t  _clockheight, _timeheight, _dateheight, _space;
     uint16_t _forceflag = 0;
     bool dots = true;
+    // The layout's two clock transforms (LayoutData.fullClock / .seconds).  Neither is derived from
+    // the size any more: a panel's clock size says nothing about whether its layout wants a date
+    // column or a seconds block, and the ILI9225 model hack is gone with them.
     bool _fullclock;
+    bool _showSeconds;
     psFrameBuffer* _fb=nullptr;
     void _draw();
     void _clear();

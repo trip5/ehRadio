@@ -18,11 +18,18 @@ MASTER TEMPLATE:  ../widgets/widgetsconfig.h   (struct LayoutData, struct BootDa
     There is no second list to keep in step: edit the master and re-run this.
 
 USAGE:
-    py conf_tool.py --clean [--dry-run]
+    py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]
     py conf_tool.py --import <conf_file> --name "Name" [--target <file.h>] [--dry-run]
 
 OPTIONS:
     --clean            Repair every display*conf.h in this directory (the wildcard pass).
+    --comments=...     (clean, default keep) how a trailing comment is chosen for a field the
+                       conf already has.  keep writes none at all.  fill writes the master's
+                       comment where the conf has none, so a conf that never documented a field
+                       comes to match the master.  master does that AND re-texts the comments
+                       that already exist when they differ.  Only the fields the master itself
+                       comments can be affected.  A protected marker such as
+                       // <--------- NEEDS EDITING! always keeps its own text.
     --import           Ingest a community yoRadio display conf file, creating a new
                        displayTFT{W}x{H}conf.h or appending layout entries to an existing one.
     --name, -n         (import) layout display name.  Required by --import.
@@ -50,7 +57,10 @@ WHAT --clean DOES (per file, nothing is written until the final prompt):
     4. Comments are preserved.  Existing trailing comments (// unused, // <--------- NEEDS EDITING!,
        // clock disappears when VU is on) are kept verbatim; commented-out alternatives such as
        // .clockConf = {...} stay on the side of the field they were found on; unknown or obsolete
-       // fields (// ??? ...) travel with the field they followed.
+       // fields (// ??? ...) travel with the field they followed.  --comments=fill writes the
+       // master's comment onto a field that has none, and --comments=master also re-texts the ones
+       // that exist when they differ; either way every change is named in the report, and a
+       // protected marker stops it.
     5. A layout entry missing metaConf or playlistConf is NOT repaired: those two are load
        bearing (dialogs write into the meta line, the playlist page is built on playlistConf), so
        the entry is left byte-identical, shouted about, and listed as NEEDS HAND EDITING.  No
@@ -101,6 +111,33 @@ MANDATORY_LAYOUT_FIELDS = ('metaConf', 'playlistConf')
 
 # Header labels seen in the wild that mean the same master group.
 HEADER_ALIASES = {'BANDS': 'VU BANDS', 'CODEC BADGE': 'CODEC BADGE'}
+
+# --comments: how a trailing comment is chosen for a field the conf already has.
+#   keep   - the conf's own text, always, and nothing is ever added.  The default.
+#   fill   - the master's comment is written where the conf has none, so every conf ends up
+#            documenting the fields the master documents.  Existing text is never touched.
+#   master - fill, plus the master's wording where both sides carry one, so a sentence that
+#            drifted is corrected.  The superset: the master's comments win everywhere.
+# Only the fields the master itself comments can be affected, which today is the seven TRANSFORMS
+# booleans in widgetsconfig.h.  Everything else in struct LayoutData and struct BootData carries a
+# section header and no per-field comment, so there is nothing for these modes to apply.
+COMMENT_MODES = ('keep', 'fill', 'master')
+
+# A trailing comment that means "a human has to look at this line" outranks the master, so it
+# keeps its own text even under --comments=master.  Nothing here is ever rewritten: the note in
+# the report says what the master wanted to say instead.
+PROTECTED_COMMENT_RE = re.compile(r'NEEDS EDITING|DO NOT EDIT|DO NOT REMOVE|SAME AS ABOVE')
+
+
+def comment_key(text):
+    """Compare two trailing comments ignoring the marker and the spacing.
+
+    The conf keeps the raw text ('// VU rotated 90 degrees') and the master is stored already
+    prefixed, so without this a re-run would report a change on every line for ever."""
+    s = re.sub(r'^/\*+', '', text.strip())
+    s = re.sub(r'\*+/$', '', s)
+    s = re.sub(r'^//\s*', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
 
 
 # ==============================================================================
@@ -324,12 +361,14 @@ class BlockModel:
     """One initialiser block (a layout entry body, or the _bootConfig body), parsed and
     ready to be re-emitted in master order with its comments intact."""
 
-    def __init__(self, interior_lines, master, fields, indent):
+    def __init__(self, interior_lines, master, fields, indent, comments_mode='keep'):
         self.master = master
         self.fields = fields               # [(field, type)] in master order
         self.indent = indent
+        self.comments_mode = comments_mode
         self.values = {}                   # field -> value text
         self.comments = {}                 # field -> trailing comment text
+        self.comment_report = []           # (action, field, old, new) for the run report
         self.prefix = {}                   # field -> [lines] emitted above it
         self.suffix = {}                   # field -> [lines] emitted below it
         self.head = []                     # lines before the first field
@@ -402,6 +441,35 @@ class BlockModel:
                 break
 
     # -- emitting -----------------------------------------------------------
+    def _field_comment(self, field):
+        """The trailing comment for a field the conf already has.
+
+        keep   - the conf's own text, and the master's comment is never consulted.
+        fill   - the master's text where the conf has none, so a conf that never documented a
+                 field comes to match the master.  An existing comment is never touched.
+        master - fill, plus the master's wording where both sides carry one, so a sentence that
+                 drifted is corrected, and a sentence only the confs have is still left alone.
+                 A protected marker outranks the master in either mode, and every change lands
+                 in comment_report so the run can name it."""
+        own = self.comments.get(field)
+        if self.comments_mode == 'keep':
+            return own
+        theirs = self.master.comment.get(field)
+        if not own:
+            if not theirs:
+                return None
+            self.comment_report.append(('+', field, '', theirs))
+            return theirs
+        if self.comments_mode != 'master':
+            return own
+        if not theirs or comment_key(own) == comment_key(theirs):
+            return own
+        if PROTECTED_COMMENT_RE.search(own):
+            self.comment_report.append(('!', field, own, theirs))
+            return own
+        self.comment_report.append(('~', field, own, theirs))
+        return theirs
+
     def emit(self, group_first):
         out = list(self.head)
         for field, _ in self.fields:
@@ -410,9 +478,10 @@ class BlockModel:
                 out.append(f'{self.indent}{hdr}')
             out.extend(self.prefix.get(field, []))
             if field in self.values:
+                comment = self._field_comment(field)
                 line = f'{self.indent}.{field:19s} = {self.values[field]},'
-                if self.comments.get(field):
-                    line += ' ' + self.comments[field]
+                if comment:
+                    line += ' ' + comment
                 out.append(line)
             else:
                 line = f'{self.indent}.{field:19s} = {self.master.null_value(field)},'
@@ -460,9 +529,10 @@ def rebuild_boot(block, master):
 # ==============================================================================
 
 class ConfFile:
-    def __init__(self, path, master):
+    def __init__(self, path, master, comments_mode='keep'):
         self.path = path
         self.master = master
+        self.comments_mode = comments_mode
         self.text = read_text(path)
         self.lines = self.text.split('\n')
         self.changed = False
@@ -472,6 +542,25 @@ class ConfFile:
 
     def note(self, msg, serious=False):
         (self.needs_hand if serious else self.notes).append(msg)
+
+    def _report_comments(self, model, where):
+        """Name every trailing comment the master added or overwrote, and every one a marker kept.
+
+        The additions are collected onto one line: a fill pass touches the most lines of all, and
+        seven field names are easier to check as a list than as seven three-line entries."""
+        added = [f for a, f, _, _ in model.comment_report if a == '+']
+        if added:
+            self.note(f'  {where}: {len(added)} trailing comment(s) added from the master: '
+                      f'{", ".join("." + f for f in added)}')
+        for action, field, old, new in model.comment_report:
+            if action == '~':
+                self.note(f'  {where}: .{field} trailing comment re-texted from the master:\n'
+                          f'      was: {old}\n'
+                          f'      now: {new}')
+            elif action == '!':
+                self.note(f'  {where}: .{field} kept its own comment - protected marker:\n'
+                          f'      kept:   {old}\n'
+                          f'      master: {new}')
 
     # -- top level ---------------------------------------------------------
     def run(self):
@@ -526,7 +615,7 @@ class ConfFile:
                 new_entries.append(e)
                 continue
             indent = indent_of(e[1]) if len(e) > 2 else '        '
-            model = BlockModel(e[1:-1], self.master, self.master.layout, indent)
+            model = BlockModel(e[1:-1], self.master, self.master.layout, indent, self.comments_mode)
             inserted = [f for f, _ in self.master.layout if f not in model.values]
             if inserted:
                 self.note(f"  entry {i} (\"{names[i]}\"): wrote {len(inserted)} missing field(s): "
@@ -538,6 +627,7 @@ class ConfFile:
                 self.note(f"  entry {i} (\"{names[i]}\"): fields were out of master order - the entry "
                           f"was rewritten into order")
             body = model.emit(group_first)
+            self._report_comments(model, f'entry {i} ("{names[i]}")')
             new_entries.append([e[0]] + body + [e[-1]])
 
         # 5. rebuild the file
@@ -555,7 +645,7 @@ class ConfFile:
         if bs is not None:
             bi = out[bs + 1:be]
             indent = indent_of(bi[1]) if len(bi) > 1 else '        '
-            bmodel = BlockModel(bi, self.master, self.master.boot, indent)
+            bmodel = BlockModel(bi, self.master, self.master.boot, indent, self.comments_mode)
             gf = {}
             seen = set()
             for field, _ in self.master.boot:
@@ -570,7 +660,9 @@ class ConfFile:
             if bmis:
                 self.note(f"  _bootConfig: wrote {len(bmis)} missing field(s): "
                           f"{', '.join('.' + f for f in bmis)}")
-            out = out[:bs + 1] + bmodel.emit(gf) + out[be:]
+            boot_body = bmodel.emit(gf)
+            self._report_comments(bmodel, '_bootConfig')
+            out = out[:bs + 1] + boot_body + out[be:]
 
         new_text = '\n'.join(out)
         if new_text != self.text:
@@ -579,11 +671,16 @@ class ConfFile:
         return self.changed
 
 
-def run_clean(dry_run, script_dir):
+def run_clean(dry_run, script_dir, comments_mode='keep'):
     master_path = os.path.join(script_dir, MASTER_REL)
     master = Master(master_path)
     print(f"master: {os.path.relpath(master_path)}\n"
           f"        {len(master.layout)} layout fields, {len(master.boot)} boot fields\n")
+    print("comments: " + comments_mode + {
+        'keep':   " - every trailing comment is left exactly as the file has it\n",
+        'fill':   " - the master's comment is added where the conf has none\n",
+        'master': " - added where the conf has none, re-texted where the two differ\n",
+    }[comments_mode])
 
     files = sorted(f for f in glob.glob(os.path.join(script_dir, 'display*conf.h'))
                    if not f.endswith('.new.h'))
@@ -592,7 +689,7 @@ def run_clean(dry_run, script_dir):
 
     temps, unchanged, problems = [], [], []
     for path in files:
-        cf = ConfFile(path, master)
+        cf = ConfFile(path, master, comments_mode)
         changed = cf.run()
         base = os.path.basename(path)
         if cf.notes:
@@ -1167,7 +1264,7 @@ def main():
         return
     if not argv:
         print("conf_tool.py - no mode given, nothing was done.")
-        print("  py conf_tool.py --clean [--dry-run]")
+        print("  py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]")
         print("  py conf_tool.py --import <conf_file> --name \"Name\" [--dry-run]")
         print("Run with --help for the full help (also the top of this file).")
         sys.exit(2)
@@ -1175,6 +1272,7 @@ def main():
     clean = '--clean' in argv
     do_import = '--import' in argv
     dry_run = '--dry-run' in argv
+    comments = 'keep'
     name = target = source = None
     i = 0
     while i < len(argv):
@@ -1193,16 +1291,26 @@ def main():
             if i + 1 >= len(argv):
                 die("--import requires a conf file")
             source = argv[i + 1]; i += 2; continue
+        if a == '--comments':
+            if i + 1 >= len(argv):
+                die("--comments requires a value: " + ' or '.join(COMMENT_MODES))
+            comments = argv[i + 1]; i += 2; continue
+        if a.startswith('--comments='):
+            comments = a.split('=', 1)[1]; i += 1; continue
         if a in ('--clean', '--dry-run'):
             i += 1; continue
         die(f"unknown argument: {a}")
+    if comments not in COMMENT_MODES:
+        die(f"unknown --comments value '{comments}' - use one of: {', '.join(COMMENT_MODES)}")
+    if do_import and comments != 'keep':
+        die("--comments applies to --clean: --import already writes the master's comments")
     if clean and do_import:
         die("--clean and --import are separate modes - run one at a time")
     if do_import and not name:
         die("--import requires --name \"Name\"")
     script_dir = os.path.dirname(os.path.abspath(__file__))
     if clean:
-        run_clean(dry_run, script_dir)
+        run_clean(dry_run, script_dir, comments)
     elif do_import:
         run_import(source, name, target, dry_run, script_dir)
     else:

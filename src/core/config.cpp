@@ -444,8 +444,11 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.inverttitle, INVERT_TITLE);
     saveValue(&store.themeId, (uint8_t)0);
     saveValue(&store.layoutId, (uint8_t)0);
+    saveValue(&store.systemFontId, (uint8_t)DISPLAYFONT);
+    saveValue(&store.clockFontId, (uint8_t)CLOCKFONT);
     saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
     saveValue(&store.clock12, (bool)CLOCK_TWELVE);
+    saveValue(&store.clockglow, (bool)CLOCKGLOW);
     saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
     saveValue(&store.vumeter, (bool)SHOW_VU_METER);
@@ -1008,6 +1011,9 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(vumeter, "vumeter"),
   CONFIG_KEY_ENTRY(vupeak, "vupeak"),
   CONFIG_KEY_ENTRY(vustyle, "vustyle"),
+  CONFIG_KEY_ENTRY(systemFontId, "sysfont"),
+  CONFIG_KEY_ENTRY(clockFontId, "clockfont"),
+  CONFIG_KEY_ENTRY(clockglow, "clockglow"),
   CONFIG_KEY_ENTRY(brightness, "bright"),
   CONFIG_KEY_ENTRY(screensaverEnabled, "scrnsvren"),
   CONFIG_KEY_ENTRY(screensaverBlank, "scrnsvrbl"),

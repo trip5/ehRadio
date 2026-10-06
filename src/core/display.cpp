@@ -59,6 +59,8 @@ const VUBandsConfig*  bandsConf_ptr       = &_layouts[0].bandsConf;
 const MoveConfig*     clockMove_ptr       = &_layouts[0].clockMove;
 const MoveConfig*     weatherMove_ptr     = &_layouts[0].weatherMove;
 const MoveConfig*     weatherMoveVU_ptr   = &_layouts[0].weatherMoveVU;
+const bool*           fullClock_ptr       = &activeLayout.fullClock;
+const bool*           seconds_ptr         = &activeLayout.seconds;
 const bool*           boomboxVU_ptr       = &activeLayout.boomboxVU;
 const bool*           rotateVU_ptr        = &activeLayout.rotateVU;
 // Point into activeLayout (the memcpy_P target), so no re-pointing on a layout switch.
@@ -68,6 +70,16 @@ const bool*           rssiDigit_ptr       = &activeLayout.rssiDigit;
 const FillConfig*     underLineConf_ptr   = &_layouts[0].underLineConf;
 const FillConfig*     overLineConf_ptr    = &_layouts[0].overLineConf;
 uint8_t layoutCount = (sizeof(_layoutNames) / sizeof(_layoutNames[0]));
+
+// The active system font id.  dspfont.h cannot read config itself - config.h includes options.h, which
+// includes dspfont.h - so the value lives here and displayFont() reads it; DISPLAYFONT is only the boot
+// default now.  Kept in step with config.store.systemFontId below.
+uint8_t activeSystemFontId = DISPLAYFONT;
+
+// The same for the clock font STYLE (which of the three designs, not which size - the size is the
+// layout's own clockConf.textsize).  clockFontStyle() in dspfont.h is the accessor, so every reader
+// goes through here rather than testing a compile-time CLOCKFONT.
+uint8_t activeClockFontId = CLOCKFONT;
 
 // ---- Layout owns widget existence -------------------------------------------------------------
 // An omitted widget is HIDDEN, never freed - the other core may be inside its _draw().  Three flags
@@ -129,6 +141,8 @@ const VUBandsConfig*  bandsConf_ptr       = nullptr;
 const MoveConfig*     clockMove_ptr       = nullptr;
 const MoveConfig*     weatherMove_ptr     = nullptr;
 const MoveConfig*     weatherMoveVU_ptr   = nullptr;
+const bool*           fullClock_ptr       = nullptr;
+const bool*           seconds_ptr         = nullptr;
 const bool*           boomboxVU_ptr       = nullptr;
 const bool*           rotateVU_ptr        = nullptr;
 const bool*           shareWeatherIP_ptr  = nullptr;
@@ -213,6 +227,24 @@ static inline void applyMove(Widget* w, const MoveConfig& m) {
 static inline void applyMoveOrRestore(Widget* w, const MoveConfig& m) {
   if (!w || moveZeroed(m)) return;
   if (m.width < 0) w->moveBack(); else w->moveTo(m);
+}
+
+// Every layout's geometry is built on the 6x8 metric class (CHARWIDTH/CHARHEIGHT), so a system font that
+// breaks it mislays the whole screen rather than merely looking wrong - and a font is a runtime setting now,
+// so one bad header would reach every panel.  Checked once at boot: the font's yAdvance, and the '0' glyph's
+// xAdvance, which is the number the text widgets multiply by.  A log line, not a stop: the screen is still
+// the best description of what a wrong font does.
+static void validateSystemFonts() {
+  for (uint8_t i = 0; i < _systemFontCount; i++) {
+    const GFXfont* f = _systemFonts[i];
+    if (!f) { SERIALLOG("FONT: id %u is null\n", i); continue; }
+    const uint8_t yAdv  = pgm_read_byte(&f->yAdvance);
+    const GFXglyph* g   = &f->glyph['0' - pgm_read_byte(&f->first)];
+    const uint8_t xAdv  = pgm_read_byte(&g->xAdvance);
+    if (yAdv != CHARHEIGHT || xAdv != CHARWIDTH)
+      SERIALLOG("FONT: id %u is not on the 6x8 class (xAdvance %u, yAdvance %u; expected %u and %u)\n",
+                i, xAdv, yAdv, CHARWIDTH, CHARHEIGHT);
+  }
 }
 
 
@@ -520,6 +552,14 @@ void Display::_start() {
     _bootStep = 2;
     return;
   }
+  // The system font is a stored preference now, so it is chosen before anything resolves layout or text:
+  // every widget string is resolved after boot with the font already in place, which is why switching it
+  // takes effect here and not live (Stage 6 of plans/font-overhaul.md adds the live walk).  The clock
+  // font style is chosen the same way and for the same reason - _buildPager() below is what turns it
+  // into widgets, and a widget reads the style once, when it is initialised.
+  activeSystemFontId = (config.store.systemFontId < _systemFontCount) ? config.store.systemFontId : 0;
+  activeClockFontId  = (config.store.clockFontId  < _clockFontCount)  ? config.store.clockFontId  : 0;
+  validateSystemFonts();
   _buildPager();
   _mode = PLAYER;
   _applyState();
@@ -907,6 +947,9 @@ void Display::loop() {
     #endif
     switch (request.type) {
         case NEWMODE: _switchMode((displayMode_e)request.payload); break;
+        // The whole layout/theme/font re-init, on the display task.  applyFont() below is the only
+        // thing that queues it; it used to be an enum value with no handler at all.
+        case APPLYSTATE: _applyState(); break;
         case CLOSEPLAYLIST: player.sendCommand({PR_PLAY, request.payload});
         case CLOCK:
           if ((_mode==PLAYER || _mode==SCREENSAVER) && !(network.status == SDOFFLINE && !config.isRTCFound()))
@@ -1415,6 +1458,30 @@ void Display::applyTheme(uint8_t id) {
 
 uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
 
+// Live system font switch.  Re-resolving every widget string is the obligation here (see
+// plans/font-overhaul.md 9): the resolver memo is keyed on the font pointer, so a new pointer
+// invalidates it for free, but the strings already sitting in the widgets were resolved with the
+// old one.  There is no way to re-resolve them in place - a widget keeps only the resolved copy -
+// so the widgets are re-initialised, which is exactly what APPLYSTATE does: it re-runs each
+// widget's init() and its setText() with the source text.  Metrics cannot move (all system fonts
+// are validated onto the 6x8 class at boot), so no layout re-measurement is needed.
+void Display::applySystemFont(uint8_t id) {
+  if (id >= _systemFontCount) id = 0;
+  config.store.systemFontId = id;
+  activeSystemFontId = id;
+  putRequest(APPLYSTATE);
+}
+
+// The clock font STYLE, same shape.  Its size index does not change, so the only thing that has to
+// be re-read is the style: ClockFontStyle() and the widget's own _superfont/_timeheight/_clockwidth
+// all come out of init(), which APPLYSTATE re-runs.
+void Display::applyClockFont(uint8_t id) {
+  if (id >= _clockFontCount) id = 0;
+  config.store.clockFontId = id;
+  activeClockFontId = id;
+  putRequest(APPLYSTATE);
+}
+
 void Display::_buildJsonCache() {
   // Build theme list JSON once — theme names are PROGMEM constants
   _themeListJson = "{";
@@ -1439,12 +1506,37 @@ void Display::_buildJsonCache() {
     buf[32] = 0;
     _layoutListJson += buf;
     _layoutListJson += '"';
+    }
+    _layoutListJson += '}';
+  
+    // The two font lists, straight off the tables in dspfont.h.  The names are proper nouns, so they
+    // are not translated and need no locale key - only the two labels above the dropdowns have one.
+    _systemFontListJson = "{";
+    for (uint8_t i = 0; i < _systemFontCount; i++) {
+      if (i > 0) _systemFontListJson += ',';
+      _systemFontListJson += '"' + String(i) + "\":\"";
+      char buf[65];
+      strncpy_P(buf, _systemFontNames[i], 64);
+      buf[64] = 0;
+      _systemFontListJson += buf;
+      _systemFontListJson += '"';
+    }
+    _systemFontListJson += '}';
+  
+    _clockFontListJson = "{";
+    for (uint8_t i = 0; i < _clockFontCount; i++) {
+      if (i > 0) _clockFontListJson += ',';
+      _clockFontListJson += '"' + String(i) + "\":\"";
+      _clockFontListJson += _clockFontStyles[i]->name;
+      _clockFontListJson += '"';
+    }
+    _clockFontListJson += '}';
   }
-  _layoutListJson += '}';
-}
-
-String Display::getThemeListJson() { return _themeListJson; }
-String Display::getLayoutListJson() { return _layoutListJson; }
+  
+  String Display::getThemeListJson() { return _themeListJson; }
+  String Display::getLayoutListJson() { return _layoutListJson; }
+  String Display::getSystemFontListJson() { return _systemFontListJson; }
+  String Display::getClockFontListJson() { return _clockFontListJson; }
 
 void Display::applyInvertTitle() {
   _applyState();

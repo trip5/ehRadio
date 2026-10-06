@@ -72,15 +72,19 @@ struct BitrateConfig {
   uint16_t dimension;
 };
 
+/* DO NOT INSERT COMMENTS IN THE NEXT 2 STRUCT BLOCKS */
+/* This section's comments are used by conf_tool.py: a block comment here becomes the section
+   header of the field BELOW it, and a field's own // comment is copied out into the conf files.
+   Keep every field line as "Type name;" optionally followed by ONE // comment on the same line.
+   The tool does not read a block comment there, and the field would then drop out of its master
+   list with no warning at all. */
+
 struct BootData {
     /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
     ScrollConfig   apTitleConf;
     ScrollConfig   apSettConf;
     /* LINES + RECTANGLES  {{ left, top, fontsize, align }, width, height, outlined } */
-    FillConfig     apTitleBGConf;   // The AP and SD-manager band.  Boot screens must not borrow a layout's
-                                    // metaBGConf: a layout is selectable, the boot screens are not.  Invert
-                                    // title does not apply to them either.  The band on TFT, the hairline on
-                                    // OLED (conf_tool.py derives both from the layout's pair).
+    FillConfig     apTitleBGConf;
     /* WIDGETS             { left, top, fontsize, align } */
     WidgetConfig   bootstrConf;
     WidgetConfig   apNameConf;
@@ -114,8 +118,10 @@ struct LayoutData {
     WidgetConfig batteryConf;
     WidgetConfig iptxtConf;
     WidgetConfig rssiConf;
+    /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
     WidgetConfig numConf;
     WidgetConfig clockConf;
+    /* VU BARS WIDGET      { left, top, 1, align } */
     WidgetConfig vuConf;
     /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
     BitrateConfig fullbitrateConf;
@@ -126,11 +132,13 @@ struct LayoutData {
     MoveConfig   weatherMove;
     MoveConfig   weatherMoveVU;
     /* TRANSFORMS          boolean */
-    bool         boomboxVU; // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+    bool         fullClock; // the divider and the day/date column right of the time
+    bool         seconds; // the seconds block right of the time
+    bool         boomboxVU; // VU drawn as a "boombox" horizontal meter
     bool         rotateVU; // VU rotated 90 degrees
-    bool         shareWeatherIP; // IP and weather share one row 
-    bool         shareBattRSSI; // RSSI and battery share one row
-    bool         rssiDigit; // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+    bool         shareWeatherIP; // IP and weather share the same row
+    bool         shareBattRSSI; // RSSI and battery share the same row
+    bool         rssiDigit; // signal drawn as a number, not bars
 };
 
 // Layout switching — extern pointer declarations, defined in display.cpp
@@ -157,6 +165,8 @@ extern const VUBandsConfig*   bandsConf_ptr;
 extern const MoveConfig*    clockMove_ptr;
 extern const MoveConfig*    weatherMove_ptr;
 extern const MoveConfig*    weatherMoveVU_ptr;
+extern const bool*          fullClock_ptr;
+extern const bool*          seconds_ptr;
 extern const bool*          boomboxVU_ptr;
 extern const bool*          rotateVU_ptr;
 extern const bool*          shareWeatherIP_ptr;

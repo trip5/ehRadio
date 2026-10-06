@@ -356,7 +356,7 @@
 //#define CLOCKFONT CHUNKY6
 //#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
-#define CLOCKFONT LED
+#define CLOCKFONT LEDCLOCK
 
 // Transform:
 //#define PRETEXT_ALLCAPS

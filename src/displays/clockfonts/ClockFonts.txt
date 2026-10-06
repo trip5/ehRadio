@@ -1,3 +1,38 @@
+=================================================================================
+CURRENT STRUCTURE (added 2026-10-06, when the font system went runtime
+
+Three STYLES, one folder each, all compiled in and chosen at runtime:
+
+    clockfonts/LEDClock/{10,15,21,28,35,52,70}.png
+    clockfonts/Chunky6/...
+    clockfonts/Chunky6px/...
+
+    py makefont.py LED          ->  clockfonts/LED.h
+
+makefont.py takes the whole folder and ABORTS, naming every missing size, if all seven are
+not there — a style is all seven or it is not a style.  templates/Template_<size>.png are
+the drawing templates, and they live OUTSIDE the style folders so the file count is never
+disturbed.
+
+10, 15, 21 and 28 are the SECONDS sizes and 15, 35, 52 and 70 the CLOCK ones.  Which one a
+panel uses is no longer a build choice: it is clockConf.textsize, a size index in the layout
+(0 = the system font, 1..4 = 15/35/52/70, and the seconds size follows from the same index).
+
+The filename is a CONTRACT, not a label: makefont.py REFUSES a file whose image height does not
+match the number in its name.  Seven sizes are seven separate hand-drawn designs, so a height
+that disagrees can only be a mis-saved export — and built anyway it would put every glyph on the
+wrong grid.  The 8 px seconds font was re-drawn at 10 px: 128x64 OLED is the only panel that
+used that rung, 10 reads better against the 15 px clock, and it still fits inside the clock's ink
+band.  Its digit came out 8 px wide, which is why the seconds' width is now MEASURED from the
+font rather than computed — see ClockWidget::_getTimeBounds().
+
+Gone: TIME_SIZE, font15/font19/font35/font52/font70.h, the Trip5/ folder, DS_DIGI/, and the
+one-PNG png_to_gfxfont.py that makefont.py replaces.
+
+Everything below is Trip5's original note about the fonts themselves, and it still applies to
+the artwork — except the DS_DIGI entries, that font having been deleted.
+=================================================================================
+
 Trip5's Notes about the fonts used by the clock:
 
 This folder ONLY contains fonts used by the clock (and on the volume page screen).
@@ -66,10 +101,10 @@ Chunky6_15_px: pixel size 2 + 1 pixels space
         width: 4 (includes 1 empty column) * 3 = 12 pixels (per digit) x 10.5 = 126 pixels
 - Time is shorter than DS_DIGI15pt7b_mono by 8 pixels
 
-*Chunky6_8:    pixel size 1
-Chunky6_8_px: pixel size 2 + 1 pixels space
-       height: 5 * 1 = 5 pixels
-        width: 4 (includes 1 empty column) * 1 = 4 pixels (per digit) x 10.5 = 42 pixels
+*Chunky6_10: Hand-drawn...
+Chunky6_10_px: Hand-drawn...
+       height: ... = 10 pixels
+        width: ... = 84 pixels
 
 
 That glow-char switch makes the "glow" character (the residual "LED" behind the character).

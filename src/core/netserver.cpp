@@ -522,11 +522,6 @@ void NetServer::chunkedHtmlPage(const String& contentType, AsyncWebServerRequest
   request->send(response);
 }
 
-#ifndef DSP_NOT_FLIPPED
-  #define DSP_CAN_FLIPPED true
-#else
-  #define DSP_CAN_FLIPPED false
-#endif
 const char *getFormat(BitrateFormat _format) {
   switch (_format) {
     case BF_MP3:  return "MP3";
@@ -565,12 +560,8 @@ void NetServer::processQueue() {
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
             if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
-                                                                act += F("\"group_mqtt\",");
-            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DBGWUI)
+            if (DSP_MODEL != DSP_DUMMY || DBGWUI)
                                                                 act += F("\"group_display\",");
-            #if defined(DSP_OLED) || DBGWUI
-                                                                act += F("\"group_oled\",");
-            #endif
             #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
               if (vuConf_ptr->textsize > 0 || DBGWUI)           act += F("\"group_vu\",");
                                                            else act += F("\"hide_group_vu\",");
@@ -579,19 +570,20 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            if (DSP_CAN_FLIPPED || DBGWUI)                      act += F("\"group_tft\",");
-                                                                act += F("\"group_inverttitle\",");
+            #if defined(DSP_TFT)
+                                                                act += F("\"group_color\",");
+            #endif
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
             #if defined(DSP_TFT) || DBGWUI
-              if (display.getThemeCount() > 1|| DBGWUI)           act += F("\"group_theme\",");
+              if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");
             #endif
-            if (TIME_SIZE !=35 || DBGWUI)                       act += F("\"group_full_time\",");
+            if (activeLayout.fullClock || DBGWUI)               act += F("\"group_full_time\",");
+                                                           else act += F("\"hide_group_full_time\",");
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");
             if (weatherConf_ptr->buffsize > 0 || DBGWUI)        act += F("\"group_weather\",");
                                                            else act += F("\"hide_group_weather\",");
                                                                 act += F("\"group_controls\",");
-            if (BTN_UP != 255 || BTN_DOWN != 255 || DBGWUI)     act += F("\"group_volbuttons\",");
             if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)
                                                                 act += F("\"group_stnbuttons\",");
             if (ENC_DT != 255 || ENC2_DT != 255 || DBGWUI)      act += F("\"group_encoder\",");
@@ -629,7 +621,7 @@ void NetServer::processQueue() {
                                   config.store.irtlp,
                                   VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -653,7 +645,10 @@ void NetServer::processQueue() {
                                   config.store.clock12,
                                   config.store.inverttitle,
                                   config.store.layoutId,
-                                  config.store.themeId);
+                                  config.store.themeId,
+                                  config.store.systemFontId,
+                                  config.store.clockFontId,
+                                  config.store.clockglow);
                                   break;
       case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,
@@ -1819,6 +1814,20 @@ void handleNotFound(AsyncWebServerRequest * request) {
   }
   if (request->url() == "/layouts.json") {
     String json = display.getLayoutListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/fonts.json") {
+    String json = display.getSystemFontListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/clockfonts.json") {
+    String json = display.getClockFontListJson();
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
     response->addHeader("Cache-Control", "no-cache");
     request->send(response);

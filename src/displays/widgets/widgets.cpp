@@ -12,11 +12,6 @@
 #include "../../core/player.h"    //  for VU widget
 #include "../../core/utility.h"
 
-#if CLOCKFONT == YO_MONO // no special character but an 8 on a 7-segment display is the same as filling in background pixels
-  #define CLOCKGLOW_STRING "88:88"
-#else //if CLOCKFONT == CHUNKY6_PX || CLOCKFONT == CHUNKY6 // these use a special character
-  #define CLOCKGLOW_STRING "//://"
-#endif
 
 /************************
       FILL WIDGET
@@ -508,36 +503,40 @@ void SliderWidget::_reset() {
 /************************
       NUM & CLOCK
  ************************/
-#if TIME_SIZE<15 || (TIME_SIZE==15 && CLOCKFONT==YO_MONO)
-  const GFXfont* Clock_GFXfontPtr = nullptr;
-  #define CLOCKFONT5x7
-#else
-  const GFXfont* Clock_GFXfontPtr = &Clock_GFXfont;
-#endif
+// Clock font resolution.  What a clock glyph looks like is decided by two runtime choices:
+//
+//   activeClockFontId  which STYLE.  dspfont.h owns it; display.cpp assigns it from
+//                      config.store.clockFontId, and clockFontStyle() is the accessor.
+//   the size index     which of that style's seven sizes, 0..4 (see clockSizePx() in dspfont.h).
+//
+// The size index is PER WIDGET: it is clockConf.textsize for the clock and numConf.textsize for the number/volume page.
+// Each widget resolves its own ClockFontSel in init() and the three helpers below take it as an argument.
+static ClockFontSel _resolveClockFont(uint8_t sizeIndex){
+  if (sizeIndex > 4) sizeIndex = 4;
+  ClockFontSel sel;
+  sel.index  = sizeIndex;
+  sel.font   = clockFontFor(sizeIndex);      // nullptr for index 0
+  sel.textPx = clockSizePx(sizeIndex);
+  if (sel.textPx == 0) sel.textPx = 1;       // the built-in cell's multiplier
+  return sel;
+}
 
-#if !defined(CLOCKFONT5x7)
-  inline GFXglyph *pgm_read_glyph_ptr(const GFXfont *gfxFont, uint8_t c) {
-    return gfxFont->glyph + c;
-  }
-  uint8_t _charWidth(unsigned char c){
-    GFXglyph *glyph = pgm_read_glyph_ptr(&Clock_GFXfont, c - 0x20);
-    return pgm_read_byte(&glyph->xAdvance);
-  }
-  uint16_t _textHeight(){
-    GFXglyph *glyph = pgm_read_glyph_ptr(&Clock_GFXfont, '8' - 0x20);
-    return pgm_read_byte(&glyph->height);
-  }
-#else // !defined(CLOCKFONT5x7)
-  uint8_t _charWidth(unsigned char c){
-    return CHARWIDTH * TIME_SIZE;
-  }
-  uint16_t _textHeight(){
-    return CHARHEIGHT * TIME_SIZE;
-  }
-#endif
-uint16_t _textWidth(const char *txt){
+inline GFXglyph *pgm_read_glyph_ptr(const GFXfont *gfxFont, uint8_t c) {
+  return gfxFont->glyph + c;
+}
+uint8_t _charWidth(const ClockFontSel& cf, unsigned char c){
+  if (cf.font == nullptr) return CHARWIDTH * cf.textPx;
+  GFXglyph *glyph = pgm_read_glyph_ptr(cf.font, c - 0x20);
+  return pgm_read_byte(&glyph->xAdvance);
+}
+uint16_t _textHeight(const ClockFontSel& cf){
+  if (cf.font == nullptr) return CHARHEIGHT * cf.textPx;
+  GFXglyph *glyph = pgm_read_glyph_ptr(cf.font, '8' - 0x20);
+  return pgm_read_byte(&glyph->height);
+}
+uint16_t _textWidth(const ClockFontSel& cf, const char *txt){
   uint16_t w = 0, l=strlen(txt);
-  for(uint16_t c=0;c<l;c++) w+=_charWidth(txt[c]);
+  for(uint16_t c=0;c<l;c++) w+=_charWidth(cf, txt[c]);
   return w;
 }
 
@@ -547,6 +546,8 @@ uint16_t _textWidth(const char *txt){
 void NumWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor) {
   Widget::init(wconf, fgcolor, bgcolor);
   _buffsize = buffsize;
+  // This widget's own size index: numConf.textsize.
+  _cf = _resolveClockFont(wconf.textsize);
   if (_text)    { free(_text);    _text = nullptr; }
   if (_oldtext) { free(_oldtext); _oldtext = nullptr; }
   _text = (char *) malloc(sizeof(char) * _buffsize);
@@ -555,7 +556,10 @@ void NumWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint
   memset(_oldtext, 0, _buffsize);
   _textwidth = _oldtextwidth = _oldleft = 0;
   _uppercase = uppercase;
-  _textheight = TIME_SIZE/*wconf.textsize*/;
+  // The PIXEL size (15/35/52/70, or the built-in cell for index 0), not the size index: it is the
+  // built-in font's multiplier on the index-0 path and the erase offset on the GFXfont path, where
+  // the ink sits ABOVE the cursor because every clock glyph has yOffset = -height.
+  _textheight = _cf.textPx;
 }
 
 void NumWidget::setText(const char* txt) {
@@ -565,16 +569,15 @@ void NumWidget::setText(const char* txt) {
   _getBounds();
   if (strcmp(_oldtext, _text) == 0) return;
   uint16_t realth = _textheight;
-  if (Clock_GFXfontPtr == NULL) realth = _textheight * CHARHEIGHT;
-  #ifndef CLOCKFONT5x7
-    else realth = _textHeight() + 1;
-  #endif
+  uint16_t eraseTop = _config.top;
+  if (_cf.font == nullptr) {
+    realth = _textheight * CHARHEIGHT;
+  } else {
+    realth = _textHeight(_cf) + 1;
+    eraseTop = _config.top - _textheight;
+  }
   if (_active)
-  #ifndef CLOCKFONT5x7
-    dsp.fillRect(_oldleft == 0 ? _realLeft() : min(_oldleft, _realLeft()),  _config.top-_textheight, max(_oldtextwidth, _textwidth), realth, _bgcolor);
-  #else
-    dsp.fillRect(_oldleft == 0 ? _realLeft() : min(_oldleft, _realLeft()),  _config.top, max(_oldtextwidth, _textwidth), realth, _bgcolor);
-  #endif
+    dsp.fillRect(_oldleft == 0 ? _realLeft() : min(_oldleft, _realLeft()),  eraseTop, max(_oldtextwidth, _textwidth), realth, _bgcolor);
 
   _oldtextwidth = _textwidth;
   _oldleft = _realLeft();
@@ -588,13 +591,15 @@ void NumWidget::setText(int val, const char *format){
 }
 
 void NumWidget::_getBounds() {
-  _textwidth= _textWidth(_text);
+  _textwidth= _textWidth(_cf, _text);
 }
 
 void NumWidget::_draw() {
-  if(!_active || TIME_SIZE<2) return;
-  dsp.setTextSize(Clock_GFXfontPtr==nullptr?TIME_SIZE:1);
-  dsp.setFont(Clock_GFXfontPtr);
+  // Index 0 has no clock font at all, and the number/volume page has always needed one: the guard
+  // was "TIME_SIZE < 2" when that was 0 and 1.
+  if(!_active || _cf.index == 0) return;
+  dsp.setTextSize(_cf.font==nullptr?_cf.textPx:1);
+  dsp.setFont(_cf.font);
   dsp.setTextColor(_fgcolor, _bgcolor);
   if(!_active) return;
   dsp.setCursor(_realLeft(), _config.top);
@@ -728,11 +733,35 @@ ClockWidget::~ClockWidget() {
 
 void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
   Widget::init(wconf, fgcolor, bgcolor);
-  _timeheight = _textHeight();
-  _fullclock = TIME_SIZE>35 || DSP_MODEL==DSP_ILI9225;
-  if(_fullclock) _superfont = TIME_SIZE / 17; //magick
-  else if(TIME_SIZE==15 || TIME_SIZE==2) _superfont=1;
-  else _superfont=0;
+  // clockConf.textsize is this clock's size index.  CLOCK_SIZE (the panel default dspfont.h derives
+  // from DSP_HEIGHT) is only what the layout tooling fills a new layout with, so a conf that says
+  // nothing still gets the size that panel has always had.
+  _cf = _resolveClockFont(wconf.textsize);
+  // The two shapes this clock draws with, built from the active style's ONE glow character.  A clock
+  // glyph's advance is what the union glyph carries - makefont.py injects it at the digit width - so
+  // <g><g>:<g><g> measures the clock exactly as "00:00" would, which is why it doubles as the width
+  // template read in _getTimeBounds().
+  //
+  // Size index 0 has no clock font to ask, so the digit '0' stands in: that is the member's own
+  // initialiser, and '0' is the one character every system font is guaranteed to have at CHARWIDTH
+  // (validateSystemFonts() checks it).  There it is only ever measured, never printed - index 0 is
+  // the 128x32 OLED and the glow is TFT-only.
+  const char g = _cf.font ? clockFontStyle().glowChar[0] : '0';
+  _glow[0] = _glow[1] = g;
+  _glow[2] = ':';
+  _glow[3] = _glow[4] = g;
+  _glowSec[0] = _glowSec[1] = g;
+  _timeheight = _textHeight(_cf);
+  // The two transforms, straight from the layout.  _fullclock was "TIME_SIZE>35 || ILI9225" and
+  // the seconds block was inferred from _superfont being non-zero; both are per-layout booleans now
+  // (LayoutData.fullClock / .seconds), which is what lets a 35 px panel show a date column and a
+  // 15 px one show seconds without either being a size rule or a model test.
+  _fullclock   = fullClock_ptr ? *fullClock_ptr : false;
+  _showSeconds = seconds_ptr   ? *seconds_ptr   : false;
+  // _superfont is the size INDEX now, not TIME_SIZE/17 (which is the same thing for the two sizes
+  // that had it: 52/17 = 3 and 70/17 = 4).  It stays because the DOW string's built-in textSize,
+  // _space and _clockheight are all derived from it.
+  _superfont = _cf.index;
   _space = (5*_superfont)/2; //magick
   if(_fullclock){
     _dateheight = _superfont<4?1:2;
@@ -774,14 +803,32 @@ uint16_t ClockWidget::_top(){
 }
 
 void ClockWidget::_getTimeBounds() {
-  _timewidth = _textWidth(CLOCKGLOW_STRING);
-  uint8_t fs = _superfont>0?_superfont:TIME_SIZE;
-  uint16_t rightside = CHARWIDTH * fs * 2; // seconds
+  // _glow is built from this style's glow character in init(), so a live font switch rebuilds it
+  // there exactly as a layout change does - nothing here reads a macro.
+  _timewidth = _textWidth(_cf, _glow);
+  uint8_t fs = _superfont>0?_superfont:_cf.textPx;
+  // How wide the seconds block is.  With a seconds font in this style it is MEASURED from that
+  // font's own advances, not computed: the seconds are a different face from the clock (its 10 px
+  // digit is 8 px wide where a 15 px one is 12), so only the seconds font can answer.  Without one,
+  // the built-in cell is CHARWIDTH * textSize like every other row.
+  uint16_t rightside;
+  const GFXfont* secFont = secondsFontFor(_cf.index);
+  if (secFont) {
+    ClockFontSel secSel = _cf;     // same index and textPx, the seconds FACE
+    secSel.font = secFont;
+    _secwidth = _textWidth(secSel, _glowSec);
+  } else {
+    _secwidth = (uint16_t)(CHARWIDTH * fs * 2);
+  }
+  rightside = _secwidth;
   if(_fullclock){
     rightside += _space*2+1; //2space+vline
     _clockwidth = _timewidth+rightside;
   } else {
-    if(_superfont==0)
+    // Anything to the right of the time is the layout's .seconds, not _superfont: with _superfont
+    // now the size index it is non-zero for every panel that has a clock font, which would have
+    // widened the clock on the 35 px family by 24 px and shifted it under WA_RIGHT/WA_CENTER.
+    if(!_showSeconds)
       _clockwidth = _timewidth;
     else
       _clockwidth = _timewidth + rightside;
@@ -794,8 +841,8 @@ void ClockWidget::_getTimeBounds() {
       break;
   }
   _dotsleft = 0;
-  for (const char* p = CLOCKGLOW_STRING; *p && *p != ':'; ++p) {
-    _dotsleft += _charWidth((unsigned char)*p);
+  for (const char* p = _glow; *p && *p != ':'; ++p) {
+    _dotsleft += _charWidth(_cf, (unsigned char)*p);
   }
 }
 
@@ -814,13 +861,14 @@ void ClockWidget::_printClock(bool force){
   // request CLOCK the moment they have something to show.
   if (!clockTrustworthy()) return;
   auto& gfx = getRealDsp();
-  gfx.setTextSize(Clock_GFXfontPtr==nullptr?TIME_SIZE:1);
-  gfx.setFont(Clock_GFXfontPtr);
+  gfx.setTextSize(_cf.font==nullptr?_cf.textPx:1);
+  gfx.setFont(_cf.font);
   bool clockInTitle=!config.isScreensaver && _config.top<_timeheight; //DSP_SSD1306x32
   uint16_t clockColor = config.isScreensaver ? config.theme.clockss : config.theme.clock;
   uint16_t clockBgColor = config.isScreensaver ? config.theme.clockbgss : config.theme.clockbg;
   uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
   uint16_t secondsColor = config.isScreensaver ? config.theme.secondsss : config.theme.seconds;
+  uint16_t secondsBgColor = config.isScreensaver ? config.theme.secondsbgss : config.theme.secondsbg;
   uint16_t dowColor = config.isScreensaver ? config.theme.dowss : config.theme.dow;
   uint16_t dateColor = config.isScreensaver ? config.theme.datess : config.theme.date;
   // _fb only exists on framebuffer (TFT) builds - guard it as getRealDsp() does
@@ -838,10 +886,10 @@ void ClockWidget::_printClock(bool force){
     _clearClock();
     _getTimeBounds();
     #ifndef DSP_OLED
-      if(CLOCKGLOW) {
+      if(config.store.clockglow) {
         gfx.setTextColor(clockBgColor, bgColor);
         gfx.setCursor(_left(), _top());
-        gfx.print(CLOCKGLOW_STRING);
+        gfx.print(_glow);
       }
     #endif
     if(clockInTitle)
@@ -851,7 +899,7 @@ void ClockWidget::_printClock(bool force){
     uint16_t timeLeft = _left();
     const char* timeText = _timebuffer;
     if (config.store.clock12 && _timebuffer[0] == ' ') {
-      timeLeft += _charWidth((unsigned char)CLOCKGLOW_STRING[0]);
+      timeLeft += _charWidth(_cf, (unsigned char)_glow[0]);
       timeText = _timebuffer + 1;
     }
     gfx.setCursor(timeLeft, _top());
@@ -881,34 +929,48 @@ void ClockWidget::_printClock(bool force){
       }
     }
   }
-  if ((_fullclock || _superfont>0) && (!_fullclock || showFullClockOnScreensaver) && (_fullclock || showSecondsOnScreensaver)) {
-    gfx.setFont();
-    gfx.setTextSize(_superfont);
-    if(!_fullclock){
-      #ifndef CLOCKFONT5x7
-        gfx.setCursor(_left()+_timewidth+_space, _top()-_timeheight+_space);
-      #else
-        gfx.setCursor(_left()+_timewidth+_space, _top());
+  if ((_fullclock || _showSeconds) && (!_fullclock || showFullClockOnScreensaver) && (_fullclock || showSecondsOnScreensaver)) {
+    // The seconds column.  With a seconds sibling in the style (10, 15, 21 or 28 px for size index
+    // 1..4 - see secondsSizePx()) the digits are drawn with the CLOCK font, ink-top aligned with
+    // where the built-in cell's ink has always begun; without a sibling, the built-in font at
+    // _superfont as before.  Both paths keep the same ink top and the same two-glyph width: the
+    // ladder's digit is 6 px per index step, which is exactly what _getTimeBounds() reserves as
+    // CHARWIDTH * fs * 2, so a style can be swapped without moving the column.
+    const GFXfont* secFont = secondsFontFor(_cf.index);
+    uint8_t  secPx = secondsSizePx(_cf.index);
+    uint16_t sx = _fullclock ? _linesleft+_space+1 : _left()+_timewidth+_space;
+    uint16_t sy = _fullclock ? _top()-_timeheight   : _top()-_timeheight+_space;  // the ink top
+    if (secFont) {
+      // Clear first: a GFXfont paints only the lit pixels, so a narrower glyph ("1" after "0")
+      // leaves the previous character's pixels behind.  Then the glow, which fills the cells the
+      // digits sit in - the same treatment clockbg gives the clock, in this style's own character.
+      gfx.fillRect(sx, sy, _secwidth, secPx, bgColor);
+      #ifndef DSP_OLED
+        if (config.store.clockglow) {
+          gfx.setFont(secFont);
+          gfx.setTextSize(1);
+          gfx.setTextColor(secondsBgColor, bgColor);
+          gfx.setCursor(sx, sy + secPx);   // yOffset is -height: the cursor is a whole cell below
+          gfx.print(_glowSec);
+        }
       #endif
-    }else{
-      gfx.setCursor(_linesleft+_space+1, _top()-_timeheight);
-    }
-    gfx.setTextColor(secondsColor, bgColor);
-    // Clear seconds area before drawing — GFXfont drawChar only paints
-    // foreground pixels, so narrower glyphs (e.g. "1" after "0") leave
-    // leftover pixels from the previous character.
-    if (Clock_GFXfontPtr != NULL) {
-      uint16_t sx = !_fullclock ? _left()+_timewidth+_space : _linesleft+_space+1;
-      uint16_t sy = !_fullclock ? _top()-_timeheight+_space : _top()-_timeheight;
-      gfx.fillRect(sx, sy, 2 * CHARWIDTH * _superfont, CHARHEIGHT * _superfont, bgColor);
+      gfx.setFont(secFont);
+      gfx.setTextSize(1);
+      gfx.setTextColor(secondsColor, bgColor);
+      gfx.setCursor(sx, sy + secPx);
+    } else {
+      gfx.setFont();
+      gfx.setTextSize(_superfont);
+      gfx.setTextColor(secondsColor, bgColor);
+      gfx.setCursor(sx, sy);
     }
     sprintf(_tmp, "%02d", network.timeinfo.tm_sec);
     gfx.print(_tmp);
   }
-  gfx.setTextSize(Clock_GFXfontPtr==nullptr?TIME_SIZE:1);
-  gfx.setFont(Clock_GFXfontPtr);
+  gfx.setTextSize(_cf.font==nullptr?_cf.textPx:1);
+  gfx.setFont(_cf.font);
   #ifndef DSP_OLED
-    gfx.setTextColor(dots ? clockColor : (CLOCKGLOW?clockBgColor:bgColor), bgColor);
+    gfx.setTextColor(dots ? clockColor : (config.store.clockglow?clockBgColor:bgColor), bgColor);
   #else
     if(clockInTitle) {
       gfx.setTextColor(dots ? config.theme.meta:config.theme.metabg, config.theme.metabg);
@@ -931,11 +993,10 @@ void ClockWidget::_clearClock(){
   #ifdef PSFBUFFER
     if(_fb && _fb->ready()) { _fb->clear(); return; }
   #endif
-  #ifndef CLOCKFONT5x7
-    dsp.fillRect(_left(), _top()-_timeheight, _clockwidth+2, _clockheight+1, bgColor);
-  #else
+  if (_cf.font == nullptr)
     dsp.fillRect(_left(), _top(), _clockwidth+1, _clockheight+1, bgColor);
-  #endif
+  else
+    dsp.fillRect(_left(), _top()-_timeheight, _clockwidth+2, _clockheight+1, bgColor);
 }
 
 void ClockWidget::draw(){

@@ -21,7 +21,7 @@ in the tool.
 ## Usage
 
 ```
-py conf_tool.py --clean [--dry-run]
+py conf_tool.py --clean [--comments=keep|master] [--dry-run]
 py conf_tool.py --import <conf_file> --name "Name" [--target <file.h>] [--dry-run]
 ```
 
@@ -60,8 +60,8 @@ the master's `/* VU BANDS ... */`), and a duplicated header collapses to one.
 
 Every comment is preserved:
 
-- a trailing comment stays exactly as it was (`// unused`, `// <--------- NEEDS EDITING!`,
-  `// clock disappears when VU is on`),
+- a trailing comment stays as the file has it (`// unused`, `// <--------- NEEDS EDITING!`,
+  `// clock disappears when VU is on`) — unless `--comments=master` is given, see below,
 - a commented-out alternative stays on the side of the field it was found on — above the field, or
   below it, whichever the file used,
 - a comment that names a field (`// .clockConf = {...}`) travels with that field,
@@ -69,6 +69,25 @@ Every comment is preserved:
   followed,
 - a note above a field stays with the field below it, and a note that ends a group with a blank
   line stays with the field above it.
+
+**`--comments=master`** brings the trailing comments into step with the master, the way the section
+headers already are. It re-texts a comment only when the master and the conf **both** carry one, so
+a sentence that drifted is corrected. It never adds a comment to a field that has none: a bare field
+is often deliberate, and writing the master's note beside a value the confs never had is
+`--import`'s job, not this one. A comment only the confs have is left alone.
+
+Every change is named in the run report before anything is installed:
+
+```
+displayOLED128x64conf.h
+  entry 2 ("Compact"): .shareWeatherIP trailing comment re-texted from the master:
+      was: // IP and weather share the bottom row
+      now: // IP and weather share one row (was the IP_WEATHER_SHARED macro)
+```
+
+Read those lines in `--dry-run` first. If a conf's own wording is worth keeping even so, put a
+marker in it — see **What it refuses to do**. The default, `keep`, consults the master's comments
+only for a field the conf does not have at all.
 
 ### 5. What it refuses to do
 
@@ -78,6 +97,11 @@ the tool prints a serious warning naming the file, the entry index, its name and
 field, leaves that entry byte-identical, and lists the file as **NEEDS HAND EDITING** at the end.
 Nothing is ever removed: deleting a layout would shift every index after it, and that index is
 persisted in `config.store.layoutId`.
+
+A trailing comment that carries a marker — `NEEDS EDITING`, `DO NOT EDIT`, `DO NOT REMOVE`,
+`SAME AS ABOVE` — is **never rewritten**, even under `--comments=master`, and the run names that
+line along with what the master wanted to say there instead. A protected marker is the way to pin a
+conf's own wording that the master cannot know, such as a sentence that is true on one panel only.
 
 ### 6. Install
 

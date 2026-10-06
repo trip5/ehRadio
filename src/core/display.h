@@ -51,8 +51,12 @@ class Display {
     uint8_t getLayoutCount();
     void applyTheme(uint8_t id);
     uint8_t getThemeCount();
+    void applySystemFont(uint8_t id);
+    void applyClockFont(uint8_t id);
     String getThemeListJson();
     String getLayoutListJson();
+    String getSystemFontListJson();
+    String getClockFontListJson();
     void applyInvertTitle();
     void invert();
     void setContrast();
@@ -124,6 +128,8 @@ class Display {
     void _buildJsonCache();
     String _themeListJson;
     String _layoutListJson;
+    String _systemFontListJson;
+    String _clockFontListJson;
   };
 
 #else
@@ -152,7 +158,11 @@ class Display {
     uint8_t getLayoutCount() { return 1; }
     String getThemeListJson()  { return "[]"; }
     String getLayoutListJson() { return "[]"; }
+    String getSystemFontListJson() { return "[]"; }
+    String getClockFontListJson()  { return "[]"; }
     void applyTheme(uint8_t) {}
+    void applySystemFont(uint8_t) {}
+    void applyClockFont(uint8_t) {}
     uint8_t getThemeCount() { return 1; }
     void applyInvertTitle() {}
     void invert() {}

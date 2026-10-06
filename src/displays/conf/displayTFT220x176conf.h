@@ -56,8 +56,10 @@ const LayoutData _layouts[] PROGMEM = {
         .batteryConf         = { }, // <--------- NEEDS EDITING!
         .iptxtConf           = { TFT_FRAMEWDT, DSP_HEIGHT-TFT_FRAMEWDT-14, 1, WA_CENTER },
         .rssiConf            = { TFT_FRAMEWDT, DSP_HEIGHT-TFT_FRAMEWDT-14, 1, WA_RIGHT },
-        .numConf             = { 0, 110, 0, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT*3, 130, 0, WA_RIGHT },
+        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .numConf             = { 0, 110, 2, WA_CENTER },
+        .clockConf           = { TFT_FRAMEWDT*3, 130, 2, WA_RIGHT },
+        /* VU BARS WIDGET      { left, top, 1, align } */
         .vuConf              = { TFT_FRAMEWDT, 58, 1, WA_LEFT },
         /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
         .fullbitrateConf     = {{DSP_WIDTH-TFT_FRAMEWDT-21, 25, 1, WA_LEFT}, 22 },
@@ -68,11 +70,13 @@ const LayoutData _layouts[] PROGMEM = {
         .weatherMove         = { TFT_FRAMEWDT, 64, DSP_WIDTH+10 },
         .weatherMoveVU       = { TFT_FRAMEWDT+46, 58, DSP_WIDTH+10-46 },
         /* TRANSFORMS          boolean */
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter (was boomboxStyle)
+        .fullClock           = true, // the divider and the day/date column right of the time
+        .seconds             = true, // the seconds block right of the time
+        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
         .rotateVU            = false, // VU rotated 90 degrees
-        .shareWeatherIP      = false, // IP and weather share one row (was the IP_WEATHER_SHARED macro)
-        .shareBattRSSI       = false, // RSSI and battery share one row (was the RSSI_BATT_SHARED macro)
-        .rssiDigit           = false, // signal drawn as a number, not bars (was the RSSI_DIGIT macro)
+        .shareWeatherIP      = false, // IP and weather share the same row
+        .shareBattRSSI       = false, // RSSI and battery share the same row
+        .rssiDigit           = false, // signal drawn as a number, not bars
     },
 };
 

@@ -337,7 +337,9 @@ depending on the selected PlatformIO environment and macro definitions.
     overridable in `myoptions.h`.
   - **dspcore.h**: one `#elif` per DSP_MODEL, sets the feature flags (`PSFBUFFER` for the TFT class, `DSP_OLED` for the
     monochrome class).
-  - **dspfont.h** (new): selects bootlogo, clock font, TIME_SIZE by resolution.
+  - **dspfont.h** (new): selects the bootlogo by resolution, and holds the system-font and clock-font
+    tables (see "Display fonts/assets" below — the clock font and its size are runtime values, not
+    resolution-derived ones).
   - **dspconf.h** (new): selects `conf/display*conf.h` by resolution × display category.
   - Display `.h` files now delegate conf/font/bootlogo to these central files — no per-file branches for resolution.
   - Conf files no longer define DSP_WIDTH/DSP_HEIGHT (set upstream in options.h).
@@ -2868,13 +2870,57 @@ Purpose:
 - display utility support
 
 ## Display fonts/assets
-- `src/displays/clockfonts/*` for digit/font assets.
-- `font15.h` is wired for 128x64 mono-OLED clock paths (SH1106/SH1107, SSD1306 128x64, SSD1305). Clock font dispatch
-  headers now live under `src/displays/clockfonts/` (`font15.h`, `font19.h`, `font35.h`, `font52.h`, `font70.h`), and
-  DS_DIGI/Chunky6 families also live there (`src/displays/clockfonts/DS_DIGI/`, `src/displays/clockfonts/Chunky6/`).
-  `font15.h` maps CHUNKY6 modes directly to Chunky6_15 variants; `font19.h` is retained for possible future use. For
-  clock rendering fallback, widgets now force `CLOCKFONT5x7` when `TIME_SIZE<15`, or when `TIME_SIZE==15` with
-  `CLOCKFONT` set to `YO_MONO`.
+
+**Both fonts are runtime choices now.  There is no `TIME_SIZE`, no `CLOCKFONT5x7`, no `Clock_GFXfont`
+and no `fontNN.h`: the whole compile-time font selection is gone.**  `plans/font-overhaul.md` is the
+design record; this is the shape of it.
+
+- **System fonts** — one folder each, `src/displays/fonts/<Name>/`, holding the `.bdf` and the header
+  `bdf2adafruit3.py` generates from it.  All of them are compiled in.  `dspfont.h` declares them
+  `extern` and holds `_systemFontNames[]` / `_systemFonts[]`; **`fonts/fonts.cpp` is the only
+  translation unit that includes the headers** — a namespace-scope `const` has internal linkage, so
+  including them from `dspfont.h` put the whole set in flash once per TU that reached it (measured:
+  39 KB on sh1106/es3c28p, 78 KB on ili9488).  `displayFont()` returns
+  `_systemFonts[activeSystemFontId]`.
+  **Every system font must stay on the 6x8 metric class** (`xAdvance == 6`, `yAdvance == 8`) — layout
+  comes from `CHARWIDTH`/`CHARHEIGHT`, not from the font — and that is validated at boot.
+- **Clock fonts** — one folder per STYLE, `src/displays/clockfonts/<Style>/`, holding
+  `{8,15,21,28,35,52,70}.png`.  `py makefont.py <Style>` converts the whole folder into one
+  `clockfonts/<Style>.h` and **aborts, naming every missing size, if the set is not complete**.  The
+  generated header defines the seven `GFXfont`s, the two glow strings and a `ClockFontStyle`; the
+  three styles are declared in `dspfont.h` as `_clockFontStyles[]` and defined in
+  `clockfonts/clockfonts.cpp`, which is the only TU that includes them.  `clockFontStyle()` is the
+  accessor, driven by `config.store.clockFontId`.
+- **The clock size is a LAYOUT value** — `clockConf.textsize`, a size index: `0` = the system font
+  (all the 128x32 panel does), `1..4` = 15, 35, 52, 70 px.  It used to be `TIME_SIZE`, one number for
+  the whole build derived from `DSP_HEIGHT`; every shipped conf now carries the index that rule
+  produced for its panel.  `numConf.textsize` is the same index for the number page, and the two are
+  independent — the widgets resolve their own `ClockFontSel`, which is why there is no global clock
+  font pointer any more.
+- **The seconds** are drawn with that style's `8/15/21/28` sibling at the same ink top the built-in
+  cell used, falling back to the built-in font when the style has no sibling at that index.  Their
+  glow uses `theme.secondsbg` / `theme.secondsbgss`.
+- **`fullClock` and `seconds` are per-layout booleans** (`LayoutData`, first two of the TRANSFORMS
+  group), replacing "the size is 52 or 70, or the model is an ILI9225" and "this size has a seconds
+  font".  The ILI9225 model hack is gone.
+- **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.
+- **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
+  into `_clockFontStyles[]`, so they must never be renumbered.
+- `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,
+  which is why the WebUI dropdowns cannot drift from what is compiled in.
+
+**Flash cost, measured, one copy each** (the point of the single defining TU):
+
+| item | bytes |
+|---|---|
+| `MatrixLight8x6` / `MatrixChunky8x6` | 12,752 each |
+| `UnixX11_6x9` (`Fixed`) | 13,696 |
+| one clock STYLE (all seven sizes, bitmaps + glyph tables) | 13,404 |
+
+So the two extra system fonts are +13,696 and the three clock styles +40,212: measured deltas of
++41,220 (sh1106, 128x64), +39,032 (es3c28p) and +36,308 (ili9488, which had already been paying for
+one 70 px font).  **Adding a font now costs its own size and nothing more** — before the linkage fix
+every one of them was in the image twice (three times on the ILI9488 family).
 
 ## GFXfont Rendering Pipeline (`src/displays/tools/commongfx.h`, `psframebuffer.h`)
 

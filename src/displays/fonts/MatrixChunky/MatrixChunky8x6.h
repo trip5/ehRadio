@@ -7,7 +7,7 @@
 // Range: 0x0021-0x04FF  (1247 slots)
 // yAdvance: 8,  yOffset: -8 (glcdfont-style)
 
-const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
+extern const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
     0x82, 0x08, 0x20, 0x02, 0x08, 0x00, 0xA2, 0x8A, 0x00, 0x00, 0x00, 0x00,
     0x51, 0x4F, 0x94, 0xF9, 0x45, 0x00, 0x23, 0xE8, 0x3E, 0x0B, 0xE2, 0x00,
     0xEA, 0xAD, 0x08, 0x5A, 0xAB, 0x80, 0xF2, 0x49, 0x3C, 0x6A, 0x6E, 0x80,
@@ -240,7 +240,7 @@ const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
     0x0B, 0xE8, 0x20, 0x82, 0x08, 0x00, 0x00, 0x2F, 0xA0, 0x82, 0x08, 0x00,
 };
 
-const GFXglyph MatrixChunky8x6Glyphs[] PROGMEM = {
+extern const GFXglyph MatrixChunky8x6Glyphs[] PROGMEM = {
     { 0, 6, 8, 6, 2, -8 }, /* 0x0021 exclam */
     { 6, 6, 8, 6, 1, -8 }, /* 0x0022 quotedbl */
     { 12, 6, 8, 6, 0, -8 }, /* 0x0023 numbersign */
@@ -1490,7 +1490,7 @@ const GFXglyph MatrixChunky8x6Glyphs[] PROGMEM = {
     { 0, 0, 0, 0, 0, 0 }, /* 0x04FF (empty) */
 };
 
-const GFXfont MatrixChunky8x6 PROGMEM = {
+extern const GFXfont MatrixChunky8x6 PROGMEM = {
     (uint8_t *)MatrixChunky8x6Bitmaps,
     (GFXglyph *)MatrixChunky8x6Glyphs,
     0x0021,  /* first */

@@ -2,7 +2,7 @@ name: Build and Deploy GitHub Page
 
 on:
   workflow_run:
-    workflows: ["Build and Release Firmware"]
+    workflows: ["Build and Release Firmware", "Update Builds in Release"]
     types:
       - completed
   push:

@@ -8,7 +8,7 @@
       "description": "ehRadio - kasperaitis_es3c28p"
     },
     {
-      "name": "No Display No Display Test",
+      "name": "No Display No Display",
       "manifest": "manifests/no_display_test-manifest.json",
       "description": "ehRadio - no_display_test"
     },

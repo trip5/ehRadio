@@ -50,7 +50,11 @@ STAGE_NAMES = {
 
 
 def run(cmd, check=True, capture=True):
-    result = subprocess.run(cmd, cwd=REPO_ROOT, text=True, capture_output=capture)
+    # Decode as UTF-8: git and gh emit UTF-8, but the Windows console code page
+    # (e.g. cp949) would otherwise be used and raise UnicodeDecodeError.
+    result = subprocess.run(
+        cmd, cwd=REPO_ROOT, capture_output=capture, encoding="utf-8", errors="replace"
+    )
     if check and result.returncode != 0:
         out = ((result.stdout or "") + (result.stderr or "")).strip()
         raise RuntimeError(
@@ -154,7 +158,7 @@ def radionversion():
 def latest_release_tag():
     if not shutil.which("gh"):
         return ""
-    result = run(["gh", "release", "view", "--json", "tagName", "-q", ".tagName"], check=False)
+    result = gh("release", "view", "--json", "tagName", "-q", ".tagName")
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
@@ -243,13 +247,33 @@ def stage_1():
     return 2
 
 
+def push_with_retry(remote, branch, attempts=4, delay=5):
+    # GitHub occasionally returns a transient 500 on push; retry a few times
+    # with a growing pause before giving up.
+    for attempt in range(1, attempts + 1):
+        result = git("push", remote, branch, check=False)
+        if result.returncode == 0:
+            print("[OK] Pushed %s" % branch)
+            return True
+        out = ((result.stdout or "") + (result.stderr or "")).strip()
+        print("[!] Push of %s failed (attempt %d/%d)." % (branch, attempt, attempts))
+        if out:
+            print(out)
+        if attempt < attempts:
+            wait = delay * attempt
+            print("[*] Retrying in %d seconds..." % wait)
+            time.sleep(wait)
+    return False
+
+
 def stage_2():
     print("\n[*] STAGE 2: PUSH main")
     if not confirm("Push main to origin?"):
         print("[!] Stopped. State saved; re-run to resume.")
         return None
-    git("push", "origin", MAIN_BRANCH)
-    print("[OK] Pushed %s" % MAIN_BRANCH)
+    if not push_with_retry("origin", MAIN_BRANCH):
+        print("[X] Could not push %s after several attempts. Re-run to resume." % MAIN_BRANCH)
+        return None
     save_lck(3)
     return 3
 
@@ -257,10 +281,9 @@ def stage_2():
 def wait_for_run(timeout=90):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        result = run(
-            ["gh", "run", "list", "--workflow", WORKFLOW_NAME, "--limit", "1",
-             "--json", "databaseId,status,conclusion"],
-            check=False,
+        result = gh(
+            "run", "list", "--workflow", WORKFLOW_NAME, "--limit", "1",
+            "--json", "databaseId,status,conclusion",
         )
         if result.returncode == 0 and result.stdout.strip() not in ("", "[]"):
             try:
@@ -287,17 +310,21 @@ def stage_3():
         print("[*] Force list: (none) - the workflow will auto-detect missing firmware.")
 
     if gh_ready() and confirm("Trigger the %s workflow now?" % WORKFLOW_DISPLAY):
-        cmd = ["gh", "workflow", "run", WORKFLOW_NAME, "--ref", MAIN_BRANCH]
+        args = ["workflow", "run", WORKFLOW_NAME, "--ref", MAIN_BRANCH]
         if folders:
-            cmd += ["-f", "builds=" + ",".join(folders)]
-        run(cmd)
+            args += ["-f", "builds=" + ",".join(folders)]
+        started = gh(*args)
+        if started.returncode != 0:
+            print("[X] Could not start the workflow:")
+            print(((started.stdout or "") + (started.stderr or "")).strip())
+            return None
         print("[*] Waiting for the run to start...")
         run_id = wait_for_run()
         if run_id is None:
             print("[X] Could not find the run. Check GitHub Actions.")
             return None
         print("[*] Watching run %s ..." % run_id)
-        watch = run(["gh", "run", "watch", str(run_id), "--exit-status"], check=False)
+        watch = gh("run", "watch", str(run_id), "--exit-status")
         if watch.returncode != 0:
             print("[X] Workflow failed or was cancelled. Inspect: gh run view %s" % run_id)
             print("[!] State saved; re-run to resume.")
@@ -313,13 +340,24 @@ def stage_3():
 
 
 def repo_slug():
+    # Derive from the git remote so gh never depends on a configured default repo.
+    url = git_out("remote", "get-url", "origin", check=False)
+    match = re.search(r"github\.com[:/](.+?)(?:\.git)?/?$", url)
+    if match:
+        return match.group(1)
     if shutil.which("gh"):
         result = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    url = git_out("remote", "get-url", "origin", check=False)
-    match = re.search(r"github\.com[:/](.+?)(?:\.git)?/?$", url)
-    return match.group(1) if match else ""
+    return ""
+
+
+def gh(*args, check=False):
+    cmd = ["gh", *args]
+    slug = repo_slug()
+    if slug:
+        cmd += ["-R", slug]
+    return run(cmd, check=check)
 
 
 def compare_url():
@@ -389,8 +427,9 @@ def stage_4():
     print("[OK] %s now at %s" % (DEV_BRANCH, dev_sha[:12]))
 
     if confirm("Push %s to origin?" % DEV_BRANCH):
-        git("push", "origin", DEV_BRANCH)
-        print("[OK] Pushed %s" % DEV_BRANCH)
+        if not push_with_retry("origin", DEV_BRANCH):
+            print("[X] Could not push %s after several attempts. Re-run to resume." % DEV_BRANCH)
+            return None
 
     save_lck(5, dev_commit_sha=dev_sha)
     return 5
@@ -413,6 +452,16 @@ def main():
     )
     parser.add_argument("--reset", action="store_true", help="discard saved state and start over")
     args = parser.parse_args()
+
+    # Windows consoles may use a legacy code page (cp949/cp1252); force UTF-8
+    # output so printing git/gh text cannot raise UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+    print()  # blank line so the first stage is not jammed against the shell prompt
 
     if args.reset and LCK_PATH.exists():
         LCK_PATH.unlink()

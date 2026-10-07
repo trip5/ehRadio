@@ -239,7 +239,7 @@ void Config::syncSDFS() {
 static void setNoStationState() {
   memset(config.station.url, 0, STATION_FIELD_LENGTH);
   memset(config.station.name, 0, STATION_FIELD_LENGTH);
-  strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
+  strncpy(config.station.name, "ehRadio \021\022", STATION_FIELD_LENGTH);
   config.station.ovol = 0;
   config.setTitle("");
 }

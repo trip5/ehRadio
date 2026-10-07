@@ -84,6 +84,28 @@ static const uint8_t RSSI__11[] PROGMEM = {
     0b000000,  // ......
 };
 
+// \007 Maple Leaf A (Surprise!)
+static const uint8_t MAPLE_A[] PROGMEM = {
+    0b000001,  // .....@
+    0b000011,  // ....@@
+    0b101011,  // @.@.@@
+    0b011111,  // .@@@@@
+    0b111111,  // @@@@@@
+    0b011111,  // .@@@@@
+    0b000111,  // ...@@@
+    0b000001,  // .....@
+};
+// \010 Maple Leaf B (Surprise!)
+static const uint8_t MAPLE_B[] PROGMEM = {
+    0b000000,  // ......
+    0b100000,  // @.....
+    0b101010,  // @.@.@.
+    0b111100,  // @@@@..
+    0b111110,  // @@@@@.
+    0b111100,  // @@@@..
+    0b110000,  // @@....
+    0b000000,  // ......
+};
 
 // \013 Battery bar 00__ (used in display.cpp Battery rendering)
 static const uint8_t BATTERY_00[] PROGMEM = {
@@ -97,7 +119,6 @@ static const uint8_t BATTERY_00[] PROGMEM = {
     0b000000,  // ......
 };
 
-
 // \014 Battery bar __00 (used in display.cpp Battery rendering)
 static const uint8_t BATTERY__00[] PROGMEM = {
     0b111110,  // @@@@@.
@@ -109,7 +130,6 @@ static const uint8_t BATTERY__00[] PROGMEM = {
     0b111110,  // @@@@@.
     0b000000,  // ......
 };
-
 
 // \015 Battery bar 10__ (used in display.cpp Battery rendering)
 static const uint8_t BATTERY_10[] PROGMEM = {
@@ -134,7 +154,6 @@ static const uint8_t BATTERY_11[] PROGMEM = {
     0b111111,  // @@@@@@
     0b000000,  // ......
 };
-
 
 // \017 Battery bar __10 (used in display.cpp Battery rendering)
 static const uint8_t BATTERY__10[] PROGMEM = {
@@ -328,8 +347,8 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     RSSI_11,         //  4: \004
     RSSI__10,        //  5: \005
     RSSI__11,        //  6: \006
-    NULL,            //  7: \007
-    NULL,            //  8: \010
+    MAPLE_A,         //  7: \007
+    MAPLE_B,         //  8: \010
     NULL,            //  9: \011 (DO NOT USE: TAB control char conflicts with TFT print())
     NULL,            // 10: \012 (DO NOT USE: LF control char conflicts with TFT print())
     BATTERY_00,      // 11: \013

@@ -42,7 +42,7 @@ class DspCore: public yoDisplay {
         display();
       }
       inline void drawLogo(uint16_t top) {
-        #if !(DSP_MODEL==DSP_SSD1306 && DSP_HEIGHT==32)
+        #if (DSP_HEIGHT>40)
           drawBitmap((width()  - LOGO_WIDTH ) / 2, top, logo, LOGO_WIDTH, LOGO_HEIGHT, 1);
         #else
           // Plain literal: transliteration now happens at render time in

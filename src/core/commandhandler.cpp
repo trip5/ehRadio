@@ -126,7 +126,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   /* Hidden Websockets */
   if (cmdIs(command, "getindex"))    { netserver.requestOnChange(GETINDEX, cid); return true; }
   if (cmdIs(command, "getactive"))   { netserver.requestOnChange(GETACTIVE, cid); return true; }
-  if (cmdIs(command, "clearfs")) { utility.pruneLittleFS(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
+  if (cmdIs(command, "clearfs"))     { utility.pruneLittleFS(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
 
   /* Options: Load Settings */
   if (cmdIs(command, "getcontrols")) { netserver.requestOnChange(GETCONTROLS, cid); return true; }
@@ -151,8 +151,8 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "inverttitle"))   { config.saveValueButWait(&config.store.inverttitle, static_cast<bool>(atoi(value)), 5000); display.applyTheme(config.store.themeId); return true; }
   if (cmdIs(command, "layout"))        { uint8_t id = constrain(atoi(value), 0, display.getLayoutCount() - 1); config.saveValueButWait(&config.store.layoutId, id, 5000); display.applyLayout(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "theme"))         { uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1); config.saveValueButWait(&config.store.themeId, id, 5000); display.applyTheme(id); return true; }
-  if (cmdIs(command, "sysfont"))       { display.applySystemFont((uint8_t)constrain(atoi(value), 0, 15)); config.saveValueButWait(&config.store.systemFontId, config.store.systemFontId, 5000); netserver.requestOnChange(GETACTIVE, 0); return true; }
-  if (cmdIs(command, "clockfont"))     { display.applyClockFont((uint8_t)constrain(atoi(value), 0, 15)); config.saveValueButWait(&config.store.clockFontId, config.store.clockFontId, 5000); netserver.requestOnChange(GETACTIVE, 0); return true; }
+  if (cmdIs(command, "sysfont"))       { uint8_t id = constrain(atoi(value), 0, display.getSystemFontCount() - 1); config.saveValueButWait(&config.store.systemFontId, id, 5000); display.applySystemFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
+  if (cmdIs(command, "clockfont"))     { uint8_t id = constrain(atoi(value), 0, display.getClockFontCount() - 1); config.saveValueButWait(&config.store.clockFontId, id, 5000); display.applyClockFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "clock12"))       { config.saveValueButWait(&config.store.clock12, static_cast<bool>(atoi(value)), 5000); display.putRequest(CLOCK); return true; }
   if (cmdIs(command, "clockglow"))     { config.saveValueButWait(&config.store.clockglow, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }

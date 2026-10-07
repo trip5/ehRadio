@@ -1461,6 +1461,12 @@ void Display::applyTheme(uint8_t id) {
 
 uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
 
+// The font tables are macros in dspfont.h rather than private statics, but the handler asks the display
+// for every count it clamps against: one shape for the four index commands, and this is the one that is
+// safe in a DSP_DUMMY build, where display.h's stubs answer instead (builds/no_display).
+uint8_t Display::getSystemFontCount() { return (uint8_t)_systemFontCount; }
+uint8_t Display::getClockFontCount()  { return (uint8_t)_clockFontCount;  }
+
 // Live system font switch.  Re-resolving every widget string is the obligation here (see
 // plans/font-overhaul.md 9): the resolver memo is keyed on the font pointer, so a new pointer
 // invalidates it for free, but the strings already sitting in the widgets were resolved with the

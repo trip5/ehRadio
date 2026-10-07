@@ -1080,6 +1080,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - persist settings with `config.saveValue(...)`
   - source-aware command policy (`WebSocket`, `HttpUrl`, `Mqtt`, `Telnet`) and shared non-WebUI blocklist checks for
     HTTP/MQTT/Telnet ingress
+  - `Commands.md` at the repository root is this file's own reference, deliberately **in the same order and the same
+    blocks** - that promise is what makes an audit a walk down two lists. `isBlockedForSource()` is the only
+    authority for its *Blocked in HTTP/MQTT/Telnet* column. Beware the names that are not commands:
+    `config.cpp`'s `CONFIG_KEY_ENTRY` keys are what a setting is stored under, and `vumeter` / `vupeak` happen to
+    exist as both. Six commands had gone undocumented before the 2026-10-07 audit
+    (`plans/commands-md-audit.md`), which is why the procedure below ends with them.
   - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`,
     `dim`/`brightness`, `dspon`/`screenon`)
   - player-command parity helpers (including exact-match-first direct URL playback command routing for `playurl` /
@@ -3595,18 +3601,21 @@ This section is specifically for adding/removing settings and avoiding missed li
    - persist with `saveValue(...)`
    - trigger display/network side effects and request updates as needed.
 7. Add WebUI wiring:
-   - element in `data/www/settings.html` with id and `data-command`.
+   - element in `data/www/options.html` with id and `data-command`.
    - fallback label text + `data-i18n` key.
    - add i18n key in `src/locale/www/en_US.json` (and optionally others).
 8. Ensure websocket UI apply path exists in `data/www/script.js`:
    - `setupElement(...)` supports element type/id.
    - incoming `GET*` payload key matches DOM element id or custom handler.
-9. If setting is locale/time/weather related, update `data/www/settings.js` apply handlers too.
+9. If setting is locale/time/weather related, update `data/www/options.js` apply handlers too.
 10. Telnet command handling is thin-dispatch by default: update `src/core/commandhandler.cpp` first, and only extend
     `src/core/telnet.cpp` if protocol normalization needs a new alias/form.
 11. If setting affects startup behavior, check `main.cpp`, `config.init()`, and `startup.startupServices()`.
 12. Update this `code-summary.md`.
-13. Update `Commands.md`.
+13. Update `Commands.md`: the entry goes in the same block and at the same position as its `cmdIs(...)`
+    branch, because the file's whole value is that walking it and this router together is mechanical. If
+    the command is refused for HTTP/MQTT/Telnet, that comes from `isBlockedForSource()` and the doc's
+    *Blocked* column has to match it - nothing else is authoritative for that column.
 
 ## When removing a setting field
 

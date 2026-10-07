@@ -19,9 +19,9 @@ Order and sections match that file.
 | `bass` | Set bass (-16..16). |
 | `volume`, `vol` | Set absolute volume (clamped 0..VOLUME_SCALE). |
 | `mute` | Toggle mute: volume 0 <-> last active level. Same behaviour as the IR mute button; physical-button mute is suppressed without a display. |
-| `togglestandby` | Toggle standby on or off |
 | `startstandby` | Turn display off, stop playback, and preserve smartstart value. |
 | `stopstandby` | Turn display on, optionally resume smartstart playback. |
+| `togglestandby` | Toggle standby on or off |
 | `burl`, `playurl` | Play direct stream URL (http/https). |
 | `sdpos` | Set SD playback position when in SD mode. |
 | `playstation`, `play` | Play station by playlist index (clamped to valid range). |
@@ -45,68 +45,61 @@ Order and sections match that file.
 
 | Command(s) | Action |
 | --- | --- |
-| `getsystem` | Request system settings payload. Blocked in HTTP/MQTT/Telnet. |
+| `getcontrols` | Request controls settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getscreen` | Request screen settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getlocale` | Request locale settings payload. Blocked in HTTP/MQTT/Telnet. |
-| `getcontrols` | Request controls settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getweather` | Request weather settings payload. Blocked in HTTP/MQTT/Telnet. |
+| `getsystem` | Request system settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getmqtt` | Request MQTT settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getbattery` | Request battery settings payload. Blocked in HTTP/MQTT/Telnet. |
-
-## Options: System
-
-| Command(s) | Action |
-| --- | --- |
-| `smartstart` | Enable/disable smartstart. |
-| `wifiscan` | Enable/disable best-RSSI WiFi scan behavior. |
-| `autoupdate` | Enable/disable auto update checks. |
-| `ehdp` | Enable/disable eHDP service. |
-| `ehdpname` | Set eHDP name and reinitialize eHDP. |
-| `mdnsname` | Set mDNS host name. |
-
-## Options: Battery
-
-| Command(s) | Action |
-| --- | --- |
-| `battref` | Calibrate battery reference voltage and refresh battery payload. |
-| `battrecalc` | Force battery recalculation and refresh battery payload. |
-
-## Options: Screen
-
-| Command(s) | Action |
-| --- | --- |
-| `flipscreen` | Toggle display flip and redraw player view. |
-| `invertdisplay` | Toggle display inversion. |
-| `numplaylist` | Toggle numbered playlist display and redraw player view. |
-| `clock12` | Toggle 12-hour clock display and refresh clock. |
-| `volumepage` | Toggle dedicated volume page behavior and refresh player view. |
-| `bufferbar` | Enable/disable the buffer bar on the display. |
-| `vumeter` | Enable/disable VU meter and refresh display state. |
-| `vupeaks` | Enable/disable the VU meter peak markers (or XY axis lines). |
-| `vustyle` | Select the VU meter visualisation style (the id is numeric, clamped to the known range). |
-| `contrast` | Set contrast (0..100) and apply to display. |
-| `brightness`, `dim` | Set brightness (0..100), ensure screen-on state, clamp dimmed brightness if needed, and apply brightness. |
-| `screenon`, `dspon` | Turn display on/off and reset dimming state. |
-| `dimmingenabled` | Enable/disable idle dimming behavior. |
-| `dimmingtimeout` | Set idle dimming timeout (5..65520). |
-| `dimmingbrightness` | Set dimmed brightness (0..100, clamped to the current brightness setting). |
-| `screensaverenabled` | Enable/disable idle screensaver behavior. |
-| `screensavertimeout` | Set idle screensaver timeout (5..65520). |
-| `screensaverblank` | Enable/disable idle screensaver blanking behavior. |
-| `screensaverplayingenabled` | Enable/disable playing screensaver behavior. |
-| `screensaverplayingtimeout` | Set playing screensaver timeout (1..1080). |
-| `screensaverplayingblank` | Enable/disable playing screensaver blanking behavior. |
-| `screensaverfull` | Enable/disable full time on the screensaver. |
 
 ## Options: Controls
 
 | Command(s) | Action |
 | --- | --- |
+| `smartstart` | Enable/disable smartstart. |
 | `fliptouch` | Toggle touchscreen axis flip and apply touch config. |
 | `dbgtouch` | Enable/disable touch debug mode. |
 | `encacc` | Set encoder acceleration value. |
 | `oneclickswitch` | Toggle one-click playlist switching behavior. |
 | `irtlp` | Set IR tolerance value. |
+
+## Options: Screen
+
+The layout, theme and font commands all take an **index, 0-based**: the lists are built in table order,
+so the first layout is `layout=0`. A value past the end of a list is clamped to its **last** entry, the
+same four ways - the two font commands clamp to the number of fonts that build actually has, not to a
+fixed number.
+
+| Command(s) | Action |
+| --- | --- |
+| `flipscreen` | Toggle display flip and redraw player view. |
+| `invertdisplay` | Toggle display inversion. |
+| `inverttitle` | Toggle the inverted title bar. Saved and the current theme is re-applied, because the inverted meta band is a theme change rather than a repaint. |
+| `layout` | Select the active layout by index, 0-based (clamped to the layout count). Saved, applied, and the WebUI's live groups are pushed. |
+| `theme` | Select the active theme by index, 0-based (clamped to the theme count). Saved and applied. |
+| `sysfont` | Select the system (display) font by index, 0-based, clamped to the number of fonts this build has. Saved, applied, and the WebUI's lists are pushed. |
+| `clockfont` | Select the clock font style by index, 0-based, clamped to the number of styles this build has. Saved, applied, and the WebUI's lists are pushed. |
+| `numplaylist` | Toggle numbered playlist display and redraw player view. |
+| `clock12` | Toggle 12-hour clock display and refresh clock. |
+| `clockglow` | Enable/disable the clock's glow. Saved, then the whole display is re-initialised. |
+| `volumepage` | Toggle dedicated volume page behavior and refresh player view. |
+| `bufferbar` | Enable/disable the buffer bar on the display. |
+| `vumeter` | Enable/disable VU meter and refresh display state. |
+| `vupeaks` | Enable/disable the VU meter peak markers (or XY axis lines). |
+| `vustyle` | Select the VU meter visualisation style (the id is numeric, clamped to the known range). |
+| `brightness`, `dim` | Set brightness (0..100), ensure screen-on state, clamp dimmed brightness if needed, and apply brightness. |
+| `dimmingenabled` | Enable/disable idle dimming behavior. |
+| `dimmingbrightness` | Set dimmed brightness (0..100, clamped to the current brightness setting). |
+| `dimmingtimeout` | Set idle dimming timeout (5..65520). |
+| `screenon`, `dspon` | Turn display on/off and reset dimming state. |
+| `screensaverenabled` | Enable/disable idle screensaver behavior. |
+| `screensaverblank` | Enable/disable idle screensaver blanking behavior. |
+| `screensavertimeout` | Set idle screensaver timeout in seconds (5..65520). |
+| `screensaverplayingenabled` | Enable/disable playing screensaver behavior. |
+| `screensaverplayingblank` | Enable/disable playing screensaver blanking behavior. |
+| `screensaverplayingtimeout` | Set playing screensaver timeout in minutes (1..1080). |
+| `screensaverfull` | Enable/disable full time on the screensaver. |
 
 ## Options: Locale
 
@@ -139,8 +132,17 @@ Order and sections match that file.
 | `wlat` | Set weather latitude, force weather refresh. |
 | `wlon` | Set weather longitude, force weather refresh. |
 
-## Options: MQTT
+## Options: System
 
+| Command(s) | Action |
+| --- | --- |
+| `wifiscan` | Enable/disable best-RSSI WiFi scan behavior. |
+| `autoupdate` | Enable/disable auto update checks. |
+| `ehdp` | Enable/disable eHDP service. |
+| `ehdpname` | Set eHDP name and reinitialize eHDP. |
+| `mdnsname` | Set mDNS host name. |
+
+## Options: MQTT
 
 | Command(s) | Action |
 | --- | --- |
@@ -150,6 +152,13 @@ Order and sections match that file.
 | `mqttuser` | Set MQTT username. |
 | `mqttpass` | Set MQTT password. |
 | `mqtttopic` | Set MQTT topic prefix. |
+
+## Options: Battery
+
+| Command(s) | Action |
+| --- | --- |
+| `battref` | Calibrate battery reference voltage and refresh battery payload. |
+| `battrecalc` | Force battery recalculation and refresh battery payload. |
 
 ## Options: Danger Zone
 
@@ -234,4 +243,5 @@ Handled in src/core/telnet.cpp before commandhandler dispatch.
 - Telnet maps `play` with no value to `start`, and `play` with URL to `burl`.
 - Boolean-like values use numeric parsing (0 false, non-zero true in most handlers).
 - Numeric values are parsed with atoi-style integer conversion.
+- The layout, theme and font commands take an index, 0-based; `vustyle` takes its own style id.
 - HTTP, MQTT, and Telnet share source policy blocking for certain commands because they are only used by websockets with WebUI

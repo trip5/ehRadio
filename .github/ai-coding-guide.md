@@ -93,6 +93,7 @@
   5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first, and search `plans/` for the area (Rule #5)
   6. Writing a comment longer than three lines? → It belongs in `code-summary.md`, or it is four shorter comments (Rule #6)
   7. Planning a change that needs more than a one-file edit? → Write it to `plans/` first, and keep it current as the code lands (Rule #7)
+  8. Adding, renaming or removing a command in `commandhandler.cpp`? → `Commands.md` gets the entry in the **same block and the same position**, and its *Blocked in HTTP/MQTT/Telnet* column has to match `isBlockedForSource()` and nothing else. The file's order is its value: an audit is a walk down the two lists. The `CONFIG_KEY_ENTRY` names in `config.cpp` are store keys, not commands
 
 ## Comment Style
 

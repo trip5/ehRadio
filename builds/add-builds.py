@@ -102,24 +102,40 @@ def current_branch():
 
 
 def changed_paths():
-    out = git_out("status", "--porcelain")
+    # Raw stdout, not git_out(): git_out() strips the whole string, which eats
+    # the leading space of the first " M path" line and corrupts that path.
+    out = git("status", "--porcelain").stdout
     paths = []
     for line in out.splitlines():
-        if len(line) < 4:
+        if len(line) < 3:
             continue
         path = line[3:].strip()
+        if not path:
+            continue
         if " -> " in path:
             path = path.split(" -> ", 1)[1]
         paths.append(path.strip('"').replace("\\", "/"))
     return paths
 
 
+def is_build_folder(name):
+    folder = REPO_ROOT / "builds" / name
+    return folder.is_dir() and (folder / "platformio.ini").is_file() and (folder / "myoptions.h").is_file()
+
+
 def changed_build_folders(paths):
     folders = set()
     for path in paths:
         parts = path.split("/")
-        if len(parts) >= 3 and parts[0] == "builds" and parts[1] != "releases":
-            folders.add(parts[1])
+        if len(parts) < 2 or parts[0] != "builds":
+            continue
+        name = parts[1]
+        if not name or name == "releases":
+            continue
+        # Only real contributor folders (platformio.ini + myoptions.h), which
+        # also filters out builds/__pycache__ and loose files under builds/.
+        if is_build_folder(name):
+            folders.add(name)
     return sorted(folders)
 
 

@@ -136,6 +136,8 @@ def radionversion():
 
 
 def latest_release_tag():
+    if not shutil.which("gh"):
+        return ""
     result = run(["gh", "release", "view", "--json", "tagName", "-q", ".tagName"], check=False)
     if result.returncode != 0:
         return ""
@@ -295,9 +297,10 @@ def stage_3():
 
 
 def repo_slug():
-    result = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False)
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
+    if shutil.which("gh"):
+        result = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
     url = git_out("remote", "get-url", "origin", check=False)
     match = re.search(r"github\.com[:/](.+?)(?:\.git)?/?$", url)
     return match.group(1) if match else ""
@@ -411,6 +414,9 @@ def main():
     except KeyboardInterrupt:
         print("\n[!] Interrupted. State saved; re-run to resume from STAGE %d." % (stage or 0))
         return 130
+    except OSError as exc:
+        print("\n[X] %s" % exc)
+        return 1
     except RuntimeError as exc:
         print("\n[X] %s" % exc)
         return 1

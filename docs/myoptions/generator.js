@@ -109,6 +109,9 @@ Promise.all([
 
   buildPage();
   loadStateFromHash();
+  // A fragment-only navigation does not reload the page, so a shared link would
+  // otherwise need an F5. Re-run the loader whenever the hash changes.
+  window.addEventListener('hashchange', loadStateFromHash);
 }).catch(function(err) {
   document.getElementById('gen-root').innerHTML =
     '<div style="color:#C80C02;padding:20px;text-align:center;">Error loading configuration files: ' +
@@ -1756,7 +1759,8 @@ function clearAllSections() {
 // ============================================================
 // Reset pins button
 // ============================================================
-function resetPins() {
+// quiet skips the preview update and alert, for applying a state from the URL.
+function resetToBoardDefaults(quiet) {
   // Step 0: Clear all sections (uncheck/deselect everything)
   clearAllSections();
   // Step 1: Reset all pin inputs to their stored JSON defaults (or blank)
@@ -1769,8 +1773,14 @@ function resetPins() {
   applyDefaultPins();
   validateAllPins();
   updateAllResetButtons();
-  updatePreview(); // immediate update on reset (no debounce)
-  showAlert('info', 'Reset to board defaults.', 2000);
+  if (!quiet) {
+    updatePreview(); // immediate update on reset (no debounce)
+    showAlert('info', 'Reset to board defaults.', 2000);
+  }
+}
+
+function resetPins() {
+  resetToBoardDefaults(false);
 }
 
 // ============================================================
@@ -2751,7 +2761,10 @@ function serializeState() {
   return state;
 }
 
+var _stateGen = 0;
+
 function loadStateFromHash() {
+  var gen = ++_stateGen;
   var hash = window.location.hash;
   if (!hash || hash.length < 2) {
     // No state - trigger initial board load
@@ -2762,14 +2775,16 @@ function loadStateFromHash() {
     var compressed = decodeURIComponent(hash.substring(1));
     var json = LZString.decompressFromBase64(compressed);
     var state = JSON.parse(json);
-    applyState(state);
+    // Clear the previous state so fields absent from this link do not linger.
+    if (gData.boardData) resetToBoardDefaults(true);
+    applyState(state, gen);
   } catch (e) {
     console.warn('Could not load state from URL hash:', e);
     onBoardChange(false);
   }
 }
 
-function applyState(state) {
+function applyState(state, gen) {
   // Board resolution by name
   var resolvedBoardIdx = 0;
   if (state.bn) {
@@ -2782,6 +2797,8 @@ function applyState(state) {
   // Load board data, then apply state
   var boardEntry = gData.boards[resolvedBoardIdx];
   fetchJSON(boardEntry.file).then(function(data) {
+    // A newer state was requested while this fetch was in flight.
+    if (gen !== undefined && gen !== _stateGen) return;
     gData.boardData = data[0];
     updateBoardImageArea();
     updateSPISections();

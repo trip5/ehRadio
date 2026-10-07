@@ -1,0 +1,216 @@
+name: Update Builds in Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to update (blank = latest release)'
+        required: false
+        default: ''
+        type: string
+      builds:
+        description: "Contributor folders to force rebuild (comma-separated) or 'all' (blank = auto-detect missing)"
+        required: false
+        default: ''
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Resolve target release tag
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+            if [ -z "$VERSION" ]; then
+              echo "❌ No release found and no version supplied."
+              exit 1
+            fi
+            echo "ℹ️  No version input; using latest release: ${VERSION}"
+          else
+            if ! gh release view "$VERSION" >/dev/null 2>&1; then
+              echo "❌ Release '${VERSION}' does not exist."
+              exit 1
+            fi
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Validate version matches options.h
+        run: |
+          EXPECTED_VERSION="${{ steps.target.outputs.version }}"
+          ACTUAL_VERSION=$(grep -oP '#define RADIOVERSION "\K[^"]+' src/core/options.h)
+          echo "Expected: ${EXPECTED_VERSION}"
+          echo "Actual:   ${ACTUAL_VERSION}"
+          if [ "${EXPECTED_VERSION}" != "${ACTUAL_VERSION}" ]; then
+            echo "❌ Version mismatch! RADIOVERSION in src/core/options.h is \"${ACTUAL_VERSION}\" but the target release is \"${EXPECTED_VERSION}\"."
+            exit 1
+          fi
+          echo "✅ Version validation passed"
+
+      - name: Verify builds/releases/ is up-to-date
+        run: |
+          echo "🔍 Verifying builds/releases/ is up-to-date..."
+          cd builds
+          python3 fix_releases.py
+          cd ..
+          if ! git diff --quiet builds/releases/; then
+            echo ""
+            echo "❌ builds/releases/ is out of date. Run locally and commit:"
+            echo "  cd builds"
+            echo "  python fix_releases.py"
+            echo "  git add releases/"
+            echo "  git commit -m 'Update release files'"
+            echo ""
+            git diff --stat builds/releases/
+            exit 1
+          fi
+          echo "✅ builds/releases/ is up-to-date"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build missing or changed firmware
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.target.outputs.version }}"
+          INPUT="${{ inputs.builds }}"
+          FW_TXT="builds/releases/firmware.txt"
+
+          # Snapshot the release's current asset names
+          gh release view "$TAG" --json assets -q '.assets[].name' | sort > /tmp/release_assets.txt
+          echo "📦 Existing release assets:"
+          sed 's/^/  /' /tmp/release_assets.txt
+
+          # Contributor folders that carry a build config
+          mapfile -t CONTRIBUTORS < <(
+            for subfolder in builds/*/; do
+              name=$(basename "$subfolder")
+              [ "$name" = "releases" ] && continue
+              [ -f "$subfolder/platformio.ini" ] || continue
+              [ -f "$subfolder/myoptions.h" ] || continue
+              echo "$name"
+            done
+          )
+
+          # Decide which contributors to build
+          declare -A WANTED
+          if [ "$INPUT" = "all" ]; then
+            echo "🔧 Force list: all contributors"
+            for c in "${CONTRIBUTORS[@]}"; do WANTED["$c"]=1; done
+          elif [ -n "$INPUT" ]; then
+            echo "🔧 Force list: ${INPUT}"
+            IFS=',' read -ra names <<< "$INPUT"
+            for n in "${names[@]}"; do
+              n="$(echo "$n" | xargs)"
+              [ -z "$n" ] && continue
+              if [ ! -d "builds/$n" ]; then
+                echo "❌ Unknown contributor folder: builds/$n"
+                exit 1
+              fi
+              WANTED["$n"]=1
+            done
+          else
+            echo "🔎 Auto-detecting missing firmware..."
+            for c in "${CONTRIBUTORS[@]}"; do
+              while IFS= read -r pio_env; do
+                [ -z "$pio_env" ] && continue
+                fw_env="${c}_${pio_env}"
+                # Only consider envs that are real firmwares in firmware.txt
+                if ! grep -qF "|${fw_env}|" "$FW_TXT"; then
+                  continue
+                fi
+                if ! grep -qx "${fw_env}.bin" /tmp/release_assets.txt; then
+                  echo "  ➕ ${fw_env} (missing)"
+                  WANTED["$c"]=1
+                  break
+                fi
+              done < <(grep -oP '(?<=\[env:)[^\]]+' "builds/$c/platformio.ini" || true)
+            done
+          fi
+
+          if [ "${#WANTED[@]}" -eq 0 ]; then
+            echo "✅ Nothing to build."
+            echo "built=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          mkdir -p binaries
+          declare -A board_done
+
+          for c in "${!WANTED[@]}"; do
+            echo "🔨 Building contributor: ${c}"
+            cp "builds/$c/myoptions.h" myoptions.h
+            cp "builds/$c/platformio.ini" platformio.ini
+
+            pio run
+
+            for d in .pio/build/*/; do
+              pio_env=$(basename "$d")
+              fw_env="${c}_${pio_env}"
+              if ! grep -qF "|${fw_env}|" "$FW_TXT"; then
+                continue
+              fi
+              if [ -f "$d/firmware.bin" ]; then
+                cp "$d/firmware.bin" "binaries/${fw_env}.bin"
+                echo "  ✅ ${fw_env}.bin"
+              fi
+              board_env=$(awk -F'|' -v fw="${fw_env}" '$3 == fw {print $1; exit}' "$FW_TXT")
+              if [ -n "$board_env" ] && [ -z "${board_done[$board_env]+x}" ]; then
+                if [ -f "$d/bootloader.bin" ] && [ -f "$d/partitions.bin" ]; then
+                  cp "$d/bootloader.bin" "binaries/${board_env}_bootloader.bin"
+                  cp "$d/partitions.bin" "binaries/${board_env}_partitions.bin"
+                  echo "  ✅ ${board_env}: bootloader + partitions"
+                  board_done[$board_env]=1
+                fi
+              fi
+            done
+          done
+
+          COUNT=$(ls -1 binaries/*.bin 2>/dev/null | wc -l)
+          echo "📦 Built ${COUNT} binaries."
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No binaries were produced."
+            exit 1
+          fi
+          echo "built=${COUNT}" >> $GITHUB_OUTPUT
+
+      - name: Upload binaries to release
+        if: steps.build.outputs.built != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.target.outputs.version }}"
+          echo "⬆️  Uploading to release ${TAG}:"
+          ls -1 binaries/*.bin | sed 's/^/  /'
+          gh release upload "$TAG" binaries/*.bin --clobber
+          echo "✅ Binaries uploaded"
+
+      - name: Update release notes
+        if: steps.build.outputs.built != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.target.outputs.version }}"
+          gh release edit "$TAG" --notes-file builds/releases/releases.md
+          echo "✅ Release notes updated from builds/releases/releases.md"

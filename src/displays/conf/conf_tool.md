@@ -21,16 +21,17 @@ in the tool.
 ## Usage
 
 ```
-py conf_tool.py --clean [--comments=keep|master] [--dry-run]
+py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]
+py conf_tool.py --check [<conf_file>] [--strict]
 py conf_tool.py --import <conf_file> --name "Name" [--target <file.h>] [--dry-run]
 ```
 
 There is no bare invocation on purpose: run with no mode and it prints a two-line pointer and
 exits 2. `--help` (or `-h`) prints the full help, which is also the top of the script.
 
-Both modes write a **`*.new.h` temp next to each file** and never touch an original until you say
-so. The `.h` extension is deliberate — it opens in the editor with syntax highlighting, so the
-result can be read before it is installed.
+The two writing modes each put a **`*.new.h` temp next to every file** and never touch an original
+until you say so. The `.h` extension is deliberate — it opens in the editor with syntax highlighting,
+so the result can be read before it is installed. `--check` writes nothing at all.
 
 ---
 
@@ -89,7 +90,29 @@ Read those lines in `--dry-run` first. If a conf's own wording is worth keeping 
 marker in it — see **What it refuses to do**. The default, `keep`, consults the master's comments
 only for a field the conf does not have at all.
 
-### 5. What it refuses to do
+### 5. MOVEs: the retired `width = -1`
+
+`clockMove = { 0, 0, -1 }` used to mean "keep the conf position", and it was a trap: the entry is not
+empty as far as the code is concerned, so the widget neither moved **nor** yielded to the VU. It is
+retired, and `--clean` rewrites every one it finds as the widget's **own coordinates** —
+`{ <clockConf left>, <clockConf top>, 0 }` for the clock, the `weatherConf` pair for the two weather
+moves — copying the text verbatim, so an expression such as `DSP_HEIGHT-50` comes across unchanged.
+
+That is an identity, because a MOVE writes the same `left`/`top` the conf does and a `width` of 0 keeps
+the conf's own span. The rewrite is named in the report like any other change:
+
+```
+entry 0 ("Default"): .clockMove written out from the retired width -1:
+      was: { 0, 94, -1 }
+      now: { 0, 94, 0 }   (from .clockConf)
+```
+
+One case is deliberately left alone: an owner whose own `left` and `top` are both `0` would expand to
+`{ 0, 0, 0 }`, which is the `{ }` spelling for "yield to the VU" — quietly turning "stay put" into
+"disappear" is worse than leaving one line for the author to read. `--import` does the same expansion,
+from the entry it is building.
+
+### 6. What it refuses to do
 
 A layout entry with no `.metaConf` or no `.playlistConf` is **not repaired**. Those two are load
 bearing — dialogs write into the meta line and the playlist page is built on `playlistConf` — so
@@ -103,7 +126,7 @@ A trailing comment that carries a marker — `NEEDS EDITING`, `DO NOT EDIT`, `DO
 line along with what the master wanted to say there instead. A protected marker is the way to pin a
 conf's own wording that the master cannot know, such as a sentence that is true on one panel only.
 
-### 6. Install
+### 7. Install
 
 The run prints a per-file report (fields written, headers normalised, order violations, fields with
 no master slot), then a summary, then:
@@ -120,7 +143,78 @@ them — read them first, then re-run without `--dry-run` to install.
 
 ---
 
-## Mode 2 — `--import`, community conf files
+## Mode 2 — `--check`, intersecting rectangles
+
+Read-only: it writes nothing, takes no `--dry-run`, and is safe on a tree you are still editing.
+
+```
+py conf_tool.py --check                        # every conf file
+py conf_tool.py --check displayTFT428x142conf.h --strict
+```
+
+A widget that updates itself repaints **its own rectangle**, background included, so two rectangles
+that overlap mean one eats the other every time it updates — which is how a weather line can cut a band
+out of the codec badge that shares its row (see [`layout_key.md`](layout_key.md), "The rectangle each
+of those owns"). This mode finds those pairs before the panel does.
+
+Three things make the report usable rather than a wall of geometry:
+
+- **Only pairs a self-updating widget is part of are reported.** A band, a rule or the playlist
+  background is drawn once per page pass, in an order the pass itself decides, so a title sitting on
+  its own underline is by design and saying so would bury the real findings.
+- **Every layout is checked in all three states** — stopped, playing with the meter off, and playing
+  with it on. That is where the MOVEs come in: the clock and the weather are only displaced while the
+  meter is on, a `{ }` MOVE takes its widget off the screen entirely, and the meter's own box only
+  exists while it is showing.
+- **An edge the tool cannot know is not guessed.** A runtime string's width, a centred line and the
+  clock's glyph run come back as `?`, and a pair that touches one is reported as **possibly
+  collides** rather than as a collision. A plain `collides` means the conf itself states both
+  rectangles.
+
+```
+displayTFT320x240conf.h
+
+Layout 1: BoomBox (VaraiTamas)
+
+.clockConf possibly collides with .fullbitrateConf
+      while stopped:  clockConf x ?, y 118-171;  fullbitrateConf x 8-49, y 124-165
+      while playing, no VU:  clockConf x ?, y 118-171;  fullbitrateConf x 8-49, y 124-165
+      while playing, VU on:  clockConf x ?, y 118-171;  fullbitrateConf x 8-49, y 124-165
+
+.rssiConf possibly collides with .batteryConf
+      while stopped:  rssiConf x ?, y 214-222;  batteryConf x ?, y 214-222
+But OK because .shareBattRSSI is active
+```
+
+The last two lines are the point of the exemptions: the pair is real, the layout declares it, and
+`.shareWeatherIP` / `.shareBattRSSI` are named so the reader knows it is deliberate. Fixing a genuine
+one is a conf change — narrow the span with a MOVE, or give one of the two a different `top`.
+
+### One file, and the `--strict` switch
+
+The file is **optional**. Naming one keeps the report to a screenful — a bare name is looked for next
+to this script, with or without the `.h`, so `--check displayTFT428x142conf.h` and
+`--check displayTFT428x142conf` both work. Leaving it out walks all fourteen, which is what you want
+before a release rather than while working on one layout.
+
+**`--strict`** drops the pairs that model (b) cannot pin down — two runtime strings on one row, which
+on a dense panel is most of the output — and names them on a single line per layout instead:
+
+```
+Layout 0: Default
+
+      held back by --strict: 6 pair(s) an edge of which is runtime text, so they may or may not touch: .voltxtConf/.iptxtConf, .voltxtConf/.rssiConf, .voltxtConf/.batteryConf, .iptxtConf/.rssiConf, .iptxtConf/.batteryConf, .rssiConf/.batteryConf
+```
+
+Nothing is dropped in silence and the summary counts them, so a layout whose *only* finding is a
+possible one still says so. Be aware of what it holds back: a pair counts as unsure when **either**
+side has an unknown edge, and the clock's own width can never be known (its glyphs are as wide as their
+own run), so **anything against `.clockConf` runs through that line** even when the two boxes plainly
+overlap in the vertical band. Read the held-back line, not just the groups.
+
+---
+
+## Mode 3 — `--import`, community conf files
 
 Converts an old-style yoRadio display conf into ehRadio's format. It either
 

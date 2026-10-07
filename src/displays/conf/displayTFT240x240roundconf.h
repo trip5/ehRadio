@@ -65,10 +65,10 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 90, 20, 6, 2, 10 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        /* MOVES               { left, top, width */
         .clockMove           = { 0, 164, 0 },
-        .weatherMove         = { TFT_FRAMEWDT, 202, -1 },
-        .weatherMoveVU       = { TFT_FRAMEWDT, 202, -1/*MAX_WIDTH*/ },
+        .weatherMove         = { TFT_FRAMEWDT+30, 37, 0 },
+        .weatherMoveVU       = { TFT_FRAMEWDT+30, 37, 0 },
         /* TRANSFORMS          boolean */
         .fullClock           = true, // the divider and the day/date column right of the time
         .seconds             = true, // the seconds block right of the time

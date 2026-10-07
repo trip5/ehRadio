@@ -216,17 +216,17 @@ static uint32_t normalizeBufferbarValue(uint32_t rawValue, uint32_t maxValue) {
   return min(rawValue, maxValue);
 }
 
-// Every MOVE goes through one of these, so no call site can forget the `{ }` rule (declared above
-// _switchMode() because C++ needs them first).  `{ }` yields to the VU; width < 0 means "the conf's own
-// position" and needs the restore, since moveTo() ignores a negative width.
+// Every MOVE goes through this, so no call site can forget the `{ }` rule (declared above _switchMode()
+// because C++ needs it first).  `{ }` yields to the VU.
+//
+// There is no "restore" variant any more.  `width = -1` was retired in favour of writing the widget's own
+// coordinates (see plans/layout-widget-overlap.md), so a move that means "stay where the conf put you" IS
+// a move to those coordinates - which is also what brings the clock back from the screensaver's random
+// spot, the job the negative-width branch used to do through moveBack().
 static inline bool moveZeroed(const MoveConfig& m) { return m.x == 0 && m.y == 0 && m.width == 0; }
 static inline void applyMove(Widget* w, const MoveConfig& m) {
   if (!w || moveZeroed(m)) return;
   w->moveTo(m);
-}
-static inline void applyMoveOrRestore(Widget* w, const MoveConfig& m) {
-  if (!w || moveZeroed(m)) return;
-  if (m.width < 0) w->moveBack(); else w->moveTo(m);
 }
 
 // Every layout's geometry is built on the 6x8 metric class (CHARWIDTH/CHARHEIGHT), so a system font that
@@ -678,7 +678,7 @@ void Display::_switchMode(displayMode_e newmode) {
     #endif
     if (player.isRunning()){
       if (config.store.vumeter && _vuwidget && vuInLayout()) {
-        applyMoveOrRestore(_clock, *clockMove_ptr);
+        applyMove(_clock, *clockMove_ptr);
         applyMove(_weather, *weatherMoveVU_ptr);
       } else {
         _clock->moveBack();  // restore from screensaver position
@@ -870,7 +870,7 @@ void Display::_layoutChange(bool played) {
   if (config.store.vumeter && _vuwidget && vuInLayout()) {
     if (played) {
       if (_vuwidget) _vuwidget->unlock();
-      applyMoveOrRestore(_clock, *clockMove_ptr);
+      applyMove(_clock, *clockMove_ptr);
       applyMove(_weather, *weatherMoveVU_ptr);
     } else {
       if (_vuwidget) if (!_vuwidget->locked()) _vuwidget->lock();
@@ -887,7 +887,10 @@ void Display::_layoutChange(bool played) {
       _clock->moveBack();
     }
   }
-  // Lock state last, from one definition.  lock() erases, so a yielded widget really disappears.
+  // Lock state last, from one definition.  lock() erases for every class that implements _clear() - the
+  // clock, the weather, the VU and the bars - so a yielded one of those really disappears.  A FillWidget
+  // and a plain TextWidget override neither _clear() nor _reset(), so for them lock() only hides: their
+  // pixels stay until something else clears them (see plans/layout-widget-overlap.md).
   const bool clockWasHidden = (_clock && _clock->locked());
   lockIfChanged(_clock, _clockHidden());
   // The weather re-shows through hideWeatherIfChanged() itself, so it needs no redrawIfVisible() here.

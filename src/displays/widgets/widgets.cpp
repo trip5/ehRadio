@@ -222,17 +222,23 @@ void ScrollWidget::init(const char* separator, ScrollConfig conf, uint16_t fgcol
   _width = conf.width;
   if (_width > (uint16_t)MAX_WIDTH) _width = (uint16_t)MAX_WIDTH;
   _backMove.width = _width;
-  uint16_t wndsz = _width / _charWidth * 4 + 1;   /* worst-case: 4-byte UTF-8 chars */
+  // The span is the room this line has, not what it paints: _syncWindow() narrows the window to the text
+  // whenever the text fits, and widens it back to the room only while the line scrolls.  One extra
+  // character of room in _window, because a scrolling line deliberately emits the glyph that is only
+  // partly visible at the edge (see _draw()).
+  uint16_t wndsz = _width / _charWidth * 4 + 5;   /* worst-case: 4-byte UTF-8 chars, plus one */
   _window = (char *) malloc(sizeof(char) * wndsz);
   memset(_window, 0, wndsz);
+  _winx = _winw = 0;
   _doscroll = false;
   #ifdef PSFBUFFER
     if (_fb) _fb->freeBuffer();
     else     _fb = new psFrameBuffer(dsp.width(), dsp.height());
-    // The window always starts where the conf - or a MOVE - puts it; `align` is what places the TEXT inside it,
-    // in _realLeft(true).  Centring the window on the screen instead is what made `left` inert for a centred
-    // scroll, and it is also why the erase rectangle and the printed text could disagree.
-    _fb->begin(&dsp, _config.left, _config.top, _width, _textheight, _bgcolor);
+    // The window starts as the whole span and the first _syncWindow() narrows it to the text once the
+    // text is known.  `align` places the TEXT inside the window, in _realLeft(true); centring the window
+    // on the screen instead is what made `left` inert for a centred scroll.  Narrowing is safe because a
+    // window that was never blitted is not erased when it goes (see psFrameBuffer::freeBuffer()).
+    _syncWindow(true);
   #endif
 }
 
@@ -264,8 +270,11 @@ void ScrollWidget::setText(const char* txt) {
   preTextString(_text, displayFont());
   if (strcmp(_oldtext, _text) == 0) return;
   _textwidth = utf8_strlen(_text) * _charWidth;
-  _x = _fb->ready()?0:_config.left;
   _doscroll = _checkIsScrollNeeded();
+  // Re-derive the window from the new text - but only while the line is on screen: a hidden line never
+  // edits the panel, and its pixels were taken off when it hid.  _draw() syncs again on the way back.
+  if (_active) _syncWindow();
+  _x = (_fb && _fb->ready())?0:_config.left;
   if (dsp.getScrollId() == this) dsp.setScrollId(NULL);
   _scrolldelay = millis();
   // Recorded whether or not the widget is drawn, so a hidden widget still knows which string it holds and a
@@ -282,9 +291,10 @@ void ScrollWidget::setText(const char* txt) {
       #ifdef PSFBUFFER
         _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
         _fb->setCursor(0, 0);
-        snprintf(_window, _width / _charWidth * 4 + 1, "%s", _text); //TODO
-        // Truncate to visible character count
-        { uint16_t maxVis = _width / _charWidth;
+        snprintf(_window, _width / _charWidth * 4 + 5, "%s", _text); //TODO
+        // Truncate to the visible characters PLUS ONE: the entering glyph is emitted whole and the clip
+        // cuts it at the pixel it may reach, so it slides in instead of popping.
+        { uint16_t maxVis = _width / _charWidth + 1;
           if (utf8_strlen(_window) > maxVis) {
             char *cut = (char*)utf8_offset(_window, maxVis);
             *cut = '\0';
@@ -297,8 +307,8 @@ void ScrollWidget::setText(const char* txt) {
       } else {
         dsp.fillRect(_config.left,  _config.top, _width, _textheight, _bgcolor);
         dsp.setCursor(_config.left, _config.top);
-        snprintf(_window, _width / _charWidth * 4 + 1, "%s", _text); //TODO
-        { uint16_t maxVis = _width / _charWidth;
+        snprintf(_window, _width / _charWidth * 4 + 5, "%s", _text); //TODO
+        { uint16_t maxVis = _width / _charWidth + 1;   // the entering glyph is drawn and clipped, not dropped
           if (utf8_strlen(_window) > maxVis) {
             char *cut = (char*)utf8_offset(_window, maxVis);
             *cut = '\0';
@@ -312,19 +322,29 @@ void ScrollWidget::setText(const char* txt) {
     } else {
       if(_fb->ready()){
       #ifdef PSFBUFFER
-        _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
-        _fb->setCursor(_realLeft(true), 0);
+        _fb->fillRect(0, 0, _winw, _textheight, _bgcolor);
+        _fb->setCursor(0, 0);
         _fb->resetUTF8();
         _fb->print(_text);
         _fb->display();
       #endif
       } else {
-        dsp.fillRect(_config.left, _config.top, _width, _textheight, _bgcolor);
-        dsp.setCursor(_realLeft(), _config.top);
-        //dsp.setClipping({_config.left, _config.top, _width, _textheight});
+        // Erase the union of the old and the new rectangle, like TextWidget::_paint(): the new text may be
+        // narrower, or sit further left, and the tail nobody erased is what smeared.  The clip is the
+        // text's OWN rectangle, never the room's, so a glyph cannot reach a neighbour on the same row.
+        const uint16_t left = _realLeft();
+        uint16_t from = left, to = (uint16_t)(left + _textwidth);
+        if (_textPainted) {
+          from = min(_oldleft, from);
+          to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
+        }
+        dsp.fillRect(from, _config.top, (uint16_t)(to - from), _textheight, _bgcolor);
+        _oldleft = left; _oldtextwidth = _textwidth; _textPainted = true;
+        dsp.setCursor(left, _config.top);
+        dsp.setClipping({from, _config.top, (uint16_t)(to - from), _textheight});
         dsp.resetUTF8();
         dsp.print(_text);
-        //dsp.clearClipping();
+        dsp.clearClipping();
       }
     }
   }
@@ -349,40 +369,51 @@ void ScrollWidget::loop() {
 void ScrollWidget::_clear(){
   if(_fb && _fb->ready()){
     #ifdef PSFBUFFER
-      _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
+      _fb->fillRect(0, 0, _winw, _textheight, _bgcolor);
       // display() happens in _draw() after text is rendered — not here
     #endif
   } else {
-    dsp.fillRect(_config.left, _config.top, _width, _textheight, _bgcolor);
+    // No window on this path: erase the union of the last and the current text rectangle, never the room.
+    const uint16_t left = _realLeft();
+    uint16_t from = left, to = (uint16_t)(left + _textwidth);
+    if (_textPainted) {
+      from = min(_oldleft, from);
+      to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
+    }
+    if (to > from) dsp.fillRect(from, _config.top, (uint16_t)(to - from), _textheight, _bgcolor);
+    _textPainted = false;
   }
 }
 
 void ScrollWidget::_draw() {
   if(!_active || _locked) return;
+  _syncWindow();          // the text may have changed width since this window was last made
   _setTextParams();
   if (_doscroll) {
-    uint16_t fbl = _fb->ready()?0:_config.left;
+    uint16_t fbl = (_fb && _fb->ready())?0:_config.left;
     uint16_t _newx = fbl - _x;
     uint16_t charOffset = _newx / _charWidth;
     const char* _cursor = utf8_offset(_text, charOffset);
     uint16_t hiddenChars = charOffset;
     uint16_t textLen = utf8_strlen(_text);
+    // One MORE character than the window holds.  The glyph on its way in is emitted whole and the clip
+    // cuts it at the pixel it is allowed to reach, so it slides in at the edge instead of appearing only
+    // once it fits - which is what the pop-in at one end of a scrolling line was.
+    const uint16_t maxVis = _width / _charWidth + 1;
     if (hiddenChars < textLen) {
-      snprintf(_window, _width / _charWidth * 4 + 1, "%s%s%s", _cursor, _sep, _text);
+      snprintf(_window, _width / _charWidth * 4 + 5, "%s%s%s", _cursor, _sep, _text);
     } else {
       uint16_t sepOffset = hiddenChars - textLen;
       const char* _scursor = utf8_offset(_sep, sepOffset);
-      snprintf(_window, _width / _charWidth * 4 + 1, "%s%s", _scursor, _text);
+      snprintf(_window, _width / _charWidth * 4 + 5, "%s%s", _scursor, _text);
     }
-    // Truncate to visible character count so a multi-byte UTF-8 sequence straddling the window edge does not leave
+    // Truncate to that count so a multi-byte UTF-8 sequence straddling the window edge does not leave
     // an orphan lead byte.
-    { uint16_t maxVis = _width / _charWidth;
-      if (utf8_strlen(_window) > maxVis) {
-        char *cut = (char*)utf8_offset(_window, maxVis);
-        *cut = '\0';
-      }
+    if (utf8_strlen(_window) > maxVis) {
+      char *cut = (char*)utf8_offset(_window, maxVis);
+      *cut = '\0';
     }
-    if(_fb->ready()){
+    if(_fb && _fb->ready()){
     #ifdef PSFBUFFER
       _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
       _fb->setCursor(_x + hiddenChars * _charWidth, 0);
@@ -401,18 +432,30 @@ void ScrollWidget::_draw() {
       dsp.clearClipping();
     }
   } else {
-    if(_fb->ready()){
+    if(_fb && _fb->ready()){
     #ifdef PSFBUFFER
-      _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
-      _fb->setCursor(_realLeft(true), 0);
+      // The window IS the text here, so the text starts at 0 inside it (see _windowRect()), and the
+      // fill covers the window, not the span - which is what keeps a neighbour on the row intact.
+      _fb->fillRect(0, 0, _winw, _textheight, _bgcolor);
+      _fb->setCursor(0, 0);
       _fb->resetUTF8();
       _fb->print(_text);
       _fb->display();
     #endif
     } else {
-      dsp.fillRect(_config.left, _config.top, _width, _textheight, _bgcolor);
-      dsp.setCursor(_realLeft(), _config.top);
-      dsp.setClipping({_realLeft(), _config.top, _width, _textheight});
+      // No window on this path, so the erase is the union of the old and the new rectangle - the rule
+      // TextWidget::_paint() already uses - and the clip is the TEXT's own rectangle, never the room's, so
+      // a glyph cannot reach a neighbour that shares the row.
+      const uint16_t left = _realLeft();
+      uint16_t from = left, to = (uint16_t)(left + _textwidth);
+      if (_textPainted) {
+        from = min(_oldleft, from);
+        to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
+      }
+      dsp.fillRect(from, _config.top, (uint16_t)(to - from), _textheight, _bgcolor);
+      _oldleft = left; _oldtextwidth = _textwidth; _textPainted = true;
+      dsp.setCursor(left, _config.top);
+      dsp.setClipping({from, _config.top, (uint16_t)(to - from), _textheight});
       dsp.resetUTF8();
       dsp.print(_text);
       dsp.clearClipping();
@@ -441,20 +484,53 @@ bool ScrollWidget::_checkDelay(int m, uint32_t &tstamp) {
   }
 }
 
+// The rectangle this line paints through, in the span's own coordinates.  A line that is NOT scrolling
+// owns only its own glyphs, so its window is the TEXT: the erase and the blit both stop at the last
+// glyph, and a neighbour that shares the row keeps its pixels.  A line that IS scrolling takes the whole
+// room, because the text sweeps across it and every column in it can be painted.
+//
+// _realLeft(true) is where the text sits inside the span, so the window starts there.  Inside the new
+// window that same call returns 0, which is why nothing else in this class had to change.
+void ScrollWidget::_windowRect(uint16_t& x, uint16_t& w){
+  if (_doscroll || _textwidth == 0) { x = _config.left; w = _width; return; }
+  x = _config.left + _realLeft(true);
+  w = _textwidth;
+  if (w > _width) w = _width;                // cannot happen while the text fits, but never wider than the span
+  if ((uint32_t)x + w > (uint32_t)dsp.width())   // a conf that reaches past the glass: stop at the edge
+    w = ((uint32_t)x < (uint32_t)dsp.width()) ? (uint16_t)(dsp.width() - x) : 1;
+}
+
+// Make the framebuffer window match the text that is about to be drawn, and keep the scroll state with
+// it.  _width is left exactly as it was - it is the span the conf (or a MOVE) gave the line, and it is
+// still what decides whether the line scrolls - and only the window is narrowed.
+//
+// force is what Widget::lock() and Widget::moveTo() need: take this line's own window off the panel even
+// when the rectangle has not changed.  A window that was never blitted is not erased when it goes (see
+// psFrameBuffer::freeBuffer()), which is what makes narrowing one safe - otherwise the first shrink
+// would wipe the very pixels a neighbour owns.
+void ScrollWidget::_syncWindow(bool force){
+  if (!_present) return;
+  _doscroll = _checkIsScrollNeeded();
+  #ifdef PSFBUFFER
+    uint16_t x = 0, w = 0;
+    _windowRect(x, w);
+    if (_fb && (force || !_fb->ready() || x != _winx || w != _winw)) {
+      _fb->freeBuffer();                       // erases the old window - the only pixels this line owns
+      _fb->begin(&dsp, x, _config.top, w, _textheight, _bgcolor);
+      _winx = x; _winw = w;
+    }
+  #endif
+}
+
 void ScrollWidget::_reset(){
   // Widget::lock() calls this, and hideByLayout() locks a widget the layout omits - one whose init() never ran, so
   // _fb is null. Bail before touching it: nothing is on screen and the framebuffer was never created. A widget the
   // layout DOES provide has always been through init(), so _fb exists on every path that reaches the rest.
   if(!_present) return;
   dsp.setScrollId(NULL);
-  _x = _fb && _fb->ready()?0:_config.left;
   _scrolldelay = millis();
-  _doscroll = _checkIsScrollNeeded();
-  #ifdef PSFBUFFER
-    _fb->freeBuffer();
-    // See init(): the window is at `left`, and `align` places the text inside it.
-    _fb->begin(&dsp, _config.left, _config.top, _width, _textheight, _bgcolor);
-  #endif
+  _syncWindow(true);
+  _x = _fb && _fb->ready()?0:_config.left;
 }
 
 /************************
@@ -576,11 +652,20 @@ void NumWidget::setText(const char* txt) {
     realth = _textHeight(_cf) + 1;
     eraseTop = _config.top - _textheight;
   }
-  if (_active)
-    dsp.fillRect(_oldleft == 0 ? _realLeft() : min(_oldleft, _realLeft()),  eraseTop, max(_oldtextwidth, _textwidth), realth, _bgcolor);
-
-  _oldtextwidth = _textwidth;
-  _oldleft = _realLeft();
+  // The erase covers the UNION of the old and the new rectangle.  The old width alone is not enough: the
+  // new text may be narrower, or start further left, and anchoring max(old, new) at min(old, new) is the
+  // only rule that covers both.  _textPainted is the "something is on the panel" flag - x == 0 is a legal
+  // position and so cannot be the sentinel it used to be (see TextWidget::_paint()).
+  if (_active) {
+    const uint16_t left = _realLeft();
+    uint16_t from = left, to = (uint16_t)(left + _textwidth);
+    if (_textPainted) {
+      from = min(_oldleft, from);
+      to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
+    }
+    dsp.fillRect(from, eraseTop, (uint16_t)(to - from), realth, _bgcolor);
+    _oldleft = left; _oldtextwidth = _textwidth; _textPainted = true;
+  }
   if (_active) _draw();
 }
 
@@ -604,6 +689,8 @@ void NumWidget::_draw() {
   if(!_active) return;
   dsp.setCursor(_realLeft(), _config.top);
   dsp.print(_text);
+  // Recorded here as well as in setText(), because a page switch reaches this through setActive() alone.
+  _oldleft = _realLeft(); _oldtextwidth = _textwidth; _textPainted = true;
   strlcpy(_oldtext, _text, _buffsize);
   dsp.setFont();
 }

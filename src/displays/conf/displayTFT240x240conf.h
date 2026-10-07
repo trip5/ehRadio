@@ -64,7 +64,7 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 100, 20, 10, 2, 10 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
+        /* MOVES               { left, top, width */
         .clockMove           = { 0, 176, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 202, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, 202, MAX_WIDTH },

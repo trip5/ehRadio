@@ -3,3 +3,4 @@
 /platformio.ini
 /*.h
 /Notes.txt
+*.lck

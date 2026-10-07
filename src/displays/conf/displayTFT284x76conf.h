@@ -70,10 +70,10 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { DSP_WIDTH/2-TFT_FRAMEWDT*2-2, 7, TFT_FRAMEWDT*2+4, 1, 17 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
-        .weatherMove         = { 0, 0, -1 },
-        .weatherMoveVU       = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { 0, 57, 0 },
+        .weatherMove         = { TFT_FRAMEWDT, 64-12, 0 },
+        .weatherMoveVU       = { TFT_FRAMEWDT, 64-12, 0 },
         /* TRANSFORMS          boolean */
         .fullClock           = false, // the divider and the day/date column right of the time
         .seconds             = false, // the seconds block right of the time
@@ -118,10 +118,10 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ 8, 64-10-10, 1, WA_LEFT }, 41 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { DSP_WIDTH/2-TFT_FRAMEWDT*2-2, 2,             TFT_FRAMEWDT*2+4, 1, 17 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 176, -1 },
-        .weatherMove         = { 0, 0, -1 },
-        .weatherMoveVU       = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { 0, 57, 0 },
+        .weatherMove         = { TFT_FRAMEWDT+1, DSP_HEIGHT-12, 0 },
+        .weatherMoveVU       = { TFT_FRAMEWDT+1, DSP_HEIGHT-12, 0 },
         /* TRANSFORMS          boolean */
         .fullClock           = false, // the divider and the day/date column right of the time
         .seconds             = false, // the seconds block right of the time

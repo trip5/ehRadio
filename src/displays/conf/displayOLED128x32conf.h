@@ -68,10 +68,10 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 12, 48, 2, 1, 8 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
-        .weatherMove         = { 0, 0, -1 },
-        .weatherMoveVU       = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { 0, 1, 0 },
+        .weatherMove         = { 0, 20, 0 },
+        .weatherMoveVU       = { 0, 20, 0 },
         /* TRANSFORMS          boolean */
         .fullClock           = false, // the divider and the day/date column right of the time
         .seconds             = false, // the seconds block right of the time

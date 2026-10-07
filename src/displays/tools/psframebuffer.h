@@ -35,10 +35,15 @@ class  psFrameBuffer : public Adafruit_GFX {
     void freeBuffer(){
       _ready = false;
       if(buffer) {
-        _dspl->fillRect(_ll, _tt, _ww, _hh, _bgcolor);
+        // Only erase the panel if this window ever reached it.  A buffer that was begun and then
+        // dropped before its first display() holds nothing, and filling its rect would wipe pixels
+        // this window never owned - which is what a shrinking ScrollWidget window would do to
+        // whatever shares the row (the codec badge, in the reported case).
+        if (_painted) _dspl->fillRect(_ll, _tt, _ww, _hh, _bgcolor);
         if (_psram) psramFrameBufferBytes -= _hh * _ww * sizeof(uint16_t);
         free(buffer);
       }
+      _painted = false;
       _psram = false;
       buffer = nullptr;
     }
@@ -88,6 +93,7 @@ class  psFrameBuffer : public Adafruit_GFX {
     }
     void display(){
       if(!buffer) return;
+      _painted = true;                 // from here the panel shows this window, so it owns those pixels
       _dspl->startWrite();
       cmCountPush();
       _dspl->setAddrWindow(_ll, _tt, _ww, _hh);
@@ -105,6 +111,7 @@ class  psFrameBuffer : public Adafruit_GFX {
     yoDisplay *_dspl = nullptr;
     uint16_t *buffer=nullptr;
     bool _ready = false;
+    bool _painted = false;           // true once display() has put this window on the panel
     bool _psram = false;
     uint16_t _bgcolor;
     void _createBuffer(){
@@ -121,6 +128,7 @@ class  psFrameBuffer : public Adafruit_GFX {
       if(buffer){
         for (int i = 0; i < _hh * _ww; i++)
           buffer[i] = _bgcolor;
+        _painted = false;              // a fresh buffer holds only the background; the panel owes it nothing
         _ready = true;
       }
     }

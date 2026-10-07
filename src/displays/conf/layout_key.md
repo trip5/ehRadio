@@ -208,6 +208,34 @@ The table decides the *first* picture; this list decides what survives. A hairli
 is gone within a second, and a frame is dependable only around an area that none of the above
 repaints — so a rule that must last belongs where the layout has nothing updating.
 
+### The rectangle each of those owns
+
+An updating widget repaints **its own rectangle**, background and all, so two rectangles that overlap
+mean one of them eats the other each time it updates. What each one covers:
+
+| widget | the rectangle it clears and repaints |
+|---|---|
+| `metaConf`, `title1Conf`, `title2Conf`, `playlistConf`, `weatherConf` | its **window**, `width` × `fontsize`×8, at `left`/`top`. Not the text: while the line is short only the text's own columns are touched, and a longer one scrolls within the window |
+| `volbarConf`, `bufferbarConf` | `width` × `height` at `left`/`top` |
+| `bitrateConf`, `voltxtConf`, `batteryConf`, `iptxtConf`, `rssiConf` | the text's own extent — its length decides, and only the last painted rectangle is ever erased |
+| `clockConf` | the digits and the date/seconds beside them; `top` is their **bottom** edge |
+| `vuConf` + `bandsConf` | `bandsConf.width`×2 + its space, by `bandsConf.height` (swapped when `rotateVU`) |
+| `fullbitrateConf` | the badge square, `dimension` × `dimension` |
+
+**`py conf_tool.py --check` computes exactly these**, per layout and per state — stopped, playing with
+the meter off, and playing with it on (where a `{ }` MOVE takes its widget off the screen and the meter
+appears) — and reports every pair that intersects, with the two rectangles and the state. A pair it
+cannot pin down exactly (two runtime strings on one row) is reported as **possible** rather than
+silent, and `.shareWeatherIP` / `.shareBattRSSI` are named as the reason a pair is acceptable. A band
+or a rule is not reported: it is drawn once, in an order the page pass decides, so a title sitting on
+its own underline is by design.
+
+Name a file to keep the report to one layout file (`--check displayTFT428x142conf.h`, with or without
+the `.h`), and add `--strict` when the possible pairs bury the certainties: it holds them back to one
+line per layout that names every pair it covers. The clock's own width is never knowable — its glyphs
+are as wide as their own run — so anything against `.clockConf` lives on that held-back line even when
+the two boxes plainly overlap in the vertical band.
+
 ---
 
 ## 4. What the numbers mean
@@ -388,16 +416,26 @@ style moves the marker with it.
 
 ## 7. Movement, dialogs and `MoveConfig`
 
-`MoveConfig` is `{ x, y, width }` and it means different things depending on `width`:
+`MoveConfig` is `{ left, top, width }` and it means different things depending on `width`:
 
 | `width` | What happens |
 |---|---|
-| `-1` | **Do not move.** The widget stays where the conf put it. This is what most confs use: `{ 0, 0, -1 }`. |
-| `0` or more | The widget travels inside the rectangle while the screensaver is active; `x`/`y` are where it goes and `width` is the width it uses. |
+| `0` | **Stay at these coordinates.** The widget is put at `left`/`top` and keeps the width its own conf gave it. This is the spelling for "leave it where the conf put it": copy the widget's own `left` and `top`. |
+| more than `0` | Move to `left`/`top` **and** take `width` as the new span — what `WA_CENTER` centres inside, and what a scroll travels within. |
 | the whole entry is `{ }` | **"Yield to the VU."** The widget disappears while the VU meter is on screen and comes back when playback stops — see below. |
 
-`weatherMove` is used when no VU is shown and `weatherMoveVU` when one is, so a weather line can
-behave differently in the two cases.
+`weatherMove` is used when the meter is **off** (while playing) and `weatherMoveVU` when it is on, so a
+weather line can behave differently in the two cases. The clock uses `clockMove` only while the meter
+is on; when the meter is off, or while stopped, both are put back at their own conf positions.
+
+> **`width = -1` is retired.** It used to mean "keep the conf position", and it was a trap: the entry
+> then is *not* empty as far as the code is concerned, so the widget neither moved **nor** yielded to
+> the VU — the two things it was written for. `py conf_tool.py --clean` rewrites every one it finds as
+> the widget's own coordinates, and a `-1` left in a file by hand is now inert.
+
+The screensaver moves the clock **itself** — a random position every `SCREENSAVERMOVE` seconds, from
+`Display::_time()` — and ignores `clockMove` completely. A MOVE is not how a clock is kept off the
+screensaver's way.
 
 ### Yielding to the VU
 
@@ -437,7 +475,8 @@ That is a real behaviour, not "unused". It is why an empty `MoveConfig` is worth
   over-long string reads as "drawn in the wrong place" rather than as nothing.
 - **A MOVE's `width` replaces the widget's own.** After a MOVE the widget's span — and so what
   `WA_CENTER` centres inside — is the MOVE's rectangle; moving back restores the conf's `width`.
-  `width = -1` means "do not move" and the whole entry `{ }` means "yield to the VU" (§7).
+  `width = 0` keeps the conf's width, and the whole entry `{ }` means "yield to the VU" (§7).
+  The old `width = -1` spelling is retired: `--clean` rewrites it as the widget's own coordinates.
 
 ### The rest
 

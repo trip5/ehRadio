@@ -127,7 +127,7 @@ struct LayoutData {
     BitrateConfig fullbitrateConf;
     /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
     VUBandsConfig bandsConf;
-    /* MOVES               { left, top, width (-1 keeps Conf position) */
+    /* MOVES               { left, top, width */
     MoveConfig   clockMove;
     MoveConfig   weatherMove;
     MoveConfig   weatherMoveVU;

@@ -66,8 +66,8 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-34, 43, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 24, 100, 4, 2, 10 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 8, 180, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { 8, 176, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 97, MAX_WIDTH },
         .weatherMoveVU       = { 70, 97, MAX_WIDTH-70+TFT_FRAMEWDT },
         /* TRANSFORMS          boolean */
@@ -114,8 +114,8 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ 8, 124, 2, WA_LEFT }, 41 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 130, 5, 4, 2, 20 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { TFT_FRAMEWDT, 170, 0 },
         .weatherMove         = { 10, 95, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, 95, MAX_WIDTH },
         /* TRANSFORMS          boolean */

@@ -36,6 +36,9 @@ class Widget{
     void setPresent(bool p) { _present = p; }
     bool present() { return _present; }
     void moveTo(MoveConfig mv){
+      // Defensive only.  A negative width was the retired `-1` spelling ("keep the conf position"), and a
+      // conf that still carries one must stay inert rather than jump to (0, 0).  Never make width
+      // unsigned: a stale -1 would become a 65535 px span at the assignment below.
       if(mv.width<0) return;
       _moved = true;
       if(_active && !_locked) _clear();
@@ -136,7 +139,15 @@ class ScrollWidget: public TextWidget {
     uint16_t _sepwidth, _startscrolldelay;
     uint8_t _charWidth;
     psFrameBuffer* _fb=nullptr;
+    // The window this line paints through, on a framebuffer build.  _width stays what it has always
+    // meant - the span from the conf or a MOVE, and what decides whether the line scrolls - while the
+    // window is that span only WHILE the line scrolls.  A line that fits owns only its own glyphs, so
+    // its window is the text's rectangle, and a repaint stops at the last glyph instead of wiping a
+    // neighbour that shares the row (the codec badge, in the reported case).
+    uint16_t _winx = 0, _winw = 0;   // the framebuffer window currently made
   private:
+    void _windowRect(uint16_t& x, uint16_t& w);
+    void _syncWindow(bool force = false);
     void _setTextParams();
     void _calcX();
     void _drawFrame();

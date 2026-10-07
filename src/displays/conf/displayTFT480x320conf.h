@@ -72,8 +72,8 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 32, 130, 4, 2, 10 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { TFT_FRAMEWDT*2, 230, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         .weatherMoveVU       = { 89, 120, MAX_WIDTH-89+TFT_FRAMEWDT },
         /* TRANSFORMS          boolean */
@@ -117,8 +117,8 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-38, 59, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 25, 130, 17, 3, 10 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { TFT_FRAMEWDT*2, 230, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         /* TRANSFORMS          boolean */
@@ -165,8 +165,8 @@ const LayoutData _layouts[] PROGMEM = {
         .fullbitrateConf     = {{ 10, 148, 2, WA_RIGHT }, 60 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 200, 7, 4, 2, 20 },
-        /* MOVES               { left, top, width (-1 keeps Conf position) */
-        .clockMove           = { 0, 0, -1 },
+        /* MOVES               { left, top, width */
+        .clockMove           = { 10, 215, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         .weatherMoveVU       = { TFT_FRAMEWDT, 120, MAX_WIDTH },
         /* TRANSFORMS          boolean */

@@ -304,6 +304,14 @@ void Startup::getDefaultPlaylist() {
       updater.setMaxSize(1024);
       updater.setUserAgent(ESPFILEUPDATER_USERAGENT);
       ESPFileUpdater::UpdateStatus result = updater.checkAndUpdate("/data/playlist.csv", PLAYLIST_DEFAULT_URL, "", ESPFILEUPDATER_VERBOSE);
+      // The CSV alone is not a playlist: index.dat carries one offset per line and is the only place the
+      // station count comes from.  This is the one writer of the four that did not index what it wrote, and
+      // an unindexed CSV is a device that reports no stations until the next boot builds one - see
+      // plans/playlist-index-and-weather-hide.md.
+      if (LittleFS.exists("/data/playlist.csv")) {
+        BOOTLOG("Indexing fetched playlist");
+        utility.indexPlaylist();
+      }
     }
   #endif
 }

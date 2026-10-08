@@ -69,7 +69,7 @@ FIELD_ORDER = [
     'title1', 'title2', 'digit', 'div', 'line', 'weather', 'vuaxis',
     'vupeak', 'vumax', 'vumin',
     'clock', 'clockbg', 'seconds', 'secondsbg', 'dow', 'date',
-    'clockss', 'clockbgss', 'secondsss', 'secondsbgss', 'dowss', 'datess',
+    'clockss', 'clockbgss', 'secondsss', 'secondsbgss', 'dowss', 'datess', 'textss',
     'buffer', 'ip', 'vol', 'rssi', 'battery', 'bitrate',
     'volbarout', 'volbarin',
     'plcurrent', 'plcurrentbg', 'plcurrentfill',
@@ -94,6 +94,7 @@ COMPUTED_FALLBACK = [
     ('vuaxis',    'div',     0.25),   # 25% of the divider
     ('clockbg',   'clock',   0.15),   # 15% of clock
     ('clockss',   'clock',   0.50),   # 50% of clock
+    ('textss',    'clockss', 1.00),   # the screensaver info line: the clockss ink verbatim
     ('secondsss', 'seconds', 0.50),   # 50% of seconds
     ('dowss',     'dow',     0.50),   # 50% of dow
     ('datess',    'date',    0.50),   # 50% of date
@@ -105,7 +106,7 @@ COMPUTED_FALLBACK = [
 # Computed values that are derived by a stated rule rather than guessed, so they are emitted
 # without the '// needs fixing?' marker - it would appear on every line of every import otherwise.
 # Every other computed fallback stays flagged, because those are eyeballed.
-DERIVED_RULES = {'line', 'vuaxis'}
+DERIVED_RULES = {'line', 'vuaxis', 'textss'}
 
 MAX_NAME_LEN = 50  # _themeNames[][64] -- truncate at 50 for safety
 

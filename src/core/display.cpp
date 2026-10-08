@@ -167,7 +167,14 @@ static void redrawIfVisible(Widget* w) { if (w && !w->locked()) w->setActive(tru
 // The clock, the buffer bar and the VU keep using lockIfChanged(): their draw paths all test _locked.
 // Order matters - lock(true) clears while the widget is still active, then the flag goes.
 static void hideWeatherIfChanged(Widget* w, bool hide) {
-  if (!w || w->locked() == hide) return;
+  if (!w) return;
+  // Hiding is a pair of flags, not just the lock: Pager::setPage() re-activates every widget without touching
+  // the lock, so a lock-only test reads that resurrected pair as already hidden and returns - leaving the
+  // widget locked but active for the next setText() to paint, which is the "Getting Weather..." line with the
+  // option off.  Showing stays the lock alone: when showing, _active belongs to the page, and a widget on an
+  // inactive page must not be drawn from here.
+  if (hide) { if (w->locked() && !w->isActive()) return; }
+  else if (!w->locked()) return;
   if (hide) { w->lock(true); w->setActive(false); }
   else      { w->lock(false); w->setActive(true); }   // re-show draws the text setText() kept recording
 }
@@ -227,6 +234,44 @@ static inline bool moveZeroed(const MoveConfig& m) { return m.x == 0 && m.y == 0
 static inline void applyMove(Widget* w, const MoveConfig& m) {
   if (!w || moveZeroed(m)) return;
   w->moveTo(m);
+}
+
+// ---- The screensaver's info line: the strip it occupies -------------------------------------------
+// The line is a widget no layout provides.  It borrows metaConf's text size and scroll speed, but its
+// width is the screen and its place is a strip along the bottom edge: one text row, with a clear gap of
+// a hundredth of the panel height (rounded up) both below it and above it, so the clock or the meter
+// never sits flush against it and the text never touches the panel edge.
+static inline uint16_t ssGap()  { return (uint16_t)((dsp.height() + 99) / 100); }
+// The line's row height is SS_INFO_TEXT's, not metaConf's: the caption carries a size of its own now.
+static inline uint16_t ssRowH() { return (uint16_t)(SS_INFO_TEXT * CHARHEIGHT); }
+
+// Whether the line would have anything in it.  The station name and the two title lines describe what is
+// playing, and over silence there is nothing; the weather stands on its own.  With both gone the strip is
+// refused outright, which is also how the clock gets the whole display back.
+static bool ssLineHasText() {
+  if (player.isRunning()) return true;
+  return config.store.showweather && network.weatherBuf && network.weatherBuf[0];
+}
+
+uint16_t Display::_ssStripH() {
+  // Nothing to show is no strip at all: the clock then wanders over the whole panel rather than around a
+  // caption that would be empty.
+  if (!config.store.screensaverText || !ssLineHasText()) return 0;
+  const uint32_t strip = (uint32_t)ssRowH() + 2u * (uint32_t)ssGap();
+  // Refused outright on a panel where the strip would leave the clock or the meter nothing: the line is
+  // decoration, and a 32 px OLED has no room for a bottom row at all.
+  if ((uint32_t)dsp.height() <= strip + 16u) return 0;
+  return (uint16_t)strip;
+}
+
+uint16_t Display::_ssContentH() {
+  const uint16_t strip = _ssStripH();
+  return strip ? (uint16_t)(dsp.height() - strip) : dsp.height();
+}
+
+uint16_t Display::_ssTextTop() {
+  if (!_ssStripH()) return 0;
+  return (uint16_t)(dsp.height() - ssGap() - ssRowH());
 }
 
 // Every layout's geometry is built on the 6x8 metric class (CHARWIDTH/CHARHEIGHT), so a system font that
@@ -689,11 +734,16 @@ void Display::_switchMode(displayMode_e newmode) {
       if (_weather) _weather->moveBack();
     }
     numOfNextStation = 0;
+    config.isScreensaver = false;
+    _pager->setPage(pages[PG_PLAYER]);
+    // The text goes AFTER the page switch, never before it: setPage() fills the whole panel on its way in,
+    // and a scroll widget repaints only from setText() or its own scroll tick - so a line painted first is
+    // wiped and stays blank until something else redraws it.  That is the "static line does not come back"
+    // half of the reset report; the widgets that repaint from _draw() were never affected.
     _meta->setAlign(metaConf_ptr->widget.align);
     _meta->setText(config.station.name);
     _nums->setText("");
-    config.isScreensaver = false;
-    _pager->setPage(pages[PG_PLAYER]);
+    _titleTexts();
     // The manager drops the player's state requests while it owns the screen, so widget state is re-derived
     // here, after the page switch, where the draws are wanted again.
     _layoutChange(player.isRunning());
@@ -731,16 +781,14 @@ void Display::_switchMode(displayMode_e newmode) {
   }
   if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
     config.isScreensaver = true;
-    _pager->setPage(pages[PG_SCREENSAVER], true);
-    if (newmode == SCREENBLANK) {
-      //dsp.clearClock();
-      _clock->clear();
-      config.setDspOn(false, false);
-    }
+    _enterScreensaver(newmode);
   } else {
     config.screensaverTicks=SCREENSAVERSTARTUPDELAY;
     config.screensaverPlayingTicks=SCREENSAVERSTARTUPDELAY;
     config.isScreensaver = false;
+    // Leaving the screensaver hands the clock back to the player page.  _clockHidden() re-locks it for
+    // the states where it should stay away, so unlocking here is what keeps the two consistent.
+    if (_clock) _clock->lock(false);
   }
   if (newmode == VOL) {
     _showNumbers(l10n(L10N_LBL_VOLUME), config.store.volume, numtxtFmt, config.store.volumepage);
@@ -769,6 +817,20 @@ void Display::_switchMode(displayMode_e newmode) {
     if (newmode == SDMAN) _sdmanScreen();
   #endif
   
+}
+
+// Bring the screensaver up, or rebuild it where it stands.  Factored out of _switchMode() so that a settings
+// change can rebuild the picture without a mode change: that path drops a request for the mode the device is
+// already in, and drops any request at all while the network is transient, and a rebuild needs neither.
+void Display::_enterScreensaver(displayMode_e mode) {
+  _screensaverWidgets();        // the widgets are built BEFORE the page switch, so the first pass draws
+  _pager->setPage(pages[PG_SCREENSAVER], true);   // the picture the prefs describe, not last time's frame
+  if (mode == SCREENBLANK) {
+    _clock->clear();
+    config.setDspOn(false, false);
+  } else {
+    config.setDspOn(config.store.dspon, false);   // a rebuild out of a blank must light the panel again
+  }
 }
 
 void Display::resetQueue() {
@@ -806,7 +868,13 @@ void Display::putRequest(displayRequestType_e type, int payload) {
   requestParams_t request;
   request.type = type;
   request.payload = payload;
-  xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY));
+  // Waiting, then dropping, is the deliberate choice for a saturated queue - but silently dropping hides the
+  // cause behind whatever ran last.  A full reset queued six requests into a five-deep queue and looked like a
+  // battery problem; this line is what tells that story next time (see plans/display-repaint-order.md).
+  if (xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) != pdTRUE) {
+    _droppedRequests++;
+    ERRORLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);
+  }
 }
 
 void Display::updateProgress(const char* label, float progress) {
@@ -848,16 +916,22 @@ bool Display::_ownScreen() const {
 // display owns is up.  The clock is only advanced in PLAYER and SCREENSAVER, so one left in a holding pattern's
 // layout is painted once and then sits frozen - which is what the manager exposed (the player stop that mode causes
 // re-un-hid it) and what the card-change wait screen shows when the index is valid and no counter ever appears.
-// _layoutChange() redraws the full clock when the mode leaves.
+// _layoutChange() redraws the full clock when the mode leaves.  While the panel is the screensaver's, the answer is
+// _screensaverWidgets()'s to give: it is the place that locks the clock for the meter, and a settings change from
+// the WebUI must not unlock one that was put away.
 bool Display::_clockHidden() {
+  if (config.isScreensaver) return _ssMeterUp;
   const bool noTimeSource = (network.status == SDOFFLINE && !config.isRTCFound());
   const bool yieldsToVU   = (config.store.vumeter && vuInLayout() && player.isRunning() && moveZeroed(*clockMove_ptr));
   if (_ownScreen()) return true;
   return noTimeSource || yieldsToVU || !clockInLayout();
 }
 
-// Same shape for the weather, plus shared-row suppression during the volume overlay.
+// Same shape for the weather, plus shared-row suppression during the volume overlay.  The widget belongs to the
+// player page alone, so while the screensaver owns the panel it is never drawn: the screensaver's own line is what
+// carries the weather there (see plans/screensaver-panel-ownership.md).
 bool Display::_weatherHidden() {
+  if (config.isScreensaver) return true;
   const bool featureOff = !config.store.showweather;
   const bool yieldsToVU = (config.store.vumeter && vuInLayout() && player.isRunning() && moveZeroed(*weatherMoveVU_ptr));
   bool volOverlay = false;
@@ -950,6 +1024,14 @@ void Display::loop() {
     #endif
     switch (request.type) {
         case NEWMODE: _switchMode((displayMode_e)request.payload); break;
+        // A screensaver setting changed while the screensaver is on screen.  Deliberately not a mode change,
+        // so it does not go through _switchMode() and its two guards: the widgets are re-derived from the
+        // prefs and the page is repainted where it stands.
+        case SSREBUILD: {
+          const displayMode_e m = (displayMode_e)request.payload;
+          if (_mode == SCREENSAVER || _mode == SCREENBLANK) { _mode = m; _enterScreensaver(m); }
+          break;
+        }
         // The whole layout/theme/font re-init, on the display task.  applyFont() below is the only
         // thing that queues it; it used to be an enum value with no handler at all.
         case APPLYSTATE: _applyState(); break;
@@ -1004,12 +1086,26 @@ void Display::loop() {
               network.buildWeatherString();
             }
           }
+          // The strip is the weather's only home there, and its existence follows the flag - with no page switch
+          // behind a checkbox.  A strip that stays just needs the new text, which nothing else delivers here.
+          if (config.isScreensaver) {
+            if ((_sstext != nullptr) != (_ssStripH() != 0)) putRequest(SSREBUILD, _mode);
+            else                                           _screensaverLine();
+          }
           break;
         }
         case NEWWEATHER: {
           // skip weather repaint during VOL to avoid overwriting the IP shown there
           if ((!*shareWeatherIP_ptr || _mode != VOL) && _weather && network.weatherBuf)
             _weather->setText(network.weatherBuf);
+          // A weather refresh is one of the things the screensaver's line is built from, and it arrives on
+          // its own schedule - which is why that line is re-built rather than set once.  If the screensaver came
+          // up with no strip to re-build - nothing playing and no weather cached - this refresh is what makes
+          // _ssStripH() true, and only a rebuild can create the widget.
+          if (config.isScreensaver) {
+            if (_sstext) _screensaverLine();
+            else if (_ssStripH()) putRequest(SSREBUILD, _mode);
+          }
           break;
         }
         case BOOTSTRING: {
@@ -1143,29 +1239,136 @@ void Display::_station() {
 char *split(char *str, const char *delim) {
   char *dmp = strstr(str, delim);
   if (dmp == NULL) return NULL;
-  *dmp = '\0'; 
+  *dmp = '\0';
   return dmp + strlen(delim);
 }
 
-void Display::_title() {
-  if (strlen(config.station.title) > 0) {
-    char tmpbuf[strlen(config.station.title)+1];
-    strlcpy(tmpbuf, config.station.title, strlen(config.station.title)+1);
-    char *stitle = split(tmpbuf, " - ");
-    if (stitle && _title2) {
-      _title1->setText(tmpbuf);
-      _title2->setText(stitle);
-    } else {
-      _title1->setText(config.station.title);
-      if (_title2) _title2->setText("");
-    }
-    
+// config.station.title arrives as "artist - song" and the layout has two title lines for it.  Both the
+// player page and the screensaver's info line want the two halves, so the rule lives here rather than in
+// either caller.  False when there is no title at all; otherwise `first` is the whole string with
+// `second` null unless the separator was found.  Both point into `dst`.
+static bool splitTitle(char* dst, size_t dstSize, char*& first, char*& second) {
+  first = second = nullptr;
+  if (!config.station.title[0]) return false;
+  strlcpy(dst, config.station.title, dstSize);
+  second = split(dst, " - ");
+  first = dst;
+  return true;
+}
+
+void Display::_titleTexts() {
+  char titlebuf[STATION_FIELD_LENGTH];
+  char *t1 = nullptr, *t2 = nullptr;
+  if (splitTitle(titlebuf, sizeof(titlebuf), t1, t2) && t2 && _title2) {
+    _title1->setText(t1);
+    _title2->setText(t2);
   } else {
-    _title1->setText("");
+    _title1->setText(config.station.title);
     if (_title2) _title2->setText("");
   }
+}
+
+void Display::_title() {
+  _titleTexts();
+  // The screensaver's own line carries the same text on a different page, so nothing else would refresh
+  // it when a song changes while the device is asleep.
+  if (config.isScreensaver) _screensaverLine();
   rgbled.trackChange();
   backlightControls.restart();
+}
+
+// The info line's text: the station name, the two title lines and the weather, joined with " * ".  The
+// first three describe what is playing, so over silence they are skipped and only the weather is left -
+// which is the same rule _ssStripH() refuses the whole strip on.  Every empty part is skipped outright
+// rather than left as a bare separator, which is why they all go through one append.
+void Display::_screensaverLine() {
+  if (!_sstext) return;
+  // Two ways the line must stay off: the settings refuse the strip, and the widget was locked for a reason of its
+  // own.  A locked widget is still _active and setText() paints on _active alone, so a new metadata string
+  // repainted the line while the strip was refused - _ssStripH() is the authoritative test, the lock the backstop.
+  if (!_ssStripH() || _sstext->locked()) return;
+  // One buffer for the display task's own use rather than a heap copy per refresh: the worst case is the
+  // station name and the title (two station fields) plus the 512-byte weather string.
+  static char line[STATION_FIELD_LENGTH * 2 + WEATHER_STRING_L + 8];
+  line[0] = '\0';
+  auto append = [](char* dst, size_t room, const char* part) {
+    if (!part || !part[0]) return;
+    if (dst[0]) strlcat(dst, " * ", room);
+    strlcat(dst, part, room);
+  };
+  if (player.isRunning()) {
+    char titlebuf[STATION_FIELD_LENGTH];
+    char *t1 = nullptr, *t2 = nullptr;
+    splitTitle(titlebuf, sizeof(titlebuf), t1, t2);
+    append(line, sizeof(line), config.station.name);
+    append(line, sizeof(line), t1);
+    append(line, sizeof(line), t2);
+  }
+  if (config.store.showweather && network.weatherBuf) append(line, sizeof(line), network.weatherBuf);
+  _sstext->setText(line);
+}
+
+// Bring both screensaver widgets in line with the prefs and the active layout.  Called on every entry
+// into SCREENSAVER rather than once at boot: the meter's segmentation comes from bandsConf, its palette
+// from the theme and the line's size from metaConf, and the WebUI stays reachable while the device is
+// asleep, so a layout or theme switch has to land.  A layout with no VU box of its own is fine here -
+// the screensaver's meter is this widget, not the player page's.
+void Display::_screensaverWidgets() {
+  // --- the info line ---
+  if (_ssStripH()) {
+    ScrollConfig conf = *metaConf_ptr;      // the scroll speed is the meta line's; the size is SS_INFO_TEXT's
+    conf.widget.left = 0;
+    conf.widget.top = _ssTextTop();
+    conf.widget.textsize = SS_INFO_TEXT;
+    conf.width = dsp.width();
+    // Both calls take "*", so the wrap-around joiner reads " * " like the joins inside the line itself.  The
+    // weather widget is the one that keeps "~", because its string is joined with " ~ " internally.
+    if (!_sstext) {
+      _sstext = new ScrollWidget("*", conf, config.theme.textss, config.theme.background);
+      pages[PG_SCREENSAVER]->addWidget(_sstext);
+    } else {
+      _sstext->init("*", conf, config.theme.textss, config.theme.background);
+    }
+    _sstext->lock(false);
+    _screensaverLine();
+  } else if (_sstext) {
+    _sstext->setText("");
+    _sstext->lock(true);        // ScrollWidget::_clear() erases the window it owns
+  }
+
+  // --- the meter, or the clock ---
+  // No playback, no meter: with nothing to read it is a still picture that still costs the panel 4-40 ms a
+  // frame, so the clock keeps it.  Decided here, on entry, like the strip above - and recorded, because it is
+  // the only answer to "does the clock show" while the panel is the screensaver's.
+  _ssMeterUp = false;
+  if (!config.store.screensaverVU || !player.isRunning()) {
+    if (_clock) _clock->lock(false);
+    if (_ssvu) _ssvu->lock(true);
+    return;
+  }
+  if (!_ssvu) {
+    _ssvu = new VuWidget();
+    pages[PG_SCREENSAVER]->addWidget(_ssvu);
+  }
+  const uint16_t W = dsp.width();
+  const uint16_t CH = _ssContentH();
+  uint8_t style = config.store.screensaverVUStyle;
+  if (style >= (uint8_t)VU_STYLE_COUNT) style = VU_STYLE_BARS;   // a stale stored id
+  // How big the meter may be and where it sits is the widget's business, not the screen's: the box comes
+  // back sized for the style - the bar family's two rows, the Lissajous's square, the budget rectangle -
+  // and already centred in the content area.  See VuWidget::resolveScreensaverBox().
+  const VuBox box = VuWidget::resolveScreensaverBox(W, CH, style);
+  if (!_ssvu->initScreensaver(box, *bandsConf_ptr, style)) {
+    if (!_ssFailed) {
+      _ssFailed = true;
+      ERRORLOG("Screensaver: no PSRAM for the VU canvas (%ux%u) - keeping the clock screensaver",
+               (unsigned)box.w, (unsigned)box.h);
+    }
+    if (_clock) _clock->lock(false);
+    return;
+  }
+  _ssMeterUp = true;
+  if (_clock) _clock->lock(true);
 }
 
 void Display::_time(bool redraw) {
@@ -1176,10 +1379,14 @@ void Display::_time(bool redraw) {
       config.setBrightness();
     }
   #endif
-  if (config.isScreensaver && network.timeinfo.tm_sec % SCREENSAVERMOVE == 0) {
+  // The clock only walks while it IS the screensaver.  With the meter in its place it is locked, and its
+  // random walk would be wasted work even so.
+  if (config.isScreensaver && !config.store.screensaverVU && network.timeinfo.tm_sec % SCREENSAVERMOVE == 0) {
     int32_t clockH = _clock->clockHeight();
     int32_t minTop = max((int32_t)TFT_FRAMEWDT, (int32_t)_clock->timeHeight());
-    int32_t maxTop = dsp.height() - clockH - TFT_FRAMEWDT;
+    // The floor is the content area rather than the panel: the info line's strip is not the clock's to
+    // cross, which is the whole reason the two bounds are derived from the same number.
+    int32_t maxTop = (int32_t)_ssContentH() - clockH - TFT_FRAMEWDT;
     uint16_t ft = (maxTop > minTop) ? static_cast<uint16_t>(random(minTop, maxTop + 1)) : static_cast<uint16_t>(minTop);
 
     int32_t minLeft = TFT_FRAMEWDT;
@@ -1441,6 +1648,11 @@ void Display::_applyState() {
   if (_weather && config.store.showweather && network.weatherBuf) _weather->setText(network.weatherBuf);
   _station();
   _title();
+  // A layout or a theme change has to land while the device is asleep as well, and both feed the
+  // screensaver's own widgets - the meter's geometry and its palette - so the screensaver is rebuilt where
+  // it stands rather than the screen being woken to the player page.  Queued, because this runs on
+  // whichever task asked for the change.
+  if (config.isScreensaver) { putRequest(SSREBUILD, _mode); return; }
   putRequest(NEWMODE, CLEAR);
   putRequest(NEWMODE, PLAYER);
 }
@@ -1488,6 +1700,18 @@ void Display::applyClockFont(uint8_t id) {
   if (id >= _clockFontCount) id = 0;
   config.store.clockFontId = id;
   activeClockFontId = id;
+  putRequest(APPLYSTATE);
+}
+
+// Both font ids in one request: what a screen reset wants, since the theme and layout ids are in the store by
+// then and APPLYSTATE reads all four.
+void Display::applyFonts(uint8_t systemId, uint8_t clockId) {
+  if (systemId >= _systemFontCount) systemId = 0;
+  if (clockId >= _clockFontCount) clockId = 0;
+  config.store.systemFontId = systemId;
+  config.store.clockFontId = clockId;
+  activeSystemFontId = systemId;
+  activeClockFontId = clockId;
   putRequest(APPLYSTATE);
 }
 

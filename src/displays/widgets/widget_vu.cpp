@@ -1,6 +1,7 @@
 #include "../../core/options.h"
 #if DSP_MODEL!=DSP_DUMMY
 #include <Arduino.h>
+#include <esp_heap_caps.h>        // the screensaver's canvas is a PSRAM allocation
 #include "../dspcore.h"
 #include "../../core/display.h"
 #include "../tools/psframebuffer.h"
@@ -17,13 +18,225 @@
 /************************
       VU WIDGET
  ************************/
+
+#if defined(DSP_TFT)
+// GFXcanvas16 keeps its raster pointer protected - "no longer private, allow subclass access" is how the
+// header puts it - and offers getBuffer() as the only reader.  A buffer we allocated ourselves can only be
+// handed over from a subclass, so this is the thinnest one that can: it owns and frees nothing, and the
+// widget remains the thing that allocates and releases the PSRAM block behind it.
+class VuCanvas : public Canvas {
+  public:
+    VuCanvas(uint16_t w, uint16_t h) : Canvas(w, h, false) {}
+    void takeBuffer(uint16_t* p) { buffer = p; }
+};
+
+// Give the canvas its buffer.  The member is protected, hence the subclass.
+static inline void vuCanvasTake(Canvas* c, uint16_t* buf) {
+  if (c) static_cast<VuCanvas*>(c)->takeBuffer(buf);
+}
+
+// The canvas is only a staging buffer for the single-burst blit, and the screensaver's box is far past
+// what the internal heap can hold - 346 KB for a 480x360 panel - so the buffer is taken from PSRAM in
+// the shape vuScratchAlloc() uses for the FFT scratch.  It is counted in `psramFrameBufferBytes`, the
+// same figure psFrameBuffer keeps for its own windows, so the Core Monitor's PSRAM line covers every
+// framebuffer this build owns.  No internal fallback is aimed at here: a build without PSRAM cannot
+// host the feature, and the caller treats a null buffer as "no canvas" (see ready()).
+static uint16_t* vuCanvasBuffer(uint16_t w, uint16_t h, bool& fromPsram) {
+  const size_t bytes = (size_t)w * h * sizeof(uint16_t);
+  if (!bytes) return nullptr;
+  fromPsram = true;
+  void* p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+  if (!p) { fromPsram = false; p = malloc(bytes); }
+  if (!p) return nullptr;
+  if (fromPsram) psramFrameBufferBytes += bytes;
+  memset(p, 0, bytes);
+  return (uint16_t*)p;
+}
+
+// Give a buffer back, keeping the accounting straight.  free() is the same call psFrameBuffer makes
+// on its own PSRAM block.
+static void vuCanvasRelease(uint16_t* buf, size_t bytes, bool fromPsram) {
+  if (!buf) return;
+  if (fromPsram && psramFrameBufferBytes >= bytes) psramFrameBufferBytes -= bytes;
+  free(buf);
+}
+
+// The bytes a canvas holds, from the canvas itself - the only record the widget keeps.
+static inline size_t vuCanvasBytes(const Canvas* c) {
+  return (size_t)c->width() * (size_t)c->height() * sizeof(uint16_t);
+}
+#endif
+
 VuWidget::~VuWidget() {
   #if defined(DSP_TFT)
-    if (_canvas) { delete _canvas; _canvas = nullptr; }
+    if (_canvas) {
+      // The buffer is ours - VuCanvas is built with allocate_buffer = false - so it is ours to give back,
+      // and _canvasPsram is the only record of whether those bytes came from PSRAM.
+      if (_canvasBuf) vuCanvasRelease(_canvasBuf, vuCanvasBytes(_canvas), _canvasPsram);
+      _canvasBuf = nullptr;
+      delete _canvas; _canvas = nullptr;
+    }
   #endif
 }
   
+// The style this instance draws.  0xFF means "the player's widget", which follows the live setting: the
+// vustyle=<n> command only queues SHOWVUMETER, so the value has to be read on every frame rather than
+// latched at init.  The screensaver's instance is pinned to screensaverVUStyle instead.
+uint8_t VuWidget::_style() const {
+  return (_styleOverride == 0xFF) ? config.store.vustyle : _styleOverride;
+}
+
+// The same split for the peaks/axis switch, and for the same reason: with peers to respect, a screensaver
+// meter must be able to show its markers and reference lines while the player page's box does not.
+bool VuWidget::_vupeak() const {
+  return (_styleOverride == 0xFF) ? config.store.vupeak : config.store.screensaverVUpeak;
+}
+
+// True only for the painter that lays down its own background as it draws: the bar family in the ROTATED
+// shape, whose incremental path fills a band with the background before re-lighting the lit part of it, and
+// whose full frames fill the whole box.  A full-box wipe before that is pure duplication, and leaving it out
+// is also what makes the partial blit possible - a wipe marks every pixel dirty by definition.
+//
+// It is deliberately not scoped to the style family alone.  The family's pattern draws one segment per step
+// and leaves bandsConf.vspace pixels of every step, plus the whole strip between the two channels, for
+// something else to fill - and for the layout's three shapes (the ribbon and the two side-by-side forms)
+// that something is still _draw()'s wipe.  Exempting them left the previous frame sitting in those gaps,
+// which showed up as the peak marker surviving there and as the bar appearing to miss its middle points.
+//
+// Every other painter draws over whatever was already on the canvas - a trace has no way to erase its own
+// previous line - and needs the wipe too.
+bool VuWidget::_selfErasing() const {
+  const uint8_t s = _style();
+  if (s != VU_STYLE_BARS && s != VU_STYLE_DIGITAL_LED) return false;
+  return _rotate;
+}
+
+bool VuWidget::ready() {
+  #if defined(DSP_TFT)
+    return _canvas && _canvasBuf;
+  #else
+    // The OLED panels draw straight into their own panel buffer, so there is nothing that can be missing.
+    return true;
+  #endif
+}
+
+// The screensaver's meter, from a box resolveScreensaverBox() has already sized and placed.  The box is
+// described to the painters in the same terms a layout uses: _draw() resolves rotate mode as
+// _cw = bands.height and _ch = bands.width * 2 + bands.space, so a box of w x h is bands.height = w with
+// bands.width = (h - space) / 2.  The bar family instead wants its two channels as whole rows with the gap
+// between them, which is that identity read the other way round: bands.width = barH, bands.space = gapH,
+// and the box is exactly 2 * barH + gapH tall.  vspace and perheight - the gap between segments and the
+// count of them inside a bar - stay the layout's own.
+//
+// The palette comes from the live theme rather than from any stored conf, because this widget is not
+// derived from the layout in any way: it is the theme's VU colours over an area the layout never saw.
+bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBands, uint8_t style) {
+  _forceRotate = true;        // the box IS the rotated shape: level axis along it, channels stacked
+  _styleOverride = style;     // pinned, so this instance ignores config.store.vustyle
+  VUBandsConfig b = layoutBands;
+  b.height = box.w;           // the level axis is the box's width
+  if (box.bars) {
+    b.width = box.barH;
+    // space is a byte in the master, so a gap wider than 255 px could not be described.  No panel's can be:
+    // the budget caps the box long before that.
+    b.space = (box.gapH > 255) ? 255 : (uint8_t)box.gapH;
+  } else {
+    b.space = layoutBands.space;
+    b.width = (box.h > (uint16_t)b.space) ? (uint16_t)((box.h - b.space) / 2) : 1;
+  }
+  if (b.width < 1) b.width = 1;
+  if (b.height < 1) b.height = 1;
+  WidgetConfig wc;
+  wc.left = box.left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
+  init(wc, b, config.theme.vumax, config.theme.vumin, config.theme.vupeak,
+       config.theme.background, config.theme.vuaxis);
+  return ready();
+}
+
+// The screensaver's box for a style.  Three rules, and each one only engages where the area can afford it:
+//
+//   bars       the two channels are rows - a 35% bar, a 10% gap between them, and the outer 10% above and
+//              below left as placement rather than painted rows - so the box is 2 * bar + gap and it is
+//              centred.  A box over the budget scales the bar and the gap together, which keeps the 10:35
+//              shape and buys bigger bars than trimming the bar alone would.
+//   Lissajous  a square, because the figure is an X-Y plot and reads wrong in a rectangle.  Its budget is
+//              VU_MAX_HEIGHT squared, deliberately smaller than the rectangle's.
+//   the rest   the budget rectangle, VU_MAX_WIDTH x VU_MAX_HEIGHT at most, centred.
+//
+// Below the budget the area comes back untouched, which is what keeps a small panel and an OLED as they were.
+VuBox VuWidget::resolveScreensaverBox(uint16_t areaW, uint16_t areaH, uint8_t style) {
+  VuBox box;
+  if (!areaW || !areaH) return box;
+  const uint32_t budget = (uint32_t)VU_MAX_WIDTH * VU_MAX_HEIGHT;
+  if (style == VU_STYLE_BARS || style == VU_STYLE_DIGITAL_LED) {
+    uint16_t gap = (uint16_t)(areaH * 10u / 100u);
+    uint16_t bar = (uint16_t)(areaH * 35u / 100u);
+    if (!gap) gap = 1;
+    uint32_t h = (uint32_t)2 * bar + gap;
+    const uint32_t hmax = budget / areaW;
+    if (hmax && h > hmax) {
+      bar = (uint16_t)((uint32_t)bar * hmax / h);
+      gap = (uint16_t)((uint32_t)gap * hmax / h);
+      if (!gap) gap = 1;
+      if (bar < 2) bar = 2;
+      h = (uint32_t)2 * bar + gap;
+    }
+    if (bar >= 2) {
+      box.bars = true; box.barH = bar; box.gapH = gap;
+      box.w = areaW; box.h = (uint16_t)h; box.left = 0;
+      box.top = (uint16_t)((areaH - (uint16_t)h) / 2);
+      return box;
+    }
+    // Too short for two rows: the rectangle below is what the style gets, drawn in the whole area.
+  }
+  if (style == VU_STYLE_LISSAJOUS && (uint32_t)areaW * areaH > (uint32_t)VU_MAX_HEIGHT * VU_MAX_HEIGHT) {
+    uint16_t side = (areaW < areaH) ? areaW : areaH;
+    if (side > VU_MAX_WIDTH) side = VU_MAX_WIDTH;
+    if (side > VU_MAX_HEIGHT) side = VU_MAX_HEIGHT;
+    box.w = side; box.h = side;
+  } else if ((uint32_t)areaW * areaH > budget) {
+    box.w = (areaW < VU_MAX_WIDTH) ? areaW : VU_MAX_WIDTH;
+    box.h = (areaH < VU_MAX_HEIGHT) ? areaH : VU_MAX_HEIGHT;
+  } else {
+    box.w = areaW; box.h = areaH;
+  }
+  box.left = (uint16_t)((areaW - box.w) / 2);
+  box.top  = (uint16_t)((areaH - box.h) / 2);
+  return box;
+}
+
+// The largest linear factor, in 1/256ths, that brings an area of w x h down to `budget` or less.  Run once
+// per init, so a search costs nothing and reads clearer than a square root would.
+static uint16_t vuScaleToBudget(uint32_t w, uint32_t h, uint32_t budget) {
+  const uint64_t area = (uint64_t)w * h;
+  uint16_t f = 256;
+  while (f > 1 && ((area * f * f) >> 16) > budget) f--;
+  return f;
+}
+
 void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor) {
+  // A screensaver instance forces rotate on: that is what makes the level axis the long one and stacks the
+  // two channels, which is the shape its box was measured for.  The player's widget follows the conf.  It is
+  // resolved first because the budget below reads it.
+  _rotate = _forceRotate || (rotateVU_ptr ? *rotateVU_ptr : false);
+  // The pixel budget, applied to a conf's box only when that box exceeds VU_MAX_WIDTH x VU_MAX_HEIGHT: both
+  // dimensions are scaled by one factor, so the shape survives, and the box is re-centred in the space the
+  // conf gave it.  Every shipped layout's VU box is inside the budget, so this leaves them all alone - and
+  // the screensaver's box has been through the same budget already, which makes this a no-op for it.
+  const uint32_t budget = (uint32_t)VU_MAX_WIDTH * VU_MAX_HEIGHT;
+  const uint16_t boxW = _rotate ? bands.height : (uint16_t)(bands.width * 2 + bands.space);
+  const uint16_t boxH = _rotate ? (uint16_t)(bands.width * 2 + bands.space) : bands.height;
+  if ((uint32_t)boxW * boxH > budget) {
+    const uint16_t f = vuScaleToBudget(boxW, boxH, budget);
+    const uint16_t nW = (uint16_t)(((uint32_t)boxW * f) >> 8);
+    const uint16_t nH = (uint16_t)(((uint32_t)boxH * f) >> 8);
+    wconf.left = (int16_t)(wconf.left + (uint16_t)((boxW - nW) / 2));
+    wconf.top  = (int16_t)(wconf.top + (uint16_t)((boxH - nH) / 2));
+    const uint16_t across = _rotate ? nH : nW;         // the side the two channels share
+    const uint16_t room = (across > bands.space) ? (uint16_t)(across - bands.space) : 0;
+    bands.width = (room > 1) ? (uint16_t)(room / 2) : 1;
+    bands.height = _rotate ? nW : nH;
+  }
   Widget::init(wconf, bgcolor, bgcolor);
   _vumaxcolor = vumaxcolor;
   _vumincolor = vumincolor;
@@ -35,6 +248,15 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
   _drawUs = 0;
   _intervalMs = VU_REFRESH_MS;
   _histMs = 0;                // the history strip primes its own clock on its first frame
+  // Start the frame counters over as well, so the cost report samples this instance's first frames rather
+  // than having already passed them: _frame drives the simulated wobble (harmless to restart) and is the
+  // clock _reportCost() samples against.
+  _frame = 0;
+  _eraseUs = _paintUs = _blitUs = 0;
+  // A new canvas holds nothing this widget drew, so the first frame has to paint all of it: the bar
+  // family's incremental path keys off these, and the sentinel means "no previous frame".
+  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
+  _prevStyle = 0xFF;
   #ifdef WIDGET_DEBUG
     _dbgFrames = _dbgFills = _dbgDrawUs = _dbgPeakUs = 0;
     _dbgLogMs = millis();
@@ -43,13 +265,20 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
   _accL = _accR = _accPL = _accPR = 0;
   _holdL = _holdR = 0;
   _bands = bands;
-  _rotate = rotateVU_ptr ? *rotateVU_ptr : false;
   #if defined(DSP_TFT)
     // TFT transfers the whole widget in one SPI burst, so it needs an intermediate canvas. OLED panels own
-    // their framebuffer and are drawn to directly.
-    if (_canvas) { delete _canvas; _canvas = nullptr; }
-    if (_rotate) _canvas = new Canvas(_bands.height, _bands.width * 2 + _bands.space);
-    else         _canvas = new Canvas(_bands.width * 2 + _bands.space, _bands.height);
+    // their framebuffer and are drawn to directly.  The buffer is allocated here rather than by the
+    // library, so a failed allocation is a state the widget can report instead of a null dereference.
+    if (_canvas) {
+      if (_canvasBuf) vuCanvasRelease(_canvasBuf, vuCanvasBytes(_canvas), _canvasPsram);
+      _canvasBuf = nullptr;
+      delete _canvas; _canvas = nullptr;
+    }
+    const uint16_t cw = _rotate ? _bands.height : (uint16_t)(_bands.width * 2 + _bands.space);
+    const uint16_t ch = _rotate ? (uint16_t)(_bands.width * 2 + _bands.space) : _bands.height;
+    _canvas = new VuCanvas(cw, ch);
+    _canvasBuf = vuCanvasBuffer(cw, ch, _canvasPsram);
+    vuCanvasTake(_canvas, _canvasBuf);
   #endif
 }
 
@@ -76,6 +305,9 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
   // rects. Everything is CLIPPED to the box here: this is the one place that knows the pixel surface, and the
   // per-frame fill covers exactly _cw x _ch, so a fill that reaches outside is painted once per frame and erased by
   // nothing, leaving a permanent mark (an even-height history strip did exactly that).
+  #if defined(DSP_TFT)
+    if (!_canvas || !_canvasBuf) return false;   // a canvas that failed to allocate draws nothing
+  #endif
   if (!w || !h) return false;
   if (x >= _cw || y >= _ch) return false;
   if ((uint32_t)x + w > _cw) w = (uint16_t)(_cw - x);
@@ -85,6 +317,13 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
     _fills++;                  // only a real fill counts; the early return above is not one
   #endif
   #if defined(DSP_TFT)
+    // Grow the frame's dirty rectangle.  The clipping above has already turned this into a real rectangle,
+    // so this is exactly the set of canvas pixels the fill is about to touch - recorded here because this
+    // is the one function that knows the pixel surface.
+    if (x < _dirtyX0) _dirtyX0 = x;
+    if (y < _dirtyY0) _dirtyY0 = y;
+    if ((uint16_t)(x + w) > _dirtyX1) _dirtyX1 = (uint16_t)(x + w);
+    if ((uint16_t)(y + h) > _dirtyY1) _dirtyY1 = (uint16_t)(y + h);
     _canvas->fillRect(x, y, w, h, color);
   #else
     dsp.fillRect(_config.left + x, _config.top + y, w, h, color);
@@ -94,6 +333,9 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
 
 void VuWidget::_draw(){
   if(!_active || _locked) return;
+  #if defined(DSP_TFT)
+    if (!_canvas || !_canvasBuf) return;   // no canvas: nothing to stage, nothing to blit - see ready()
+  #endif
 
   // Resolve the box once, exactly as the single-style widget always did, so every style works from the same numbers.
   // rotateVU says which bandsConf axis is the level axis: read here for every style, while boomboxVU is a bar-family
@@ -105,11 +347,21 @@ void VuWidget::_draw(){
 
   _levels(_len, _measL, _measR);
 
-  _fillLocal(0, 0, _cw, _ch, _bgcolor);
+  // The wipe is for the painters that have nothing to erase with: their previous frame is removed by
+  // clearing the box rather than by the style itself.  The bar family does its own erasing, and leaving
+  // the wipe out for it is also what makes a partial blit possible later - a full-box wipe marks every
+  // pixel dirty by definition, which is the information a dirty rectangle is built from.
+  // The dirty rectangle starts empty and _fillLocal() grows it, so what goes to the panel at the end of
+  // this frame is what the painters actually touched rather than the whole box every time.
+  _dirtyX0 = _cw; _dirtyY0 = _ch; _dirtyX1 = 0; _dirtyY1 = 0;
+
+  const uint32_t tEraseStart = micros();
+  if (!_selfErasing()) _fillLocal(0, 0, _cw, _ch, _bgcolor);
+  const uint32_t tEraseEnd = micros();
 
   _frame++;
 
-  switch (static_cast<vuStyle_e>(config.store.vustyle)) {
+  switch (static_cast<vuStyle_e>(_style())) {
     case VU_STYLE_DIGITAL_LED:      _drawBars(true);        break;
     case VU_STYLE_HISTORY:          _drawHistory();         break;
     case VU_STYLE_SPECTRUM_REFLECT: _drawSpectrumReflect(); break;
@@ -122,13 +374,33 @@ void VuWidget::_draw(){
     default:                  _drawBars(false);     break;
   }
 
-  #if defined(DSP_TFT)
-    dsp.startWrite();
-    dsp.setAddrWindow(_config.left, _config.top, _cw, _ch);
-    dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
-    dsp.endWrite();
-  #endif
-  // OLED needs no blit here - DspCore::loop() flushes the panel buffer.
+  const uint32_t tPaintEnd = micros();
+
+  // Send what this frame touched, whole or in part - see _blit().  The OLED panels do nothing here: they
+  // draw straight into their own panel buffer and DspCore::loop() flushes it after this returns.
+  _blit();
+
+  // The frame's split, for _reportCost().  Last frame's raw figures, not smoothed: the report samples a
+  // few frames and the reader wants what those frames actually cost.
+  _eraseUs = tEraseEnd - tEraseStart;
+  _paintUs = tPaintEnd - tEraseEnd;
+  _blitUs  = micros() - tPaintEnd;
+}
+
+// One line naming where a full-panel meter's frame time goes.  Printed only by the screensaver's own
+// instance (the pinned style is what identifies it), and only on three frames: the first one after the
+// fade and the peak markers have settled, then two more so a single unlucky sample cannot mislead.  A
+// TFT with a canvas carries the wire cost in the blit; the OLED panels report zero there, because they
+// have no canvas and their flush happens after this returns.
+void VuWidget::_reportCost() {
+  FUNCTIONLOG("VU.Widget", "SS meter %ux%u px, style %u: erase %lums, painter %lums, blit %lums, total %lums, frame %u, dirty %ux%u px",
+      (unsigned)_cw, (unsigned)_ch, (unsigned)_style(),
+      (unsigned long)(_eraseUs / 1000u), (unsigned long)(_paintUs / 1000u),
+      (unsigned long)(_blitUs / 1000u),
+      (unsigned long)((_eraseUs + _paintUs + _blitUs) / 1000u),
+      (unsigned)_frame,                                            // the frame counter, not a fill count
+      (unsigned)(_dirtyX1 > _dirtyX0 ? _dirtyX1 - _dirtyX0 : 0),   // the rectangle _blit() was handed
+      (unsigned)(_dirtyY1 > _dirtyY0 ? _dirtyY1 - _dirtyY0 : 0));
 }
 
 void VuWidget::_drawBars(bool led){
@@ -141,8 +413,14 @@ void VuWidget::_drawBars(bool led){
   if (h > _bands.vspace) h -= _bands.vspace;
   else h = 1;
 
+  // One of the two layout transforms is read live down here, so a screensaver box overrides it.  rotateVU
+  // is already folded into _rotate by init() and every test below reads that member; boomboxVU is not, and
+  // the ribbon shape belongs to a conf that asked for it - a screensaver box was measured for the plain
+  // stacked form and would otherwise be repainted in the layout's shape.
+  const bool bb = _forceRotate ? false : *boomboxVU_ptr;
+
   if (led) {
-    if (_rotate || (_config.align && !*boomboxVU_ptr)) {
+    if (_rotate || (_config.align && !bb)) {
       measL = vuSnapLit(measL, step, len);
       measR = vuSnapLit(measR, step, len);
     } else if (_config.align) {              // BoomBox left channel is cleared from x = 0
@@ -152,6 +430,106 @@ void VuWidget::_drawBars(bool led){
       measL = vuSnapClear(measL, step);
       measR = vuSnapClear(measR, step);
     }
+  }
+
+  // Peak marker geometry, resolved once because both the incremental path just below and the full path
+  // further down draw with it.  peakThk reserves the outermost pixels of the widget, which keeps the marker
+  // inside the .bandsConf footprint.
+  const uint16_t peakThk = ((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) > 0
+                         ? (uint16_t)((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) : 1;
+  uint16_t pkL = 0, pkR = 0;
+  if (_vupeak()) {
+    // Collapse the 0xFFFF sentinel and clamp BEFORE snapping: a snap can move a marker down to the quiet end, and a
+    // negative x would wrap in the fillRect below.
+    pkL = (_peakL < peakThk || _peakL > len) ? peakThk : _peakL;
+    pkR = (_peakR < peakThk || _peakR > len) ? peakThk : _peakR;
+    if (led) {
+      if (_rotate || (_config.align && !bb)) {
+        pkL = vuSnapLit(pkL, step, len);
+        pkR = vuSnapLit(pkR, step, len);
+      } else if (_config.align) {
+        pkL = vuSnapClear(pkL, step);
+        pkR = vuSnapLit(pkR, step, len);
+      } else {
+        pkL = vuSnapClear(pkL, step);
+        pkR = vuSnapClear(pkR, step);
+      }
+      if (pkL < peakThk) pkL = peakThk;      // the snap must not push the marker out of the box
+      if (pkR < peakThk) pkR = peakThk;
+    }
+  }
+
+  // ---- The rotated shape, incrementally -------------------------------------------------------------
+  // A screensaver's box is always rotated, and that is what this path exists for.  Only the band that can
+  // have changed since the last frame is repainted: the span between the old tip and the new one for each
+  // channel, widened to wherever its peak marker moved.  Everything outside it already holds this frame's
+  // picture - below the old tip the colour pattern has not changed and past the new tip the background has
+  // not - so a quiet station touches a few hundred pixels instead of the whole box, and _draw()'s blob
+  // shrinks to match.  The invariant that makes it correct is that _prevMeas* / _prevPk* describe exactly
+  // what the canvas holds, and every way of breaking that (a new canvas, a move, a lock) invalidates them
+  // through init() or _reset().
+  //
+  // The other three shapes keep the full repaint: they are the layout's own arrangements - the ribbon and
+  // the two side-by-side forms - they are small boxes on a real layout, and each would need its own version
+  // of this arithmetic.
+  if (_rotate) {
+    const bool full = (_prevMeasL == 0xFFFF || _prevMeasR == 0xFFFF ||
+                       _prevStyle != _style() || _prevVupeak != _vupeak());
+    // A full repaint owns its background, exactly as _draw()'s wipe did for this family before
+    // _selfErasing() took the wipe away from it - and for the same reason the incremental path below has to
+    // lay down a band of it: the pattern leaves bandsConf.vspace pixels of every step, and the whole strip
+    // between the two channels, untouched.  Nothing else fills them, so without this they hold whatever the
+    // canvas was allocated with - vuCanvasBuffer() memsets to zero, and they are black.
+    if (full) _fillLocal(0, 0, _cw, _ch, _bgcolor);
+    else {
+      for (uint8_t ch = 0; ch < 2; ch++) {
+        const uint16_t meas = ch ? measR : measL;
+        const uint16_t tipNew = (uint16_t)(len - meas);
+        // Each channel reads its OWN previous tip: with the branches swapped the band was anchored on the
+        // other channel's old tip, so wherever the two differed part of the changed span went unpainted.
+        const uint16_t tipOld = (uint16_t)(len - (ch ? _prevMeasR : _prevMeasL));
+        const uint16_t pkNew = ch ? pkR : pkL;
+        const uint16_t pkOld = ch ? _prevPkR : _prevPkL;
+        uint16_t lo = (tipOld < tipNew) ? tipOld : tipNew;
+        uint16_t hi = (tipOld < tipNew) ? tipNew : tipOld;
+        if (_vupeak()) {
+          // Each marker sits just beyond its tip and moves on its own, so both its old and its new rect
+          // belong to the band: repainting the band is what restores the old one to pattern or background.
+          for (uint8_t k = 0; k < 2; k++) {
+            const uint16_t pk = k ? pkOld : pkNew;
+            if (pk == 0xFFFF || pk > len) continue;
+            const uint16_t a = (uint16_t)(len - pk), b = (uint16_t)(a + peakThk);
+            if (a < lo) lo = a;
+            if (b > hi) hi = b;
+          }
+        }
+        if (hi > len) hi = len;
+        if (hi <= lo) continue;                       // this channel did not move at all
+        const uint16_t off = ch ? (uint16_t)(_bands.width + _bands.space) : 0;
+        // The band gets its background first - the gaps between segments and the strip between the two
+        // channels are only the theme's background if something puts it there, and this is the something.
+        // It also makes the whole band correct in one pass: below it, only the lit part is re-lit.
+        _fillLocal(lo, off, (uint16_t)(hi - lo), thk, _bgcolor);
+        // Then the lit part of the band, one segment at a time so the hot end keeps its colour.
+        const uint16_t pEnd = (tipNew < hi) ? tipNew : hi;
+        for (uint16_t i = (uint16_t)((lo / step) * step); i < pEnd; i = (uint16_t)(i + step)) {
+          uint16_t hh = h;
+          if ((uint16_t)(i + hh) > pEnd) hh = (uint16_t)(pEnd - i);
+          _drawBand(i, ch, hh, (i > len - step * 3) ? _vumaxcolor : _vumincolor);
+        }
+        // Then the marker, over both.
+        if (_vupeak() && pkNew != 0xFFFF && pkNew <= len)
+          _fillLocal((uint16_t)(len - pkNew), off, peakThk, thk, _vupeakcolor);
+      }
+    }
+    // Remember what this frame left there, whichever path drew it.
+    _prevMeasL = measL;
+    _prevMeasR = measR;
+    _prevPkL = _vupeak() ? pkL : 0xFFFF;
+    _prevPkR = _vupeak() ? pkR : 0xFFFF;
+    _prevStyle = _style();
+    _prevVupeak = _vupeak();
+    if (!full) return;                                // nothing left to do, and no full-box work
   }
 
   for (int i = 0; i < len; i += step) {
@@ -164,7 +542,7 @@ void VuWidget::_drawBars(bool led){
     if (_rotate) {
       colorL = colorR = (i > len - step * 3) ? _vumaxcolor : _vumincolor;
     } else if (_config.align) {
-      if (!*boomboxVU_ptr) {
+      if (!bb) {
         colorL = colorR = (i > len - step * 4) ? _vumaxcolor : _vumincolor;
       } else {
         colorL = (i > step) ? _vumincolor : _vumaxcolor;
@@ -181,7 +559,7 @@ void VuWidget::_drawBars(bool led){
     _fillLocal(len - measL, 0, measL, thk, _bgcolor);
     _fillLocal(len - measR, thk + _bands.space, measR, thk, _bgcolor);
   } else if (_config.align) {
-    if (!*boomboxVU_ptr) {
+    if (!bb) {
       _fillLocal(len - measL, 0, measL, thk, _bgcolor);
       _fillLocal(cw - measR, 0, measR, thk, _bgcolor);
     } else {
@@ -193,35 +571,15 @@ void VuWidget::_drawBars(bool led){
     _fillLocal(thk + _bands.space, 0, thk, measR, _bgcolor);
   }
 
-  // Peak markers. Drawn after the clears so they survive them, and before the blit. Each sits in the cleared strip
-  // just beyond its channel's high-water mark. Clamping to peakThk reserves the outermost pixels of the widget, which
-  // keeps the marker inside the .bandsConf footprint.
-  if (config.store.vupeak) {
-    uint16_t peakThk = (uint16_t)((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000);
-    if (peakThk < 1) peakThk = 1;
-    // Collapse the 0xFFFF sentinel and clamp BEFORE snapping: a snap can move a marker down to the quiet end, and a
-    // negative x would wrap in the fillRect below.
-    uint16_t pkL = (_peakL < peakThk || _peakL > len) ? peakThk : _peakL;
-    uint16_t pkR = (_peakR < peakThk || _peakR > len) ? peakThk : _peakR;
-    if (led) {
-      if (_rotate || (_config.align && !*boomboxVU_ptr)) {
-        pkL = vuSnapLit(pkL, step, len);
-        pkR = vuSnapLit(pkR, step, len);
-      } else if (_config.align) {
-        pkL = vuSnapClear(pkL, step);
-        pkR = vuSnapLit(pkR, step, len);
-      } else {
-        pkL = vuSnapClear(pkL, step);
-        pkR = vuSnapClear(pkR, step);
-      }
-      if (pkL < peakThk) pkL = peakThk;      // the snap must not push the marker out of the box
-      if (pkR < peakThk) pkR = peakThk;
-    }
+  // Peak markers. Drawn after the clears so they survive them, and before the blit.  Their geometry was
+  // resolved at the top of this function, because the incremental path needs the same numbers; this is only
+  // the drawing of it.  Each marker sits in the cleared strip just beyond its channel's high-water mark.
+  if (_vupeak()) {
     if (_rotate) {
       _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
       _fillLocal(len - pkR, thk + _bands.space, peakThk, thk, _vupeakcolor);
     } else if (_config.align) {
-      if (!*boomboxVU_ptr) {
+      if (!bb) {
         _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
         _fillLocal(cw - pkR, 0, peakThk, thk, _vupeakcolor);
       } else {
@@ -271,7 +629,7 @@ void VuWidget::_centreCross() {
   // geometry, so the existing VU Meter Peaks switch owns it - the same checkbox that owns the level peak markers.
   // The spectrum's baseline and the history strip's divider are deliberately NOT gated with it: those two are what
   // their bars and traces grow out of, so hiding them would leave the data with nothing to read it against.
-  if (!config.store.vupeak) return;
+  if (!_vupeak()) return;
   _fillLocal(0, _ch / 2, _cw, 1, _vuaxiscolor);
   _fillLocal(_cw / 2, 0, 1, _ch, _vuaxiscolor);
 }
@@ -338,9 +696,13 @@ void VuWidget::_drawHistory(){
   uint16_t nb = full / (VU_HISTORY_MIN_PX ? VU_HISTORY_MIN_PX : 1);
   if (nb < 1) nb = 1;
   if (nb > VU_HISTORY_MAX) nb = VU_HISTORY_MAX;
-  uint16_t colW = full / nb;
+  // colW rounds UP, so that full / colW can only come back at or below the cap.  Floored, 480 / 100 is 4
+  // and 480 / 4 is 120 - twenty bytes past each history array, every frame, and a panic a few hundred
+  // frames in.
+  uint16_t colW = (uint16_t)((full + nb - 1) / nb);
   if (!colW) colW = 1;
-  nb = full / colW;                          // colW was floored, so this stays inside the cap
+  nb = full / colW;
+  if (nb > VU_HISTORY_MAX) nb = VU_HISTORY_MAX;   // the clamp belongs after the second division
   if (!nb) nb = 1;
 
   // One column per VU_REFRESH_MS of WALL CLOCK, not per redraw: the duty limiter makes the redraw rate vary with what
@@ -377,7 +739,7 @@ void VuWidget::_drawHistory(){
   // The middle line, and the fill, are the two halves of the vupeak switch in this style, and they are opposites:
   // with it on you get the line and the bare traces, with it off the filled form and no line. Painting the line first
   // keeps it under the data. The line is REFERENCE GEOMETRY, so it is drawn in vuaxis.
-  if (config.store.vupeak) _fillLocal(0, lineY, full, th, _vuaxiscolor);
+  if (_vupeak()) _fillLocal(0, lineY, full, th, _vuaxiscolor);
 
   uint16_t prevYL = 0, prevYR = 0;
   bool havePrev = false;
@@ -398,7 +760,7 @@ void VuWidget::_drawHistory(){
     // run spans the previous tick to this one, which does too. Only a column with no predecessor to join to is drawn
     // as two bare ticks. The fills show in the WIDGET_DEBUG report as fills/frame, which made the redundancy worth
     // finding.
-    if (!config.store.vupeak) {
+    if (!_vupeak()) {
       const uint16_t mid = (uint16_t)(lineY + th / 2);
       const uint16_t bottom = (uint16_t)(yR + tick);
       if (mid > yL)     _fillLocal(x, yL, colW, (uint16_t)(mid - yL), colourL);
@@ -448,7 +810,7 @@ void VuWidget::_drawSpectrumReflect(){
   // The baseline is half of what the vupeak switch does here; the other half is the bar colouring below. With it on
   // you get the line and bars split into a vumin body with a vumax tip; with it off, no line and whole bars of one
   // colour. The line is REFERENCE GEOMETRY so it is drawn in vuaxis; the bars are DATA, in the trace colours.
-  if (config.store.vupeak) _fillLocal(0, lineY, full, th, _vuaxiscolor);
+  if (_vupeak()) _fillLocal(0, lineY, full, th, _vuaxiscolor);
 
   const uint16_t seg = (_bands.perheight && band) ? (uint16_t)(band / _bands.perheight) : 1;
   const uint16_t hot = (uint16_t)(seg * 3);   // the outer HOTSEG segments, as everywhere else
@@ -475,7 +837,7 @@ void VuWidget::_drawSpectrumReflect(){
       // 255 in the band scale is a full-height bar, which is one channel's whole span.
       uint16_t h = (uint16_t)(((uint32_t)bands[b] * band) / 255);
       if (!h) h = 1;
-      if (config.store.vupeak) {
+      if (_vupeak()) {
         // Annotated: the baseline is drawn, so the bar is split at the hot zone - a vumin body with the outer HOTSEG
         // segments of the axis in vumax. A bar that does not reach the hot zone has no tip, the same threshold the
         // plain rule uses, so the two agree at the boundary.
@@ -508,7 +870,7 @@ void VuWidget::_drawSpectrumMirror(){
   const uint16_t halfW = _cw / 2;
   // The height the bars grow into: above the bottom line when it is drawn, the whole box when it is not - the same
   // reservation _drawSpectrumReflect() makes at its baseline, moved to the bottom edge.
-  const uint16_t avail = (config.store.vupeak && _ch > th) ? (uint16_t)(_ch - th) : _ch;
+  const uint16_t avail = (_vupeak() && _ch > th) ? (uint16_t)(_ch - th) : _ch;
   const uint16_t axis = avail ? avail : 1;
   // The divider and the daylight around it. The blocks are placed from the DIVIDER outwards rather than centred in
   // their own halves: centring each half looks even-handed, but the line's own pixel comes out of the right half, so
@@ -516,7 +878,7 @@ void VuWidget::_drawSpectrumMirror(){
   // both sides - 1 + the line + 1, so 3 px where the line is one pixel thick and 4 px where it is two.
   const uint16_t day = 1;
   const uint16_t xd = (uint16_t)(halfW - th / 2);            // the divider's left edge
-  const uint16_t innerGap = config.store.vupeak ? day : 0;   // no line drawn, no reservation made
+  const uint16_t innerGap = _vupeak() ? day : 0;   // no line drawn, no reservation made
   const uint16_t leftRoom  = (xd > innerGap) ? (uint16_t)(xd - innerGap) : 0;
   const uint16_t rightRoom = (_cw > (uint16_t)(xd + th + innerGap)) ? (uint16_t)(_cw - xd - th - innerGap) : 0;
   // The tighter of the two, so one block width fits on both sides of the line.
@@ -529,7 +891,7 @@ void VuWidget::_drawSpectrumMirror(){
   // The two reference lines this style reads against: the bottom edge the bars grow from, and the divider the two
   // halves meet on. Painted first, so a bar overdraws them where it touches. Both are REFERENCE GEOMETRY, so they are
   // drawn in vuaxis; the bars are DATA and keep the vumin/vumax trace colours.
-  if (config.store.vupeak) {
+  if (_vupeak()) {
     if (_ch > th) _fillLocal(0, (uint16_t)(_ch - th), _cw, th, _vuaxiscolor);
     _fillLocal(xd, 0, th, _ch, _vuaxiscolor);
   }
@@ -561,7 +923,7 @@ void VuWidget::_drawSpectrumMirror(){
       const uint8_t b = mirrored ? (uint8_t)(n - 1 - col) : col;
       uint16_t h = (uint16_t)(((uint32_t)bands[b] * axis) / 255);
       if (!h) h = 1;
-      if (config.store.vupeak) {
+      if (_vupeak()) {
         // Annotated like the Spectrum: the bottom line is drawn, so each bar is a vumin body with the outer HOTSEG
         // segments of the axis in vumax.
         const uint16_t tipStart = (axis > hot) ? (uint16_t)(axis - hot) : 0;
@@ -752,7 +1114,7 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
   // Peak markers. meas is the length CLEARED from the loud end, so the loudest recent reading is the SMALLEST meas
   // seen. 0xFFFF is the "not set yet" sentinel, and the snap branch collapses it on the first call, which is why
   // _holdL/_holdR are always armed before they are read.
-  if (!config.store.vupeak) { _peakL = _peakR = 0xFFFF; return; }
+  if (!_vupeak()) { _peakL = _peakR = 0xFFFF; return; }
   // A new high snaps the marker out and re-arms the hold; the decay only starts once that hold has expired. A level
   // that merely stays put does not re-arm it, so VU_PEAK_FREEZE_MS is really "how long the marker stays parked after
   // the level starts falling". If the marker ends up behind the bar tip, the next frame's snap pulls it forward.
@@ -814,6 +1176,11 @@ void VuWidget::loop(){
   const uint32_t cost = micros() - t0;
   _drawUs = (_drawUs * 3u + cost) / 4u;              // a quarter of every new sample
 
+  // The screensaver's meter reports the split of its frame at three points: the first frame after the
+  // fade and the peak markers have settled, then twice more.  A pinned style is what marks this instance
+  // as the screensaver's - the player's box never reports.
+  if (_styleOverride != 0xFF && (_frame == 3 || _frame == 10 || _frame == 30)) _reportCost();
+
   // While the startup services are downloading, the network core holds up to three TLS sessions and the audio stream
   // is usually up, so the floor is raised and every style redraws VU_STARTUP_SERVICES_DIV times slower until they
   // finish. The flag is the work itself, not "until the boot is stable": in SD playback the services can stay parked
@@ -839,7 +1206,7 @@ void VuWidget::loop(){
     if (elapsed >= 5000) {
       const float secs = (float)elapsed / 1000.0f;
       FUNCTIONLOG("VU.Widget", "Box %ux%u, style %u: %.1f FPS, draw %.2fms avg / %.2fms peak, interval %ums, %.1f fills/frame, free heap %u",
-          (unsigned)_cw, (unsigned)_ch, (unsigned)config.store.vustyle,
+          (unsigned)_cw, (unsigned)_ch, (unsigned)_style(),
           (float)_dbgFrames / secs,
           _dbgFrames ? ((float)_dbgDrawUs / 1000.0f) / (float)_dbgFrames : 0.0f,
           (float)_dbgPeakUs / 1000.0f,
@@ -863,6 +1230,11 @@ void VuWidget::_reset(){
   // Widget::lock() and Widget::moveTo() call this. Dropping the high-water marks makes the marker restart at the bar
   // tip, and clearing _lastMs makes the next frame adopt the live level instead of fading in from a stale position.
   _peakL = _peakR = 0xFFFF;
+  // Whatever the previous frame drew is no longer where this widget is about to draw, so the incremental
+  // path starts from "repaint everything" again.  Both callers clear the area first, so the canvas really
+  // does hold only the background where the band assumes it does.
+  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
+  _prevStyle = 0xFF;
   _accL = _accR = _accPL = _accPR = 0;
   _holdL = _holdR = 0;
   _lastMs = 0;
@@ -875,6 +1247,65 @@ void VuWidget::_reset(){
     _dbgLogMs = millis();
     _fills = 0;
   #endif
+}
+
+// Forget where the incremental paths believe the panel is.  Something cleared the screen underneath us -
+// a page switch fills the panel with the background - so both the bar band and the blit rectangle have to
+// start again from "repaint everything".
+void VuWidget::_invalidate() {
+  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
+  _prevStyle = 0xFF;
+}
+
+// Send the canvas to the panel: the rectangle this frame's fills touched, or the whole box when sending
+// that rectangle in pieces would cost more than sending everything.
+//
+// A sub-rectangle cannot go out in one call, because the canvas rows are strided: its rows have to be
+// gathered into something contiguous first.  They are gathered a few at a time into a small scratch, and
+// each group is ONE address window plus ONE data stream - the shape every other multi-row write in this
+// driver uses, and the shape the full-box blit below uses.  That matters.  The first version of this sent
+// one row per writePixels(), which re-enters the driver's transaction per row and so raises CSX between
+// them; the panel came back with everything outside the band missing and the band itself mangled, which is
+// what a broken write stream looks like.  Gathering costs about a fifth of what the wire does per pixel
+// (0.2 us against 0.85, both measured - see plans/vu-framerate.md), so it is worth it whenever it saves
+// even one row of traffic.
+void VuWidget::_blit() {
+  #if defined(DSP_TFT)
+    const uint16_t dw = (_dirtyX1 > _dirtyX0) ? (uint16_t)(_dirtyX1 - _dirtyX0) : 0;
+    const uint16_t dh = (_dirtyY1 > _dirtyY0) ? (uint16_t)(_dirtyY1 - _dirtyY0) : 0;
+    if (!dw || !dh) return;                       // nothing on the canvas changed, so nothing goes out
+    const uint16_t dx = _dirtyX0, dy = _dirtyY0;
+    const uint32_t wholePx = (uint32_t)_cw * _ch;
+    const uint32_t partPx  = (uint32_t)dw * dh;
+    dsp.startWrite();
+    if ((wholePx - partPx) <= (uint32_t)dh * 8u) {
+      // What the rectangle would save is worth less than the window calls it would take: send the lot.
+      dsp.setAddrWindow(_config.left, _config.top, _cw, _ch);
+      dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
+    } else {
+      // Tiles of at most kBlitScratchPx pixels, in whole columns and rows, so cols * rows can never
+      // exceed the scratch for any dw or dh.  Sizing the groups from dw alone did: a band wider than
+      // 256 px wrote up to 288 bytes past this array on a 480 px box and smashed the display task's stack.
+      constexpr uint16_t kBlitScratchPx = 256;
+      uint16_t scratch[kBlitScratchPx];
+      const uint16_t cols = (dw > kBlitScratchPx) ? kBlitScratchPx : dw;
+      const uint16_t rows = kBlitScratchPx / cols;      // >= 1, because cols <= kBlitScratchPx
+      for (uint16_t x = 0; x < dw; x = (uint16_t)(x + cols)) {
+        const uint16_t tw = (uint16_t)(((uint16_t)(dw - x) < cols) ? (uint16_t)(dw - x) : cols);
+        for (uint16_t y = 0; y < dh; y = (uint16_t)(y + rows)) {
+          const uint16_t n = (uint16_t)(((uint16_t)(dh - y) < rows) ? (uint16_t)(dh - y) : rows);
+          uint16_t* p = scratch;
+          for (uint16_t r = 0; r < n; r++, p += tw)
+            memcpy(p, _canvasBuf + (uint32_t)(dy + y + r) * _cw + dx + x, (size_t)tw * sizeof(uint16_t));
+          dsp.setAddrWindow((int16_t)(_config.left + dx + x), (int16_t)(_config.top + dy + y),
+                            (int16_t)tw, (int16_t)n);
+          dsp.writePixels(scratch, (uint32_t)tw * n);
+        }
+      }
+    }
+    dsp.endWrite();
+  #endif
+  // An OLED panel owns its buffer and DspCore::loop() flushes it, so there is nothing to send here.
 }
 
 #endif // #if DSP_MODEL!=DSP_DUMMY

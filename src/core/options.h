@@ -1515,6 +1515,18 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SS_FULL_DATETIME
   #define SS_FULL_DATETIME false
 #endif
+#ifndef SS_TEXT
+  #define SS_TEXT false
+#endif
+#ifndef SS_VU
+  #define SS_VU false
+#endif
+#ifndef SS_VU_STYLE
+  #define SS_VU_STYLE VU_STYLE_DEFAULT // numeric 0-index
+#endif
+#ifndef SS_VUPEAK
+  #define SS_VUPEAK SHOW_VU_PEAK // numeric 0-index
+#endif
 #ifndef DIMMING_ENABLED
     #define DIMMING_ENABLED false
 #endif  

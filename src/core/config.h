@@ -88,6 +88,7 @@ struct theme_t {
   uint16_t secondsbgss;
   uint16_t dowss;
   uint16_t datess;
+  uint16_t textss;
   uint16_t buffer;
   uint16_t ip;
   uint16_t vol;
@@ -159,6 +160,10 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      screensaverPlayingBlank = SS_PLAYING_BLANK;
   uint16_t  screensaverPlayingTimeout = SS_PLAYING_TIME;
   bool      screensaverFullDateTime = SS_FULL_DATETIME;
+  bool      screensaverText = SS_TEXT;
+  bool      screensaverVU = SS_VU;
+  uint8_t   screensaverVUStyle = SS_VU_STYLE;
+  bool      screensaverVUpeak = SS_VUPEAK;
 
   // Locale
   char      locale_webui[6] = WEBUI_LOCALE;

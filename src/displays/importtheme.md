@@ -82,10 +82,11 @@ py importtheme.py mytheme.h --name "My Theme"
 | `COLOR_PL_CURRENT_FILL` | `.plcurrentfill` |
 | `COLOR_PLAYLIST_0..4` | `.playlist[0..4]` |
 
-Two fields in `ThemeData` have **no** old-format counterpart, so no `COLOR_*` maps to them: `.line`
-(sits between `.div` and `.weather`) and `.vuaxis` (between `.weather` and `.vupeak`). Both are derived
-by rule from `.div` - see below. They still occupy their place in `FIELD_ORDER`, because the emitted
-entries are designated initialisers and have to follow the struct's own order.
+Three fields in `ThemeData` have **no** old-format counterpart, so no `COLOR_*` maps to them: `.line`
+(sits between `.div` and `.weather`), `.vuaxis` (between `.weather` and `.vupeak`) and `.textss`
+(between `.datess` and `.buffer`). All three are derived by rule - the first two from `.div`, the third
+from `.clockss`, see below. They still occupy their place in `FIELD_ORDER`, because the emitted entries
+are designated initialisers and have to follow the struct's own order.
 
 ## Smart fallbacks
 
@@ -102,8 +103,8 @@ on the generated line, so the values that need a human eye are easy to spot.
 
 ## Screensaver colors — COMPUTED, CHECK MANUALLY!
 
-The old yoRadio format did **not** have separate screensaver clock colors. ehRadio
-added five new fields for the screensaver clock display:
+The old yoRadio format did **not** have separate screensaver colors. ehRadio
+added six fields for the screensaver display:
 
 ```c
 .clockss       // Screensaver clock digits
@@ -111,6 +112,7 @@ added five new fields for the screensaver clock display:
 .secondsss     // Screensaver seconds
 .dowss         // Screensaver day-of-week
 .datess        // Screensaver date
+.textss        // Screensaver info line (station, titles, weather)
 ```
 
 If the old theme file has `COLOR_CLOCK_SS` etc., those values are used directly.
@@ -124,6 +126,10 @@ If the old theme file has `COLOR_CLOCK_SS` etc., those values are used directly.
 | `.dowss` | `.dow` | 50% |
 | `.datess` | `.date` | 50% |
 | `.clockbg` | `.clock` | 15% |
+
+`.textss` is deliberately **not** in that table. It is a rule rather than a computed guess - the
+screensaver's info line is the same ink as the screensaver clock, so it is `.clockss` verbatim, which
+is why it is listed under the derived rules below and carries no `// needs fixing?` marker.
 
 **These computed values are a starting point — they should be reviewed and
 tweaked by hand.** The screensaver runs on a black background and often benefits
@@ -139,16 +145,17 @@ Example of hand-adjusted screensaver colors in a theme entry:
 .datess        = RGB(255, 255, 255),
 ```
 
-## Line and VU axis — DERIVED, NO REVIEW NEEDED
+## Line, VU axis and info line — DERIVED, NO REVIEW NEEDED
 
-Two palette entries were added to ehRadio after the old theme format was defined, so no old theme file
-can carry them. Both derive from `.div`, which every theme file sets - which makes them rules rather
-than guesses:
+Three palette entries were added to ehRadio after the old theme format was defined, so no old theme file
+can carry them. `.line` and `.vuaxis` derive from `.div`, which every theme file sets, and `.textss`
+from `.clockss` - which makes them rules rather than guesses:
 
 | Field | Derived from | Multiplier | Consumed by |
 |---|---|---|---|
 | `.line` | `.div` | 100% (the divider verbatim) | the under and over line widgets (`underLineConf` / `overLineConf` in the layout) |
 | `.vuaxis` | `.div` | 25% | every reference line the VU draws: the centre cross, the bar baseline, the histogram line and the Spectrum divider |
+| `.textss` | `.clockss` | 100% (verbatim) | the scrolling info line the screensaver draws when `screensavertext` is on |
 
 `.vuaxis` is deliberately a quarter of the divider and **not** a copy of `.clockbg`. The axis is a
 reference line that has to read against the theme's own background, and `.clockbg` is a background

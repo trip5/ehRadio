@@ -199,10 +199,34 @@
               <input type="number" id="scrpt" data-command="screensaverplayingtimeout" value="" maxlength="3" min="1" max="1080" />
             </div>
           </div>
+          <div class="flex-row">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_screensaver_text">Info on Screensaver</span>
+              <div class="checkbox ssoption" id="scrtext" data-command="screensavertext"><div class="knob"></div></div>
+            </div>
+            <div class="inputwrap center group_vu_ss hidden">
+              <span class="inputtitle" data-i18n="lbl_vu_screensaver">VU Screensaver</span>
+              <div class="checkbox ssoption" id="scrvu" data-command="screensavervu"><div class="knob"></div></div>
+            </div>
+          </div>
           <div class="flex-row group_full_time hidden">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_full_time_screensaver">Full Time</span>
               <div class="checkbox ssoption" id="scrfull" data-command="screensaverfull"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row group_vu_ss_style hidden">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_vu_peaks_axis">VU Meter Peaks / Axis</span>
+              <div class="checkbox ssoption" id="scrpeak" data-command="screensavervupeak"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row group_vu_ss_style hidden">
+            <div class="inputwrap center centerpad">
+              <span class="inputtitle" data-i18n="lbl_vu_style">VU Style</span>
+              <select type="text" id="scrstyle" name="scrstyle">
+                <option value="">Styles Load Here</option>
+              </select>
             </div>
           </div>
         </section>

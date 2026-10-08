@@ -563,8 +563,11 @@ void NetServer::processQueue() {
             if (DSP_MODEL != DSP_DUMMY || DBGWUI)
                                                                 act += F("\"group_display\",");
             #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
+                                                                act += F("\"group_vu_ss\",");
               if (vuConf_ptr->textsize > 0 || DBGWUI)           act += F("\"group_vu\",");
                                                            else act += F("\"hide_group_vu\",");
+              if (config.store.screensaverVU || DBGWUI)         act += F("\"group_vu_ss_style\",");
+                                                           else act += F("\"hide_group_vu_ss_style\",");
             #endif
             if (bufferbarConf_ptr->height > 0 || DBGWUI)        act += F("\"group_buffer\",");
                                                            else act += F("\"hide_group_buffer\",");
@@ -577,7 +580,8 @@ void NetServer::processQueue() {
             #if defined(DSP_TFT) || DBGWUI
               if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");
             #endif
-            if (activeLayout.fullClock || DBGWUI)               act += F("\"group_full_time\",");
+            if ((activeLayout.fullClock && !config.store.screensaverVU) || DBGWUI)
+                                                                act += F("\"group_full_time\",");
                                                            else act += F("\"hide_group_full_time\",");
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");
@@ -621,7 +625,7 @@ void NetServer::processQueue() {
                                   config.store.irtlp,
                                   VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"scrtext\":%d,\"scrvu\":%d,\"scrstyle\":%d,\"scrpeak\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -634,6 +638,10 @@ void NetServer::processQueue() {
                                   config.store.screensaverPlayingBlank,
                                   config.store.screensaverPlayingTimeout,
                                   config.store.screensaverFullDateTime,
+                                  config.store.screensaverText,
+                                  config.store.screensaverVU,
+                                  config.store.screensaverVUStyle,
+                                  config.store.screensaverVUpeak,
                                   config.store.bufferbar,
                                   config.store.vumeter,
                                   config.store.vupeak,

@@ -69,7 +69,9 @@ Order and sections match that file.
 The layout, theme and font commands all take an **index, 0-based**: the lists are built in table order,
 so the first layout is `layout=0`. A value past the end of a list is clamped to its **last** entry, the
 same four ways - the two font commands clamp to the number of fonts that build actually has, not to a
-fixed number.
+fixed number. `vustyle` and `screensavervustyle` take the ids `/visuals.json` publishes, and they are
+deliberately **two independent settings**: the box on the player page and a meter covering the whole
+panel are different pictures, so nothing keeps them in step.
 
 | Command(s) | Action |
 | --- | --- |
@@ -87,7 +89,7 @@ fixed number.
 | `bufferbar` | Enable/disable the buffer bar on the display. |
 | `vumeter` | Enable/disable VU meter and refresh display state. |
 | `vupeaks` | Enable/disable the VU meter peak markers (or XY axis lines). |
-| `vustyle` | Select the VU meter visualisation style (the id is numeric, clamped to the known range). |
+| `vustyle` | Select the VU meter visualisation style (numeric, 0-based, clamped to the known range). |
 | `brightness`, `dim` | Set brightness (0..100), ensure screen-on state, clamp dimmed brightness if needed, and apply brightness. |
 | `dimmingenabled` | Enable/disable idle dimming behavior. |
 | `dimmingbrightness` | Set dimmed brightness (0..100, clamped to the current brightness setting). |
@@ -100,6 +102,10 @@ fixed number.
 | `screensaverplayingblank` | Enable/disable playing screensaver blanking behavior. |
 | `screensaverplayingtimeout` | Set playing screensaver timeout in minutes (1..1080). |
 | `screensaverfull` | Enable/disable full time on the screensaver. |
+| `screensavertext` | Show/hide the screensaver's info line: station name, 2 title lines, and weather (if enabled). |
+| `screensavervu` | Draw the VU full screen as the screensaver instead of the moving clock. |
+| `screensavervustyle` | Select the style that full-screen meter draws (numeric, 0-based, clamped to the known range, same as `vustyle`). |
+| `screensavervupeak` | Show/hide the peak markers and the axis or reference lines on that full-screen meter (independent of `vupeaks`). |
 
 ## Options: Locale
 

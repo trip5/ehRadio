@@ -10,8 +10,12 @@ work from one master.
 
 - the **field order** (the compiler demands it anyway: these are designated initialisers),
 - each field's **type**, which decides what an empty value looks like (`{ }`, or `false`),
-- the **section headers** (`/* SCROLLS ... */`, `/* SLIDER BARS ... */`, `/* LINES + RECTANGLES ... */`, `/* WIDGETS ... */`,
-  `/* CODEC BADGE ... */`, `/* VU BANDS ... */`, `/* MOVES ... */`, `/* TRANSFORMS ... */`),
+- the **section headers**, one set per struct. `BootData` has `/* SCROLLS ... */`,
+  `/* LINES + RECTANGLES ... */`, `/* WIDGETS ... */` and `/* BOOT PROGRESS ... */`; `LayoutData` has
+  `/* SCROLLS ... */`, `/* SLIDER BARS ... */`, `/* LINES + RECTANGLES ... */`, `/* WIDGETS ... */`,
+  `/* NUMBERS FONT ... */`, `/* VU BARS WIDGET ... */`, `/* CODEC BADGE ... */`, `/* VU BANDS ... */`,
+  `/* MOVES ... */` and `/* TRANSFORMS ... */`. A label both structs use is not a conflict: each block
+  is read and written on its own,
 - the **per-field comments** (for example `// VU rotated 90 degrees`).
 
 The tool keeps no list of its own, so a field added to the master appears in every conf the next
@@ -71,11 +75,19 @@ Every comment is preserved:
 - a note above a field stays with the field below it, and a note that ends a group with a blank
   line stays with the field above it.
 
-**`--comments=master`** brings the trailing comments into step with the master, the way the section
-headers already are. It re-texts a comment only when the master and the conf **both** carry one, so
-a sentence that drifted is corrected. It never adds a comment to a field that has none: a bare field
-is often deliberate, and writing the master's note beside a value the confs never had is
-`--import`'s job, not this one. A comment only the confs have is left alone.
+Three values, and the default is `keep`:
+
+| value | what it does |
+|---|---|
+| `keep` | the conf's own text, always. Nothing is added. |
+| `fill` | as `keep`, plus the master's comment on a field the conf has none for, so a conf that never documented a field comes to match the master |
+| `master` | `fill`, plus the master's wording where the conf already carried a comment, so a sentence that drifted is corrected |
+
+Only a field the **master itself comments** can be affected, and today that is the seven `TRANSFORMS`
+booleans at the end of `struct LayoutData`. Every other field carries a section header and no
+per-field comment, so there is nothing for `fill` or `master` to apply - which is why `keep` is the
+default: the two other modes are a correction tool for drifted sentences, not a mass documentation
+pass. A comment only the confs have is left alone either way.
 
 Every change is named in the run report before anything is installed:
 
@@ -87,8 +99,9 @@ displayOLED128x64conf.h
 ```
 
 Read those lines in `--dry-run` first. If a conf's own wording is worth keeping even so, put a
-marker in it — see **What it refuses to do**. The default, `keep`, consults the master's comments
-only for a field the conf does not have at all.
+marker in it — see **What it refuses to do**. `--comments` applies to `--clean` only: `--import`
+already writes the master's comments for the fields it fills in, so passing the switch there is
+refused, and an unknown value dies listing the three valid ones.
 
 ### 5. MOVEs: the retired `width = -1`
 

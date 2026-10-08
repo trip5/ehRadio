@@ -123,7 +123,7 @@ TRUE_DEFINES = {
 MANDATORY_LAYOUT_FIELDS = ('metaConf', 'playlistConf')
 
 # Header labels seen in the wild that mean the same master group.
-HEADER_ALIASES = {'BANDS': 'VU BANDS', 'CODEC BADGE': 'CODEC BADGE'}
+HEADER_ALIASES = {'BANDS': 'VU BANDS', 'CODEC BADGE': 'CODEC BADGE', 'NUMBERS': 'NUMBERS FONT'}
 
 # --comments: how a trailing comment is chosen for a field the conf already has.
 #   keep   - the conf's own text, always, and nothing is ever added.  The default.

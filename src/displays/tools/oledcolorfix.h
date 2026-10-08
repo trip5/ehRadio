@@ -33,6 +33,7 @@
   config.theme.secondsbgss = TFT_BG;
   config.theme.dowss      = TFT_FG;
   config.theme.datess     = TFT_FG;
+  config.theme.textss     = TFT_FG;
   config.theme.buffer     = TFT_FG;
   config.theme.ip         = TFT_FG;
   config.theme.vol        = TFT_FG;

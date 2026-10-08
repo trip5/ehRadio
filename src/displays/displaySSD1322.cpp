@@ -40,6 +40,7 @@ void DspCore::initDisplay() {
     config.theme.secondsbgss = GRAY_1;
     config.theme.dowss      = GRAY_7;
     config.theme.datess     = GRAY_7;
+    config.theme.textss     = TFT_FG;
     config.theme.buffer     = TFT_FG;
     config.theme.ip         = GRAY_2;
     config.theme.vol        = TFT_FG;

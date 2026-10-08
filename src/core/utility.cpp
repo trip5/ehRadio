@@ -434,6 +434,15 @@ void Utility::initPlaylist() {
   } else {
     FUNCTIONLOG("Playlist", "initPlaylist: index exists, no action needed");
   }
+  // Both files, every boot: the pair is what says whether the device and the playlist agree, and an index
+  // that does not belong to the CSV is a device reporting no stations while the file lists them.
+  size_t csvSize = 0, idxSize = 0;
+  File csv = LittleFS.open(PLAYLIST_PATH, "r");
+  if (csv) { csvSize = csv.size(); csv.close(); }
+  File idx = LittleFS.open(INDEX_PATH, "r");
+  if (idx) { idxSize = idx.size(); idx.close(); }
+  FUNCTIONLOG("Playlist", "initPlaylist: %u bytes of playlist.csv, %u index entries (%u bytes)",
+              (unsigned)csvSize, (unsigned)(idxSize / 4), (unsigned)idxSize);
 }
 
 bool Utility::cleanPlaylist() {

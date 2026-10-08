@@ -110,9 +110,8 @@ void ticks() {
       timeSyncTicks=0;
       network.forceTimeSync = true;
     }
-    // Weather sync interval: config value is in minutes, convert to seconds
     uint16_t weatherSyncInterval = (uint16_t)config.store.weathersyncinterval * 60;
-    if (weatherSyncTicks >= weatherSyncInterval) {
+    if (config.store.showweather && weatherSyncTicks >= weatherSyncInterval) {
       weatherSyncTicks=0;
       network.forceWeather = true;
     }

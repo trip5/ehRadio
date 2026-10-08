@@ -911,6 +911,34 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/core/display.h` / `display.cpp`
 - `display.h` declares Display class and display mode/change API.
+- The screensaver's two extra widgets are `Display::_ssvu` and `Display::_sstext` - the only widgets no layout
+  provides. `_screensaverWidgets()` brings them up on **every** entry into `SCREENSAVER`, not once at boot,
+  because the meter's segmentation comes from the active layout's `bandsConf` and the info line's size from
+  `metaConf`, and the WebUI stays reachable while the device is asleep. While the meter is up the clock is
+  `lock()`ed (both `ClockWidget::draw()` and `_draw()` bail on `_locked`), so `_time()` also skips its random
+  walk. `_ssContentH()` is the panel less the line's strip - one text row plus 1% of the panel height, rounded
+  up, above and below it - and that figure is the floor the walking clock is clamped to. `_sstext` is created
+  and re-init'd with the `"*"` separator, so its wrap-around joiner reads `" * "` like `_screensaverLine()`'s own
+  joins; the separator is per widget (built as `" %c "` in `ScrollWidget::init()`), and the weather widget is the
+  one that keeps `"~"`, matching the `" ~ "` inside the weather string. See
+  `plans/screensaver-panel-ownership.md`.
+- **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
+  `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
+  both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
+  return) and from `_layoutChange()` via `SHOWVUMETER`. The weather widget belongs to the player page alone and
+  must never be drawn over the screensaver - `_screensaverLine()` is what carries it there. That method is
+  guarded on `_ssStripH()` first and on the lock second, because a *refused* strip is locked rather than inactive
+  and `ScrollWidget::setText()` paints on `_active` alone - so a new metadata string (`NEWTITLE` -> `_title()`) or
+  a weather refresh would otherwise paint the line the strip was refused for, leaving the content area sized as if
+  the strip were gone. The clock's answer while asleep is the recorded `Display::_ssMeterUp`, set by
+  `_screensaverWidgets()` on the one path that locks the clock for the meter, so the two cannot disagree; a
+  derived predicate was rejected because the canvas-allocation failure path - where the clock is what the
+  screensaver shows - is precisely the case a derived answer gets wrong.
+- `SHOWWEATHER` and `NEWWEATHER` recompose the screensaver rather than the player page while
+  `config.isScreensaver`: `SHOWWEATHER` queues `SSREBUILD` only when the strip's existence changes with the
+  flag (otherwise it refreshes only the line, so a toggle costs no panel clear), and `NEWWEATHER` rebuilds when
+  there is no strip yet but `_ssStripH()` has become true - nothing playing and no weather cached at entry,
+  where only a rebuild can create the widget - and otherwise updates the line as before.
 - Render queue + display task + widget/page orchestration.
 - **Theme/layout/invert runtime switching** — major refactor:
   - `_applyState()` — central state function: loads layout from PROGMEM, loads theme from PROGMEM (TFT only), applies
@@ -1073,6 +1101,31 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
+- The three screensaver-composition commands (`screensavertext`, `screensavervu`, `screensavervustyle`) are the
+  only members of the screensaver family that also ask for `GETACTIVE` again, because they change which rows
+  the Screen section shows. `GETACTIVE` sends `group_vu_ss` unconditionally inside the VU `#if` (the VU
+  Screensaver checkbox, which needs no VU box in the layout), `group_vu_ss_style` only while `screensaverVU`
+  is on (the style picker *and* the meter's own peaks/axis switch, which share the group because both belong
+  to the screensaver's meter), and withdraws `group_full_time` while it is on; `group_vu` keeps its own
+  meaning, "the active layout has a VU box". `GETSCREEN` carries `scrtext`, `scrvu`, `scrstyle` and
+  `scrpeak`.
+- `screensavervupeak` is deliberately not `vupeaks`: `screensaverVUpeak` is a store of its own, and the
+  widget reads it through `VuWidget::_vupeak()` whenever the instance is the pinned one - the same split
+  `_style()` makes for `screensaverVUStyle` against `vustyle`. It owns the peak markers and every axis or
+  reference line in every style, which is why the label is "VU Meter Peaks / Axis" on both rows.
+- A screensaver setting is applied where it is visible. Every `screensaver*` command shares one helper that,
+  while the device is already in `SCREENSAVER` or `SCREENBLANK`, queues an `SSREBUILD` carrying the mode the
+  blank switches now describe - the same choice [`network.cpp`](../src/core/network.cpp) makes when the
+  countdown fires - instead of waking the device to the player. `SSREBUILD` calls
+  `Display::_enterScreensaver()` directly rather than going through `_switchMode()`, which cannot serve it:
+  the first guard on that function's fifth line drops a request for the mode the device is already in, and the
+  second drops any request while the network is transient, and either one leaves the old picture running.
+  `_enterScreensaver()` holds what `_switchMode()`'s screensaver branch used to do, including lighting the
+  panel again so a rebuild out of `SCREENBLANK` shows the picture rather than a dark screen. The two enable
+  switches (`screensaverenabled`, `screensaverplayingenabled`) still return to the player, because with the
+  governing one off the screensaver should not be up at all - and that exit is the route that resets
+  `screensaverTicks`/`screensaverPlayingTicks`. The cost is the panel clear a rebuild goes through, one full
+  blit of black before the rebuilt picture; that clear is what owns the whole panel when a box shrinks.
 - Central command router for WS, URL params, MQTT, and telnet fallback paths.
 - Main responsibilities:
   - map `key=value` commands into config/player/display/network actions

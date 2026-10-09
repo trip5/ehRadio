@@ -205,16 +205,23 @@ def ask_yesno(question: str, default_yes: bool = True):
 # Glyph normalisation
 # ---------------------------------------------------------------------------
 
-def normalise_height(rows: list, strategy: str, yoffs: int) -> list:
+def normalise_height(rows: list, strategy: str, yoffs: int, descent: int) -> list:
     """
     Normalise glyph rows to TARGET_H (8) using the font-level strategy
     and the glyph's BBX yoffs for correct vertical positioning.
 
-    BBX yoffs = distance from baseline (Y=0) to the bottom of the bitmap.
-    In our 8-row cell: baseline = just below row 7, so:
-      - bottom padding = yoffs rows (row 7 - yoffs + 1 through row 7)
+    BBX yoffs = distance from the baseline (Y=0) to the bottom of the bitmap,
+    positive upwards.  The font's box is (FONT_ASCENT + FONT_DESCENT) rows and
+    is dropped onto the top of the 8-row cell, so the baseline ends up `descent`
+    rows above the cell bottom and a glyph's bottom sits (yoffs + descent) rows
+    above it:
+      - bottom padding = yoffs + descent rows
       - glyph rows in the middle
       - top padding = remainder
+
+    That is the whole vertical rule, and it is what makes a font that declares a
+    descent (the usual "7 above, 1 below") line up with one that declares none
+    (ascent 8 / descent 0) instead of sitting one row low.
 
     Font-level cutting is applied first (same for all glyphs), then yoffs
     positions each glyph individually within the cell.
@@ -234,10 +241,12 @@ def normalise_height(rows: list, strategy: str, yoffs: int) -> list:
         result = result[:-2]      # discard 2 bottom rows
     # 'none', 'pad-bottom', 'pad-both' — no cutting
 
-    # 2. Position using yoffs (distance from baseline to glyph bottom).
-    #    Positive yoffs = space between glyph bottom and baseline.
-    #    Negative yoffs = descender (clipped — yOffset=-8 has no below-baseline room).
-    bottom_pad = max(0, yoffs)
+    # 2. Position using yoffs (distance from the baseline to the glyph bottom)
+    #    and the font's own descent.  The baseline sits `descent` rows above the
+    #    cell bottom, so the glyph bottom is (yoffs + descent) rows above it.
+    #    A negative result means a descender deeper than the font's descent band;
+    #    the truncation below clips it against the cell floor.
+    bottom_pad = yoffs + descent
     top_pad = TARGET_H - len(result) - bottom_pad
     if top_pad < 0:
         # Glyph + baseline space won't fit — clip glyph from bottom
@@ -460,7 +469,8 @@ NULL_GLYPH_DESC = (0, 0, 0, 0, 0, 0)
 
 
 def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
-                    h_strategy: str, w_strategy: str, orig_w: int, orig_h: int):
+                    h_strategy: str, w_strategy: str, orig_w: int, orig_h: int,
+                    descent: int):
     """Generate the complete GFXfont .h file."""
     prefix = re.sub(r'[^a-zA-Z0-9]', '_', font_name)
     if not prefix[0].isalpha():
@@ -475,6 +485,7 @@ def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
     lines.append(f'// Font: {font_name}')
     lines.append(f'// Original BBX: {orig_w}×{orig_h}  →  normalised to {TARGET_W}×{TARGET_H}')
     lines.append(f'// Height strategy: {h_strategy},  Width strategy: {w_strategy}')
+    lines.append(f'// Baseline: ascent+descent box dropped on the cell top (descent={descent})')
     lines.append(f'// Range: 0x{first_cp:04X}-0x{last_cp:04X}  ({range_size} slots)')
     lines.append(f'// yAdvance: {Y_ADVANCE},  yOffset: -{TARGET_H} (glcdfont-style)')
     lines.append('')
@@ -491,7 +502,7 @@ def generate_header(glyphs_dict, first_cp, last_cp, font_name: str,
             glyph_descriptors.append((0, 0, 0, g.advance, 0, 0))
         else:
             # Normalise height: font-level strategy + per-glyph yoffs positioning
-            norm_rows = normalise_height(g.rows, h_strategy, g.yoffs)
+            norm_rows = normalise_height(g.rows, h_strategy, g.yoffs, descent)
             # Normalise width
             norm_rows = normalise_width_columns(norm_rows, g.width, w_strategy)
 
@@ -644,19 +655,32 @@ def main():
     # Determine codepoint range
     # ------------------------------------------------------------------
     if len(sys.argv) >= 4:
-        first_cp = int(sys.argv[2], 16) if sys.argv[2].startswith('0x') else int(sys.argv[2])
-        last_cp = int(sys.argv[3], 16) if sys.argv[3].startswith('0x') else int(sys.argv[3])
-        first_cp = max(first_cp, min(non_empty))
-        last_cp = min(last_cp, max(non_empty))
+        req_first = int(sys.argv[2], 16) if sys.argv[2].startswith('0x') else int(sys.argv[2])
+        req_last = int(sys.argv[3], 16) if sys.argv[3].startswith('0x') else int(sys.argv[3])
     else:
-        first_cp = min(non_empty)
-        last_cp = max(non_empty)
+        req_first = min(non_empty)
+        req_last = max(non_empty)
+
+    # The requested window, pulled in to the slots that actually hold a glyph.  A
+    # leading blank slot is not merely wasted flash: the renderer reads the cell
+    # advance for a space from the first glyph, so an empty slot 0 makes every space
+    # zero-width.  (An empty-but-present glyph keeps its advance; a missing codepoint
+    # is emitted as an all-zero descriptor.)
+    in_range = [cp for cp in non_empty if req_first <= cp <= req_last]
+    if not in_range:
+        print(f'ERROR: no glyphs in range 0x{req_first:04X}-0x{req_last:04X}.', file=sys.stderr)
+        sys.exit(1)
+    first_cp, last_cp = in_range[0], in_range[-1]
+    dropped_start = first_cp - req_first
+    dropped_end = req_last - last_cp
 
     range_size = last_cp - first_cp + 1
     est_flash = range_size * 6
 
     print(f'Font name: {font_name}', file=sys.stderr)
     print(f'Range: 0x{first_cp:04X} — 0x{last_cp:04X} ({range_size} slots)', file=sys.stderr)
+    print(f'Dropped empty slots: {dropped_start} from beginning / {dropped_end} from end.',
+          file=sys.stderr)
     print(f'Estimated glyph table: {est_flash} bytes ({est_flash/1024:.1f} KB)', file=sys.stderr)
 
     if est_flash > 80000:
@@ -709,7 +733,7 @@ def main():
     # Generate output
     # ------------------------------------------------------------------
     output = generate_header(glyphs_dict, first_cp, last_cp, font_name,
-                             h_strategy, w_strategy, max_w, font_height)
+                             h_strategy, w_strategy, max_w, font_height, descent)
 
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:

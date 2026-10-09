@@ -148,29 +148,40 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
   if (b.height < 1) b.height = 1;
   WidgetConfig wc;
   wc.left = box.left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
+  // Black, never config.theme.background: the screensaver paints its own picture and its background is always
+  // black - the clock and the info line do the same while isScreensaver.  The four VU colours stay the live
+  // theme's, which is what makes the meter look like the theme's; only what it erases to is black.
   init(wc, b, config.theme.vumax, config.theme.vumin, config.theme.vupeak,
-       config.theme.background, config.theme.vuaxis);
+       0, config.theme.vuaxis);
   return ready();
 }
 
 // The screensaver's box for a style.  Three rules, and each one only engages where the area can afford it:
 //
-//   bars       the two channels are rows - a 35% bar, a 10% gap between them, and the outer 10% above and
-//              below left as placement rather than painted rows - so the box is 2 * bar + gap and it is
-//              centred.  A box over the budget scales the bar and the gap together, which keeps the 10:35
-//              shape and buys bigger bars than trimming the bar alone would.
+//   bars       the two channels are rows - VU_BAR_PERCENT each, VU_BAR_GAP_PERCENT between them, and the
+//              remainder above and below left as placement rather than painted rows - so the box is
+//              2 * bar + gap and it is centred.  A box over the budget scales the bar and the gap
+//              together, which keeps the shape and buys bigger bars than trimming the bar alone would.
 //   Lissajous  a square, because the figure is an X-Y plot and reads wrong in a rectangle.  Its budget is
 //              VU_MAX_HEIGHT squared, deliberately smaller than the rectangle's.
 //   the rest   the budget rectangle, VU_MAX_WIDTH x VU_MAX_HEIGHT at most, centred.
 //
 // Below the budget the area comes back untouched, which is what keeps a small panel and an OLED as they were.
+
+// The bar family's shape, as percentages of the content height - Bars (VU_STYLE_BARS) and Digital LED
+// (VU_STYLE_DIGITAL_LED) are one painter over one box.  Each channel takes VU_BAR_PERCENT and the gap
+// between them VU_BAR_GAP_PERCENT; the remainder is placement, split evenly above and below by the
+// centring.  The shipped shape is 25 + 20 + 10 + 20 + 25.
+#define VU_BAR_PERCENT      20
+#define VU_BAR_GAP_PERCENT  10
+
 VuBox VuWidget::resolveScreensaverBox(uint16_t areaW, uint16_t areaH, uint8_t style) {
   VuBox box;
   if (!areaW || !areaH) return box;
   const uint32_t budget = (uint32_t)VU_MAX_WIDTH * VU_MAX_HEIGHT;
   if (style == VU_STYLE_BARS || style == VU_STYLE_DIGITAL_LED) {
-    uint16_t gap = (uint16_t)(areaH * 10u / 100u);
-    uint16_t bar = (uint16_t)(areaH * 35u / 100u);
+    uint16_t gap = (uint16_t)(areaH * VU_BAR_GAP_PERCENT / 100u);
+    uint16_t bar = (uint16_t)(areaH * VU_BAR_PERCENT / 100u);
     if (!gap) gap = 1;
     uint32_t h = (uint32_t)2 * bar + gap;
     const uint32_t hmax = budget / areaW;

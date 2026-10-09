@@ -580,8 +580,7 @@ void NetServer::processQueue() {
             #if defined(DSP_TFT) || DBGWUI
               if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");
             #endif
-            if ((activeLayout.fullClock && !config.store.screensaverVU) || DBGWUI)
-                                                                act += F("\"group_full_time\",");
+            if (activeLayout.fullClock || DBGWUI)               act += F("\"group_full_time\",");
                                                            else act += F("\"hide_group_full_time\",");
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");

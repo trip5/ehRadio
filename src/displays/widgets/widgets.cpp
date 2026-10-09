@@ -191,8 +191,24 @@ void TextWidget::_draw() {
 /************************
       SCROLL WIDGET
  ************************/
-ScrollWidget::ScrollWidget(const char* separator, ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
-  init(separator, conf, fgcolor, bgcolor);
+
+// The mark a looping line prints between its tail and its head, and what the screensaver's info line joins its own parts with.
+#define SCROLL_MARK_TEXT "\xC2\xB7" // « U+00B7 "Bullet" in UTF-8: a bare 0xB7 byte is dropped as a stray continuation
+#define SCROLL_MARK_ICON "\007\010" // Maple Icon (Happy Canada Day!)
+// A function-local static because there is one mark shape at a time and the mark is consumed immediately either way- copied by the widget, concatenated by the screensaver line.
+const char* scrollMark() {
+  static char mark[6];
+  #ifdef EVERYDAY_IS_CANADA_DAY
+    const bool canadaDay = true;
+  #else
+    const bool canadaDay = (network.timeinfo.tm_mon == 6 && network.timeinfo.tm_mday == 1); // July is 6, 0-based
+  #endif
+  snprintf(mark, sizeof(mark), " %s ", canadaDay ? SCROLL_MARK_ICON : SCROLL_MARK_TEXT);
+  return mark;
+}
+
+ScrollWidget::ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
+  init(conf, fgcolor, bgcolor);
 }
 
 ScrollWidget::~ScrollWidget() {
@@ -201,24 +217,15 @@ ScrollWidget::~ScrollWidget() {
   if (_window) { free(_window);  _window = nullptr; }
 }
 
-void ScrollWidget::init(const char* separator, ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
+void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
   TextWidget::init(conf.widget, conf.buffsize, conf.uppercase, fgcolor, bgcolor);
-  if (_sep)    { free(_sep);    _sep = nullptr; }
   if (_window) { free(_window); _window = nullptr; }
-  _sep = (char *) malloc(sizeof(char) * 4);
-  memset(_sep, 0, 4);
-  snprintf(_sep, 4, " %.*s ", 1, separator);
-  // Resolved for the same reason as _text: _sepwidth is strlen-based, so a
-  // multi-byte separator would otherwise be measured in bytes and drawn in
-  // codepoints.  This also sanitises the "%.*s" above, which cuts on a byte and
-  // can leave a broken lead byte when the separator is not ASCII.
-  preTextString(_sep, displayFont());
   _x = conf.widget.left;
   _startscrolldelay = conf.startscrolldelay;
   _scrolldelta = conf.scrolldelta;
   _scrolltime = conf.scrolltime;
   _charSize(_config.textsize, _charWidth, _textheight);
-  _sepwidth = strlen(_sep) * _charWidth;
+  _setMark(scrollMark());     // after _charSize: _sepwidth is measured with _charWidth
   _width = conf.width;
   if (_width > (uint16_t)MAX_WIDTH) _width = (uint16_t)MAX_WIDTH;
   _backMove.width = _width;
@@ -240,6 +247,39 @@ void ScrollWidget::init(const char* separator, ScrollConfig conf, uint16_t fgcol
     // window that was never blitted is not erased when it goes (see psFrameBuffer::freeBuffer()).
     _syncWindow(true);
   #endif
+}
+
+// Copy a mark in and re-measure it.  Allocation failure leaves the previous mark alone: a refresh that cannot
+// allocate must not hand _draw() a null _sep.
+void ScrollWidget::_setMark(const char* mark) {
+  char* fresh = (char *) malloc(strlen(mark) + 1);
+  if (!fresh) return;
+  strcpy(fresh, mark);
+  preTextString(fresh, displayFont());
+  if (_sep) free(_sep);
+  _sep = fresh;
+  // Counted in codepoints, not bytes: the mark may be multi-byte (« is two), and _sepwidth is what the scroll cycle
+  // is measured against - bytes would make the cycle longer than the mark it draws.
+  _sepwidth = utf8_strlen(_sep) * _charWidth;
+}
+
+// The mark is the one piece of a scrolling line that can change without setText(): a holiday begins at midnight.
+// scrollMark() caches its own answer for a minute, so this is a staleness check, and the rebuild behind it happens
+// only when the mark really differs.
+void ScrollWidget::_refreshMark() {
+  if (!_sep) return;
+  const char* mark = scrollMark();
+  if (strcmp(_sep, mark) == 0) return;
+  _setMark(mark);
+}
+
+// A scrolling paint owns the whole span: it erased and printed all of it.  Recording that as the painted rectangle
+// is what lets a later, shorter text erase the row instead of only its own narrower box - without it the old line's
+// pixels survive around a dialog's shorter header, which no background bar covers on a panel that has none.
+void ScrollWidget::_spanPainted() {
+  _oldleft = _config.left;
+  _oldtextwidth = _width;
+  _textPainted = true;
 }
 
 void ScrollWidget::_setTextParams() {
@@ -319,6 +359,7 @@ void ScrollWidget::setText(const char* txt) {
         dsp.print(_window);
         dsp.clearClipping();
       }
+      _spanPainted();
     } else {
       if(_fb->ready()){
       #ifdef PSFBUFFER
@@ -358,6 +399,7 @@ void ScrollWidget::setText(const char* txt, const char *format){
 
 void ScrollWidget::loop() {
   if(_locked) return;
+  _refreshMark();
   if (!_doscroll || _config.textsize == 0 || (dsp.getScrollId() != NULL && dsp.getScrollId() != this)) return;
   uint16_t fbl = _fb->ready()?0:_config.left;
   if (_checkDelay(_x == fbl ? _startscrolldelay : _scrolltime, _scrolldelay)) {
@@ -386,7 +428,7 @@ void ScrollWidget::_clear(){
 }
 
 void ScrollWidget::_draw() {
-  if(!_active || _locked) return;
+  if(!_active || _locked || !_sep) return;
   _syncWindow();          // the text may have changed width since this window was last made
   _setTextParams();
   if (_doscroll) {
@@ -431,6 +473,7 @@ void ScrollWidget::_draw() {
       dsp.print(" ");
       dsp.clearClipping();
     }
+    _spanPainted();
   } else {
     if(_fb && _fb->ready()){
     #ifdef PSFBUFFER

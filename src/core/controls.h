@@ -25,6 +25,7 @@ public:
   void controlsEvent(bool toRight, int8_t volDelta = 0);
   void onBtnClick(int id);
   void checkButtonsHeldOnBoot();  // bare GPIO check before controls.init() — hold MODE/ENC_SW to force SD mode
+  bool screenSaverExit();
 private:
   int lpId = -1;
   unsigned long lpDelay = 0;
@@ -42,7 +43,6 @@ private:
   void onBtnLongPressStart(int id);
   void onBtnLongPressStop(int id);
   boolean checklpdelay(int m, unsigned long &tstamp);
-  bool screenSaverExit();
   void onBtnDuringLongPress(int id);
   void onBtnDoubleClick(int id);
   static void btnClickCb(void* p);

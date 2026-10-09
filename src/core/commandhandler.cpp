@@ -56,9 +56,9 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   #endif
 
   /* Websockets for Player */
-  if (cmdIs(command, "toggle"))      { network.cancelStreamRetry(); player.toggle(); return true; }
-  if (cmdIs(command, "prev"))        { network.cancelStreamRetry(); player.prev(); return true; }
-  if (cmdIs(command, "next"))        { network.cancelStreamRetry(); player.next(); return true; }
+  if (cmdIs(command, "toggle"))      { network.cancelStreamRetry(); controls.screenSaverExit(); player.toggle(); return true; }
+  if (cmdIs(command, "prev"))        { network.cancelStreamRetry(); controls.screenSaverExit(); player.prev(); return true; }
+  if (cmdIs(command, "next"))        { network.cancelStreamRetry(); controls.screenSaverExit(); player.next(); return true; }
   if (cmdIs(command, "voldown", "volumedown", "volm", "vol-")) { player.stepVol(false); return true; }
   if (cmdIs(command, "volup",   "volumeup",   "volp", "vol+")) { player.stepVol(true);  return true; }
   if (cmdIs(command, "newmode"))     { config.newConfigMode = atoi(value); netserver.requestOnChange(CHANGEMODE, cid); return true; }
@@ -71,7 +71,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "startstandby")) { utility.startStandby(); return true; }
   if (cmdIs(command, "stopstandby")) { utility.stopStandby(); return true; }
   if (cmdIs(command, "togglestandby")) { utility.toggleStandby(); return true; }
-  if (cmdIs(command, "burl", "playurl")) { network.cancelStreamRetry(); return player.queueResolvedUrl(value); }
+  if (cmdIs(command, "burl", "playurl")) { network.cancelStreamRetry(); controls.screenSaverExit(); return player.queueResolvedUrl(value); }
   if (cmdIs(command, "sdpos")) {
     if (config.getMode()==PM_SDCARD) {
       uint32_t sdval = static_cast<uint32_t>(atoi(value)); config.sdResumePos = 0;
@@ -80,10 +80,10 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     }
     return true;
   }
-  if (cmdIs(command, "playstation", "play")) { network.cancelStreamRetry(); uint16_t id = atoi(value); uint16_t cs = utility.playlistLength(); id = (id < 1) ? 1 : (id > cs ? cs : id); player.sendCommand({PR_PLAY, id}); return true; }
+  if (cmdIs(command, "playstation", "play")) { network.cancelStreamRetry(); controls.screenSaverExit(); uint16_t id = atoi(value); uint16_t cs = utility.playlistLength(); id = (id < 1) ? 1 : (id > cs ? cs : id); player.sendCommand({PR_PLAY, id}); return true; }
   if (cmdIs(command, "shuffle"))         { config.saveValue(&config.store.sdshuffle, static_cast<bool>(atoi(value))); if (config.store.sdshuffle) player.next(); return true; }
-  if (cmdIs(command, "start"))           { if (config.getMode() == PM_WEB) return player.resumeLastWebSource(); player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
-  if (cmdIs(command, "stop"))            { network.cancelStreamRetry(); player.sendCommand({PR_STOP, 0}); return true; }
+  if (cmdIs(command, "start"))           { controls.screenSaverExit(); if (config.getMode() == PM_WEB) return player.resumeLastWebSource(); player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
+  if (cmdIs(command, "stop"))            { network.cancelStreamRetry(); controls.screenSaverExit(); player.sendCommand({PR_STOP, 0}); return true; }
   #ifndef DEEP_SLEEP_DISABLE
     if (cmdIs(command, "sleep")) {
       if (value[0] == '\0') {

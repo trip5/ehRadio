@@ -22,12 +22,6 @@
   #define VU_MAX_HEIGHT 140
 #endif
 
-// The screensaver info line's text size.  Its own rather than metaConf's: the line is a caption, and meta's
-// size made it a headline on a big panel.  2 is the size the weather lines use.  Guarded, like the budget.
-#ifndef SS_INFO_TEXT
-  #define SS_INFO_TEXT 2
-#endif
-
 // A meter box in panel coordinates, plus the two row heights the bar family needs (zero for every other
 // style).  Produced by resolveScreensaverBox(), so the window, the bar ratios and the budget live beside the
 // painters that care instead of in display.cpp.

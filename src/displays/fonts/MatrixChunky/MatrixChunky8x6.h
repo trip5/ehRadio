@@ -4,7 +4,8 @@
 // Font: MatrixChunky8x6
 // Original BBX: 6×8  →  normalised to 6×8
 // Height strategy: none,  Width strategy: simple
-// Range: 0x0021-0x04FF  (1247 slots)
+// Baseline: ascent+descent box dropped on the cell top (descent=0)
+// Range: 0x0021-0x0491  (1137 slots)
 // yAdvance: 8,  yOffset: -8 (glcdfont-style)
 
 extern const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
@@ -60,7 +61,7 @@ extern const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
     0x8A, 0x2F, 0x88, 0xF8, 0x82, 0x00, 0x82, 0x08, 0x00, 0x82, 0x08, 0x00,
     0x7A, 0x0F, 0xA2, 0xF8, 0x2F, 0x00, 0xA0, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x7B, 0x3B, 0x69, 0xB7, 0x37, 0x80, 0x62, 0x8E, 0x00, 0xE0, 0x00, 0x00,
-    0x00, 0x04, 0xB6, 0x48, 0x00, 0x00, 0x00, 0x00, 0x3E, 0x08, 0x00, 0x00,
+    0x00, 0xA5, 0x28, 0x50, 0xA0, 0x00, 0x00, 0x00, 0x3E, 0x08, 0x00, 0x00,
     0x00, 0x00, 0x3E, 0x00, 0x00, 0x00, 0x7B, 0x3B, 0x69, 0xA7, 0x37, 0x80,
     0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2, 0x8E, 0x00, 0x00, 0x00, 0x00,
     0x01, 0x0E, 0x10, 0x03, 0x80, 0x00, 0xE0, 0x8E, 0x20, 0xE0, 0x00, 0x00,
@@ -68,7 +69,7 @@ extern const uint8_t MatrixChunky8x6Bitmaps[] PROGMEM = {
     0x00, 0x08, 0xA2, 0x8B, 0xE8, 0x00, 0xFB, 0xAE, 0xBA, 0x28, 0xA2, 0x80,
     0x00, 0x0C, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x30,
     0x43, 0x04, 0x10, 0xE0, 0x00, 0x00, 0xE2, 0x8E, 0x00, 0xE0, 0x00, 0x00,
-    0x00, 0x09, 0x36, 0x90, 0x00, 0x00, 0x82, 0x4A, 0x10, 0xA8, 0xE0, 0x80,
+    0x02, 0x85, 0x0A, 0x52, 0x80, 0x00, 0x82, 0x4A, 0x10, 0xA8, 0xE0, 0x80,
     0x82, 0x4A, 0x16, 0x88, 0x41, 0x80, 0xC1, 0x2D, 0x18, 0xD4, 0x70, 0x40,
     0x20, 0x02, 0x38, 0x82, 0x2F, 0x80, 0x40, 0x8F, 0xA2, 0xFA, 0x28, 0x80,
     0x10, 0x8F, 0xA2, 0xFA, 0x28, 0x80, 0x20, 0x0F, 0xA2, 0xFA, 0x28, 0x80,
@@ -1378,124 +1379,14 @@ extern const GFXglyph MatrixChunky8x6Glyphs[] PROGMEM = {
     { 0, 0, 0, 0, 0, 0 }, /* 0x048F (empty) */
     { 2748, 6, 8, 6, 0, -8 }, /* 0x0490 uni0490 */
     { 2754, 6, 8, 6, 0, -8 }, /* 0x0491 uni0491 */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0492 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0493 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0494 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0495 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0496 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0497 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0498 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x0499 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049A (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049B (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049C (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049D (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049E (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x049F (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04A9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AD (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04AF (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04B9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BD (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04BF (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04C9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CD (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04CF (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04D9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DD (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04DF (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04E9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04EA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04EB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04EC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04ED (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04EE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04EF (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F0 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F1 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F2 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F3 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F4 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F5 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F6 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F7 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F8 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04F9 (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FA (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FB (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FC (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FD (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FE (empty) */
-    { 0, 0, 0, 0, 0, 0 }, /* 0x04FF (empty) */
 };
 
 extern const GFXfont MatrixChunky8x6 PROGMEM = {
     (uint8_t *)MatrixChunky8x6Bitmaps,
     (GFXglyph *)MatrixChunky8x6Glyphs,
     0x0021,  /* first */
-    0x04FF,   /* last */
+    0x0491,   /* last */
     8         /* yAdvance */
 };
 
-// 460 glyphs in range (1247 slots), 2760 bytes bitmap data, 7482 bytes glyph table
+// 460 glyphs in range (1137 slots), 2760 bytes bitmap data, 6822 bytes glyph table

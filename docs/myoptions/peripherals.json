@@ -1,5 +1,5 @@
 [ { "title": "Peripherals and Build Options",
-    "info": "Compiled-in options and other hardware of the build" },
+    "info": "Compiled-in hardware options of the build" },
   {
     "name": "LED",
     "pins": [ "LED_PIN" ],

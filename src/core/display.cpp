@@ -242,8 +242,16 @@ static inline void applyMove(Widget* w, const MoveConfig& m) {
 // a hundredth of the panel height (rounded up) both below it and above it, so the clock or the meter
 // never sits flush against it and the text never touches the panel edge.
 static inline uint16_t ssGap()  { return (uint16_t)((dsp.height() + 99) / 100); }
-// The line's row height is SS_INFO_TEXT's, not metaConf's: the caption carries a size of its own now.
-static inline uint16_t ssRowH() { return (uint16_t)(SS_INFO_TEXT * CHARHEIGHT); }
+// The line's text size, from the first layout row that states one: the weather line (the row the strip shares
+// its look with), then title1, then the playlist, and metaConf last - meta is mandatory, so the chain resolves
+// on any laid-out display.  The bare 1 is only for a caller running before the layout is applied.
+static inline uint8_t ssTextSize() {
+  const ScrollConfig* chain[] = { weatherConf_ptr, title1Conf_ptr, playlistConf_ptr, metaConf_ptr };
+  for (const ScrollConfig* c : chain)
+    if (c && c->widget.textsize) return c->widget.textsize;
+  return 1;
+}
+static inline uint16_t ssRowH() { return (uint16_t)(ssTextSize() * CHARHEIGHT); }
 
 // Whether the line would have anything in it.  The station name and the two title lines describe what is
 // playing, and over silence there is nothing; the weather stands on its own.  With both gone the strip is
@@ -363,7 +371,7 @@ void Display::_bootScreen() {
   bootScroll.startscrolldelay = apSettUsable ? _bootConfig.apSettConf.startscrolldelay : 0;
   bootScroll.scrolldelta      = apSettUsable ? _bootConfig.apSettConf.scrolldelta : 1;
   bootScroll.scrolltime       = apSettUsable ? _bootConfig.apSettConf.scrolltime : SCROLLTIME;
-  _bootstring = (TextWidget*) &_boot->addWidget(new ScrollWidget(" ", bootScroll, BOOT_TXT_COLOR, 0));
+  _bootstring = (TextWidget*) &_boot->addWidget(new ScrollWidget(bootScroll, BOOT_TXT_COLOR, 0));
   _bootstring->setText(RADIOVERSION);
   _pager->addPage(_boot);
   _pager->setPage(_boot, true);
@@ -388,7 +396,7 @@ void Display::_buildPager() {
   // the footer, which is what puts the over line above everything else that page draws.
   _overLinePage = new Page();
   if (title2Conf_ptr->buffsize > 0) {
-    _title2 = new ScrollWidget("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+    _title2 = new ScrollWidget(*title2Conf_ptr, config.theme.title2, config.theme.background);
   }
   _plbackground = new FillWidget(*playlBGConf_ptr, config.theme.plcurrentfill);
   _metabackground = new FillWidget(*metaBGConf_ptr, config.theme.metafill);
@@ -417,7 +425,7 @@ void Display::_buildPager() {
     _battery = new TextWidget(*batteryConf_ptr, 10, false, config.theme.battery, config.theme.background);
   }
   if (weatherConf_ptr->buffsize > 0) {
-    _weather = new ScrollWidget("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
+    _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background);
   }
 
   if (_volbar)   _footer->addWidget(_volbar);
@@ -465,7 +473,7 @@ void Display::_buildPager() {
     updConf.widget.align = WA_CENTER;
     updConf.widget.top = (dsp.height() - (updConf.widget.textsize * CHARHEIGHT)) / 2;
     updConf.widget.top = max<int16_t>(0, updConf.widget.top - CHARHEIGHT);
-    _updLabel = new ScrollWidget("  ", updConf,
+    _updLabel = new ScrollWidget(updConf,
                                  config.theme.title1, config.theme.background);
     _updLabel->lock(true);   // don't paint the label's background band unless updating
 
@@ -518,7 +526,7 @@ void Display::_apScreen() {
     }
     uint16_t mfg = config.theme.meta;
     uint16_t mbg = config.theme.metabg;
-    ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", _bootConfig.apTitleConf, mfg, mbg));
+    ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apTitleConf, mfg, mbg));
     bootTitle->setText(l10n(L10N_LBL_AP_IMPROV_MODE));
     TextWidget *apname = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.apNameConf, 30, false, config.theme.title1, config.theme.background));
     apname->setText(l10n(L10N_LBL_APNAME));
@@ -534,7 +542,7 @@ void Display::_apScreen() {
     #ifdef AP_PASSWORD
       appass2->setText(AP_PASSWORD);
     #endif
-    ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", _bootConfig.apSettConf, config.theme.title2, config.theme.background));
+    ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apSettConf, config.theme.title2, config.theme.background));
     bootSett->setText(utility.ipToStr(WiFi.softAPIP()), l10n(L10N_MSG_CONNECT_OPEN));
     _pager->addPage(_boot);
     _pager->setPage(_boot);
@@ -556,9 +564,9 @@ void Display::_sdmanScreen() {
   }
   uint16_t mfg = config.theme.meta;
   uint16_t mbg = config.theme.metabg;
-  ScrollWidget *sdTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", _bootConfig.apTitleConf, mfg, mbg));
+  ScrollWidget *sdTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apTitleConf, mfg, mbg));
   sdTitle->setText(l10n(L10N_LBL_SDMAN));
-  ScrollWidget *sdUrl = (ScrollWidget*) &_boot->addWidget(new ScrollWidget("*", _bootConfig.apSettConf, config.theme.title2, config.theme.background));
+  ScrollWidget *sdUrl = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apSettConf, config.theme.title2, config.theme.background));
   sdUrl->setText(utility.ipToStr(WiFi.localIP()), l10n(L10N_MSG_OPEN));
   // apName2Conf, not apNameConf: the fontsize-2 title already occupies y=2..18 on a 128x64 and apNameConf's
   // top is 18, so the countdown drew over the title's last row.
@@ -1277,7 +1285,8 @@ void Display::_title() {
   backlightControls.restart();
 }
 
-// The info line's text: the station name, the two title lines and the weather, joined with " * ".  The
+// The info line's text: the station name, the two title lines and the weather, joined with the shared scroll mark
+// (scrollMark(): " * ", or the holiday icon).  The
 // first three describe what is playing, so over silence they are skipped and only the weather is left -
 // which is the same rule _ssStripH() refuses the whole strip on.  Every empty part is skipped outright
 // rather than left as a bare separator, which is why they all go through one append.
@@ -1288,12 +1297,13 @@ void Display::_screensaverLine() {
   // repainted the line while the strip was refused - _ssStripH() is the authoritative test, the lock the backstop.
   if (!_ssStripH() || _sstext->locked()) return;
   // One buffer for the display task's own use rather than a heap copy per refresh: the worst case is the
-  // station name and the title (two station fields) plus the 512-byte weather string.
-  static char line[STATION_FIELD_LENGTH * 2 + WEATHER_STRING_L + 8];
+  // station name and the title (two station fields) plus the 512-byte weather string, plus three marks of up to
+  // four bytes each.
+  static char line[STATION_FIELD_LENGTH * 2 + WEATHER_STRING_L + 16];
   line[0] = '\0';
   auto append = [](char* dst, size_t room, const char* part) {
     if (!part || !part[0]) return;
-    if (dst[0]) strlcat(dst, " * ", room);
+    if (dst[0]) strlcat(dst, scrollMark(), room);
     strlcat(dst, part, room);
   };
   if (player.isRunning()) {
@@ -1316,18 +1326,21 @@ void Display::_screensaverLine() {
 void Display::_screensaverWidgets() {
   // --- the info line ---
   if (_ssStripH()) {
-    ScrollConfig conf = *metaConf_ptr;      // the scroll speed is the meta line's; the size is SS_INFO_TEXT's
+    ScrollConfig conf = *metaConf_ptr;      // the scroll speed is the meta line's; the size is the weather conf's
     conf.widget.left = 0;
     conf.widget.top = _ssTextTop();
-    conf.widget.textsize = SS_INFO_TEXT;
+    conf.widget.textsize = ssTextSize();
     conf.width = dsp.width();
-    // Both calls take "*", so the wrap-around joiner reads " * " like the joins inside the line itself.  The
-    // weather widget is the one that keeps "~", because its string is joined with " ~ " internally.
+    // The mark is the widget's own now, so what a wrapping line shows reads exactly like the joins inside the
+    // screensaver line above.
+    // Black, never config.theme.background: the screensaver paints its own picture and its background is
+    // always black - the clock does the same while isScreensaver.  With the theme's colour the line laid a
+    // coloured band over the black the rest of the panel shows.
     if (!_sstext) {
-      _sstext = new ScrollWidget("*", conf, config.theme.textss, config.theme.background);
+      _sstext = new ScrollWidget(conf, config.theme.textss, 0);
       pages[PG_SCREENSAVER]->addWidget(_sstext);
     } else {
-      _sstext->init("*", conf, config.theme.textss, config.theme.background);
+      _sstext->init(conf, config.theme.textss, 0);
     }
     _sstext->lock(false);
     _screensaverLine();
@@ -1379,9 +1392,12 @@ void Display::_time(bool redraw) {
       config.setBrightness();
     }
   #endif
-  // The clock only walks while it IS the screensaver.  With the meter in its place it is locked, and its
-  // random walk would be wasted work even so.
-  if (config.isScreensaver && !config.store.screensaverVU && network.timeinfo.tm_sec % SCREENSAVERMOVE == 0) {
+  // The clock only walks while it IS the screensaver, and "is it" is _ssMeterUp - the recorded answer to "does
+  // the meter own the panel", which is also what _clockHidden() returns while asleep.  Asking the option
+  // instead meant VU-on with nothing playing showed the clock but left it parked, while every other route to
+  // the clock screensaver walked.  With the meter genuinely up the clock is locked, so its walk would be
+  // wasted work even so.
+  if (config.isScreensaver && !_ssMeterUp && network.timeinfo.tm_sec % SCREENSAVERMOVE == 0) {
     int32_t clockH = _clock->clockHeight();
     int32_t minTop = max((int32_t)TFT_FRAMEWDT, (int32_t)_clock->timeHeight());
     // The floor is the content area rather than the panel: the info line's strip is not the clock's to
@@ -1453,24 +1469,24 @@ void Display::_reinitWidgets() {
     #else
       mbg = config.store.inverttitle ? config.theme.metafill : config.theme.metabg;
     #endif
-    _meta->init("*", *metaConf_ptr, mfg, mbg);
+    _meta->init(*metaConf_ptr, mfg, mbg);
   }
   // Title1 is optional like the rest: nothing else depends on it, and it has no other lock site.
-  if (title1InLayout()) { _title1->init("*", *title1Conf_ptr, config.theme.title1, config.theme.background); showByLayout(_title1); }
+  if (title1InLayout()) { _title1->init(*title1Conf_ptr, config.theme.title1, config.theme.background); showByLayout(_title1); }
   else hideByLayout(_title1);
   // Safe on a never-initialised clock: ClockWidget bails on !_present and guards every _fb deref.
   if (clockInLayout()) { _clock->init(*clockConf_ptr, 0, 0); showByLayout(_clock); }
   else hideByLayout(_clock);
-  _plcurrent->init("*", *playlistConf_ptr, config.theme.plcurrent, config.theme.plcurrentbg);
+  _plcurrent->init(*playlistConf_ptr, config.theme.plcurrent, config.theme.plcurrentbg);
   _plwidget->init(_plcurrent);
   _plcurrent->moveTo({TFT_FRAMEWDT, (uint16_t)(_plwidget->currentTop()), (int16_t)playlistConf_ptr->width});
   // --- Player-page optional widgets (lazy-create if newly enabled) ---
   if (title2InLayout()) {
     if (!_title2) {
-      _title2 = new ScrollWidget("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+      _title2 = new ScrollWidget(*title2Conf_ptr, config.theme.title2, config.theme.background);
       pages[PG_PLAYER]->addWidget(_title2);
     } else {
-      _title2->init("*", *title2Conf_ptr, config.theme.title2, config.theme.background);
+      _title2->init(*title2Conf_ptr, config.theme.title2, config.theme.background);
       showByLayout(_title2);
     }
   } else hideByLayout(_title2);
@@ -1485,10 +1501,10 @@ void Display::_reinitWidgets() {
   } else hideByLayout(_vuwidget);
   if (weatherInLayout()) {
     if (!_weather) {
-      _weather = new ScrollWidget("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
+      _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background);
       pages[PG_PLAYER]->addWidget(_weather);
     } else {
-      _weather->init("~", *weatherConf_ptr, config.theme.weather, config.theme.background);
+      _weather->init(*weatherConf_ptr, config.theme.weather, config.theme.background);
       showByLayout(_weather);
     }
   } else hideByLayout(_weather);

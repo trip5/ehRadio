@@ -914,14 +914,17 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - The screensaver's two extra widgets are `Display::_ssvu` and `Display::_sstext` - the only widgets no layout
   provides. `_screensaverWidgets()` brings them up on **every** entry into `SCREENSAVER`, not once at boot,
   because the meter's segmentation comes from the active layout's `bandsConf` and the info line's size from
-  `metaConf`, and the WebUI stays reachable while the device is asleep. While the meter is up the clock is
-  `lock()`ed (both `ClockWidget::draw()` and `_draw()` bail on `_locked`), so `_time()` also skips its random
-  walk. `_ssContentH()` is the panel less the line's strip - one text row plus 1% of the panel height, rounded
-  up, above and below it - and that figure is the floor the walking clock is clamped to. `_sstext` is created
-  and re-init'd with the `"*"` separator, so its wrap-around joiner reads `" * "` like `_screensaverLine()`'s own
-  joins; the separator is per widget (built as `" %c "` in `ScrollWidget::init()`), and the weather widget is the
-  one that keeps `"~"`, matching the `" ~ "` inside the weather string. See
-  `plans/screensaver-panel-ownership.md`.
+  the first conf that states one (`ssTextSize()`: `weatherConf`, then `title1Conf`, then `playlistConf`, then
+  `metaConf`), and the WebUI stays reachable while the device is asleep. While the meter is up the clock is
+  `lock()`ed (both `ClockWidget::draw()` and `_draw()` bail on `_locked`), and `_time()` skips its random walk on
+  the same recorded answer: its gate is `config.isScreensaver && !_ssMeterUp`, **not** the `screensaverVU` option,
+  so the clock walks whenever it is what the screensaver shows - VU-on with nothing playing included, which is the
+  case that shipped parked - and never while the meter owns the panel. `_ssContentH()` is the panel less the line's
+  strip - one text row plus 1% of the panel height, rounded
+  up, above and below it - and that figure is the floor the walking clock is clamped to. `_sstext` is created and
+  re-init'd like any other scroll line, so it carries the shared mark at its wrap, and `_screensaverLine()` joins the
+  line's own parts with that same helper - the two cannot differ, and the character lives in one file (see the
+  widgets.cpp note below). See `plans/screensaver-panel-ownership.md`.
 - **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
   `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
   both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
@@ -934,6 +937,21 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `_screensaverWidgets()` on the one path that locks the clock for the meter, so the two cannot disagree; a
   derived predicate was rejected because the canvas-allocation failure path - where the clock is what the
   screensaver shows - is precisely the case a derived answer gets wrong.
+- **A user action wakes the panel, and the wake is explicit.** The screensaver is only ever left by a
+  `NEWMODE, PLAYER`, which is issued from two places: `Controls::screenSaverExit()` - which every panel handler
+  (encoder, buttons, IR) runs first, clearing the display queue, restarting the countdown and queueing the mode -
+  and `_play()`'s success branch ([`player.cpp`](../src/core/player.cpp:345)). The WebUI has no handler of its own,
+  so its transport commands (`toggle`, `prev`, `next`, `playstation`/`play`, `start`, `stop`, `burl`/`playurl`) now
+  call `Controls::screenSaverExit()` from `CommandHandler::exec` as well. That was the pause gap: pause is
+  `player.toggle()` with `_status == PLAYING` -> `PR_STOP` -> `_stop()`, which queues only `DBITRATE`/`PSTOP` and so
+  never reached a mode change, leaving the screensaver up with a dead meter (next/prev/play exit only because they
+  reach `_play()`). Volume and mute deliberately do **not** wake - a level change is not a transport action - and
+  the helper is a no-op once the mode is not a screensaver, so the panel paths that already ran it are unaffected.
+- **The screensaver's background is always black (0), never `config.theme.background`.** The clock, the info line
+  and the meter all erase to black while `isScreensaver`; only their *ink* colours come from the theme
+  (`config.theme.textss` for the caption, the four VU colours for the meter). The info line's background and the
+  meter's were the theme's for a while, which laid a coloured band behind the caption and a themed box behind the
+  bands; both now pass `0` - in `_screensaverWidgets()` and in `VuWidget::initScreensaver()`.
 - `SHOWWEATHER` and `NEWWEATHER` recompose the screensaver rather than the player page while
   `config.isScreensaver`: `SHOWWEATHER` queues `SSREBUILD` only when the strip's existence changes with the
   flag (otherwise it refreshes only the line, so a toggle costs no panel clear), and `NEWWEATHER` rebuilds when
@@ -2810,6 +2828,29 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - common display core wrapper and API layer used by `core/display.cpp`.
 - `src/displays/widgets/widgets.h`, `widgets.cpp`, `widgetsconfig.h`
   - widget classes (scroll, text, bars, VU, clock, playlist, etc.).
+  - **The scroll mark is the widget's own.** `ScrollWidget`'s constructor and `init()` take no separator: they build
+    `_sep` from `scrollMark()`, a helper in `widgets.cpp` that owns the mark, its character and its one date, so no
+    other file names a character and changing it is one edit. The mark is `«` (`SCROLL_MARK_TEXT`, spelled as UTF-8 -
+    a bare 0xAB byte is a stray continuation to `preTextString()` and would be dropped, not drawn) and
+    `SCROLL_MARK_ICON` - a two-cell icon from `icons.h`'s `ICON_TABLE`, drawn by the display layer, so it needs no
+    font support - on Canada Day: `scrollMark()` asks `network.timeinfo` for `tm_mon == 6 && tm_mday == 1` and
+    nothing else, because a wrong clock is simply not 1 July, with `EVERYDAY_IS_CANADA_DAY` as an `#ifdef` for
+    looking at the icon on any day. `_setMark()` allocates `strlen(mark) + 1` (the old code hard-coded four bytes,
+    which is what made a two-byte mark impossible), measures it with `utf8_strlen` rather than `strlen` - the mark
+    may be multi-byte and `_sepwidth` is what the scroll cycle is measured against - and leaves the previous mark in
+    place if the allocation fails. `_refreshMark()`, first thing in `loop()`, re-asks and rebuilds only when the mark
+    actually differs, so a date that rolls over while the device runs lands on the next pass and nothing is
+    reallocated in between. `scrollMark()` is declared in `widgets.h` because the screensaver's info line joins its
+    own parts with it too - the literal `" * "` that used to sit in `_screensaverLine()` is gone. See
+    `plans/holiday-icons.md`.
+  - **A scrolling line owns its whole span, and now says so.** `ScrollWidget::_spanPainted()` records
+    `_oldleft`/`_oldtextwidth` as the span and sets `_textPainted`, and is called at the end of the scrolling paints
+    in `setText()` and in `_draw()`. Both erase sites - `TextWidget::_paint()` and `ScrollWidget::setText()`'s
+    non-scrolling branch - erase the UNION of the old and the new rectangle, so without that record a later, shorter
+    text erased only its own box and left a previously scrolling line's pixels standing around it. Invisible wherever
+    a background bar covers the row (the TFT's `_metabackground`) and obvious where none does: the OLED's meta line
+    showing `VOLUME` over a scrolling station name. `_clear()` reads the same two flags, so a hidden scrolling line
+    left its pixels behind the same way. See `plans/layout-widget-overlap.md`.
   - **Boot-line messages** (what the `_bootstring` line says while the boot is blocked): one request type per message in
     `displayRequestType_e` (`common.h`) plus a case in `Display::draw()` that does
     `_bootstring->setText(l10n(L10N_MSG_...))`. The three are `WAITFORSD`, `FORMATTING` and `SCANNINGWIFI` — the last
@@ -3091,6 +3132,13 @@ surface:
 The shared box fill in `_draw()` is the clear for **every** style, including the tail-clear bar family: every fill and
 `_clear()` stops at `len`, so the final (clamped) segment is only clean because the box was cleared first. Do not
 reintroduce `drawRGBBitmap` here — the manual blit is deliberate (see the memory-ownership notes above).
+
+**The bar family's shape is two macros** — `VU_BAR_PERCENT` (20) and `VU_BAR_GAP_PERCENT` (10), at the top of
+`resolveScreensaverBox()` in `widget_vu.cpp`, read as percentages of the content height. Each channel is one
+`VU_BAR_PERCENT`, the gap between them is `VU_BAR_GAP_PERCENT`, and the remainder is placement, split evenly above
+and below by the centring — the shipped shape is `25 + 20 + 10 + 20 + 25`. Both Bars and Digital LED go through this
+path (`case VU_STYLE_DIGITAL_LED: _drawBars(true);`). Above the pixel budget the bar and the gap scale by one
+factor, so that shape draws literally only where the budget does not bite.
 
 **Two kinds of layout, one drawing rule.** The **bar family** (styles 0-1) draws two strips where `bandsConf` says they
 are, so `rotateVU`, `align` and `boomboxVU` all matter to it, exactly as they always have. **Every other style** (2-6)

@@ -84,7 +84,7 @@ static const uint8_t RSSI__11[] PROGMEM = {
     0b000000,  // ......
 };
 
-// \007 Maple Leaf A (Surprise!)
+// \007 Maple Leaf A (used in widgets.cpp on Canada Day)
 static const uint8_t MAPLE_A[] PROGMEM = {
     0b000001,  // .....@
     0b000011,  // ....@@
@@ -95,7 +95,7 @@ static const uint8_t MAPLE_A[] PROGMEM = {
     0b011111,  // .@@@@@
     0b000001,  // .....@
 };
-// \010 Maple Leaf B (Surprise!)
+// \010 Maple Leaf B (used in widgets.cpp on Canada Day)
 static const uint8_t MAPLE_B[] PROGMEM = {
     0b000000,  // ......
     0b100000,  // @.....
@@ -179,30 +179,9 @@ static const uint8_t BATTERY__11[] PROGMEM = {
     0b000000,  // ......
 };
 
+// \021 Unused
 
-// \021 Taeguk A (Surprise!)
-static const uint8_t TAEGUK_A[] PROGMEM = {
-    0b000011,  // ....@@
-    0b000100,  // ...@..
-    0b001000,  // ..@...
-    0b001000,  // ..@...
-    0b001101,  // ..@@.@
-    0b001111,  // ..@@@@
-    0b000111,  // ...@@@
-    0b000011,  // ....@@
-};
-
-// \022 Taeguk B (Surprise!)
-static const uint8_t TAEGUK_B[] PROGMEM = {
-    0b110000,  // @@....
-    0b001000,  // ..@...
-    0b000100,  // ...@..
-    0b110100,  // @@.@..
-    0b111100,  // @@@@..
-    0b111100,  // @@@@..
-    0b111000,  // @@@...
-    0b110000,  // @@....
-};
+// \022 Unused
 
 // \023 Speaker icon (used in conf files: voltxtFmt)
 static const uint8_t SPEAKER[] PROGMEM = {
@@ -382,8 +361,8 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     BATTERY_11,      // 14: \016
     BATTERY__10,     // 15: \017
     BATTERY__11,     // 16: \020
-    TAEGUK_A,        // 17: \021
-    TAEGUK_B,        // 18: \022
+    NULL,            // 17: \021
+    NULL,            // 18: \022
     SPEAKER,         // 19: \023
     VOL_25,          // 20: \024
     VOL_50,          // 21: \025

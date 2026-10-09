@@ -365,11 +365,13 @@
 //#define WWW_CASETRANSFORM
 //#define CLOCKGLOW false
 //#define PLAYLIST_MODE_PAGED false
+//#define EVERYDAY_IS_CANADA_DAY
 
 // Other:
 //#define DEEP_SLEEP_DISABLE
 
 //#undef VS_PATCH_ENABLE    
 //#define VS_PATCH_ENABLE true
+
 
 #endif // myoptions_h

@@ -23,6 +23,8 @@
 extern const GFXfont MatrixLight8x6;
 extern const GFXfont MatrixChunky8x6;
 extern const GFXfont Fixed;
+extern const GFXfont BmPlus_HP_100LX_6x8;
+extern const GFXfont Bm437_ATI_SmallW_6x8;
 #if DISPLAYFONT > X11
   #warning "DISPLAYFONT value not recognized, defaulting to MATRIXCHUNKY"
   #undef DISPLAYFONT
@@ -34,12 +36,16 @@ extern const GFXfont Fixed;
 const char _systemFontNames[][64] PROGMEM = {
   "Matrix Light",
   "Matrix Chunky",
-  "Unix X11 Fixed",
+  "Unix X11",
+  "HP 100LX",
+  "ATI Small Wonder",
 };
 const GFXfont* const _systemFonts[] = {
   &MatrixLight8x6,
   &MatrixChunky8x6,
   &Fixed,
+  &BmPlus_HP_100LX_6x8,
+  &Bm437_ATI_SmallW_6x8,
 };
 #define _systemFontCount (sizeof(_systemFonts) / sizeof(_systemFonts[0]))
 

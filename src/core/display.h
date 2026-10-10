@@ -92,24 +92,17 @@ class Display {
     uint32_t _bufferbarMax = 0;
     Pager *_pager = nullptr;
     Page *_footer = nullptr;
-    // The over line gets a page of its own, attached to the player page after the footer: a page draws its own
-    // widgets and then its sub-pages in insertion order, so that is what makes the line paint above the bottom row.
     Page *_overLinePage = nullptr;
     VuWidget *_vuwidget = nullptr;
-    // The screensaver's two widgets: the only ones no layout provides.  Created on the first screensaver
-    // entry and kept, because the VU's canvas is a PSRAM allocation worth not re-making, and
-    // re-initialised on every entry rather than once, because the segmentation comes from the active
-    // layout's bandsConf and the line's text size from metaConf.  See plans/screensaver-overhaul.md.
     VuWidget *_ssvu = nullptr;
     ScrollWidget *_sstext = nullptr;
-    bool _ssFailed = false;   // no PSRAM for the VU canvas: log once, then keep the clock screensaver
-    bool _ssMeterUp = false;  // set by _screensaverWidgets(): the meter owns the panel, so the clock stays hidden
+    bool _ssFailed = false;
+    bool _ssMeterUp = false;
     NumWidget *_nums = nullptr;
     ClockWidget *_clock = nullptr;
     Page *_boot = nullptr;
     TextWidget *_bootstring = nullptr, *_volip = nullptr, *_voltxt = nullptr, *_battery = nullptr, *_rssi = nullptr, *_bitrate = nullptr;
     #ifdef USE_SD
-      // The SD File Manager's countdown line.  Non-null also means "the page currently in _boot is the manager's" which is how _switchMode knows it is safe to tear that page down again
       TextWidget *_sdmanCountText = nullptr;
       bool _sdmanCountShown = false;
       void _sdmanScreen();
@@ -119,9 +112,6 @@ class Display {
     uint8_t _bootStep = 0;
     displayRequestType_e _deferredType = NOPE;
     int _deferredPayload = 0;
-    // Requests that could not be queued inside DSQ_SEND_DELAY.  Dropping is the deliberate choice under load,
-    // but it must not be silent: a lost NEWMODE looks exactly like the setting that asked for it doing
-    // nothing, which is how a full reset came to look like a battery problem.
     uint32_t _droppedRequests = 0;
     uint32_t _deferredDueMs = 0;
     void _createDspTask();
@@ -143,26 +133,17 @@ class Display {
     void _switchMode(displayMode_e newmode);
     void _updateBattery();
     void _updateVolume();
-    // Screensaver composition.  The strip is the info line plus a clear gap above and below it, and is 0
-    // when the prefs do not ask for the line or the panel is too short to afford it; _ssContentH() is
-    // what is left over for the clock or the meter.
+    void _footerIp();
     uint16_t _ssStripH();
     uint16_t _ssContentH();
     uint16_t _ssTextTop();
     void _screensaverLine();
     void _screensaverWidgets();
-    // Bring the screensaver up, or rebuild it where it stands.  Not part of _switchMode() because a rebuild
-    // is not a mode change - see the SSREBUILD request.
     void _enterScreensaver(displayMode_e mode);
     void _buildJsonCache();
-    // Kept apart from _buildJsonCache() because the registry can change after that runs once - a slot
-    // saved or deleted from the editor, or the slot files read after the cache was built - so
-    // getThemeListJson() rebuilds this one list when its generation has moved.
     void _buildThemeListJson();
     String _themeListJson;
     uint16_t _themeListGen;
-    // A THEMEPREVIEW is already on the queue.  Set from the result of the send and cleared where the
-    // request is handled, so it can never be left stuck by a dropped request (see putRequest).
     bool _previewPending;
     String _layoutListJson;
     String _systemFontListJson;

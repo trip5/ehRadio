@@ -200,6 +200,10 @@ class NetServer {
     void resetQueue();
     void setBootReady(bool val) { bootReady = val; }
     bool isBootReady() const { return bootReady; }
+    // True once begin() has actually registered the routes and started listening.  begin() creates a fresh
+    // queue every call, so this is what makes the deferred start idempotent: the WebUI is now brought up from
+    // Startup::loop() when the startup services are out of the way, and that check must not run twice.
+    bool isListening() const { return listening; }
 
     void setRSSI(int val) { rssi = val; };
     int  getRSSI()        { return rssi; };
@@ -215,6 +219,7 @@ class NetServer {
     QueueHandle_t nsQueue;
     int rssi = 0;
     bool bootReady = false;
+    bool listening = false;
     StaticFileCache fileCache;   /* PSRAM-backed WebUI file cache */
 
     static size_t chunkedHtmlPageCallback(uint8_t* buffer, size_t maxLen, size_t index);

@@ -537,7 +537,10 @@ function getWiFi(path){
 }
 
 /** SYSTEM **/
-function rebootSystem(info, waitSeconds = 15, autoReload = true){
+// 30 s, not 15: the WebUI is deliberately held back until the startup services are out of the way (see
+// Startup::loop()), so a boot that has a download to do can take longer than the old window - and the redirect
+// still fires the instant /ready answers, so a longer window only ever helps.
+function rebootSystem(info, waitSeconds = 30, autoReload = true){
   getId("settingscontent").innerHTML=`<h2>${info}</h2>`;
   getId("settingsdone").classList.add("hidden");
   getId("navigation").classList.add("hidden");

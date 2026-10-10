@@ -61,6 +61,13 @@ void Startup::deferBootStable(const char* reason) {
 }
 
 void Startup::loop() {
+  if (!netserver.isListening() && network.status == CONNECTED &&
+      (_services != SVC_WILL_RUN || cardInUse())) {
+    BOOTLOG("Startup Async Services are finished - starting the WebUI...");
+    netserver.begin();
+    netserver.startLoopTask();
+    display.putRequest(NEWIP, 0);   // the footer IP is the indicator that the WebUI is up
+  }
   if (!_bootStablePending) return;
   if (_bootStartMs == 0) {
     _bootStartMs = millis();  // First loop() call — setup() (including smartstart) is done

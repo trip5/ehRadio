@@ -31,8 +31,8 @@
 // pruneLittleFS() compares each /data file's basename against that list, so a path there would never
 // match and the file would be deleted at the next cleanup.  The registry builds its /data path from
 // this same list, so the two cannot drift apart.
-#define THEME_SLOT_FILES "xtheme1.json", "xtheme2.json", "xtheme3.json", "xtheme4.json", "xtheme5.json", \
-                         "xtheme6.json", "xtheme7.json", "xtheme8.json", "xtheme9.json", "xtheme10.json"
+#define THEME_SLOT_FILES "theme1.json", "theme2.json", "theme3.json", "theme4.json", "theme5.json", \
+                         "theme6.json", "theme7.json", "theme8.json", "theme9.json", "theme10.json"
 
 // The fixed length of the list — built-ins plus every custom slot, filled or not.
 uint8_t themeCount();

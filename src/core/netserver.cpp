@@ -482,6 +482,7 @@ bool NetServer::begin(bool quiet) {
     ArduinoOTA.begin();
   #endif //#if USE_OTA
 
+  listening = true;
   if (!quiet) SERIALLOG("done");
   return true;
 }

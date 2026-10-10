@@ -656,7 +656,7 @@ void Display::_start() {
         _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
       } else {
         if (*shareWeatherIP_ptr && config.store.showweather) _volip->setText("");
-        else _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+        else _footerIp();
       }
     }
   }
@@ -668,6 +668,13 @@ void Display::_start() {
   _station();
   if (!(network.status == SDOFFLINE && !config.isRTCFound())) _time(false);
   _bootStep = 2;
+}
+
+// The footer IP, written in one place.  It is the user's indicator that the WebUI is up.
+void Display::_footerIp() {
+  if (!_volip) return;
+  if (!netserver.isListening()) { _volip->setText(""); return; }
+  _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
 }
 
 void Display::_showDialog(const char *title) {
@@ -698,7 +705,7 @@ void Display::_showNumbers(const char* header, int32_t value, const char* fmt, b
   if (dialogPage) _showDialog(header);
   if (_volip) {
     if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
-    else _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+    else _footerIp();
   }
   if (value < 0) _nums->setText("");
   else _nums->setText(value, fmt);
@@ -762,7 +769,7 @@ void Display::_switchMode(displayMode_e newmode) {
         } else {
           // weather and IP share the same bottom row; hide IP when weather is active
           if (*shareWeatherIP_ptr && config.store.showweather) _volip->setText("");
-          else _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+          else _footerIp();
         }
       }
     // force weather repaint on return to PLAYER; larger displays repaint naturally
@@ -1099,7 +1106,7 @@ void Display::loop() {
           hideWeatherIfChanged(_weather, _weatherHidden());
           if (!config.store.showweather) {
             if (_weather) _weather->setText("");
-            if (_volip) _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+            _footerIp();
           } else {
             // weather and IP share a row; suppress weather text and IP together based on mode
             if (*shareWeatherIP_ptr) {
@@ -1176,7 +1183,7 @@ void Display::loop() {
               } else {
                 // skip IP repaint in PLAYER when weather owns the shared row
                 if (!*shareWeatherIP_ptr || !(_mode == PLAYER && config.store.showweather))
-                  _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+                  _footerIp();
               }
             }
           break;
@@ -1723,7 +1730,7 @@ void Display::_applyState(bool inPlace) {
           } else if (*shareWeatherIP_ptr && config.store.showweather) {
             _volip->setText("");   // the weather owns that shared row
           } else {
-            _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+            _footerIp();
           }
         }
         break;

@@ -107,13 +107,15 @@ void setup() {
   BOOTTIMELOG("cleanStaleSearchResults");
   config.initPlaylistMode();
   BOOTTIMELOG("initPlaylistMode");
-  netserver.begin();
-  BOOTTIMELOG("netserver.begin");
-  if (network.status != SDOFFLINE) {
-    netserver.startLoopTask();
-    telnet.begin();
-  }
-  BOOTTIMELOG("netserver task & telnet");
+  // The WebUI is deliberately held back until the startup services are out of the way.  netserver.begin() is
+  // where the request queue, the listener, mDNS and the PSRAM WebUI file cache (up to ~300 KB) are allocated,
+  // and a WebUI connection landing while a service is making its own TLS connection is what overwhelms the
+  // network stack.  Startup::loop() starts it the moment nothing is borrowing that memory; nothing needs the
+  // server in between (requestOnChange is null-guarded), and the footer IP is the indicator, because it is not
+  // drawn until the server is listening.
+  if (network.status == SDOFFLINE) netserver.begin();   // offline mode runs no services, so nothing to wait for
+  if (network.status != SDOFFLINE) telnet.begin();      // a listening socket and no task: telnet stays early
+  BOOTTIMELOG("telnet (netserver deferred)");
   controls.init();
   BOOTTIMELOG("controls.init");
   display.putRequest(DSP_START);

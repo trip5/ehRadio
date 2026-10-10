@@ -115,6 +115,25 @@ Some hardware questions may also be answered within this file.
 
 Want to get even more advanced? There are bunches of notes and tools in the codebase including font editors & builders, localization scripts, and more.
 
+### `/data` Folder
+
+This is the folder that platformio should flash when uploading the filesystem. ehRadio uses LittleFS.
+
+#### `/data/www`
+
+This folder contains all needed file for the WebUI.
+
+The standard ehRadio `platformio.ini` file executes `extra_scripts` to gzip these files before being flashed, greatly reducing their size and increasing throughput for the WebUI.
+
+#### `/data/data`
+
+This folder contains files needed for operation. You can put your own files here that make the radio run "out of the box."
+None are mandatory.  All of these files should be exported directly from ehRadio.
+
+Examples of these files may be found in the `/builds/data` folder:
+  - `playlist.csv` contains a list of radio streams.
+  - `wifi.csv` is list of Wireless APs and passwords.
+
 ### Languages
 
 Language-support is directly hardcoded into the firmware and use the [Matrix-Fonts 8x6-series fonts](https://github.com/trip5/Matrix-Fonts#8x6-series-fonts).

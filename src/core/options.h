@@ -832,8 +832,11 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 // How many seconds to wait after boot completed to Start the Async Services (other services are starting and too soon can crash netserver stack).  The less-important services started here (can take a full minute to complete if server connection issues):
 // verifies/downloads locale JSON file, checks for new version (triggers autoupdate), downloads PLAYLIST_DEFAULT_URL (if set), updates timezones.json.gz and rb_srvrs.json, cleans up stale search results
+// 3 s rather than 10: the delay lets the audio buffer fill before anything competes for WiFi, and with the
+// WebUI now held back until the services are done (see Startup::loop()) the only thing that can compete is
+// the services themselves, which is what the delay was protecting the buffer from in the first place.
 #ifndef STARTUP_ASYNC_SERVICES_DELAY
-  #define STARTUP_ASYNC_SERVICES_DELAY 10
+  #define STARTUP_ASYNC_SERVICES_DELAY 3
 #endif
  // How many seconds to wait after boot completed (including smart start and Async Services) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
   #ifndef BOOT_STABLE_TIME

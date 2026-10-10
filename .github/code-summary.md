@@ -381,14 +381,20 @@ depending on the selected PlatformIO environment and macro definitions.
   8. if no connectivity: start minimal server + controls + display start and return
   9. if connectivity:
      - `config.initPlaylistMode()`
-     - `netserver.begin()`
-     - `telnet.begin()`
+     - `telnet.begin()` — early on purpose: a listening socket with no task of ours, so it costs nothing
      - controls init
      - display start
      - MQTT init when enabled in settings
      - optional smart-start playback
      - `startup.startupServices()`
      - `netserver.setBootReady(true)` only after setup work is actually complete
+     - **`netserver.begin()` deliberately does NOT happen here.** The WebUI is held back until the startup
+       services are out of the way, because `begin()` is where the request queue, the listener, mDNS *and* the
+       PSRAM WebUI file cache (up to ~300 KB) are allocated, and a WebUI connection landing while a service makes
+       its own TLS connection is what overwhelms the network stack. `Startup::loop()` starts it (see that
+       section); the footer IP is the indicator, because `Display::_footerIp()` draws nothing until
+       `netserver.isListening()`. The AP and SDOFFLINE paths still start it here — the captive portal is the only
+       way in on a first boot, and offline mode runs no services at all.
 - `loop()`:
   - AP mode: Improv + captive DNS
   - normal: telnet loop
@@ -528,6 +534,15 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 
 ## `src/core/startup.h` / `startup.cpp`
 - Boot-only orchestration module following the standard core `class + global instance` pattern (`Startup startup;`).
+- **`loop()` is also where the WebUI starts, and the three service states are what decides it.** The condition is
+  `!netserver.isListening() && network.status == CONNECTED && (_services != SVC_WILL_RUN || cardInUse())`, at the
+  very top of `loop()` — above its `_bootStablePending` early return, which is why it cannot live at the end of
+  `setup()`. All three parts are load-bearing. Waiting only for `SVC_DONE` would leave **SD mode with no WebUI**:
+  `SVC_WILL_RUN` means the task was *created*, and it parks in `while (cardInUse())`, which is exactly when the
+  WebUI is needed to switch back to web radio. `SVC_NONE` is the opposite trap — no WiFi, no `UPDATEURL` or the
+  web files missing means no services are coming, so nothing else would ever start the server. `begin()` creates a
+  fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the trigger sends `NEWIP`
+  so the footer IP appears with the server rather than at boot.
 - **Boot stability is a state, not a timer.** `Startup::_services` is `SVC_NONE` / `SVC_WILL_RUN` / `SVC_DONE`, and
   `setup()` has already settled which one applies by the time `loop()` can run, because `startupServices()` has exactly
   one call site — [`main.cpp:142`](src/main.cpp:142), inside `setup()`. `loop()` then has three exits: `SVC_NONE` proves

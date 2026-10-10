@@ -473,6 +473,22 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 
 ## `src/core/config.cpp`
 - Persistent storage/defaults/hardware bootstrap center.
+- **The two asset keep-lists hold bare basenames, and they are why a new asset is a two-place edit.**
+  `Config::wwwFiles[]` is simultaneously the PSRAM cache manifest, the `/www` prune whitelist and the list
+  `verifyLittleFS()` requires *in full* — it is an exact set match, so a file added here must reach every
+  device or the check reports the filesystem incomplete and the repair path runs. `Config::dataFiles[]`
+  holds the optional `/data` files and only feeds `pruneLittleFS()`, so it may name a file that does not
+  exist; `THEME_SLOT_FILES` adds the ten `xtheme1..10.json` custom theme slots there purely so the next
+  cleanup does not delete them. Both lists are compared against a basename, never a path.
+- `Config::loadTheme()` resolves through the theme registry, not the compiled table, and deliberately
+  tolerates an unresolved id: it runs from `_initHW()` before LittleFS is mounted, so a custom id cannot be
+  judged yet — see `src/displays/themeregistry.*`. `Startup::checkLittleFSandVer()` calls it again once the
+  slot files have been read, **and persists the correction when the resolved id differs from the stored one**.
+  That write is what stops a stale id from coming back to life: with the slot files gone (a reflashed
+  filesystem) a persisted `themeId` pointing at an empty slot would silently re-apply itself the moment
+  anything refilled that slot, changing the device's theme on a later boot for no visible reason. It has to
+  happen there rather than inside `loadTheme()`, whose earlier call cannot judge a custom id at all and would
+  therefore forget a perfectly good custom theme on every boot.
 - Main responsibilities:
   - load and validate Preferences (`cfgset` marker)
   - defaults/init logic
@@ -1065,6 +1081,38 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/core/netserver.cpp`
 - HTTP + WebSocket + upload/update + search/curated orchestration.
+- **The theme editor's API sits at the end of `handleNotFound()`, behind `#if defined(DSP_TFT) || DBGWUI`.**
+  Eight routes serve `/editor.html` and nothing else links to them: `GET /theme-elements.json` (one object per
+  element — its key and its label — in table order), `GET /themeall.json` (every id, empty slots included, because the editor's source
+  dropdown must be able to offer one), `GET /themeactive.json` (the id in use, one number), `GET
+  /themedata.json?id=N`, `GET /xtheme.json?slot=N` (one slot as a download, offered to the browser as
+  `ehRadioTheme-<name>.json`), `GET /xthemeall.json` (every filled slot in one, in order, as
+  `ehRadioThemes-Backup.json`), `POST /xtheme` (`action=save|delete`) and `POST /themeapply`. The theme travels as ONE
+  `data=` field holding the same document the slot files use, so `themeParseTheme()` is the only parser and
+  there is no second shape to keep in step — and for the same reason **Save is also the import**: the export
+  writes what a save would have written, so feeding it back through Save restores the slot. `POST /xtheme`
+  also takes an optional **`use=0`**, which writes and installs the slot *without* selecting it; that is what
+  the page's bulk import uses, because ten sequential saves would otherwise leave the device sitting on the
+  last theme imported. The routes sit outside the WebUI's `group_*` conventions on purpose: the page is
+  unlisted and only it consumes them. The two exports exist because the slot files are the only copy of a
+  custom theme, and a LittleFS reflash takes all ten with it.
+- **`/themeall.json` sends an empty string for a slot that holds nothing, not a label.** The editor's two
+  dropdowns describe the same slot differently — the source has to say "this is a custom slot", the target
+  has to say "this is already taken" — so the decoration is the page's job and the firmware sends only the
+  name. An empty string is then the single, unambiguous "nothing here" the page reads, with no marker string
+  for the two sides to disagree about. (`/themes.json`, which the options page uses, instead omits empty
+  slots entirely — a different list for a different consumer.)
+- **`themeapply` previews and writes nothing; `xtheme action=save` commits and does everything.** The
+  preview parses into `themeStaging()` and queues `THEMEPREVIEW`, and the display task takes the staged
+  colours from there — no file, no NVS, no `themeId`. The page sends that request on a debounce as you
+  edit, which is the whole of the "live" behaviour and has no control of its own. Save is the editor's one
+  committing action: it writes the slot, then sets `themeId` to it, persists that and calls
+  `display.applyTheme()` — the ordinary theme path, the same one the WebUI dropdown uses — so the panel
+  shows it and options.html agrees about which theme is in use. It therefore resets the pre-sleep countdown
+  exactly as any theme change does. Delete is the other NVS write: when the slot being removed is the theme
+  in use, `themeId` falls back to 0 and is persisted, because a stored id with no theme behind it is the one
+  state that cannot be left behind. `GET /themes.json` picks up a save or delete by itself —
+  `Display::getThemeListJson()` rebuilds when the registry's generation has moved.
 - Main responsibilities:
   - static file serving from PSRAM cache (via `StaticFileCache`) — no LittleFS reads during HTTP serving
   - fallback to LittleFS for dynamic files not in cache (`searchresults.json`, `curated.json`, etc.)
@@ -1213,13 +1261,79 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   [`layout_key.md`](../src/displays/conf/layout_key.md) documents every field and now states the write-every-field and
   keep-the-headers rules.
 
+## `src/displays/themeregistry.h` / `themeregistry.cpp`
+- **The theme registry: one flat list of ids serving two sources.** Ids `0..12` are the compiled `_themes[]`
+  table, ids `13..22` are the ten user slots whose files live in `/data/xtheme1..10.json`. Readers ask for a
+  copy (`themeCopy()`) or a name, never for the table, and the rest of the firmware only ever sees
+  `config.theme` — which is why blending the two sources needed no changes outside `config.cpp` and
+  `display.cpp`.
+- **`themeCount()` is a constant 23, and "is anything there" is a separate question** (`themeFilled()`).
+  `config.store.themeId` is persisted, so a count that shrank — or an id that moved because a file was
+  deleted — would silently re-point the device at a different theme. `themeAt()` returns `nullptr` for an
+  empty custom slot, so nothing can dereference one.
+- **`themeValidId()` has a two-phase rule, and it exists purely because of boot order.**
+  `config.loadTheme()` runs from `_initHW()`, before LittleFS is mounted, so a custom id cannot be judged on
+  that pass — answering "0" would forget the user's choice for the whole session. Until `themeLoadSlots()`
+  has read the files the custom ids are therefore left alone, the caller falls back to built-in 0 for the
+  palette, and `Startup::checkLittleFSandVer()` re-runs `loadTheme()` once the slots are known.
+- **The element table is reached only through `themeElementKey()`, `themeElementLabel()` and
+  `themeElementCount()`.** The table in `themes.h` pairs each field's wire key with a human label, and these
+  three are the only way in, so `elementIndex()`, `themeJsonFor()` and the WebUI route never index it and
+  cannot disagree about what an element is called. Past the end they return `""` rather than trapping, so a
+  loop over the count needs no guard at each use.
+- **One document shape, one parser, and one rule: known keys, missing keys zeroed.** `{ "name": "...",
+  "colors": { ".key": 565 } }` is the slot file, the Save body and the Apply body alike. Reading iterates the
+  document's own members and matches each key against `_themeElementNames` rather than looking up each of our
+  keys in turn — which keeps any key text legal, brackets and dots included, and makes an unknown key simply
+  ignorable. A key the document leaves out comes back **black**, in every context: there is no
+  inherit-from-a-base rule any more, because it made a partial file mean different things in different places
+  (the loader inherited from built-in 0, the preview from the theme in use) and the editor always sends all 43
+  keys, so it only ever mattered to a hand-made file. There is no `version` field either — the keys are the
+  contract, so nothing has to negotiate one. An `[r,g,b]` array is still accepted in place of a 565 integer.
+- **`themeJsonForAllSlots()` is the Backup All writer, and a backup is a SET of themes.** It emits the filled
+  slots in slot order and nothing else — no `null` for an empty slot and nothing padded on the end — or, when
+  exactly one slot is filled, that slot's own document, so the two export buttons agree on a one-theme device.
+  There is no placeholder because there is no layout in the file: a restore packs these themes into whatever
+  slots are free, so declaring an emptiness would describe an intent the reader does not honour.
+- **`themeJsonFor()` REPLACES the buffer it is given; it does not append, and the array writer depends on
+  knowing that.** Each element is built into its own `String` and then appended. Handing it the array's own
+  buffer overwrote the `[` with the first theme and then each element overwrote the one before, leaving the
+  last filled slot's document followed by a stray `]` — invalid JSON, and invisible until two slots were
+  filled because with one the array path returns before the second call happens. The contract is stated on
+  both functions so the next caller cannot repeat it.
+- `themeJsonFor()` builds the output by hand rather than with a serializer, so the keys are emitted exactly as
+  `themes.h` spells them. `themeStaging()` is the one scratch theme a preview is parsed into and
+  `themeStagingCopyTo()` is how the display task collects it; a second POST overwriting it is harmless, since
+  it carries newer colours for the same repaint and a torn read could only mix two of the user's own palettes.
+- **A knowingly accepted cost:** the built-in tables are `const` at namespace scope, so including `themes.h`
+  here makes a second copy for this translation unit (about 2 KB of flash). Giving them one definition would
+  mean restructuring a header that `importtheme.py` generates into.
+
 ## `src/displays/themes.h`
 - Runtime theme switching data, loaded from PROGMEM at runtime.
-- `ThemeData` struct: 35 `uint16_t` color fields + `playlist[5]` — mirrors `config.h` `theme_t`.
-- `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported).
-- `const char _themeNames[][32] PROGMEM` — display names for WebUI dropdown.
+- `ThemeData` struct: 38 `uint16_t` colour fields + `playlist[5]` — 43 in all, and it mirrors `config.h`'s
+  `theme_t`, which is what lets `memcpy` carry one into the other.
+- `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported), reached only through the
+  theme registry.
+- `const char _themeNames[][64] PROGMEM` — display names for WebUI dropdown.
 - `RGB(r,g,b)` macro packs 8-bit RGB into RGB565 `uint16_t`.
-- Populated by `importtheme.py` script.
+- **`_themeElementNames[] PROGMEM` is the contract with the theme files and the editor.** One entry per
+  `uint16_t` field of `ThemeData`, in declaration order, each pairing a `key` with a `label`. The key is the
+  wire and file name — `playlist` is 0-based (`.playlist[0]` is the first entry) so the file and the struct
+  agree directly — and the label is what a human reads, which the editor shows by default with the key a click
+  away. A label is never parsed, matched or stored, so renaming one cannot touch a byte of a theme file. **One
+  element per line is the point:** two parallel tables would let a key be added without its label and shift
+  every entry after it, while a count-based check still passed. A `static_assert` ties
+  `sizeof(ThemeData)/sizeof(uint16_t)` to the table's length: adding a field to the struct fails the build
+  until an entry is added here, rather than silently orphaning that key in every theme file already on disk.
+- **Every colour in `_themes[]` is written on the 565 steps** — `level * step`, so red and blue are
+  multiples of 8 and green of 4, the same numbers `editor.html` shows. This is a spelling of the same colour
+  and not a change to it: `(r >> 3) * 8` packs back to the same 565 that `r` did, so the 502 literals
+  `importtheme.py --quantise` moved in the shipped file compiled to a **byte-identical firmware** in all
+  three environments.
+- Populated by `importtheme.py`, which takes either an old-style `#define COLOR_*` file or a WebUI JSON
+  export (one theme or a whole backup), routes both through the same fallback rules, and snaps everything it
+  writes onto those steps. See [`importtheme.md`](../src/displays/importtheme.md).
 - **`.line` and `.vuaxis`: the two entries with no old-format source, both derived from `.div`.** `line` sits between
   `.div` and `.weather`, `vuaxis` between `.weather` and `.vupeak`, and their place in the entry is fixed because the
   entries are designated initialisers. The rules are part of the palette now, not values to eyeball: **`.line` =
@@ -2677,6 +2791,81 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 ---
 
 ## WebUI Per-File Map (`data/www`)
+- **`editor.html` — the theme editor, and the only unlisted page.** It is reached by typing the URL; nothing
+  links to it, and it deliberately does not follow the WebUI's `group_*` conventions or load `theme.css`
+  (its colour fields must show the theme's values, not the WebUI's palette). Its script is inline, per the
+  rule below. Two rows: "Load theme" (the source) and "Custom Theme" (the target, with Save, Delete, Export,
+  Export All and Import beside it — every one of them acts on the target or the slot list, so they belong on
+  its row). "Load theme" lists every id,
+  empty slots included, and both *replaces* the grid and shows it on the panel when changed, because a load
+  changes the grid as much as an edit does and should look the same. "Custom Theme" only chooses the slot and
+  never touches the grid, which is what makes copy-tweak-save-to-another-slot work. The two lists decorate
+  the slots their own way — the source reads "[ Custom Theme 1 ] Name" and just "[ Custom Theme 2 ]" when
+  empty, the target reads "[ 1 ] Name" and "[ 2 ] (empty)" — so the list itself says what Save would
+  overwrite and no separate hint line is needed. There is deliberately **one button that commits**: `Save`
+  writes the slot and makes it the theme in use. Everything else is feedback — every edit is sent on a
+  debounce as a preview, so the panel follows along while a colour is hunted for, and that preview has no
+  button or checkbox of its own. Which loads preview is gated by the `quiet` flag, which marks the two fills
+  that must NOT touch the panel: the one on page open, and the one after a delete (where the device has
+  applied the fallback itself). Without that gate, merely opening the page would repaint the device with
+  whatever theme the page happens to start on. The page **opens on the theme the device is using** — the id
+  comes from `GET /themeactive.json` and that theme is what fills the grid — rather than on the first
+  built-in, so a fresh page cannot quietly commit something nobody chose; the fill is quiet, because that
+  theme is already on the panel. The status line sits above the grid rather than under it, where a page this
+  tall would have hidden it. `Delete` needs a second click, in the spirit of the danger zone. `Export`
+  downloads the selected slot through `GET /xtheme.json?slot=N` — from the device, so the file is byte for
+  byte what a save would write and can be posted straight back through Save, which is the only reason it can
+  be trusted as a backup before a filesystem reflash. `Backup All` downloads every filled slot through
+  `GET /xthemeall.json`, and the device decides the shape: one theme comes down as that theme's own document
+  (so the two buttons agree when there is only one to export), several as the array. Both **suggest a file
+  name** through `Content-Disposition`, so the browser's save dialog arrives pre-filled: `ehRadioTheme-<theme
+  name>.json` for one, filtered to what a file system will take and with an RFC 5987 form alongside when the
+  name carries accents, and `ehRadioThemes-Backup.json` for the set. The RFC 5987 `filename*` value is written
+  **unquoted** and has to stay that way: a closing `"` after the `.json` is not a delimiter there but part of the
+  value, and the browser saves the file as `.json_`, replacing the illegal character with an underscore. `Import`
+  reads a chosen
+  file locally — it never leaves the browser until it is written — and splits by shape. A **single theme** is
+  written into the selected slot and becomes the theme in use, exactly like Save, overwriting that slot with
+  no warning: it is the one import that can destroy something, and it can only ever touch the slot the user
+  chose. An **array is a restore**, written into the **free** slots in ascending order and never over an
+  occupied one, each with `use=0` so putting themes back does not change what the device is playing. A backup
+  is a set of themes rather than a map of where they sat, so the slots are packed and the file carries no
+  placeholders — and the confirmation names the slots used, because they are not the slots the themes came
+  from. **Capacity is checked before the first write**: more themes than free slots aborts the whole restore,
+  writes nothing and says so in red (`That file has 4 themes but only 2 slots are free. Delete some themes and
+  try again.`), which is also why the arming step is gone — a bulk import can no longer overwrite, so a second
+  confirm click would protect nothing. The free-slot list is asked for fresh from `themeall.json` rather than
+  trusted from page state, since it decides the whole import.
+- **The element column reads as English, and the header switches it back to the .h names.** Each row's first
+  cell shows the label from `/theme-elements.json`, with the key in its `title`, and clicking the `Element`
+  header rewrites every cell in place between label and key. The header stays a header — plain text, pointer
+  cursor, a dotted underline on hover, deliberately **not** a button, because it is the column that changes and
+  not the page — and it obeys the same rewrite-don't-rebuild rule as the dropdown labels. The view is not
+  persisted, so every load starts friendly, and the column keeps only the label or key it needs: the document
+  and the wire stay keyed by key throughout.
+- **The theme name has its own row above the table, and the R/G/B fields step in 565 levels.** The name was
+  the first row of the `<tbody>`, which put it in the element column and made it read as that column's header;
+  it is not part of the grid, so it now sits in an `.erow` above it labelled `Name` (the id and everything
+  that reads it are unchanged). The colour fields offer the levels the panel actually holds: red and blue step
+  8 up to 248, green steps 4 up to 252, and the number shown is the level times its step — `r5 << 3` — so every
+  click is exactly one level and nothing can be typed that silently collapses onto the colour next door. 248
+  and 255 are the same red (`r8 >> 3` is 31 for both), so the field's maximum reads 248 rather than 255 and
+  249-255 are simply not offered; a value typed between two steps is snapped to
+  the nearest one when the field loses focus; and the `565` column plus the swatch stay the authoritative
+  reading. Presentation only — the wire format, the files and `RGB(r,g,b)` are untouched.
+- **Each field carries its own row index, and the preview debounce is a named constant.** `buildGrid()`
+  captures the row in the listener, so `onEdit(idx)` and `onSwatch(sw, idx)` paint the row that fired rather
+  than looking one up: the earlier version used `document.activeElement`, and a click on the spinner arrows
+  fires `input` **without focusing the field**, so it painted nothing while still sending the preview — a
+  panel flash with a swatch and a 565 cell stuck on the old value. The panel is repainted after
+  `PREVIEW_DELAY` (1000 ms) of quiet, because a preview is a full widget re-init and a colour hunt should not
+  be twenty repaints.
+- **An initialiser is not a refresher, and a page must not rebuild what the user is editing.** `editor.html`
+  builds its grid exactly once. After a save or a delete it refreshes only the dropdown *labels*, in place,
+  by rewriting the text of the options that already exist — because the id set never changes, only which
+  ids hold a theme. Calling the initialiser a second time emptied the table body, rebuilt every row as a
+  fresh empty input and re-created both selects, which blanked every field and snapped the source dropdown
+  back to its first option while the user was looking at it.
 - **Keep a script inside its page when only that page uses it.** Every file in `Config::wwwFiles[]` is fetched
   separately by the OTA updater and each fetch pays its own HTTPS handshake, so fewer files means a faster update for
   every device in the field - the byte count of the file barely matters beside that. `search.html`, `curated.html` and

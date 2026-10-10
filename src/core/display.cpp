@@ -21,6 +21,7 @@
 #include "../locale/dsplocale.h"
 #include "../displays/dspcore.h"
 #include "../displays/themes.h"
+#include "../displays/themeregistry.h"
 #include "../displays/widgets/pages.h"
 #include "../displays/widgets/widgets.h"
 #include "../displays/widgets/widget_vu.h"
@@ -844,6 +845,7 @@ void Display::_enterScreensaver(displayMode_e mode) {
 void Display::resetQueue() {
   if (displayQueue!=NULL) xQueueReset(displayQueue);
   _deferredType = NOPE;  // a queue flush takes a stale deferred message with it
+  _previewPending = false; // ...and any preview waiting on it, or the next one would be coalesced away
 }
 
 // Queue a request the display task must not apply yet.  delayMs 0 is just putRequest().
@@ -868,6 +870,12 @@ void Display::_drawNextStationNum(uint16_t num) {
 
 void Display::putRequest(displayRequestType_e type, int payload) {
   if (displayQueue==NULL) return;
+  // One preview at a time.  A THEMEPREVIEW that is already waiting is redundant whichever way you
+  // look at it - the staging theme is where the newest palette lives, and the waiting request will
+  // read it when it runs - so a second one would only queue another full widget re-init.  The flag is
+  // taken from the send result below rather than set before it, because a saturated queue drops
+  // requests (see the note under the send) and a flag left set would block previews for good.
+  if (type == THEMEPREVIEW && _previewPending) return;
   // A later boot-line message supersedes a deferred one, or a scan could overwrite "Wi-fi: <ssid>" mid-delay.
   if (_deferredType != NOPE &&
       (type == BOOTSTRING || type == FORMATTING || type == WAITFORSD || type == SCANNINGWIFI)) {
@@ -882,6 +890,8 @@ void Display::putRequest(displayRequestType_e type, int payload) {
   if (xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) != pdTRUE) {
     _droppedRequests++;
     ERRORLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);
+  } else if (type == THEMEPREVIEW) {
+    _previewPending = true;
   }
 }
 
@@ -1043,6 +1053,15 @@ void Display::loop() {
         // The whole layout/theme/font re-init, on the display task.  applyFont() below is the only
         // thing that queues it; it used to be an enum value with no handler at all.
         case APPLYSTATE: _applyState(); break;
+        // The same re-init for the theme editor's live preview, but repainted in place: the mode, the
+        // overlays and the screensaver countdowns are all deliberately left alone.
+        case THEMEPREVIEW:
+          _previewPending = false;  // taken off the queue, so the next preview may be queued again
+          // config.theme is written inside _applyState() - the only place allowed to - and it takes the
+          // staged colours rather than re-reading the stored theme.  See the theme copy there: reading
+          // the stored theme on this path is what made the first version of the preview a no-op.
+          _applyState(true);
+          break;
         case CLOSEPLAYLIST: player.sendCommand({PR_PLAY, request.payload});
         case CLOCK:
           if ((_mode==PLAYER || _mode==SCREENSAVER) && !(network.status == SDOFFLINE && !config.isRTCFound()))
@@ -1643,11 +1662,15 @@ void Display::_applyMetaInvert() {
   }
 }
 
-void Display::_applyState() {
+void Display::_applyState(bool inPlace) {
   memcpy_P(&activeLayout, &_layouts[config.store.layoutId], sizeof(LayoutData));
   _setLayoutPointers();
   #ifdef DSP_TFT
-    memcpy_P(&config.theme, &_themes[config.store.themeId], sizeof(ThemeData));
+    // A preview arrives with its colours already staged, so on that path the stored theme must NOT be
+    // re-read: doing so replaces them with the very colours the panel is already showing, which is a
+    // repaint of what was there rather than a preview of what the user just edited.
+    if (inPlace) themeStagingCopyTo(&config.theme);
+    else         themeCopy(config.store.themeId, &config.theme);
   #endif
   _applyMetaInvert();
   _reinitWidgets();
@@ -1666,9 +1689,60 @@ void Display::_applyState() {
   _title();
   // A layout or a theme change has to land while the device is asleep as well, and both feed the
   // screensaver's own widgets - the meter's geometry and its palette - so the screensaver is rebuilt where
-  // it stands rather than the screen being woken to the player page.  Queued, because this runs on
-  // whichever task asked for the change.
-  if (config.isScreensaver) { putRequest(SSREBUILD, _mode); return; }
+  // it stands rather than the screen being woken to the player page.
+  if (config.isScreensaver) {
+    // A preview is already ON the display task, so the rebuild is done right here.  Queueing it - which is
+    // right for a change some other task asked for, hence the queue below - left the widget re-init above
+    // painted over the picture with the screensaver only returning a pass later, which is the flash the
+    // user sees as "shows the main screen, then re-enters".
+    if (inPlace) { _enterScreensaver(_mode); return; }
+    putRequest(SSREBUILD, _mode);
+    return;
+  }
+  if (inPlace) {
+    // The editor's live preview.  _switchMode() is deliberately never called: that is what leaves the mode,
+    // the clock's hand-over and both screensaver countdowns exactly as they were, since a mode change would
+    // reset the countdowns and cancel an overlay.
+    //
+    // The page the user is looking at has to be put BACK, because _reinitWidgets() above does not only
+    // rebuild the objects - it re-applies their layout visibility, and those calls paint as they go.  The
+    // page that is up therefore ends up with fresh player and dialog widgets drawn over it; the playlist is
+    // where that is unmissable (RSSI and the buffer bar appearing over a half-drawn list).
+    switch (_mode) {
+      case PLAYER:
+        _pager->setPage(pages[PG_PLAYER]);
+        _station();
+        _title();
+        _volume();
+        if (_battery) _updateBattery();
+        // A page switch fills the panel and the IP line only repaints from setText, so it is written again
+        // here - the same rule _switchMode(PLAYER) and the boot painter follow.
+        if (_volip) {
+          if (network.status == SDOFFLINE) {
+            _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+          } else if (*shareWeatherIP_ptr && config.store.showweather) {
+            _volip->setText("");   // the weather owns that shared row
+          } else {
+            _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+          }
+        }
+        break;
+      case STATIONS:
+        // _drawPlaylist(), not the playlist widget's own draw: it also re-arms the 30-second return ticker,
+        // and that is wanted here - editing while the list is up should hold it there rather than let it
+        // time out mid-edit.  The scroll position is untouched, since currentPlItem is not reset.
+        _pager->setPage(pages[PG_PLAYLIST]);
+        _drawPlaylist();
+        break;
+      default:
+        // The volume page, a dialog and the rest draw from the same widgets the re-init just repainted on
+        // their own page, so they are already correct.  Anything else is left alone rather than
+        // half-rebuilt, and that is safe: the palette is applied, so the next time that page is entered it
+        // comes up in the new colours.
+        break;
+    }
+    return;
+  }
   putRequest(NEWMODE, CLEAR);
   putRequest(NEWMODE, PLAYER);
 }
@@ -1682,12 +1756,14 @@ void Display::applyLayout(uint8_t id) {
 uint8_t Display::getLayoutCount() { return layoutCount; }
 
 void Display::applyTheme(uint8_t id) {
-  if (id >= sizeof(_themes)/sizeof(_themes[0])) return;
+  // Filled, not merely in range: an empty custom slot is a valid id with nothing behind it, and
+  // applying it would leave the previous colours up under a new id.
+  if (!themeFilled(id)) return;
   config.store.themeId = id;
   _applyState();
 }
 
-uint8_t Display::getThemeCount() { return sizeof(_themes) / sizeof(_themes[0]); }
+uint8_t Display::getThemeCount() { return themeCount(); }
 
 // The font tables are macros in dspfont.h rather than private statics, but the handler asks the display
 // for every count it clamps against: one shape for the four index commands, and this is the one that is
@@ -1731,19 +1807,32 @@ void Display::applyFonts(uint8_t systemId, uint8_t clockId) {
   putRequest(APPLYSTATE);
 }
 
-void Display::_buildJsonCache() {
-  // Build theme list JSON once — theme names are PROGMEM constants
-  _themeListJson = "{";
-  for (uint8_t i = 0; i < sizeof(_themes)/sizeof(_themes[0]); i++) {
-    if (i > 0) _themeListJson += ',';
-    _themeListJson += '"' + String(i) + "\":\"";
+void Display::_buildThemeListJson() {
+  // One entry per FILLED id, and the keys are the real ids rather than positions.  A custom slot with
+  // no file behind it is therefore simply absent, with no gap and no placeholder: options.js builds
+  // the select from the object's entries and uses each key as the option value, so a sparse list
+  // needs no change on that side at all.
+  String json = "{";
+  bool first = true;
+  for (uint8_t i = 0; i < themeCount(); i++) {
+    if (!themeFilled(i)) continue;
+    if (!first) json += ',';
+    first = false;
+    json += '"' + String(i) + "\":\"";
     char buf[33];
-    strncpy_P(buf, _themeNames[i], 32);
+    strncpy_P(buf, themeName(i), 32);
     buf[32] = 0;
-    _themeListJson += buf;
-    _themeListJson += '"';
+    json += buf;
+    json += '"';
   }
-  _themeListJson += '}';
+  json += '}';
+  // One assignment, so a request reading the cache never sees a half-built list.
+  _themeListJson = json;
+  _themeListGen = themeGeneration();
+}
+
+void Display::_buildJsonCache() {
+  _buildThemeListJson();
 
   // Build layout list JSON once
   _layoutListJson = "{";
@@ -1782,7 +1871,13 @@ void Display::_buildJsonCache() {
     _clockFontListJson += '}';
   }
   
-  String Display::getThemeListJson() { return _themeListJson; }
+  String Display::getThemeListJson() {
+    // The registry can move under this cache: the slot files are read after the first build, and the
+    // editor can save or delete a slot at any time.  The generation says when to rebuild, so no
+    // caller has to know it changed.
+    if (_themeListGen != themeGeneration()) _buildThemeListJson();
+    return _themeListJson;
+  }
   String Display::getLayoutListJson() { return _layoutListJson; }
   String Display::getSystemFontListJson() { return _systemFontListJson; }
   String Display::getClockFontListJson() { return _clockFontListJson; }

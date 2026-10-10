@@ -28,6 +28,7 @@
 #include "../displays/dspcore.h"
 #include "../displays/dspfont.h"
 #include "../displays/widgets/widgetsconfig.h" //BitrateFormat
+#include "../displays/themeregistry.h"         // the theme editor's API below
 #if USE_OTA
   #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     #include <NetworkUdp.h>
@@ -1812,6 +1813,241 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(response);
     return;
   }
+  // ---------------------------------------------------------------------------
+  // The theme editor.  Nothing but /editor.html uses these, and the page is not linked from anywhere,
+  // so they are deliberately outside the WebUI's own conventions: the theme travels as one JSON field
+  // and the shape is the same one the slot files use, which is what lets one parser serve the boot
+  // loader, Save and Apply alike.  TFT-only (the same test the theme group in the WebUI uses), because
+  // on a monochrome build a theme never reaches the panel at all.
+  // ---------------------------------------------------------------------------
+  #if defined(DSP_TFT) || DBGWUI
+  if (request->url() == "/theme-elements.json") {
+    // One object per element, in table order which is also the field order: the key the page sends back
+    // with a value, and the label it shows in the grid instead.  Both come from the one table in
+    // themes.h, so the page cannot mispair them and nothing here has to explain what a key means.
+    // Neither string needs escaping - they are our own literals of dots, brackets, letters and dashes.
+    String json = "[";
+    for (size_t i = 0; i < themeElementCount(); i++) {
+      if (i > 0) json += ',';
+      json += "{\"key\":\"";
+      json += themeElementKey(i);
+      json += "\",\"label\":\"";
+      json += themeElementLabel(i);
+      json += "\"}";
+    }
+    json += ']';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themeall.json") {
+    // Every id, filled or not: the editor's first dropdown lists all of them so an empty slot is still
+    // somewhere the user can save into, and the label says which ones hold nothing.
+    String json = "{";
+    for (uint8_t i = 0; i < themeCount(); i++) {
+      if (i > 0) json += ',';
+      json += '"' + String(i) + "\":\"";
+      // An empty slot is an EMPTY STRING rather than a fabricated label: the editor decorates names
+      // itself (its two dropdowns label the same slot differently) and it reads "empty" from exactly
+      // this, so there is no marker string for the two sides to disagree about.
+      if (themeFilled(i)) json += themeName(i);
+      json += '"';
+    }
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themeactive.json") {
+    // One number: which theme the device is using.  The editor opens on this instead of on the first
+    // built-in, so a fresh page starts from what is on the panel and its Save cannot quietly commit
+    // something the user never chose.
+    String json = "{\"id\":";
+    json += config.store.themeId;
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themedata.json") {
+    // One theme in the same shape the slot files use, so the page fills its grid with the identical
+    // code path whether the theme came from flash or from a file.
+    const int id = request->hasArg("id") ? request->arg("id").toInt() : -1;
+    if (id < 0 || id >= (int)themeCount() || !themeFilled((uint8_t)id)) {
+      request->send(404, "text/plain", "No such theme");
+      return;
+    }
+    String json;
+    themeJsonFor(themeAt((uint8_t)id), themeName((uint8_t)id), json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/xtheme.json") {
+    // Export one slot as a download.  It comes straight off the device, so the file is byte for byte what
+    // a save would have written, and it can go back the same way - Save IS the import, because it parses
+    // whatever this produced.  The reason it exists: the slot files are the only copy of a custom theme,
+    // so a filesystem reflash loses them unless they were taken out first.
+    const int slot = request->hasArg("slot") ? request->arg("slot").toInt() : -1;
+    if (slot < 0 || slot >= THEME_CUSTOM_MAX) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(THEME_BUILTIN_COUNT + slot);
+    if (!themeFilled(id)) {
+      request->send(404, "text/plain", "That slot is empty");
+      return;
+    }
+    String json;
+    themeJsonFor(themeAt(id), themeName(id), json);
+    // A suggested file name, so the browser's save dialog arrives pre-filled.  The theme's own name, made
+    // safe for a file system: anything a path cannot carry becomes an underscore, but UTF-8 bytes are kept
+    // because the RFC 5987 form of the header carries them properly for the browsers that read it alongside
+    // the plain one.  A name with nothing usable left in it keeps the slot's own file name instead, which is
+    // what the device stores the theme as anyway.
+    String stem;
+    for (const char* p = themeName(id); *p != '\0'; p++) {
+      const char c = *p;
+      const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                         c == ' ' || c == '-' || c == '_' || c == '.';
+      stem += (plain || (uint8_t)c >= 0x80) ? c : '_';
+    }
+    stem.trim();
+    String disposition;
+    if (stem.length() == 0) {
+      disposition = "attachment; filename=\"";
+      disposition += themeSlotFileName((uint8_t)slot);
+      disposition += '"';
+    } else {
+      // Two names in one header: the plain, quoted form for anything that does not read RFC 5987, and the
+      // quoted-string-free UTF-8 form for everything that does.  The filename* value must NOT be quoted -
+      // a closing quote there is not a delimiter, it is part of the value, and browsers turn the illegal
+      // character into an underscore when they pre-fill the save dialog (which is where ".json_" came from).
+      disposition = "attachment; filename=\"ehRadioTheme-";
+      disposition += stem;
+      disposition += ".json\"; filename*=UTF-8''ehRadioTheme-";
+      for (size_t i = 0; i < stem.length(); i++) {
+        const uint8_t b = (uint8_t)stem[i];
+        const bool plain = (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+                           b == '-' || b == '_' || b == '.';
+        if (plain) {
+          disposition += (char)b;
+        } else {
+          char esc[5];
+          snprintf(esc, sizeof(esc), "%%%02X", b);
+          disposition += esc;
+        }
+      }
+      disposition += ".json";
+    }
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", disposition);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/xthemeall.json") {
+    // Every filled slot in one download.  The shape follows the page's rule: one theme is that theme's own
+    // document, so a single-theme device gets the identical file from either Export button, and more than
+    // one is an array in slot order with null where a slot holds nothing.
+    String json;
+    themeJsonForAllSlots(json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", "attachment; filename=\"ehRadioThemes-Backup.json\"");
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/xtheme") {
+    const AsyncWebParameter *actionArg = request->getParam("action", true);
+    const AsyncWebParameter *slotArg = request->getParam("slot", true);
+    if (actionArg == nullptr || slotArg == nullptr) {
+      request->send(400, "text/plain", "action and slot are required");
+      return;
+    }
+    const int slot = slotArg->value().toInt();
+    if (slot < 0 || slot >= THEME_CUSTOM_MAX) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(THEME_BUILTIN_COUNT + slot);
+
+    if (actionArg->value() == "delete") {
+      themeDeleteSlot((uint8_t)slot);
+      if (config.store.themeId == id) {
+        // The theme the device is using has just stopped existing, so the choice falls back to the
+        // factory theme and is persisted.  This is the one place the editor writes NVS, and it is
+        // because a stored id with nothing behind it cannot be left behind.  applyTheme() repaints the
+        // panel through the ordinary theme path - a delete is a real change, not a preview.
+        config.store.themeId = 0;
+        config.saveValue(&config.store.themeId, (uint8_t)0);
+        display.applyTheme(0);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    if (actionArg->value() == "save") {
+      const AsyncWebParameter *dataArg = request->getParam("data", true);
+      if (dataArg == nullptr) {
+        request->send(400, "text/plain", "data is required");
+        return;
+      }
+      ThemeData parsed;
+      char name[33];
+      name[0] = '\0';
+      if (!themeParseTheme(dataArg->value().c_str(), &parsed, name, sizeof(name))) {
+        request->send(400, "text/plain", "Bad theme JSON");
+        return;
+      }
+      if (!themeSaveSlot((uint8_t)slot, name, &parsed)) {
+        request->send(500, "text/plain", "Write failed");
+        return;
+      }
+      // Save is the editor's one committing action, so it does both halves: the slot is written AND it
+      // becomes the device's theme.  That is what makes the panel show it and options.html agree about
+      // which theme is in use.  It is a real theme change rather than a preview, so it goes through the
+      // ordinary theme path — the same one the WebUI dropdown uses — which also means it resets the
+      // pre-sleep countdown exactly as any other theme change does.
+      //
+      // `use=0` is for the bulk import, which installs themes without the device leaving whatever it was
+      // already using: ten sequential saves would otherwise leave it sitting on the last one imported.
+      const bool useIt = request->hasParam("use", true)
+                           ? request->getParam("use", true)->value().toInt() != 0
+                           : true;
+      if (useIt) {
+        config.saveValue(&config.store.themeId, id);
+        display.applyTheme(id);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    request->send(400, "text/plain", "Bad action");
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/themeapply") {
+    const AsyncWebParameter *dataArg = request->getParam("data", true);
+    if (dataArg == nullptr) {
+      request->send(400, "text/plain", "data is required");
+      return;
+    }
+    // The body lands in the staging theme and the display task takes it from there; this task never
+    // touches the live theme, and nothing at all is written to a file or to NVS.  A key the body leaves
+    // out comes back black, the same rule the files follow - and the page always sends all 43 keys, so
+    // that only ever shows up for a hand-made request.
+    if (!themeParseTheme(dataArg->value().c_str(), themeStaging(), nullptr, 0)) {
+      request->send(400, "text/plain", "Bad theme JSON");
+      return;
+    }
+    display.putRequest(THEMEPREVIEW);
+    request->send(200, "text/plain", "OK");
+    return;
+  }
+  #endif
+
   if (request->url() == "/themes.json") {
     String json = display.getThemeListJson();
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);

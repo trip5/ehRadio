@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theme Editor</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Only the rules this page needs.  theme.css is deliberately left out: the colour fields must show
+     the theme's own values, not the WebUI's palette, and nothing here is trying to look dressed up. */
+  #editorwrap { max-width: 900px; margin: 0 auto; padding: 10px; }
+  #editorwrap h3 { margin: 4px 0 10px; }
+  .erow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .erow label { min-width: 8em; }
+  .hint { opacity: .75; font-size: 90%; }
+  /* One size for the whole table.  The cells used to be 92% while a form control kept the user agent's
+     own size - and a control does not inherit font size - so the two columns could never match. */
+  #grid { border-collapse: collapse; width: 100%; font-size: 115%; }
+  #grid th, #grid td { padding: 1px 5px; border-bottom: 1px solid #555; text-align: left;
+                       white-space: nowrap; }
+  #grid input { font: inherit; }
+  #grid input[type=number] { width: 4.2em; }
+  #grid input[type=color] { width: 2.6em; height: 1.5em; padding: 0; vertical-align: middle; }
+  #grid td.v565 { opacity: .8; text-align: right; }
+  #grid th.num, #grid td.num { text-align: right; }
+  /* The Element header is the friendly-name toggle.  It stays a header - plain text, no button, because
+     it is the column that changes and not the page - so it is only a pointer and a hint on hover. */
+  #elemhead { cursor: pointer; }
+  #elemhead:hover { text-decoration: underline dotted; }
+  #tname { width: 22em; }
+  #msg { min-height: 1.4em; margin: 2px 0 10px; }
+  #msg.good { color: rgb(0, 240, 0); }
+  #msg.bad  { color: rgb(255, 0, 0); }
+</style>
+</head>
+<body>
+<div id="editorwrap">
+  <h3>Theme Editor</h3>
+
+  <div class="erow">
+    <label for="srce">Load theme</label>
+    <select id="srce"></select>
+  </div>
+
+  <div class="erow">
+    <label for="dest">Custom Theme</label>
+    <select id="dest"></select>
+    <button id="save" title="writes this slot and makes it the theme in use">Save</button>
+    <button id="delete" title="removes this slot">Delete</button>
+    <button id="export" title="downloads this slot as a json file">Export</button>
+    <button id="exportall" title="backs up every saved slot as one json file">Backup All</button>
+    <button id="import" title="one theme overwrites the selected slot; several fill every free slot">Import</button>
+    <input type="file" id="importfile" accept=".json,application/json" style="display:none">
+  </div>
+
+  <div class="erow">
+    <label for="tname">Name</label>
+    <input type="text" id="tname" maxlength="32" placeholder="theme name">
+  </div>
+
+  <div id="msg" class="hint"></div>
+
+  <table id="grid">
+    <thead>
+      <tr><th id="elemhead" title="click to show the .h variable names">Element</th>
+          <th class="num" title="32 levels, step 8">Red</th>
+          <th class="num" title="64 levels, step 4">Green</th>
+          <th class="num" title="32 levels, step 8">Blue</th>
+          <th>Swatch</th><th class="num">565</th></tr>
+    </thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// The theme is the same document the device stores: { name, colors: { ".key": 565 } }.
+//
+// Known keys, and a missing key comes back BLACK.  There is no version field and nothing to negotiate:
+// a key the firmware does not know is discarded, and a key a file leaves out is zeroed.  The element
+// keys, their labels and their order all come from the device, so this page never hard-codes a list that
+// could drift, and the label is what the grid shows unless the header is clicked.
+//
+// There is one committing action, Save: it writes the slot AND becomes the theme in use.  What the page
+// does beyond that is follow your edits: every change is sent, debounced, as a *preview*, which the
+// device repaints in place without selecting anything or writing anything.
+// ---------------------------------------------------------------------------
+var ELEM = [];        // one entry per element from the device: { key, label }, in field order
+var ROWS = [];        // one entry per element: { cell, nums: [rEl,gEl,bEl], swatch, v565 }
+var SHOWKEYS = false; // the element column shows labels by default; the Element header toggles it
+var NAMES = {};       // theme id -> name, from themeall.json; "" for a custom slot holding nothing
+var CUSTOM_BASE = 0;  // the first custom id, derived from the list the firmware sends
+var MSG = null;
+
+function msg(text, bad) {
+  MSG.textContent = text || '';
+  MSG.className = bad ? 'bad' : 'good';
+}
+
+// --- 565 <-> 8 bit ---------------------------------------------------------
+// The expansion and contraction are a matched pair: r5 -> r8 -> r5 is the identity, which is what
+// stops a colour drifting a step every time the page saves what it just loaded.  (r5<<3 alone is not
+// the identity - the low bits would be lost and 247 would become 248.)
+function expand5(v) { return (v << 3) | (v >> 2); }
+function expand6(v) { return (v << 2) | (v >> 4); }
+function v565ToRgb(v) {
+  return [ expand5((v >> 11) & 0x1F), expand6((v >> 5) & 0x3F), expand5(v & 0x1F) ];
+}
+function rgbTo565(r, g, b) {
+  return (((r >> 3) & 0x1F) << 11) | (((g >> 2) & 0x3F) << 5) | ((b >> 3) & 0x1F);
+}
+function clamp8(v) { v = parseInt(v, 10); if (isNaN(v)) v = 0; return Math.max(0, Math.min(255, v)); }
+
+// --- the field scale -------------------------------------------------------
+// The panel holds 32 red levels, 64 green and 32 blue, so those are what the fields offer: the number
+// shown is the level times its own step, which is what the flat shift produces on the way out (r5 << 3).
+// So every value the box can hold is exactly one level from its neighbour and no click is ever wasted.
+// 248 is the highest red on offer because 248..255 are all level 31 - one colour - and themes.h writes its
+// colours the same way, level times step, so the same colour is the same three numbers here and there.
+// Green is finer because it carries one more bit.
+var FSTEP = [8, 4, 8];
+var FMAX  = [248, 252, 248];
+
+function v565ToLevels(v) { return [ (v >> 11) & 0x1F, (v >> 5) & 0x3F, v & 0x1F ]; }
+
+// A value typed between two steps is pulled onto the nearest one when the field is left, so the box
+// only ever shows a colour the panel can actually hold.
+function snapField(v, idx) {
+  v = clamp8(v);
+  v = Math.round(v / FSTEP[idx]) * FSTEP[idx];
+  return Math.max(0, Math.min(FMAX[idx], v));
+}
+
+// --- the grid --------------------------------------------------------------
+// Built once, at load.  Nothing after this may rebuild it: the rows ARE what the user is editing, and
+// a refresh that recreated them is what blanked the whole page in the first version of this page.
+// The theme name is not part of the table - it has its own row above it - so this builds the element
+// rows only, and the table's first row is the first element.
+function buildGrid() {
+  var body = document.getElementById('body');
+  body.innerHTML = '';
+
+  ELEM.forEach(function(el, rowIndex) {
+    var row = document.createElement('tr');
+    var cell = document.createElement('td');
+    cell.textContent = SHOWKEYS ? el.key : el.label;
+    cell.title = el.key;
+    row.appendChild(cell);
+
+    var nums = [];
+    [0, 1, 2].forEach(function(c) {
+      var tdN = document.createElement('td');
+      tdN.className = 'num';
+      var inp = document.createElement('input');
+      inp.type = 'number';
+      inp.min = 0;
+      inp.max = FMAX[c];
+      inp.step = FSTEP[c];
+      tdN.appendChild(inp);
+      row.appendChild(tdN);
+      nums.push(inp);
+    });
+
+    var tdS = document.createElement('td');
+    var sw = document.createElement('input');
+    sw.type = 'color';
+    tdS.appendChild(sw);
+    row.appendChild(tdS);
+
+    var tdV = document.createElement('td');
+    tdV.className = 'v565';
+    row.appendChild(tdV);
+
+    body.appendChild(row);
+    var entry = { cell: cell, nums: nums, swatch: sw, v565: tdV };
+    ROWS.push(entry);
+
+    nums.forEach(function(inp, c) {
+      // The row index is captured here, so nothing has to work out later which row changed.
+      inp.addEventListener('input', function() { onEdit(rowIndex); });
+      inp.addEventListener('change', function() {
+        var snapped = snapField(inp.value, c);
+        if (String(snapped) !== inp.value) { inp.value = snapped; onEdit(rowIndex); }
+      });
+    });
+    sw.addEventListener('input', function() { onSwatch(sw, rowIndex); });
+  });
+
+  // The header is the toggle, and it is the only thing that has to be wired once the rows exist.
+  document.getElementById('elemhead').addEventListener('click', function() { setElemView(!SHOWKEYS); });
+  setElemView(SHOWKEYS);
+}
+
+// Rewrites the element column in place - text only, never a rebuild - which is the same rule the
+// dropdown refresh follows: the rows ARE what the user is editing, so nothing may recreate them.
+function setElemView(keys) {
+  SHOWKEYS = keys;
+  ROWS.forEach(function(r, i) { r.cell.textContent = keys ? ELEM[i].key : ELEM[i].label; });
+  document.getElementById('elemhead').title =
+    keys ? 'click to show the friendly names' : 'click to show the .h variable names';
+}
+
+function row565(i) {
+  return rgbTo565(clamp8(ROWS[i].nums[0].value),
+                  clamp8(ROWS[i].nums[1].value),
+                  clamp8(ROWS[i].nums[2].value));
+}
+
+function paintRow(i) {
+  var v = row565(i);
+  ROWS[i].v565.textContent = v;
+  var rgb = v565ToRgb(v);
+  ROWS[i].swatch.value = '#' + ((1 << 24) + (rgb[0] << 16) + (rgb[1] << 8) + rgb[2]).toString(16).slice(1);
+}
+
+// The device speaks 565 and the fields speak levels times their step, both directions through the level,
+// so a colour loads and saves identically: level 31 shows as 248 and 248 saves back as level 31.
+function setRow(i, v) {
+  v = (isNaN(v) ? 0 : v) & 0xFFFF;
+  var lv = v565ToLevels(v);
+  for (var c = 0; c < 3; c++) ROWS[i].nums[c].value = lv[c] * FSTEP[c];
+  paintRow(i);
+}
+
+function onSwatch(swatch, idx) {
+  var hex = swatch.value;
+  var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+  // The swatch carries 8 bits and the panel has 5 or 6, so the numbers shown are the quantised ones -
+  // a drawn value the display could never reproduce would be a lie in the file.
+  setRow(idx, rgbTo565(r, g, b));
+  onEdit(idx);
+}
+
+// --- labels ----------------------------------------------------------------
+// The device sends a plain name, and an empty string for a slot that holds nothing.  How a slot READS
+// differs between the two dropdowns, so the decoration is built here rather than sent: one list has to
+// say which slots are custom, the other which ones are already taken.
+function customBase() { return Object.keys(NAMES).length - 10; }
+
+function slotName(slot) { return NAMES[String(CUSTOM_BASE + slot)] || ''; }
+
+// Dropdown A: "[ Custom Theme 1 ] My Theme", and just "[ Custom Theme 2 ]" when the slot is empty.
+function sourceLabel(id) {
+  if (id < CUSTOM_BASE) return NAMES[String(id)] || '';
+  var n = slotName(id - CUSTOM_BASE);
+  var tag = '[ Custom Theme ' + (id - CUSTOM_BASE + 1) + ' ]';
+  return n ? tag + ' ' + n : tag;
+}
+
+// Dropdown B: "[ 1 ] My Theme", or "[ 2 ] (empty)" - the target list says what Save would overwrite.
+function destLabel(slot) {
+  var n = slotName(slot);
+  return n ? '[ ' + (slot + 1) + ' ] ' + n : '[ ' + (slot + 1) + ' ] (empty)';
+}
+
+// The option LISTS never change shape - every id and every slot exists whether or not it holds a theme -
+// so applying a fresh list only rewrites the labels of the options that are already there and nothing the
+// user has typed or selected can move.  That is what a save, a delete or an import needs, and it is also
+// what an import uses when it has already asked the device for the list itself.
+function applyNames(all) {
+  NAMES = all;
+  CUSTOM_BASE = customBase();
+  var srce = document.getElementById('srce');
+  Array.prototype.forEach.call(srce.options, function(o) { o.textContent = sourceLabel(Number(o.value)); });
+  var dest = document.getElementById('dest');
+  Array.prototype.forEach.call(dest.options, function(o) { o.textContent = destLabel(parseInt(o.value, 10)); });
+}
+
+// Re-reads the names from the device, then applies them.
+function refreshLabels() {
+  return fetch('themeall.json').then(function(r) { return r.json(); }).then(applyNames);
+}
+
+// --- loading and saving ----------------------------------------------------
+function fillFrom(theme) {
+  document.getElementById('tname').value = theme.name || '';
+  // A key the document does not carry is zeroed, which is the same rule the device applies.
+  ELEM.forEach(function(el, i) { setRow(i, theme.colors ? theme.colors[el.key] : 0); });
+}
+
+function currentTheme() {
+  var colors = {};
+  ELEM.forEach(function(el, i) { colors[el.key] = row565(i); });
+  return { name: document.getElementById('tname').value, colors: colors };
+}
+
+function post(url, params) {
+  var body = Object.keys(params).map(function(k) {
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  });
+}
+
+// quiet means "this was not a user selection": the fill on page open, and the fill after a delete, where
+// the device has already applied the fallback itself.  Those two must leave the panel alone - opening the
+// page would otherwise repaint the device with whatever theme the page happens to start on.  A pick from
+// "Load theme" IS a selection, so it shows on the panel at once, exactly like an edit does.
+function loadTheme(id, quiet) {
+  return fetch('themedata.json?id=' + id).then(function(r) {
+    if (!r.ok) throw new Error('empty');
+    return r.json();
+  }).then(function(t) {
+    fillFrom(t);
+    if (!quiet) {
+      preview();
+      msg('Loaded ' + (t.name || id));
+    }
+  }).catch(function() {
+    // An empty slot has no numbers to load, so the grid is left exactly as it is and the user is told
+    // why - filling it with black would silently destroy whatever they were editing.
+    if (!quiet) msg('That slot is empty - the grid is unchanged', true);
+  });
+}
+
+var previewTimer = null;
+var lastSent = '';
+// How long the page stays quiet before repainting the panel.  A preview is a full widget re-init, so a
+// colour hunt that clicks an arrow twenty times should not be twenty repaints.
+var PREVIEW_DELAY = 1000;
+
+function preview() {
+  // A preview shows the grid on the panel and changes nothing else: no file, no selection.  Identical
+  // payloads are dropped here as well as on the device, because a full repaint is not free.
+  var json = JSON.stringify(currentTheme());
+  if (json === lastSent) return Promise.resolve();
+  lastSent = json;
+  return post('themeapply', { data: json }).catch(function(e) { msg('Preview failed: ' + e.message, true); });
+}
+
+// The row is handed in rather than worked out from the focus.  Clicking a number field's spinner arrows
+// fires input without ever focusing that field, so the old document.activeElement lookup found no row,
+// painted nothing, and left the swatch and the 565 cell showing the previous colour while the preview
+// still went out - which is exactly the flash with no update that it looked like.
+function onEdit(idx) {
+  if (idx >= 0) paintRow(idx);
+  // Debounced: the device coalesces too, but there is no reason to send a request per click or keystroke.
+  if (previewTimer) clearTimeout(previewTimer);
+  previewTimer = setTimeout(function() { previewTimer = null; preview(); }, PREVIEW_DELAY);
+}
+
+// --- import ----------------------------------------------------------------
+// Import can only ever touch a slot the file is meant for.  A backup is a SET of themes, so a restore
+// packs them into whatever slots are free and never over an occupied one; the one exception is the single
+// theme, which goes where the target dropdown points exactly as a Save would, and may overwrite there.
+// Nothing else here can remove or replace anything, which is why the old confirm-second-click arming is
+// gone: with no way to destroy a slot, a second click protected nothing.
+
+function freeSlots() {
+  var free = [];
+  for (var slot = 0; slot < 10; slot++) if (slotName(slot) === '') free.push(slot);
+  return free;
+}
+
+function importTheme(doc) {
+  // An array is a backup; a plain object is a single theme.  The device never writes a one-element array -
+  // it writes the single document instead - so an array is always more than one theme.
+  if (Array.isArray(doc)) {
+    var themes = doc.filter(function(t) { return t && typeof t === 'object'; });
+    if (themes.length === 0) { msg('That file holds no themes', true); return; }
+    // The free-slot list is asked for fresh rather than trusted from page state: it decides the whole
+    // import, and a capacity check against a stale answer is not a check.  The abort happens before the
+    // first write, so a restore either lands whole or not at all.
+    fetch('themeall.json').then(function(r) { return r.json(); }).then(function(all) {
+      applyNames(all);
+      var free = freeSlots();
+      if (themes.length > free.length) {
+        msg('That file has ' + themes.length + ' themes but only ' + free.length + ' slot' +
+            (free.length === 1 ? ' is' : 's are') + ' free. Delete some themes and try again.', true);
+        return;
+      }
+      return writeImport(themes, free);
+    }).catch(function(e) { msg('Import failed: ' + e.message, true); });
+    return;
+  }
+  if (doc && typeof doc === 'object') {
+    // One theme goes into the selected slot, overwriting with no warning - the only destructive thing
+    // Import can do, and only ever to the slot that was chosen.  `use` is left off so the device treats it
+    // exactly like Save: the slot is written AND it becomes the theme in use, and the grid is left showing
+    // what was written.
+    var slot = parseInt(document.getElementById('dest').value, 10);
+    post('xtheme', { action: 'save', slot: slot, data: JSON.stringify(doc) })
+      .then(function() {
+        fillFrom(doc);
+        lastSent = '';
+        return refreshLabels();
+      })
+      .then(function() {
+        document.getElementById('srce').value = String(CUSTOM_BASE + slot);
+        msg('Imported ' + (doc.name || 'that theme') + ' into Custom Theme ' + (slot + 1) + ' and put it in use');
+      })
+      .catch(function(e) { msg('Import failed: ' + e.message, true); });
+    return;
+  }
+  msg('That file is not a theme', true);
+}
+
+function writeImport(themes, free) {
+  // Into the free slots in order, never over an occupied one, and use=0 so the device stays on the theme
+  // it was using: putting themes back is not the same as choosing one of them.
+  var chain = Promise.resolve();
+  var used = [];
+  themes.forEach(function(t, i) {
+    var slot = free[i];
+    used.push(slot + 1);
+    chain = chain.then(function() {
+      return post('xtheme', { action: 'save', slot: slot, use: 0, data: JSON.stringify(t) });
+    });
+  });
+  return chain.then(function() {
+    lastSent = '';
+    return refreshLabels();
+  }).then(function() {
+    // The slots are named because they are not the slots the themes came from: a restore packs them.
+    msg('Restored ' + themes.length + ' theme' + (themes.length === 1 ? '' : 's') + ' into Custom Theme' +
+        (used.length === 1 ? ' ' : 's ') + used.join(', '));
+  });
+}
+
+// --- wiring ----------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', function() {
+  MSG = document.getElementById('msg');
+
+  Promise.all([
+    fetch('theme-elements.json').then(function(r) { return r.json(); }),
+    fetch('themeall.json').then(function(r) { return r.json(); }),
+    fetch('themeactive.json').then(function(r) { return r.json(); })
+  ]).then(function(res) {
+    ELEM = res[0];
+    NAMES = res[1];
+    CUSTOM_BASE = customBase();
+    buildGrid();
+
+    // Dropdown A is the source: every id, built-ins first, custom slots decorated.  Changing it loads that
+    // theme into the grid and shows it on the panel.
+    var srce = document.getElementById('srce');
+    Object.keys(NAMES).forEach(function(id) {
+      var o = document.createElement('option');
+      o.value = id;
+      o.textContent = sourceLabel(Number(id));
+      srce.appendChild(o);
+    });
+
+    // Dropdown B is only a target: it decides where Save writes and never touches the grid, which is what
+    // lets a theme be copied, tweaked and saved to a different slot.  Its labels say what is already there.
+    var dest = document.getElementById('dest');
+    for (var slot = 0; slot < 10; slot++) {
+      var o2 = document.createElement('option');
+      o2.value = String(slot);
+      o2.textContent = destLabel(slot);
+      dest.appendChild(o2);
+    }
+
+    srce.addEventListener('change', function(ev) { loadTheme(ev.target.value); });
+
+    document.getElementById('save').addEventListener('click', function() {
+      var slot = parseInt(dest.value, 10);
+      post('xtheme', { action: 'save', slot: slot, data: JSON.stringify(currentTheme()) })
+        .then(function() {
+          // The device has already written the slot, selected it and repainted, so the grid is now the
+          // theme in use: point the source dropdown at it and let the labels catch up.
+          lastSent = '';
+          return refreshLabels().then(function() {
+            srce.value = String(CUSTOM_BASE + slot);
+            msg('Saved to Custom Theme ' + (slot + 1) + ' and put in use');
+          });
+        })
+        .catch(function(e) { msg('Save failed: ' + e.message, true); });
+    });
+
+    document.getElementById('delete').addEventListener('click', function(ev) {
+      // Two steps, in the same spirit as the danger zone: the first click arms, the second acts.
+      var btn = ev.target;
+      if (btn.dataset.armed !== '1') {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Confirm delete';
+        setTimeout(function() { btn.dataset.armed = ''; btn.textContent = 'Delete'; }, 5000);
+        return;
+      }
+      btn.dataset.armed = '';
+      btn.textContent = 'Delete';
+      var slot = parseInt(dest.value, 10);
+      var wasSource = srce.value === String(CUSTOM_BASE + slot);
+      post('xtheme', { action: 'delete', slot: slot })
+        .then(function() {
+          lastSent = '';
+          return refreshLabels();
+        })
+        .then(function() {
+          if (wasSource) {
+            // The theme the grid came from no longer exists, so fall back to the first built-in.  The
+            // device has done the same thing with its own selection (the slot was the theme in use).
+            srce.value = '0';
+            return loadTheme(0, true);
+          }
+        })
+        .then(function() { msg('Deleted Custom Theme ' + (slot + 1)); })
+        .catch(function(e) { msg('Delete failed: ' + e.message, true); });
+    });
+
+    document.getElementById('export').addEventListener('click', function() {
+      var slot = parseInt(dest.value, 10);
+      if (slotName(slot) === '') {
+        msg('That slot is empty - nothing to export', true);
+        return;
+      }
+      // Straight from the device, so the file is byte for byte what a save would have written, and it can
+      // go back the same way: Save IS the import, because it parses whatever this produced.
+      window.location = 'xtheme.json?slot=' + slot;
+    });
+
+    document.getElementById('exportall').addEventListener('click', function() {
+      // One theme comes down as that theme's own document, several as an array - the device decides, so
+      // the two export buttons agree on the file when there is only one theme to export.
+      window.location = 'xthemeall.json';
+    });
+
+    var fileInput = document.getElementById('importfile');
+    document.getElementById('import').addEventListener('click', function() {
+      fileInput.value = '';   // so choosing the same file twice in a row still fires a change
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', function() {
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        var doc = null;
+        try { doc = JSON.parse(reader.result); }
+        catch (e) { msg('That file is not valid JSON', true); return; }
+        importTheme(doc);
+      };
+      reader.onerror = function() { msg('Could not read that file', true); };
+      reader.readAsText(f);
+    });
+
+    // Open on the theme the device is actually using, so the grid starts from what is on the panel and a
+    // Save cannot quietly commit something that was never chosen.  Quiet, because it is already showing.
+    var active = String(res[2].id);
+    if (NAMES[active] === undefined) active = '0';
+    srce.value = active;
+    loadTheme(active, true);
+  }).catch(function(e) { msg('Could not read the theme lists: ' + e.message, true); });
+});
+</script>
+</body>
+</html>

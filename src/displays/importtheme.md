@@ -9,13 +9,24 @@ Which can be mostly be used to feed the importtheme.py script... read below for 
 
 ## What it does
 
-[`importtheme.py`](../src/displays/importtheme.py) converts old-style yoRadio theme files
-(`#define COLOR_*` format) into ehRadio's [`themes.h`](../src/displays/themes.h) runtime
-theme entries. It always appends to the existing `themes.h` — never overwrites.
+[`importtheme.py`](../src/displays/importtheme.py) turns theme files into ehRadio's
+[`themes.h`](../src/displays/themes.h) runtime entries. It always appends to the existing `themes.h` —
+never overwrites.
+
+Two input formats, told apart by the file itself:
+
+* an **old-style yoRadio theme** (`#define COLOR_*  r,g,b`), which is the rest of this document, and
+* an **ehRadio JSON export** from the WebUI theme editor — the single-theme `Export` file or the
+  `Backup All` array. See *JSON input* below; it is the shorter read.
 
 ```
-py importtheme.py mytheme.h --name "My Theme"
+py importtheme.py mytheme.h --name "My Theme"      # old style, a name is required
+py importtheme.py "ehRadioTheme-My Neon.json"      # one theme, named by the file
+py importtheme.py ehRadioThemes-Backup.json        # a whole backup, numbered
 ```
+
+Either way, every colour written is put onto the 565 steps the WebUI editor uses — see
+*565 steps and `--quantise`* below.
 
 ## Input format (old yoRadio style)
 
@@ -179,6 +190,51 @@ The script handles old themes that use preprocessor conditions to create
 variants (e.g., `#ifdef INVERT_COLORS`). Each branch produces a separate
 theme entry with its own name suffix (e.g., "My Theme" and "My Theme (Inverted)").
 
+## JSON input (a WebUI export)
+
+`Export` in the theme editor downloads one theme as a document; `Backup All` downloads every saved slot as
+an array of them. Both are accepted, and the shape is what says which is which: a `{` is one theme, a `[`
+is a list. A `null` in an older backup is skipped rather than trusted.
+
+```json
+{"name":"My Neon","colors":{".background":0,".meta":63422}}
+```
+
+* The **keys are the element names** from `themes.h` with a leading dot, so the mapping is a strip and
+  nothing else. A key that is not one of ours is reported as unknown, and a field the document leaves out
+  goes through exactly the same fallbacks as an old colour file.
+* The **values are 565 integers**, converted to the numbers the editor shows — each level times its own
+  step — so a colour arriving this way is already on the grid. An `[r, g, b]` array is accepted in place of
+  a 565 integer, the same tolerance the firmware's own loader has for a hand-edited file.
+* The **name comes from the document**; `--name` overrides it, and a theme with neither falls back to the
+  file name. A multi-theme file is numbered the way the old format's variants are (`... 1`, `... 2`),
+  because a backup often holds several saves of one theme that all carry the same name inside.
+* A name already in `_themeNames` is reported, since re-importing the same export is the easy way to end
+  up with two entries that read alike.
+
+## 565 steps and `--quantise`
+
+The panel stores RGB565 — 32 red levels, 64 green, 32 blue — so the 8-bit values are only buckets: every
+one of 248..255 is red level 31 and the panel draws the identical colour for all of them. The WebUI editor
+therefore shows a level as `level * step`: 0, 8, 16 ... 248 for red and blue, 0, 4, 8 ... 252 for green.
+This script writes those same numbers, so a palette, the editor and the panel all agree.
+
+Everything the script writes is snapped onto those steps, including the computed fallbacks, which are
+percentages of another colour and so land anywhere.
+
+`--quantise` does the same for the colours **already** in `themes.h`:
+
+```
+py importtheme.py --quantise --dry-run     # report, then write themes.h.new.h
+py importtheme.py --quantise               # rewrite themes.h
+```
+
+It cannot change a pixel: `(r >> 3) * 8` packs back to the same 565 that `r` did, so the panel draws the
+same colour and only the numbers move, each one within its own bucket. A number keeps the width it had, so
+the file's alignment survives, and a value already on a step is left alone — which is what makes a second
+run report nothing to do. It says how many colours it moved, and it refuses to write at all if any of them
+would have changed its 565.
+
 ## Dry-run mode
 
 Always test first with `--dry-run`:
@@ -187,7 +243,8 @@ Always test first with `--dry-run`:
 py importtheme.py mytheme.h --name "Test" --dry-run
 ```
 
-This writes to `themes.new.h` without modifying the real file.
+This writes to `themes.h.new.h` without modifying the real file. It is what `--quantise --dry-run` uses
+too.
 
 ## Note Regarding "Invert Title"
 

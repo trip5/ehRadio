@@ -23,6 +23,7 @@
 #include "utility.h"
 #include "../displays/dspcore.h"
 #include "../displays/themes.h"
+#include "../displays/themeregistry.h"
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
@@ -31,10 +32,13 @@
 const char* const Config::wwwFiles[] = {"options.js", "script.js", "script2.js",
                                         "logo.svg", "icon.png", "style.css", "theme.css", "rb_srvrs.json", "timezones.json",
                                         "curated.html", "irrecord.html", "options.html", "sdmanager.html", "search.html", "updform.html",
-                                        "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
+                                        "editor.html", "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
 const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 
-const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE};
+// The theme slots are optional files rather than required ones, so they are here purely to keep
+// pruneLittleFS() from deleting them: that function compares each /data file's basename against this
+// list, which is why THEME_SLOT_FILES holds bare names and not paths.
+const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, THEME_SLOT_FILES};
 const size_t Config::dataFilesCount = sizeof(Config::dataFiles) / sizeof(Config::dataFiles[0]);
 
 #if defined(SPI_BUS_SECONDARY)
@@ -421,9 +425,15 @@ void Config::_initHW() {
 }
 
 void Config::loadTheme() {
-  uint8_t count = sizeof(_themes) / sizeof(_themes[0]);
-  if (config.store.themeId >= count) config.store.themeId = 0;
-  memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData));
+  // Through the registry rather than straight off the table: the id may name a user slot, and it may
+  // name a slot whose file has since been deleted.  themeValidId() answers both - it hands back the
+  // id when a theme is really there and 0 otherwise, so the persisted id cannot dangle.
+  //
+  // This runs from _initHW(), which is before LittleFS is mounted, so on that first pass a custom id
+  // is deliberately left unjudged (see themeValidId) and resolves to nothing; the fallback keeps a
+  // real palette on the panel meanwhile, and Startup calls this again once the slots are read.
+  config.store.themeId = themeValidId(config.store.themeId);
+  if (!themeCopy(config.store.themeId, &theme)) themeCopy(0, &theme);
 }
 
 void Config::defaultSettings(const char *val, uint8_t clientId) {

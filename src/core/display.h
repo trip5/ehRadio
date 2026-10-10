@@ -129,7 +129,9 @@ class Display {
     void _setLayoutPointers();
     void _syncLineRule(FillWidget*& w, const FillConfig* conf, bool under);
     void _applyMetaInvert();
-    void _applyState();
+    // inPlace is the editor's live preview: the same re-init, but the current page is refilled where
+    // it stands instead of the device being sent to the player page, so nothing else changes.
+    void _applyState(bool inPlace = false);
     void _showDialog(const char *title);
     void _showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage);
     void _setReturnTicker(uint8_t time_s);
@@ -153,7 +155,15 @@ class Display {
     // is not a mode change - see the SSREBUILD request.
     void _enterScreensaver(displayMode_e mode);
     void _buildJsonCache();
+    // Kept apart from _buildJsonCache() because the registry can change after that runs once - a slot
+    // saved or deleted from the editor, or the slot files read after the cache was built - so
+    // getThemeListJson() rebuilds this one list when its generation has moved.
+    void _buildThemeListJson();
     String _themeListJson;
+    uint16_t _themeListGen;
+    // A THEMEPREVIEW is already on the queue.  Set from the result of the send and cleared where the
+    // request is handled, so it can never be left stuck by a dropped request (see putRequest).
+    bool _previewPending;
     String _layoutListJson;
     String _systemFontListJson;
     String _clockFontListJson;

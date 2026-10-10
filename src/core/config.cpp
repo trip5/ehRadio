@@ -427,9 +427,14 @@ void Config::_initHW() {
 void Config::loadTheme() {
   // Through the registry rather than straight off the table: the id may name a user slot, and it may
   // name a slot whose file has since been deleted.  themeValidId() answers both - it hands back the
-  // id when a theme is really there and 0 otherwise, so the persisted id cannot dangle.
+  // id when a theme is really there and 0 otherwise, so the persisted id cannot dangle.  The id is
+  // resolved on every class: it is the editor/WebUI's bookkeeping, not the panel's ink.
   config.store.themeId = themeValidId(config.store.themeId);
-  if (!themeCopy(config.store.themeId, &theme)) themeCopy(0, &theme);
+  // The colours are copied only on a colour panel.  On a mono or greyscale one, config.theme is NOT a
+  // theme: it is the driver's fixed palette, applied in DspCore::initDisplay() by tools/oledcolorfix.h
+  #ifdef DSP_TFT
+    if (!themeCopy(config.store.themeId, &theme)) themeCopy(0, &theme);
+  #endif
 }
 
 void Config::defaultSettings(const char *val, uint8_t clientId) {

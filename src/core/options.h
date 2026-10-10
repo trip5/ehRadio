@@ -809,6 +809,15 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef STREAM_RETRY_RESPAWN_MS
   #define STREAM_RETRY_RESPAWN_MS 5000 // ms a resume may stay owed with no retry task before ticks() starts a new one
 #endif
+#ifndef STREAM_RESET_MAX
+  #define STREAM_RESET_MAX 3 // link resets allowed in one outage before the restart rung is reached
+#endif
+#ifndef RECOVERY_REBOOT_MAX
+  #define RECOVERY_REBOOT_MAX 2 // consecutive recovery restarts before the escalation gives up and retries patiently
+#endif
+#ifndef RECOVERY_HEALTHY_MS
+  #define RECOVERY_HEALTHY_MS 600000 // ms of continuous playback that clears the restart count: the wedge is gone
+#endif
 #ifndef NET_REFUSAL_MS
   #define NET_REFUSAL_MS 700 // a failed connect faster than this was refused, so the link is fine
 #endif

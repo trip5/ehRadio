@@ -821,15 +821,46 @@ budget (four back-to-back teardowns, measured). The handle must be cleared befor
 `WiFiLostConnection` must use `network.lostPlaying || player.isRunning()`, never an assignment: during a reset
 nothing is playing, so an assignment wrote `false` and the Wi-Fi returned to a silent radio.
 
+**The ladder has a floor and a ceiling, and the reset is reached from two places** through one helper,
+`forceLinkReset()`. The floor is a ladder that cannot be created at all: the create needs
+`NETWORK_TASK_STACK_BYTES` (8 KB on the S3 - `NETWORK_TASK_STACK_SIZE` 4 KB × `STACK_MULTIPLIER` 2) of
+contiguous heap, and the heap is lowest exactly when the stack is wedged, so the one rung that matters was
+unavailable when it was needed. A failed create used to be logged once (with the message swallowed, see the
+note in the guide) and forgotten, every 5 s forever, which is the incident that prompted this: the log showed
+`stream retry task is gone with a resume still owed` alternating with a bare `[ERROR] Network` for minutes
+while the heap sat at 7204-8424 bytes. Two failures in a row now escalate, and the reset needs no task, no heap
+and no scheduler. The ceiling is `STREAM_RESET_MAX` (3) resets and then **`ESP.restart()`**: a wedge that
+survives three resets, each followed by a successful Wi-Fi reconnect, cannot be cleared from software.
+
+**The reboot rung writes nothing to `bootStableMarker`.** The intentional-reboot paths set it true so the next
+boot is not safe mode; doing that here would mean a network wedge could never reach safe mode, and setting it
+false would mean one always could. Left alone it keeps its own meaning - a boot that never proved itself still
+lands in safe mode, and a device that has been up for hours still boots normally. The restart count is
+`RTC_DATA_ATTR` so it survives `esp_restart()` (which is the point) and a power cycle clears it;
+`RECOVERY_REBOOT_MAX` (2) consecutive restarts stops the escalation and returns to patient retries, because a
+device that wedges on every boot would otherwise reboot every ~100 s forever and safe mode would not catch it
+either: each boot *does* prove itself stable before the network fails. `RECOVERY_HEALTHY_MS` (10 min) of
+continuous playback clears the count so a later wedge gets the full escalation again.
+
+**The verdict is asked for on every failed attempt.** It used to be skipped when the connect returned in under
+`NET_REFUSAL_MS`: a fast failure was read as a refusal from the host, which does prove the path works - but a
+stack with an exhausted socket pool also fails fast, so the first two attempts of a wedge were waved through as
+"the host refused". The probe costs a gateway connect (~30 ms) or a bare-IP connect (≤700 ms), nothing beside
+an attempt, and only WEDGED is acted on: a station that is merely offline still gets the patient 15 s then 60 s
+tail forever, unchanged, because a reset would fix nothing there and costs a scan, a reassociation and DHCP.
+With the probe always asked, a stack that never answers is identified on the **first** attempt, so the reset
+lands about 8 s after the stream is lost instead of about 18 s.
+
 **One spawner, and a ladder that cannot lose its task.** Everything that starts `retryStreamConnection` - the
 arm gate in `player.loop()`, `WiFiReconnected`, and now the self-heal - goes through **`spawnStreamRetry()`**
 (`network.cpp`). The check-and-claim is a critical section, because two callers could otherwise win the race and
 leave a stray task running with the handle already cleared; more importantly the `xTaskCreatePinnedToCore` result
 is checked, because `player.loop()` sets `network.lostPlaying = true` **before** creating the task and nothing
 else clears that flag except a fresh Wi-Fi reconnect event - so a silent failure closed the arm gate until a
-reboot. `ticks()` (the 1 ms Ticker heartbeat) self-heals the same way: if `lostPlaying` is set, no task is
-servicing it, `!beginReconnect` and the link is up, it re-spawns, rate limited by `STREAM_RETRY_RESPAWN_MS`
-(options.h). The `wifiReconnectionTask` spawn is checked and logged too, but has no equivalent fallback: the AP is
+reboot. `ticks()` (the 1 s `Ticker` heartbeat, `ctimer.attach(1, ticks)`) self-heals the same way: if
+`lostPlaying` is set, no task is servicing it, `!beginReconnect` and the link is up, it re-spawns, rate limited
+by `STREAM_RETRY_RESPAWN_MS` (options.h), and escalates to a link reset once the re-spawns themselves keep
+failing. The `wifiReconnectionTask` spawn is checked and logged too, but has no equivalent fallback: the AP is
 otherwise only re-found on the next disconnect event.
 
 **Why the VS1053 build depended on this ladder more than the I2S build.** Both libraries retry a dead stream

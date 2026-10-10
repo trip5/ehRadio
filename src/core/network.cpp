@@ -5,6 +5,7 @@
 #include <ehDP.h>
 #include <ESPFileUpdater.h>
 #include <ESPmDNS.h>
+#include <esp_attr.h>
 #include <ImprovWiFiLibrary.h>
 #include "config.h"
 #include "display.h"
@@ -27,6 +28,51 @@ MyNetwork network;
 TaskHandle_t syncTaskHandle;
 TaskHandle_t streamRetryTaskHandle = NULL;
 static uint8_t streamResetsUsed = 0;
+
+// Recovery restarts, counted in RTC memory: it survives esp_restart(), which is the whole point, and a power
+// cycle clears it.  It means a device that wedges on every boot reboots itself at most RECOVERY_REBOOT_MAX
+// times in a row and then goes back to patient retries, instead of rebooting every minute forever.  A stream
+// that plays steadily for RECOVERY_HEALTHY_MS clears it, so a later wedge gets the full escalation again.
+RTC_DATA_ATTR static uint8_t recoveryReboots = 0;
+
+// The last rung, reached only when STREAM_RESET_MAX link resets have each been followed by a reconnect and
+// the stack is still wedged: nothing in software can clear that, so restart and let it come up clean.
+//
+// bootStableMarker is deliberately NOT written.  The intentional-reboot paths set it true so the next boot is
+// not safe mode, and writing it here would mean a network wedge could never reach safe mode - while writing
+// it false would mean one always could.  Left alone it keeps its own meaning: a boot that never proved itself
+// still lands in safe mode, and a device that has been running for hours still boots normally.
+static void recoveryReboot(const char* why) {
+  if (recoveryReboots >= RECOVERY_REBOOT_MAX) {
+    // Said once every five minutes, not once per attempt: this is the endgame - a wedge that cannot be reset
+    // (budget spent) and cannot be restarted (count spent) - and a caller that keeps asking every 5 s must not
+    // turn that into the very log flood this whole change exists to stop.
+    static uint32_t lastRefusedMs = 0;
+    if (lastRefusedMs == 0 || (millis() - lastRefusedMs) >= 300000UL) {
+      lastRefusedMs = millis() ? millis() : 1;
+      ERRORLOG("Recovery restarts spent (%u, %s) - retrying patiently instead of restarting again",
+          (unsigned)recoveryReboots, why);
+    }
+    return;
+  }
+  recoveryReboots++;
+  ERRORLOG("Recovery restart %u/%u: %s", (unsigned)recoveryReboots, (unsigned)RECOVERY_REBOOT_MAX, why);
+  delay(200);   // let the line reach the serial monitor before the restart
+  ESP.restart();
+}
+
+// The one place a link is forced down.  It costs a scan, a reassociation and DHCP, so it is spent only on a
+// verdict - but it is also the only rung that needs no task, no heap and no scheduler, which is why ticks()
+// can reach for it when the ladder cannot even be created.  Returns false when the budget is spent and the
+// restart was refused, i.e. the caller should keep retrying rather than expecting the link to drop.
+static bool forceLinkReset(const char* why) {
+  if (streamResetsUsed >= STREAM_RESET_MAX) { recoveryReboot(why); return false; }
+  streamResetsUsed++;
+  FUNCTIONLOG("Network", "forcing a link reset %d/%d: %s", streamResetsUsed, STREAM_RESET_MAX, why);
+  streamRetryTaskHandle = NULL;   // WiFiReconnected restarts this task, so it must look stopped
+  WiFi.disconnect(true, false);   // wifioff: fires STA_DISCONNECTED, which runs the recovery chain
+  return true;
+}
 
 bool getWeather(char *wstr);
 void doSync(void * pvParameters);
@@ -65,7 +111,7 @@ bool spawnStreamRetry() {
   spawnPending = false;
   if (ok != pdPASS) streamRetryTaskHandle = NULL;   // leave it NULL so the next attempt can try again
   portEXIT_CRITICAL(&spawnMux);
-  if (ok != pdPASS) ERRORLOG("Network", "streamRetry task could not be created (%u bytes, free heap %u)", (unsigned)NETWORK_TASK_STACK_BYTES, (unsigned)ESP.getFreeHeap());
+  if (ok != pdPASS) ERRORLOG("streamRetry task could not be created (%u bytes, free heap %u)", (unsigned)NETWORK_TASK_STACK_BYTES, (unsigned)ESP.getFreeHeap());
   return ok == pdPASS;
 }
 
@@ -75,12 +121,40 @@ void ticks() {
   // created, and a create can fail on a fragmented heap, while a task can also end early and leave the flag
   // set (a WiFi loss mid-outage does exactly that).  Either way the arm gate in player.loop() stays closed and
   // only a reboot used to help.  If the debt is owed, nothing is servicing it, and the link is up: start one.
+  //
+  // A create that keeps failing is its own emergency.  The task needs NETWORK_TASK_STACK_BYTES of contiguous
+  // heap and this is the state where the heap is lowest, so the ladder can be impossible exactly when the
+  // stack is wedged.  Two failures in a row escalate to a link reset, which needs no task and no heap; the
+  // reset budget leads on to the restart from there.
   if (network.lostPlaying && streamRetryTaskHandle == NULL && !network.beginReconnect && WiFi.status() == WL_CONNECTED) {
     static uint32_t lastRespawnMs = 0;
+    static uint8_t spawnFailures = 0;
     if (lastRespawnMs == 0 || (millis() - lastRespawnMs) >= STREAM_RETRY_RESPAWN_MS) {
       lastRespawnMs = millis() ? millis() : 1;
-      FUNCTIONLOG("Network", "stream retry task is gone with a resume still owed - starting a new one");
-      spawnStreamRetry();
+      if (spawnStreamRetry()) {
+        if (spawnFailures) FUNCTIONLOG("Network", "stream retry task running again after %u failed start(s)", (unsigned)spawnFailures);
+        spawnFailures = 0;
+      } else if (++spawnFailures >= 2) {
+        // Logged when the escalation first happens, not on every pass afterwards: a refused reset or restart
+        // means this branch runs again every 5 s and would otherwise be the flood it is meant to end.
+        if (spawnFailures == 2) FUNCTIONLOG("Network", "stream retry task will not start - escalating to a link reset");
+        if (forceLinkReset("ladder could not be spawned")) spawnFailures = 0;
+      }
+    }
+  }
+  // An outage that ends earns the escalation back.  Without this the restarts would be spent for the life of
+  // the boot and a wedge a week later would have no rung left; an outage that never ends keeps its count.
+  {
+    static uint32_t playingSince = 0;
+    if (player.isRunning()) {
+      if (playingSince == 0) playingSince = millis();
+      else if (recoveryReboots && (millis() - playingSince) >= RECOVERY_HEALTHY_MS) {
+        recoveryReboots = 0;
+        FUNCTIONLOG("Network", "stream stable - recovery restarts cleared");
+        playingSince = millis();
+      }
+    } else {
+      playingSince = 0;
     }
   }
   static uint32_t timeSyncTicks = 0;
@@ -249,7 +323,6 @@ static netVerdict_e probeNetworkStack() {
 
 void retryStreamConnection(void * pvParameters) {
   const uint16_t fastAttempts = 40;  // after this many the cadence slows down; it never gives up
-  const uint8_t maxResets = 3;       // link resets are the brute-force rung, capped across the outage
   uint16_t attemptCount = 0;
   bool slowed = false;
   for (;;) {
@@ -288,19 +361,20 @@ void retryStreamConnection(void * pvParameters) {
       if (attemptCount == 1) startup.deferBootStable("stream lost");   // no-op unless the boot is unproven
       if (attemptCount == 2) display.putRequest(NEWMODE, LOST);
 
-      // The connect DURATION is itself a verdict: a refusal returns in tens of ms and proves the path
-      // works, a timeout means it is stale.  Only ambiguity probes further - see probeNetworkStack().
+      // The verdict is asked for on every failure rather than inferred from how long the connect took.  A
+      // refusal does return in tens of ms and does prove the path works - but so does a stack whose socket
+      // pool is exhausted, which is the wedge itself, and that shortcut is what let the first two attempts of
+      // a wedge pass as "the host refused".  The probe costs a gateway connect (~30 ms) or a bare-IP connect
+      // (<=700 ms), which is nothing beside an attempt, and it is the whole decision: only WEDGED is acted on.
       const uint32_t connectMs = player.lastConnectMs;
-      const netVerdict_e verdict = (connectMs && connectMs < NET_REFUSAL_MS) ? NET_STACK_OK : probeNetworkStack();
-      FUNCTIONLOG("Network", "attempt %d/%d failed (connect %lums): %s", attemptCount, fastAttempts, (unsigned long)connectMs, netVerdictName(verdict));
-      if (verdict == NET_STACK_WEDGED && streamResetsUsed < maxResets &&
-          network.status == CONNECTED && !network.beginReconnect) {
-        streamResetsUsed++;
-        FUNCTIONLOG("Network", "forcing a link reset %d/%d", streamResetsUsed, maxResets);
-        streamRetryTaskHandle = NULL;   // WiFiReconnected restarts this task, so it must look stopped
-        WiFi.disconnect(true, false);   // wifioff: fires STA_DISCONNECTED, which runs the recovery chain
-        vTaskDelete(NULL);
-        return;
+      const netVerdict_e verdict = probeNetworkStack();
+      FUNCTIONLOG("Network", "attempt %d/%d failed (connect %lums, %s): %s", attemptCount, fastAttempts,
+          (unsigned long)connectMs, (connectMs && connectMs < NET_REFUSAL_MS) ? "refused" : "no answer",
+          netVerdictName(verdict));
+      if (verdict == NET_STACK_WEDGED && network.status == CONNECTED && !network.beginReconnect) {
+        // forceLinkReset() spends the budget and, past it, restarts.  A refused restart means retrying is all
+        // that is left, so the ladder carries on rather than deleting itself.
+        if (forceLinkReset("stream wedged")) { vTaskDelete(NULL); return; }
       }
     } else {
       // Conditions changed (user pressed stop, or already playing, or WiFi lost again)
@@ -367,7 +441,7 @@ void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
     if (xTaskCreatePinnedToCore(wifiReconnectionTask, "wifiReconn", NETWORK_TASK_STACK_BYTES, NULL, NET_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
       // No stream-ladder style retry exists for this one: the AP is only re-found on the next disconnect event,
       // so a failed create has to be visible rather than silent.
-      ERRORLOG("Network", "wifiReconn task could not be created (%u bytes, free heap %u)", (unsigned)NETWORK_TASK_STACK_BYTES, (unsigned)ESP.getFreeHeap());
+      ERRORLOG("wifiReconn task could not be created (%u bytes, free heap %u)", (unsigned)NETWORK_TASK_STACK_BYTES, (unsigned)ESP.getFreeHeap());
     }
   }
 }

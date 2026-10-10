@@ -67,6 +67,60 @@ const char _themeNames[][64] PROGMEM = {
     "vip-cxema.org",
 };
 
+// Theme element keys and their labels - used by the WebUI editor
+struct ThemeElementName {
+  const char* key;
+  const char* label;
+};
+
+const ThemeElementName _themeElementNames[] PROGMEM = {
+    { ".background",    "Background" },
+    { ".meta",          "Meta Text" },
+    { ".metabg",        "Meta Background" },
+    { ".metafill",      "Meta Fill (Border)" },
+    { ".title1",        "Title 1" },
+    { ".title2",        "Title 2" },
+    { ".digit",         "Digits (Clock, Volume, IR)" },
+    { ".div",           "Divider in Full Time" },
+    { ".line",          "Divider Lines" },
+    { ".weather",       "Weather Text" },
+    { ".vuaxis",        "VU Axis Line" },
+    { ".vupeak",        "VU Peak Bars" },
+    { ".vumax",         "VU Maximum" },
+    { ".vumin",         "VU Minimum" },
+    { ".clock",         "Clock" },
+    { ".clockbg",       "Clock Background (Glow)" },
+    { ".seconds",       "Seconds" },
+    { ".secondsbg",     "Seconds Background (Glow)" },
+    { ".dow",           "Day of Week" },
+    { ".date",          "Date" },
+    { ".clockss",       "Screensaver - Clock" },
+    { ".clockbgss",     "Screensaver - Clock Background (Glow)" },
+    { ".secondsss",     "Screensaver - Seconds" },
+    { ".secondsbgss",   "Screensaver - Seconds Background (Glow)" },
+    { ".dowss",         "Screensaver - Day of Week" },
+    { ".datess",        "Screensaver - Date" },
+    { ".textss",        "Screensaver - Info Text" },
+    { ".buffer",        "Buffer Bar" },
+    { ".ip",            "IP" },
+    { ".vol",           "Volume Text" },
+    { ".rssi",          "RSSI (Wi-fi Signal)" },
+    { ".battery",       "Battery" },
+    { ".bitrate",       "Bitrate" },
+    { ".volbarout",     "Volume Bar Outside" },
+    { ".volbarin",      "Volume Bar Inside" },
+    { ".plcurrent",     "Playlist - Current" },
+    { ".plcurrentbg",   "Playlist - Current Background" },
+    { ".plcurrentfill", "Playlist - Current Fill (Border)" },
+    { ".playlist[0]",   "Playlist - 0 (Nearest Current)" },
+    { ".playlist[1]",   "Playlist - 1 (Next to 0)" },
+    { ".playlist[2]",   "Playlist - 2 (Next to 1)" },
+    { ".playlist[3]",   "Playlist - 3 (Next to 2)" },
+    { ".playlist[4]",   "Playlist - 4 (Next to 3)" },
+};
+
+// The Themes
+
 const ThemeData _themes[] PROGMEM = {
     {   // ehRadio Blue & Red (Trip5)
         .background   = RGB(  0,   0,   0),
@@ -602,78 +656,6 @@ const ThemeData _themes[] PROGMEM = {
         .plcurrentfill = RGB(  0,   0,   0),
         .playlist      = {RGB(160, 164, 160), RGB(144, 144, 144), RGB(120, 120, 120), RGB( 96, 100,  96), RGB( 80,  80,  80)},
     },
-};
-
-// ---------------------------------------------------------------------------
-// Theme element keys and their labels
-// ---------------------------------------------------------------------------
-// One entry per uint16_t field of ThemeData, in declaration order.  This table is the contract between
-// the firmware, the /data theme files and the /editor.html grid: a key maps to an index, and that
-// index is the field.
-//
-//   key    the wire and file name, verbatim - dots, brackets and all.  It is what a theme file on
-//          disk is matched against and what the editor sends and receives, so it never changes.
-//   label  what a human reads.  The editor shows this by default and keeps the key one click away,
-//          so a label may be anything at all: it is never parsed, matched or stored, and renaming
-//          one cannot touch a byte of a theme file.
-//
-// The playlist has no 1-based form here: .playlist[0] is the first entry, so the file and the
-// struct agree without a translation step anywhere.
-//
-// sizeof() on the table below is what keeps the build honest through the static_assert that follows,
-// so adding a field to ThemeData fails the build until an entry is added here rather than silently
-// orphaning that key in every theme file already on disk.  One element per line is what makes the
-// pair impossible to get out of step: two parallel tables would let a key be added without its label,
-// shifting every element after it while the count-based assert still passed.
-struct ThemeElementName {
-  const char* key;
-  const char* label;
-};
-
-const ThemeElementName _themeElementNames[] PROGMEM = {
-    { ".background",    "Background" },
-    { ".meta",          "Meta Text" },
-    { ".metabg",        "Meta Background" },
-    { ".metafill",      "Meta Fill (Border)" },
-    { ".title1",        "Title 1" },
-    { ".title2",        "Title 2" },
-    { ".digit",         "Digits (Clock, Volume, IR)" },
-    { ".div",           "Divider in Full Time" },
-    { ".line",          "Divider Lines" },
-    { ".weather",       "Weather Text" },
-    { ".vuaxis",        "VU Axis Line" },
-    { ".vupeak",        "VU Peak Bars" },
-    { ".vumax",         "VU Maximum" },
-    { ".vumin",         "VU Minimum" },
-    { ".clock",         "Clock" },
-    { ".clockbg",       "Clock Background (Glow)" },
-    { ".seconds",       "Seconds" },
-    { ".secondsbg",     "Seconds Background (Glow)" },
-    { ".dow",           "Day of Week" },
-    { ".date",          "Date" },
-    { ".clockss",       "Screensaver - Clock" },
-    { ".clockbgss",     "Screensaver - Clock Background (Glow)" },
-    { ".secondsss",     "Screensaver - Seconds" },
-    { ".secondsbgss",   "Screensaver - Seconds Background (Glow)" },
-    { ".dowss",         "Screensaver - Day of Week" },
-    { ".datess",        "Screensaver - Date" },
-    { ".textss",        "Screensaver - Info Text" },
-    { ".buffer",        "Buffer Bar" },
-    { ".ip",            "IP" },
-    { ".vol",           "Volume Text" },
-    { ".rssi",          "RSSI (Wi-fi Signal)" },
-    { ".battery",       "Battery" },
-    { ".bitrate",       "Bitrate" },
-    { ".volbarout",     "Volume Bar Outside" },
-    { ".volbarin",      "Volume Bar Inside" },
-    { ".plcurrent",     "Playlist - Current" },
-    { ".plcurrentbg",   "Playlist - Current Background" },
-    { ".plcurrentfill", "Playlist - Current Fill (Border)" },
-    { ".playlist[0]",   "Playlist - 0 (Nearest Current)" },
-    { ".playlist[1]",   "Playlist - 1 (Next to 0)" },
-    { ".playlist[2]",   "Playlist - 2 (Next to 1)" },
-    { ".playlist[3]",   "Playlist - 3 (Next to 2)" },
-    { ".playlist[4]",   "Playlist - 4 (Next to 3)" },
 };
 
 #define THEME_ELEMENT_COUNT (sizeof(_themeElementNames) / sizeof(_themeElementNames[0]))

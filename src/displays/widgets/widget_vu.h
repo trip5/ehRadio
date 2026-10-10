@@ -68,15 +68,6 @@ class VuWidget: public Widget {
     // High-water marks, measured as cleared pixels from the loud end. 0xFFFF means
     // "not set yet" and is adopted on the first _levels() call, once len is known.
     uint16_t _peakL = 0xFFFF, _peakR = 0xFFFF;
-    // What the previous frame left on the panel, for the bar family's incremental path (see _drawBars):
-    // the cleared length of each channel, where the two peak markers were drawn, which style drew it, and
-    // whether the markers were on at all.  0xFFFF / 0xFF mean "no previous frame, repaint everything",
-    // which is also what a change in any of the four means - a peak switched off has to erase its own
-    // marker, and a style change repaints in a different pattern.  Invalidated by init() and _reset().
-    uint16_t _prevMeasL = 0xFFFF, _prevMeasR = 0xFFFF;
-    uint16_t _prevPkL = 0xFFFF, _prevPkR = 0xFFFF;
-    uint8_t _prevStyle = 0xFF;
-    bool _prevVupeak = false;
     uint32_t _lastMs = 0;                    // last call to _levels(), for the fade time base
     uint32_t _redrawMs = 0;                  // last redraw start, for the duty limiter below
     uint32_t _intervalMs = VU_REFRESH_MS;    // current gap between redraws, set from the draw cost
@@ -105,17 +96,11 @@ class VuWidget: public Widget {
     // Core Monitor's figure.  The canvas is a plain allocation rather than a psFrameBuffer, so the
     // accounting is this widget's to keep.
     bool _canvasPsram = false;
-    // The rectangle this frame's fills touched, in canvas coordinates: _fillLocal() is the only place that
-    // knows the pixel surface, so it is the only place that has to keep this.  Empty means "nothing on the
-    // canvas changed, so nothing goes to the panel"; _draw() empties it at the top of every frame.
-    uint16_t _dirtyX0 = 0, _dirtyY0 = 0, _dirtyX1 = 0, _dirtyY1 = 0;
     // The style this instance draws: the live setting unless the instance is pinned.
     uint8_t _style() const;
     // The peaks/axis switch this instance obeys, derived the same way: the screensaver's meter and the
     // player page's box can be different VUs, so neither the markers nor the axis lines are shared with it.
     bool _vupeak() const;
-    // True for the painters that clear their own area as they draw, so _draw() can leave out its wipe.
-    bool _selfErasing() const;
 
     // Geometry of the current frame. _draw() resolves it once and every style reads it: _len/_thk are the per-channel
     // level axis and cross-section, _cw/_ch the whole box, and _measL/_measR are what _levels() produced (the length
@@ -165,8 +150,7 @@ class VuWidget: public Widget {
     uint16_t _frame = 0;                     // redraws so far, drives the simulated wobble
     void _clear();
     void _reset();
-    void _invalidate() override;
-    // Send the canvas to the panel, whole or in part, from the rectangle _fillLocal() recorded this frame.
+    // Send the canvas to the panel: the whole box, which is all that ever changes now.
     void _blit();
     // One log line with the frame's split, printed a few times once the screensaver's meter has settled.
     void _reportCost();

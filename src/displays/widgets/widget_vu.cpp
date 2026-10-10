@@ -92,25 +92,6 @@ bool VuWidget::_vupeak() const {
   return (_styleOverride == 0xFF) ? config.store.vupeak : config.store.screensaverVUpeak;
 }
 
-// True only for the painter that lays down its own background as it draws: the bar family in the ROTATED
-// shape, whose incremental path fills a band with the background before re-lighting the lit part of it, and
-// whose full frames fill the whole box.  A full-box wipe before that is pure duplication, and leaving it out
-// is also what makes the partial blit possible - a wipe marks every pixel dirty by definition.
-//
-// It is deliberately not scoped to the style family alone.  The family's pattern draws one segment per step
-// and leaves bandsConf.vspace pixels of every step, plus the whole strip between the two channels, for
-// something else to fill - and for the layout's three shapes (the ribbon and the two side-by-side forms)
-// that something is still _draw()'s wipe.  Exempting them left the previous frame sitting in those gaps,
-// which showed up as the peak marker surviving there and as the bar appearing to miss its middle points.
-//
-// Every other painter draws over whatever was already on the canvas - a trace has no way to erase its own
-// previous line - and needs the wipe too.
-bool VuWidget::_selfErasing() const {
-  const uint8_t s = _style();
-  if (s != VU_STYLE_BARS && s != VU_STYLE_DIGITAL_LED) return false;
-  return _rotate;
-}
-
 bool VuWidget::ready() {
   #if defined(DSP_TFT)
     return _canvas && _canvasBuf;
@@ -264,10 +245,6 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
   // clock _reportCost() samples against.
   _frame = 0;
   _eraseUs = _paintUs = _blitUs = 0;
-  // A new canvas holds nothing this widget drew, so the first frame has to paint all of it: the bar
-  // family's incremental path keys off these, and the sentinel means "no previous frame".
-  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
-  _prevStyle = 0xFF;
   #ifdef WIDGET_DEBUG
     _dbgFrames = _dbgFills = _dbgDrawUs = _dbgPeakUs = 0;
     _dbgLogMs = millis();
@@ -328,13 +305,6 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
     _fills++;                  // only a real fill counts; the early return above is not one
   #endif
   #if defined(DSP_TFT)
-    // Grow the frame's dirty rectangle.  The clipping above has already turned this into a real rectangle,
-    // so this is exactly the set of canvas pixels the fill is about to touch - recorded here because this
-    // is the one function that knows the pixel surface.
-    if (x < _dirtyX0) _dirtyX0 = x;
-    if (y < _dirtyY0) _dirtyY0 = y;
-    if ((uint16_t)(x + w) > _dirtyX1) _dirtyX1 = (uint16_t)(x + w);
-    if ((uint16_t)(y + h) > _dirtyY1) _dirtyY1 = (uint16_t)(y + h);
     _canvas->fillRect(x, y, w, h, color);
   #else
     dsp.fillRect(_config.left + x, _config.top + y, w, h, color);
@@ -358,16 +328,14 @@ void VuWidget::_draw(){
 
   _levels(_len, _measL, _measR);
 
-  // The wipe is for the painters that have nothing to erase with: their previous frame is removed by
-  // clearing the box rather than by the style itself.  The bar family does its own erasing, and leaving
-  // the wipe out for it is also what makes a partial blit possible later - a full-box wipe marks every
-  // pixel dirty by definition, which is the information a dirty rectangle is built from.
-  // The dirty rectangle starts empty and _fillLocal() grows it, so what goes to the panel at the end of
-  // this frame is what the painters actually touched rather than the whole box every time.
-  _dirtyX0 = _cw; _dirtyY0 = _ch; _dirtyX1 = 0; _dirtyY1 = 0;
+  // Every painter wipes the whole box first.  The trace styles have nothing to erase with, and the bar
+  // family's pattern leaves bandsConf.vspace pixels of every step, plus the whole strip between the two
+  // channels, for the wipe to fill - so a full wipe is what this family has always needed.  The wipe also
+  // marks every pixel dirty, which is why the blit is always the whole box and why the incremental band
+  // and the dirty rectangle this widget used to carry were removed.
 
   const uint32_t tEraseStart = micros();
-  if (!_selfErasing()) _fillLocal(0, 0, _cw, _ch, _bgcolor);
+  _fillLocal(0, 0, _cw, _ch, _bgcolor);
   const uint32_t tEraseEnd = micros();
 
   _frame++;
@@ -387,8 +355,8 @@ void VuWidget::_draw(){
 
   const uint32_t tPaintEnd = micros();
 
-  // Send what this frame touched, whole or in part - see _blit().  The OLED panels do nothing here: they
-  // draw straight into their own panel buffer and DspCore::loop() flushes it after this returns.
+  // Send the whole box - see _blit().  The OLED panels do nothing here: they draw straight into their own
+  // panel buffer and DspCore::loop() flushes it after this returns.
   _blit();
 
   // The frame's split, for _reportCost().  Last frame's raw figures, not smoothed: the report samples a
@@ -404,14 +372,12 @@ void VuWidget::_draw(){
 // TFT with a canvas carries the wire cost in the blit; the OLED panels report zero there, because they
 // have no canvas and their flush happens after this returns.
 void VuWidget::_reportCost() {
-  FUNCTIONLOG("VU.Widget", "SS meter %ux%u px, style %u: erase %lums, painter %lums, blit %lums, total %lums, frame %u, dirty %ux%u px",
+  FUNCTIONLOG("VU.Widget", "SS meter %ux%u px, style %u: erase %lums, painter %lums, blit %lums, total %lums, frame %u",
       (unsigned)_cw, (unsigned)_ch, (unsigned)_style(),
       (unsigned long)(_eraseUs / 1000u), (unsigned long)(_paintUs / 1000u),
       (unsigned long)(_blitUs / 1000u),
       (unsigned long)((_eraseUs + _paintUs + _blitUs) / 1000u),
-      (unsigned)_frame,                                            // the frame counter, not a fill count
-      (unsigned)(_dirtyX1 > _dirtyX0 ? _dirtyX1 - _dirtyX0 : 0),   // the rectangle _blit() was handed
-      (unsigned)(_dirtyY1 > _dirtyY0 ? _dirtyY1 - _dirtyY0 : 0));
+      (unsigned)_frame);                                           // the frame counter, not a fill count
 }
 
 void VuWidget::_drawBars(bool led){
@@ -443,9 +409,9 @@ void VuWidget::_drawBars(bool led){
     }
   }
 
-  // Peak marker geometry, resolved once because both the incremental path just below and the full path
-  // further down draw with it.  peakThk reserves the outermost pixels of the widget, which keeps the marker
-  // inside the .bandsConf footprint.
+  // Peak marker geometry, resolved once because both the clears and the marker themselves draw with it.
+  // peakThk reserves the outermost pixels of the widget, which keeps the marker inside the .bandsConf
+  // footprint.
   const uint16_t peakThk = ((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) > 0
                          ? (uint16_t)((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) : 1;
   uint16_t pkL = 0, pkR = 0;
@@ -468,79 +434,6 @@ void VuWidget::_drawBars(bool led){
       if (pkL < peakThk) pkL = peakThk;      // the snap must not push the marker out of the box
       if (pkR < peakThk) pkR = peakThk;
     }
-  }
-
-  // ---- The rotated shape, incrementally -------------------------------------------------------------
-  // A screensaver's box is always rotated, and that is what this path exists for.  Only the band that can
-  // have changed since the last frame is repainted: the span between the old tip and the new one for each
-  // channel, widened to wherever its peak marker moved.  Everything outside it already holds this frame's
-  // picture - below the old tip the colour pattern has not changed and past the new tip the background has
-  // not - so a quiet station touches a few hundred pixels instead of the whole box, and _draw()'s blob
-  // shrinks to match.  The invariant that makes it correct is that _prevMeas* / _prevPk* describe exactly
-  // what the canvas holds, and every way of breaking that (a new canvas, a move, a lock) invalidates them
-  // through init() or _reset().
-  //
-  // The other three shapes keep the full repaint: they are the layout's own arrangements - the ribbon and
-  // the two side-by-side forms - they are small boxes on a real layout, and each would need its own version
-  // of this arithmetic.
-  if (_rotate) {
-    const bool full = (_prevMeasL == 0xFFFF || _prevMeasR == 0xFFFF ||
-                       _prevStyle != _style() || _prevVupeak != _vupeak());
-    // A full repaint owns its background, exactly as _draw()'s wipe did for this family before
-    // _selfErasing() took the wipe away from it - and for the same reason the incremental path below has to
-    // lay down a band of it: the pattern leaves bandsConf.vspace pixels of every step, and the whole strip
-    // between the two channels, untouched.  Nothing else fills them, so without this they hold whatever the
-    // canvas was allocated with - vuCanvasBuffer() memsets to zero, and they are black.
-    if (full) _fillLocal(0, 0, _cw, _ch, _bgcolor);
-    else {
-      for (uint8_t ch = 0; ch < 2; ch++) {
-        const uint16_t meas = ch ? measR : measL;
-        const uint16_t tipNew = (uint16_t)(len - meas);
-        // Each channel reads its OWN previous tip: with the branches swapped the band was anchored on the
-        // other channel's old tip, so wherever the two differed part of the changed span went unpainted.
-        const uint16_t tipOld = (uint16_t)(len - (ch ? _prevMeasR : _prevMeasL));
-        const uint16_t pkNew = ch ? pkR : pkL;
-        const uint16_t pkOld = ch ? _prevPkR : _prevPkL;
-        uint16_t lo = (tipOld < tipNew) ? tipOld : tipNew;
-        uint16_t hi = (tipOld < tipNew) ? tipNew : tipOld;
-        if (_vupeak()) {
-          // Each marker sits just beyond its tip and moves on its own, so both its old and its new rect
-          // belong to the band: repainting the band is what restores the old one to pattern or background.
-          for (uint8_t k = 0; k < 2; k++) {
-            const uint16_t pk = k ? pkOld : pkNew;
-            if (pk == 0xFFFF || pk > len) continue;
-            const uint16_t a = (uint16_t)(len - pk), b = (uint16_t)(a + peakThk);
-            if (a < lo) lo = a;
-            if (b > hi) hi = b;
-          }
-        }
-        if (hi > len) hi = len;
-        if (hi <= lo) continue;                       // this channel did not move at all
-        const uint16_t off = ch ? (uint16_t)(_bands.width + _bands.space) : 0;
-        // The band gets its background first - the gaps between segments and the strip between the two
-        // channels are only the theme's background if something puts it there, and this is the something.
-        // It also makes the whole band correct in one pass: below it, only the lit part is re-lit.
-        _fillLocal(lo, off, (uint16_t)(hi - lo), thk, _bgcolor);
-        // Then the lit part of the band, one segment at a time so the hot end keeps its colour.
-        const uint16_t pEnd = (tipNew < hi) ? tipNew : hi;
-        for (uint16_t i = (uint16_t)((lo / step) * step); i < pEnd; i = (uint16_t)(i + step)) {
-          uint16_t hh = h;
-          if ((uint16_t)(i + hh) > pEnd) hh = (uint16_t)(pEnd - i);
-          _drawBand(i, ch, hh, (i > len - step * 3) ? _vumaxcolor : _vumincolor);
-        }
-        // Then the marker, over both.
-        if (_vupeak() && pkNew != 0xFFFF && pkNew <= len)
-          _fillLocal((uint16_t)(len - pkNew), off, peakThk, thk, _vupeakcolor);
-      }
-    }
-    // Remember what this frame left there, whichever path drew it.
-    _prevMeasL = measL;
-    _prevMeasR = measR;
-    _prevPkL = _vupeak() ? pkL : 0xFFFF;
-    _prevPkR = _vupeak() ? pkR : 0xFFFF;
-    _prevStyle = _style();
-    _prevVupeak = _vupeak();
-    if (!full) return;                                // nothing left to do, and no full-box work
   }
 
   for (int i = 0; i < len; i += step) {
@@ -583,8 +476,8 @@ void VuWidget::_drawBars(bool led){
   }
 
   // Peak markers. Drawn after the clears so they survive them, and before the blit.  Their geometry was
-  // resolved at the top of this function, because the incremental path needs the same numbers; this is only
-  // the drawing of it.  Each marker sits in the cleared strip just beyond its channel's high-water mark.
+  // resolved at the top of this function; this is only the drawing of it.  Each marker sits in the cleared
+  // strip just beyond its channel's high-water mark.
   if (_vupeak()) {
     if (_rotate) {
       _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
@@ -1241,11 +1134,6 @@ void VuWidget::_reset(){
   // Widget::lock() and Widget::moveTo() call this. Dropping the high-water marks makes the marker restart at the bar
   // tip, and clearing _lastMs makes the next frame adopt the live level instead of fading in from a stale position.
   _peakL = _peakR = 0xFFFF;
-  // Whatever the previous frame drew is no longer where this widget is about to draw, so the incremental
-  // path starts from "repaint everything" again.  Both callers clear the area first, so the canvas really
-  // does hold only the background where the band assumes it does.
-  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
-  _prevStyle = 0xFF;
   _accL = _accR = _accPL = _accPR = 0;
   _holdL = _holdR = 0;
   _lastMs = 0;
@@ -1260,60 +1148,15 @@ void VuWidget::_reset(){
   #endif
 }
 
-// Forget where the incremental paths believe the panel is.  Something cleared the screen underneath us -
-// a page switch fills the panel with the background - so both the bar band and the blit rectangle have to
-// start again from "repaint everything".
-void VuWidget::_invalidate() {
-  _prevMeasL = _prevMeasR = _prevPkL = _prevPkR = 0xFFFF;
-  _prevStyle = 0xFF;
-}
-
-// Send the canvas to the panel: the rectangle this frame's fills touched, or the whole box when sending
-// that rectangle in pieces would cost more than sending everything.
-//
-// A sub-rectangle cannot go out in one call, because the canvas rows are strided: its rows have to be
-// gathered into something contiguous first.  They are gathered a few at a time into a small scratch, and
-// each group is ONE address window plus ONE data stream - the shape every other multi-row write in this
-// driver uses, and the shape the full-box blit below uses.  That matters.  The first version of this sent
-// one row per writePixels(), which re-enters the driver's transaction per row and so raises CSX between
-// them; the panel came back with everything outside the band missing and the band itself mangled, which is
-// what a broken write stream looks like.  Gathering costs about a fifth of what the wire does per pixel
-// (0.2 us against 0.85, both measured - see plans/vu-framerate.md), so it is worth it whenever it saves
-// even one row of traffic.
+// Send the canvas to the panel.  Every frame now wipes the whole box, so the whole box is always what has
+// to go out: one address window and one data stream, which is the shape every other multi-row write in
+// this driver uses (see pushImage() in ILI9486_SPI.cpp).  The partial, tiled path this used to carry went
+// with the dirty rectangle - a full wipe marks every pixel dirty, so the rectangle was always the box.
 void VuWidget::_blit() {
   #if defined(DSP_TFT)
-    const uint16_t dw = (_dirtyX1 > _dirtyX0) ? (uint16_t)(_dirtyX1 - _dirtyX0) : 0;
-    const uint16_t dh = (_dirtyY1 > _dirtyY0) ? (uint16_t)(_dirtyY1 - _dirtyY0) : 0;
-    if (!dw || !dh) return;                       // nothing on the canvas changed, so nothing goes out
-    const uint16_t dx = _dirtyX0, dy = _dirtyY0;
-    const uint32_t wholePx = (uint32_t)_cw * _ch;
-    const uint32_t partPx  = (uint32_t)dw * dh;
     dsp.startWrite();
-    if ((wholePx - partPx) <= (uint32_t)dh * 8u) {
-      // What the rectangle would save is worth less than the window calls it would take: send the lot.
-      dsp.setAddrWindow(_config.left, _config.top, _cw, _ch);
-      dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
-    } else {
-      // Tiles of at most kBlitScratchPx pixels, in whole columns and rows, so cols * rows can never
-      // exceed the scratch for any dw or dh.  Sizing the groups from dw alone did: a band wider than
-      // 256 px wrote up to 288 bytes past this array on a 480 px box and smashed the display task's stack.
-      constexpr uint16_t kBlitScratchPx = 256;
-      uint16_t scratch[kBlitScratchPx];
-      const uint16_t cols = (dw > kBlitScratchPx) ? kBlitScratchPx : dw;
-      const uint16_t rows = kBlitScratchPx / cols;      // >= 1, because cols <= kBlitScratchPx
-      for (uint16_t x = 0; x < dw; x = (uint16_t)(x + cols)) {
-        const uint16_t tw = (uint16_t)(((uint16_t)(dw - x) < cols) ? (uint16_t)(dw - x) : cols);
-        for (uint16_t y = 0; y < dh; y = (uint16_t)(y + rows)) {
-          const uint16_t n = (uint16_t)(((uint16_t)(dh - y) < rows) ? (uint16_t)(dh - y) : rows);
-          uint16_t* p = scratch;
-          for (uint16_t r = 0; r < n; r++, p += tw)
-            memcpy(p, _canvasBuf + (uint32_t)(dy + y + r) * _cw + dx + x, (size_t)tw * sizeof(uint16_t));
-          dsp.setAddrWindow((int16_t)(_config.left + dx + x), (int16_t)(_config.top + dy + y),
-                            (int16_t)tw, (int16_t)n);
-          dsp.writePixels(scratch, (uint32_t)tw * n);
-        }
-      }
-    }
+    dsp.setAddrWindow(_config.left, _config.top, _cw, _ch);
+    dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
     dsp.endWrite();
   #endif
   // An OLED panel owns its buffer and DspCore::loop() flushes it, so there is nothing to send here.

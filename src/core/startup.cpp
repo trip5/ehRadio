@@ -68,7 +68,7 @@ void Startup::loop() {
     netserver.startLoopTask();
     display.putRequest(NEWIP, 0);   // the footer IP is the indicator that the WebUI is up
     BOOTLOG("WebUI Ready! Go to http://%s/ to configure", WiFi.localIP().toString().c_str());
-    BOOTLOG("-------------------------------------------------");
+    BOOTLOG("-------------------------------------------------------");
   }
   if (!_bootStablePending) return;
   if (_bootStartMs == 0) {

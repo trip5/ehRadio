@@ -3368,6 +3368,14 @@ The shared box fill in `_draw()` is the clear for **every** style, including the
 `_clear()` stops at `len`, so the final (clamped) segment is only clean because the box was cleared first. Do not
 reintroduce `drawRGBBitmap` here — the manual blit is deliberate (see the memory-ownership notes above).
 
+**The bar family is a full wipe plus a full repaint, and that is deliberate.** A brief incremental path — a band
+between the old and the new tip, with a dirty-rectangle blit — was removed (2026-10-10) because its correctness rested
+on `_prev*` state that had to describe the canvas exactly, and it kept leaving leftovers in the vspace gaps and the
+inter-channel strip. `_draw()` now wipes the whole box for every style unconditionally, `_blit()` always sends the
+whole box, and the dirty rectangle, `_prevMeas*` / `_prevPk*` / `_prevStyle` / `_prevVupeak`, `_selfErasing()` and
+`Widget::_invalidate()` are gone. Do not reintroduce a partial blit without the wipe it depends on. See
+[`plans/vu-bars-full-repaint.md`](../plans/vu-bars-full-repaint.md).
+
 **The bar family's shape is two macros** — `VU_BAR_PERCENT` (20) and `VU_BAR_GAP_PERCENT` (10), at the top of
 `resolveScreensaverBox()` in `widget_vu.cpp`, read as percentages of the content height. Each channel is one
 `VU_BAR_PERCENT`, the gap between them is `VU_BAR_GAP_PERCENT`, and the remainder is placement, split evenly above

@@ -27,7 +27,7 @@ class Widget{
     }
     // _present = the active layout provides this widget, set only by hideByLayout()/showByLayout(). It outranks
     // _active, which Pager::setPage() re-activates on every mode change.
-    void setActive(bool act, bool clr=false) { if(act && !_present) return; if(act && !_active) _invalidate(); _active = act; if(_active && !_locked) _draw(); if(clr && !_locked) _clear(); }
+    void setActive(bool act, bool clr=false) { if(act && !_present) return; _active = act; if(_active && !_locked) _draw(); if(clr && !_locked) _clear(); }
     // Locking is always allowed; unlocking a widget the layout dropped is not. Once absent, nothing but
     // showByLayout() can make it draw again.
     void lock(bool lck=true) { if(!lck && !_present) return; _locked = lck; if(_locked) _reset(); if(_locked && _active) _clear();  }
@@ -67,11 +67,6 @@ class Widget{
     uint16_t _fgcolor, _bgcolor, _width;
     WidgetConfig _config;
     MoveConfig _backMove;
-    // Called when the widget is switched on, before anything is drawn.  A widget that draws incrementally -
-    // repainting and sending only what changed - believes something about what the panel already holds, and
-    // that belief dies when something else clears the screen: a page switch fills the panel with the
-    // background.  Empty for every widget that repaints its whole area, which is all of them but the VU.
-    virtual void _invalidate() {}
     virtual void _draw() {}
     virtual void _clear() {}
     virtual void _reset() {}

@@ -428,10 +428,6 @@ void Config::loadTheme() {
   // Through the registry rather than straight off the table: the id may name a user slot, and it may
   // name a slot whose file has since been deleted.  themeValidId() answers both - it hands back the
   // id when a theme is really there and 0 otherwise, so the persisted id cannot dangle.
-  //
-  // This runs from _initHW(), which is before LittleFS is mounted, so on that first pass a custom id
-  // is deliberately left unjudged (see themeValidId) and resolves to nothing; the fallback keeps a
-  // real palette on the panel meanwhile, and Startup calls this again once the slots are read.
   config.store.themeId = themeValidId(config.store.themeId);
   if (!themeCopy(config.store.themeId, &theme)) themeCopy(0, &theme);
 }

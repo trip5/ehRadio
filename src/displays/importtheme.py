@@ -57,7 +57,6 @@ COLOR_TO_FIELD = {
     'COLOR_BACKGROUND':       'background',
     'COLOR_STATION_NAME':     'meta',
     'COLOR_STATION_BG':       'metabg',
-    'COLOR_STATION_FILL':     'metafill',
     'COLOR_SNG_TITLE_1':      'title1',
     'COLOR_SNG_TITLE_2':      'title2',
     'COLOR_DIGITS':           'digit',
@@ -86,7 +85,6 @@ COLOR_TO_FIELD = {
     'COLOR_VOLBAR_IN':        'volbarin',
     'COLOR_PL_CURRENT':       'plcurrent',
     'COLOR_PL_CURRENT_BG':    'plcurrentbg',
-    'COLOR_PL_CURRENT_FILL':  'plcurrentfill',
     'COLOR_PLAYLIST_0':       'playlist[0]',
     'COLOR_PLAYLIST_1':       'playlist[1]',
     'COLOR_PLAYLIST_2':       'playlist[2]',
@@ -95,14 +93,14 @@ COLOR_TO_FIELD = {
 }
 
 FIELD_ORDER = [
-    'background', 'meta', 'metabg', 'metafill',
+    'background', 'meta', 'metabg',
     'title1', 'title2', 'digit', 'div', 'line', 'weather', 'vuaxis',
     'vupeak', 'vumax', 'vumin',
     'clock', 'clockbg', 'seconds', 'secondsbg', 'dow', 'date',
     'clockss', 'clockbgss', 'secondsss', 'secondsbgss', 'dowss', 'datess', 'textss',
     'buffer', 'ip', 'vol', 'rssi', 'battery', 'bitrate',
     'volbarout', 'volbarin',
-    'plcurrent', 'plcurrentbg', 'plcurrentfill',
+    'plcurrent', 'plcurrentbg',
     'playlist',
 ]
 
@@ -245,7 +243,6 @@ def parse_theme(path):
             block_line_indices.add(li)
 
     global_colors = {}
-    global_unknowns = []
     for li, line in enumerate(lines):
         if li in block_line_indices: continue
         s = line.strip()
@@ -256,13 +253,11 @@ def parse_theme(path):
             rgb = (int(m.group(2)), int(m.group(3)), int(m.group(4)))
             if name in COLOR_TO_FIELD:
                 global_colors[COLOR_TO_FIELD[name]] = rgb
-            else:
-                global_unknowns.append((name, rgb))
 
     # Step 4: generate variants
     n_blocks = len(blocks)
     if n_blocks == 0:
-        return [{'colors': dict(global_colors), 'unknowns': list(global_unknowns), 'name_suffix': ''}], blocks
+        return [{'colors': dict(global_colors), 'name_suffix': ''}], blocks
 
     results = []
     for combo in range(1 << n_blocks):
@@ -272,7 +267,6 @@ def parse_theme(path):
             active_lines |= block_active[(bi, bit)]
 
         colors = dict(global_colors)
-        unknowns = list(global_unknowns)
         for li, line in enumerate(lines):
             if li in active_lines:
                 m = re.match(r'#define\s+(COLOR_\w+)\s+(\d+)\s*,\s*(\d+)\s*,\s*(\d+)', line.strip())
@@ -281,11 +275,9 @@ def parse_theme(path):
                     rgb = (int(m.group(2)), int(m.group(3)), int(m.group(4)))
                     if name in COLOR_TO_FIELD:
                         colors[COLOR_TO_FIELD[name]] = rgb
-                    else:
-                        unknowns.append((name, rgb))
 
         suffix = f" {combo+1}" if n_blocks > 0 else ""
-        results.append({'colors': colors, 'unknowns': unknowns, 'name_suffix': suffix})
+        results.append({'colors': colors, 'name_suffix': suffix})
 
     return results, blocks
 
@@ -298,9 +290,9 @@ def parse_theme_json(path):
     always a list - and an empty one, or an older backup with nulls in it, is handled rather than trusted.
 
     The keys are the element names from themes.h with a leading dot, so the mapping is a strip and nothing
-    else; a key that is not one of ours comes back as unknown, which is where the fallbacks and the report
-    notice it.  Values are 565 integers converted to the numbers the editor shows, and an [r, g, b] array is
-    accepted in place of one, the same tolerance the firmware's own loader has for a hand-edited file.
+    else; a key that is not one of ours is skipped.  Values are 565 integers converted to the numbers the
+    editor shows, and an [r, g, b] array is accepted in place of one, the same tolerance the firmware's own
+    loader has for a hand-edited file.
     """
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         text = f.read()
@@ -333,7 +325,7 @@ def parse_theme_json(path):
             # too, and there "name" is simply not a colour.
             raw = {k: v for k, v in d.items() if k != 'name'}
 
-        colors, unknowns = {}, []
+        colors = {}
         for key, value in raw.items():
             key = str(key)
             fname = key[1:] if key.startswith('.') else key
@@ -356,18 +348,15 @@ def parse_theme_json(path):
                     continue
             if re.fullmatch(r'playlist\[[0-4]\]', fname) or fname in FIELD_ORDER:
                 colors[fname] = rgb
-            else:
-                unknowns.append((key, rgb))
 
         name = d.get('name') if isinstance(d.get('name'), str) and d.get('name').strip() else None
-        results.append({'colors': colors, 'unknowns': unknowns, 'name_suffix': '', 'name': name})
+        results.append({'colors': colors, 'name_suffix': '', 'name': name})
 
     return results
 
 
 def emit_theme_entry(name, data, index):
     colors = data['colors']       # original colors from theme file (do not mutate)
-    unknowns = data['unknowns']
 
     # Working copy that we fill with fallbacks
     final = dict(colors)
@@ -429,8 +418,6 @@ def emit_theme_entry(name, data, index):
             comment = ' // needs fixing?' if fname in needs_fixing else ''
             lines.append(f'        .{fname:13s} = RGB({r:3d}, {g:3d}, {b:3d}),{comment}')
 
-    for uname, (r, g, b) in unknowns:
-        lines.append(f'        // ??? (Unused by ehRadio) {uname} = RGB({r}, {g}, {b})')
     lines.append('    },')
     return '\n'.join(lines), len(colors), len(quantised)
 
@@ -600,7 +587,7 @@ def main():
     # it needs one.  Either way more than one theme is numbered the way the old format's variants are, because
     # a backup often holds several saves of the same theme and they all carry the same name inside.
     numbered = len(results) > 1
-    entries, names_to_add, issues = [], [], False
+    entries, names_to_add = [], []
     print(f"\nAdding {basename} theme(s) to themes.h...")
 
     for position, result in enumerate(results):
@@ -612,9 +599,8 @@ def main():
         entry_text, converted, moved = emit_theme_entry(theme_name, result, idx)
         entries.append(entry_text)
         names_to_add.append(theme_name)
-        if result['unknowns']: issues = True
         print(f"\nTheme: {theme_name}")
-        print(f"  {len(result['colors'])} colors, {len(result['unknowns'])} unknown")
+        print(f"  {len(result['colors'])} colors")
         if moved: print(f"  {moved} colour(s) snapped onto the 565 steps")
         idx += 1
 
@@ -632,7 +618,6 @@ def main():
     else:
         if not modify_themes(target_full, entries, names_to_add): sys.exit(1)
         print(f"\nUpdated: {target_full}")
-    if issues: print("Please review lines marked with // ??? before building!")
 
 
 if __name__ == '__main__':

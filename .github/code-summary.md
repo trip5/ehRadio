@@ -1079,9 +1079,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **The meta fill pair belongs to `LayoutData`; the boot band to `BootData`.** `metaBGConf` / `metaBGConfInv` are
   alternatives selected by *invert title* (`Display::_applyMetaInvert()`, `display.cpp`), never both, and with **no
   fallback**: an empty `metaBGConfInv` means invert mode draws no bar, which is how a layout declines one. Both are
-  plain fills drawn in `config.theme.metafill`, except that **TFT only** replaces `metafill` with `theme.div` first when
-  inverted; OLED has no such override and its drivers point `metafill` at a foreground shade (`oledcolorfix.h`,
-  `displaySSD1322.cpp`), so a band there reads as a solid block rather than a tint — hence the OLED confs carry a
+  plain fills drawn in `config.theme.metabg`, except that **when the title is inverted** the band uses
+  `config.theme.line` instead (the rule under the meta). The OLED drivers point `line` at a foreground shade
+  (`oledcolorfix.h`, `displaySSD1322.cpp`), so a band there reads as a solid block rather than a tint — hence the OLED confs carry a
   hairline or `{ }` in `metaBGConf` and the bar in `metaBGConfInv`, the reverse of a yoRadio conf. `_apScreen()` and
   `_sdmanScreen()` draw `_bootConfig.apTitleBGConf` and ignore *invert title*, so a setup screen is independent of the
   selected layout (its text geometry already came from `_bootConfig`). `conf_tool.py` normalises an imported pair by
@@ -1437,8 +1437,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     `_pages`, so nothing in a sub-page can be self-updating - which is why the footer holds only bars and text.
   - **`outlined` in `FillConfig` now means the shape for a fill, and still means "frame plus inset" for the two
     sliders.** `FillWidget::_draw()` (`widgets.cpp:31`) reads it and draws `drawRect` instead of `fillRect`, in the same
-    colour the widget was constructed with - `theme.line` for the two reference lines, `theme.metafill` for the meta
-    band and the boot band, `theme.plcurrentfill` for the playlist highlight - and leaves the interior alone on purpose,
+    colour the widget was constructed with - `theme.line` for the two reference lines, `theme.metabg` for the meta
+    band and the boot band, `theme.plcurrentbg` for the playlist highlight - and leaves the interior alone on purpose,
     because a frame that cleared its inside would erase the widgets it exists to enclose. `false` is what every conf in
     the tree writes, so no existing layout changed; and since a rectangle one pixel thick is its own outline, `outlined`
     does nothing visible to a hairline, which is the one thing to tell a layout author. `SliderWidget::init`
@@ -1450,9 +1450,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     the corrected comment without any change to `conf_tool.py`.
   - **`metaBGConfInv` is consumed by a pointer swap, not by a second widget.** When `config.store.inverttitle` is on,
     `_applyState()` re-points `metaBGConf_ptr` at `metaBGConfInv` (falling back to `metaBGConf` when the inv conf is
-    empty) and, on TFT, sets `config.theme.metafill = config.theme.div` first - so the single band widget is
-    re-initialised from the inv geometry and drawn in the divider ink, which makes it read as the rule under the station
-    name instead of a band. What is dead is the exported `metaBGConfInv_ptr`: it is assigned in three places (the
+    empty) and the single band widget is re-initialised from the inv geometry drawn in `config.theme.line` - so it reads
+    as the rule under the station name instead of a band. What is dead is the exported `metaBGConf_ptr`'s sibling
+    `metaBGConfInv_ptr`: it is assigned in three places (the
     initialiser, the null block for builds without a display, and `_setLayoutPointers()`) and never read, because the
     swap goes through `metaBGConf_ptr`. Recorded, not fixed.
 
@@ -3223,7 +3223,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - The old `utf8To.*`, `utf8_common.*`, `utf8Latin.*` and `utf8Cyrillic.*` files are **gone** (they were replaced by the
   Unicode GFXfont pipeline); `localization-guide.md` still described them as "retained for reference".
 - `src/displays/tools/oledcolorfix.h` — OLED monochrome color initialization. `DSP_INVERT_TITLE` ifdef removed;
-  `metafill` corrected to `TFT_FG` (was `TFT_BG` — invisible on black screen).
+  the palette no longer carries `metafill`/`plcurrentfill` (the meta band takes `metabg`, the rule under an inverted
+  meta takes `line`, and the playlist highlight takes `plcurrentbg`).
 
 Purpose:
 - text normalization/transliteration and glyph handling

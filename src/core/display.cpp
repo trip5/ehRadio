@@ -399,8 +399,8 @@ void Display::_buildPager() {
   if (title2Conf_ptr->buffsize > 0) {
     _title2 = new ScrollWidget(*title2Conf_ptr, config.theme.title2, config.theme.background);
   }
-  _plbackground = new FillWidget(*playlBGConf_ptr, config.theme.plcurrentfill);
-  _metabackground = new FillWidget(*metaBGConf_ptr, config.theme.metafill);
+  _plbackground = new FillWidget(*playlBGConf_ptr, config.theme.plcurrentbg);
+  _metabackground = new FillWidget(*metaBGConf_ptr, config.theme.metabg);
   // These two always exist - their confs are re-pointed behind them (invert, playlist mode) - so a zeroed
   // conf is a state here, not an absence.  The optional lines are made by _syncLineRule() below.
   if (vuConf_ptr->textsize > 0) {
@@ -523,7 +523,7 @@ void Display::_apScreen() {
     // The boot screens own their band and ignore invert title - a layout is selectable, they are not.
     // Optional: { } means this panel wants no band, so no widget is made for one.
     if (_bootConfig.apTitleBGConf.height > 0) {
-      _boot->addWidget(new FillWidget(_bootConfig.apTitleBGConf, config.theme.metafill));
+      _boot->addWidget(new FillWidget(_bootConfig.apTitleBGConf, config.theme.metabg));
     }
     uint16_t mfg = config.theme.meta;
     uint16_t mbg = config.theme.metabg;
@@ -561,7 +561,7 @@ void Display::_sdmanScreen() {
   _boot = new Page();
   // Own band, no invert title, skipped when empty - same rule as the AP screen.
   if (_bootConfig.apTitleBGConf.height > 0) {
-    _boot->addWidget(new FillWidget(_bootConfig.apTitleBGConf, config.theme.metafill));
+    _boot->addWidget(new FillWidget(_bootConfig.apTitleBGConf, config.theme.metabg));
   }
   uint16_t mfg = config.theme.meta;
   uint16_t mbg = config.theme.metabg;
@@ -1493,7 +1493,8 @@ void Display::_reinitWidgets() {
     #ifdef DSP_TFT
       mbg = config.store.inverttitle ? config.theme.background : config.theme.metabg;
     #else
-      mbg = config.store.inverttitle ? config.theme.metafill : config.theme.metabg;
+      mbg = config.store.inverttitle ? config.theme.meta : config.theme.metabg;
+      // mbg = config.store.inverttitle ? config.theme.line : config.theme.metabg;
     #endif
     _meta->init(*metaConf_ptr, mfg, mbg);
   }
@@ -1617,8 +1618,12 @@ void Display::_reinitWidgets() {
   if (numInLayout()) { _nums->init(*numConf_ptr, 10, false, config.theme.digit, config.theme.background); showByLayout(_nums); }
   else hideByLayout(_nums);
   // Background fills
-  if (_plbackground) _plbackground->init(*playlBGConf_ptr, config.theme.plcurrentfill);
-  if (_metabackground) _metabackground->init(*metaBGConf_ptr, config.theme.metafill);
+  if (_plbackground) _plbackground->init(*playlBGConf_ptr, config.theme.plcurrentbg);
+  #ifdef DSP_TFT
+    if (_metabackground) _metabackground->init(*metaBGConf_ptr, config.store.inverttitle ? config.theme.line : config.theme.metabg);
+  #else
+    if (_metabackground) _metabackground->init(*metaBGConf_ptr, config.store.inverttitle ? config.theme.meta : config.theme.line);
+  #endif
   _syncLineRule(_underline, underLineConf_ptr, true);
   _syncLineRule(_overline, overLineConf_ptr, false);
   #if !PLAYLIST_MODE_PAGED
@@ -1659,9 +1664,6 @@ void Display::_setLayoutPointers() {
 
 void Display::_applyMetaInvert() {
   if (config.store.inverttitle) {
-    #ifdef DSP_TFT
-      config.theme.metafill = config.theme.div;
-    #endif
     // No fallback: an empty metaBGConfInv is the layout declining a bar when inverted.
     metaBGConf_ptr = &activeLayout.metaBGConfInv;
   } else {

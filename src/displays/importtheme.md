@@ -34,7 +34,6 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
 #define COLOR_BACKGROUND        0,0,0
 #define COLOR_STATION_NAME      255,255,255
 #define COLOR_STATION_BG        0,0,125
-#define COLOR_STATION_FILL      0,0,125
 #define COLOR_SNG_TITLE_1       255,255,255
 #define COLOR_SNG_TITLE_2       105,105,105
 // ... etc
@@ -47,7 +46,6 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
     .background   = RGB(  0,   0,   0),
     .meta         = RGB(255, 255, 255),
     .metabg       = RGB(  0,   0, 125),
-    .metafill     = RGB(  0,   0, 125),
     .title1       = RGB(255, 255, 255),
     .title2       = RGB(105, 105, 105),
     // ... etc
@@ -61,7 +59,6 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
 | `COLOR_BACKGROUND` | `.background` |
 | `COLOR_STATION_NAME` | `.meta` |
 | `COLOR_STATION_BG` | `.metabg` |
-| `COLOR_STATION_FILL` | `.metafill` |
 | `COLOR_SNG_TITLE_1` | `.title1` |
 | `COLOR_SNG_TITLE_2` | `.title2` |
 | `COLOR_DIGITS` | `.digit` |
@@ -90,8 +87,11 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
 | `COLOR_VOLBAR_IN` | `.volbarin` |
 | `COLOR_PL_CURRENT` | `.plcurrent` |
 | `COLOR_PL_CURRENT_BG` | `.plcurrentbg` |
-| `COLOR_PL_CURRENT_FILL` | `.plcurrentfill` |
 | `COLOR_PLAYLIST_0..4` | `.playlist[0..4]` |
+
+Two legacy defines are ignored: `COLOR_STATION_FILL` (the meta band is drawn with `.metabg`) and
+`COLOR_PL_CURRENT_FILL` (the playlist highlight is drawn with `.plcurrentbg`). Likewise any JSON key the
+script does not recognise is skipped.
 
 Three fields in `ThemeData` have **no** old-format counterpart, so no `COLOR_*` maps to them: `.line`
 (sits between `.div` and `.weather`), `.vuaxis` (between `.weather` and `.vupeak`) and `.textss`
@@ -201,8 +201,8 @@ is a list. A `null` in an older backup is skipped rather than trusted.
 ```
 
 * The **keys are the element names** from `themes.h` with a leading dot, so the mapping is a strip and
-  nothing else. A key that is not one of ours is reported as unknown, and a field the document leaves out
-  goes through exactly the same fallbacks as an old colour file.
+  nothing else. A key that is not one of ours is skipped, and a field the document leaves out goes through
+  exactly the same fallbacks as an old colour file.
 * The **values are 565 integers**, converted to the numbers the editor shows — each level times its own
   step — so a colour arriving this way is already on the grid. An `[r, g, b]` array is accepted in place of
   a 565 integer, the same tolerance the firmware's own loader has for a hand-edited file.
@@ -253,6 +253,6 @@ When turning on "Invert Title" in the WebUI, the following colors and widgets ar
 | Theme | Ordinary use | Invert Title On |
 |---|---|---|
 | `.meta` | the text of `.metaConf` (the station name) | is ignored |
-| `.metabg` | the background color of `.metaConf`| is used to color the text |
-| `.metafill` | the color of `.metaBGConf` (the box that surrounds `.metaConf`) | the color of `.metaBGConfInv` (the line under `.metaConf`) |
+| `.metabg` | the background color of `.metaConf` and of `.metaBGConf` (the band behind it) | is used to color the text |
+| `.line` | the color of `underLineConf` / `overLineConf` | the color of `.metaBGConfInv` (the line under `.metaConf`) |
 | `.background` | the background color of the rest of the display | the background color of `.metaBGConf` too |

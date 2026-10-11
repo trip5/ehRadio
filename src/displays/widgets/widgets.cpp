@@ -25,10 +25,11 @@ void FillWidget::init(FillConfig conf, uint16_t bgcolor){
 }
 
 // A filled rectangle, or its frame.  The colour is the same either way - it is the one the widget was constructed
-// with, which is theme.line for the two reference lines, metafill for the meta band, plcurrentfill for the playlist
-// highlight - so a conf that says outlined draws the same pixels as one that does not until both dimensions are 2 or
-// more, a one-pixel-thick rectangle being its own outline.  The frame is drawn inside the given bounds and the
-// interior is left alone: clearing it to the background would erase the widgets the frame exists to enclose.
+// with, which is theme.line for the two reference lines, metabg for the meta band (line when the title is inverted)
+// and plcurrentbg for the playlist highlight - so a conf that says outlined draws the same pixels as one that does
+// not until both dimensions are 2 or more, a one-pixel-thick rectangle being its own outline.  The frame is drawn
+// inside the given bounds and the interior is left alone: clearing it to the background would erase the widgets it
+// exists to enclose.
 void FillWidget::_draw(){
   if(!_active) return;
   if (_outlined) dsp.drawRect(_config.left, _config.top, _width, _height, _bgcolor);
@@ -1305,7 +1306,7 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
   uint8_t charH = CHARHEIGHT * playlistConf_ptr->widget.textsize;
   int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize;
   if (selected) {
-    dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentfill);
+    dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentbg);
     dsp.fillRect(TFT_FRAMEWDT, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);
     dsp.setTextColor(config.theme.plcurrent, config.theme.plcurrentbg);
   } else {

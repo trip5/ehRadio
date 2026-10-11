@@ -88,8 +88,9 @@ today. With `outlined` true it draws only the rectangle's **outline** and leaves
 deliberately, because a frame that cleared its inside would erase the widgets it exists to enclose.
 
 The colour is the same either way, and it is the one the widget was built with: `theme.line` for
-`underLineConf` and `overLineConf`, `theme.metafill` for `metaBGConf`, `metaBGConfInv` and the boot
-band `apTitleBGConf`, `theme.plcurrentfill` for `playlBGConf`. **So an outlined conf looks different
+`underLineConf`, `overLineConf` and `metaBGConfInv` (the rule under the meta when the title is inverted),
+`theme.metabg` for `metaBGConf` and the boot band `apTitleBGConf`, and `theme.plcurrentbg` for
+`playlBGConf`. **So an outlined conf looks different
 from a filled one only once `width` and `height` are both 2 or more**: a rectangle one pixel thick is
 its own outline, which is why `outlined` does nothing to a hairline.
 

@@ -65,7 +65,6 @@ struct theme_t {
   uint16_t background;
   uint16_t meta;
   uint16_t metabg;
-  uint16_t metafill;
   uint16_t title1;
   uint16_t title2;
   uint16_t digit;
@@ -99,7 +98,6 @@ struct theme_t {
   uint16_t volbarin;
   uint16_t plcurrent;
   uint16_t plcurrentbg;
-  uint16_t plcurrentfill;
   uint16_t playlist[5];
 };
 struct config_t // specify defaults here (and macros in options.h) (defaults are NOT saved to Prefs)

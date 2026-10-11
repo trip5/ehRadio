@@ -3264,7 +3264,14 @@ design record; this is the shape of it.
 - **`fullClock` and `seconds` are per-layout booleans** (`LayoutData`, first two of the TRANSFORMS
   group), replacing "the size is 52 or 70, or the model is an ILI9225" and "this size has a seconds
   font".  The ILI9225 model hack is gone.
-- **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.
+- **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.  It is
+  gated at draw time by the glow colour differing from the backdrop (`clockBgColor != bgColor`, and the
+  seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
+  is exactly the no-op the old `!DSP_OLED` guard gave, while a colour theme that sets them equal is skipped
+  too.  On greyscale SSD1322 (`clockbg = GRAY_1` against a black background) the glow is now both offered and
+  drawn, where the `DSP_OLED` guard hid it.  The WebUI's Clock Glow row is offered on the same rule, via the
+  `group_clockglow` / `hide_group_clockglow` token in `GETACTIVE` (`netserver.cpp`), which the `theme`
+  command re-sends so the row follows a theme switch with the settings page open.
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,

@@ -9,6 +9,12 @@
 #define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
 #define BOOTLOGOTOP     68
 
+// Note:
+// This display will automatically center the clock based on width...
+// Search widgets.cpp for this line:
+// #if DSP_MODEL==DSP_GC9A01A
+
+
 const BootData _bootConfig PROGMEM = {
         /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
         .apTitleConf         = {{ TFT_FRAMEWDT+12, TFT_FRAMEWDT+28+20, 3, WA_CENTER }, 140, false, MAX_WIDTH-24, 0, 3, SCROLLTIME },

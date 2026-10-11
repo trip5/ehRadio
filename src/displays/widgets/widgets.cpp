@@ -1016,13 +1016,15 @@ void ClockWidget::_printClock(bool force){
   if(force){
     _clearClock();
     _getTimeBounds();
-    #ifndef DSP_OLED
-      if(config.store.clockglow) {
-        gfx.setTextColor(clockBgColor, bgColor);
-        gfx.setCursor(_left(), _top());
-        gfx.print(_glow);
-      }
-    #endif
+    // Theme-aware rather than panel-type-based: the glow is only meaningful where the clock's own
+    // background differs from what the digits sit on, so on a one-bit panel (clockbg == background)
+    // this is the same no-op the old !DSP_OLED guard gave, while a colour theme that sets them equal
+    // is now skipped too.
+    if(config.store.clockglow && clockBgColor != bgColor) {
+      gfx.setTextColor(clockBgColor, bgColor);
+      gfx.setCursor(_left(), _top());
+      gfx.print(_glow);
+    }
     if(clockInTitle)
       gfx.setTextColor(config.theme.meta, config.theme.metabg);
     else
@@ -1076,15 +1078,13 @@ void ClockWidget::_printClock(bool force){
       // leaves the previous character's pixels behind.  Then the glow, which fills the cells the
       // digits sit in - the same treatment clockbg gives the clock, in this style's own character.
       gfx.fillRect(sx, sy, _secwidth, secPx, bgColor);
-      #ifndef DSP_OLED
-        if (config.store.clockglow) {
-          gfx.setFont(secFont);
-          gfx.setTextSize(1);
-          gfx.setTextColor(secondsBgColor, bgColor);
-          gfx.setCursor(sx, sy + secPx);   // yOffset is -height: the cursor is a whole cell below
-          gfx.print(_glowSec);
-        }
-      #endif
+      if (config.store.clockglow && secondsBgColor != bgColor) {
+        gfx.setFont(secFont);
+        gfx.setTextSize(1);
+        gfx.setTextColor(secondsBgColor, bgColor);
+        gfx.setCursor(sx, sy + secPx);   // yOffset is -height: the cursor is a whole cell below
+        gfx.print(_glowSec);
+      }
       gfx.setFont(secFont);
       gfx.setTextSize(1);
       gfx.setTextColor(secondsColor, bgColor);

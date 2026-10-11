@@ -575,9 +575,9 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            #if defined(DSP_TFT)
-                                                                act += F("\"group_color\",");
-            #endif
+            if (config.theme.clockbg != config.theme.background || DBGWUI)
+                                                                act += F("\"group_clockglow\",");
+                                                           else act += F("\"hide_group_clockglow\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
             #if defined(DSP_TFT) || DBGWUI
               if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");

@@ -71,7 +71,7 @@ const LayoutData _layouts[] PROGMEM = {
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 7, 54-1, 1, 1, 10 },
         /* MOVES               { left, top, width */
-        .clockMove           = { TFT_FRAMEWDT+(54/2)+1-2, 52, 0 },
+        .clockMove           = { TFT_FRAMEWDT+(54/2)+1, 52, 0 },
         .weatherMove         = { TFT_FRAMEWDT, 64-9, 0 },
         .weatherMoveVU       = { TFT_FRAMEWDT, 64-9, 0 },
         /* TRANSFORMS          boolean */

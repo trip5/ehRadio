@@ -95,6 +95,7 @@
   7. Planning a change that needs more than a one-file edit? → Write it to `plans/` first, and keep it current as the code lands (Rule #7)
   8. Adding, renaming or removing a command in `commandhandler.cpp`? → `Commands.md` gets the entry in the **same block and the same position**, and its *Blocked in HTTP/MQTT/Telnet* column has to match `isBlockedForSource()` and nothing else. The file's order is its value: an audit is a walk down the two lists. The `CONFIG_KEY_ENTRY` names in `config.cpp` are store keys, not commands
   9. Adding a field to `theme_t`? → it lands in **four** places, or the build or the tool is quietly wrong: `theme_t` in `config.h`, `ThemeData` in `themes.h` (the two are `memcpy_P`'d, so their shapes must match exactly), every hand-overridden reduced palette (`displays/tools/oledcolorfix.h`, `displaySSD1322.cpp`), and **`importtheme.py`** - `FIELD_ORDER` plus its derivation rule, with the matching rows in `importtheme.md`. A field missing from `FIELD_ORDER` is dropped from every imported theme without a word. A new *screensaver* colour belongs in the "derived" list, not the computed one, if a stated rule produces it
+  10. Patching `I2S_Audio` or `VS1053_Audio`? → `src/libraries/i2s-frankenstein-surgery-notes.md` or `src/libraries/vs1053-frankenstein-surgery-notes.md` - the matching one, not both - gets a new `## Post-Graft Patch Fixes (YYYY.MM.DD)` section: the file changed, and why. Same change set.
 
 ## Comment Style
 

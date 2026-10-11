@@ -62,15 +62,26 @@ class DspCore: public yoDisplay {
     void setScrollId(void * scrollid) { _scrollid = scrollid; }
     void * getScrollId() { return _scrollid; }
     uint16_t textWidth(const char *txt);
+    // The rectangle is half-open on its right and bottom edges: left .. left+width-1.  Both tests below used to
+    // admit one pixel past those, which is a glyph column escaping a scrolling line's clip and surviving the next
+    // erase on a monochrome panel.  writeFillRect is the correct reading, and writePixel now matches it.
     inline void writePixel(int16_t x, int16_t y, uint16_t color) {
       if(_clipping){
-        if ((x < _cliparea.left) || (x > _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y > _cliparea.top + _cliparea.height)) return;
+        if ((x < _cliparea.left) || (x >= _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y >= _cliparea.top + _cliparea.height)) return;
       }
       yoDisplay::writePixel(x, y, color);
     }
     inline void writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
       if(_clipping){
-        if ((x < _cliparea.left) || (x >= _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y > _cliparea.top + _cliparea.height))  return;
+        // Clamped, not merely tested at its origin: a fill that started inside the rectangle was drawn at its
+        // whole width and height, so it painted past the right and bottom edges too.
+        const int16_t right  = (int16_t)(_cliparea.left + _cliparea.width);
+        const int16_t bottom = (int16_t)(_cliparea.top  + _cliparea.height);
+        if (x < (int16_t)_cliparea.left) { w -= (int16_t)_cliparea.left - x; x = (int16_t)_cliparea.left; }
+        if (y < (int16_t)_cliparea.top)  { h -= (int16_t)_cliparea.top  - y; y = (int16_t)_cliparea.top;  }
+        if (x + w > right)  w = right  - x;
+        if (y + h > bottom) h = bottom - y;
+        if (w <= 0 || h <= 0) return;   // wholly outside
       }
       cmCountFill();                  // counted after the clip test: only real fills
       yoDisplay::writeFillRect(x, y, w, h, color);

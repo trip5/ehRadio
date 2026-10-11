@@ -961,7 +961,7 @@ void ClockWidget::_getTimeBounds() {
     if(!_showSeconds)
       _clockwidth = _timewidth;
     else
-      _clockwidth = _timewidth + rightside;
+      _clockwidth = _timewidth + _space + rightside;
   }
   switch(_config.align){
     case WA_LEFT: _clockleft = _config.left; break;

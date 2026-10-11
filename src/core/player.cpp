@@ -216,6 +216,7 @@ void Player::loop() {
     }
   }
   Audio::loop();
+  audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
 
   // Clear the "connecting" placeholder on player state
   if (isRunning() && isConnecting()) {
@@ -288,6 +289,7 @@ void Player::_play(uint16_t stationId) {
   if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
   setError("");
   setDefaults();
+  audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   config.setDspOn(1);
@@ -379,6 +381,7 @@ void Player::browseUrl() {
 void Player::playUrl(const char* url) {
   setError("");
   remoteStationName = true;
+  audioHandlers.resetMetadata();
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   config.setDspOn(1);
   resumeAfterUrl = _status==PLAYING;

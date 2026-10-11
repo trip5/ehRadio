@@ -741,6 +741,9 @@ void Audio::showstreamtitle(const char* ml) {
 }
 
 //---------------------------------------------------------------------------------------------------------------------
+// The manifest only advances on a segment boundary, so a poll that finds nothing new waits for one.
+static const uint32_t M3U8_NO_SEGMENT_WAIT_MS = 2000;
+
 void Audio::loop(){
 
     if(!m_f_running) return;
@@ -769,6 +772,8 @@ void Audio::loop(){
     }
     else { // m3u8 datastream only
         const char* host;
+        static uint32_t no_host_timer = millis();
+        if(no_host_timer > millis()) {return;}
 
         switch(getDatamode()) {
         case HTTP_RESPONSE_HEADER:
@@ -785,6 +790,9 @@ void Audio::loop(){
 // [Maleksm graft] playAudioData(); // task handles this via performAudioTask()
             host = parsePlaylist_M3U8();
 // [Maleksm graft] playAudioData(); // task handles this via performAudioTask()
+            // No new segment in the manifest yet: wait for one instead of re-fetching it in a spin, which
+            // without this pause happens as fast as the socket allows.
+            if(!host) { no_host_timer = millis() + M3U8_NO_SEGMENT_WAIT_MS; }
             if(host) { // host contains the next playlist URL
                 httpPrint(host);
             }
@@ -1675,6 +1683,7 @@ const char* Audio::parsePlaylist_M3U8() {
     static uint64_t xMedSeq = 0;
     static boolean f_mediaSeq_found = false;
     boolean f_EXTINF_found = false;
+    boolean f_seqResync = false;    // the window's live sequence is rebuilt once per parse, at most
     char llasc[21]; // uint64_t max = 18,446,744,073,709,551,615  thats 20 chars + \0
     if(m_f_firstM3U8call){
         m_f_firstM3U8call = false;
@@ -1779,6 +1788,17 @@ const char* Audio::parsePlaylist_M3U8() {
                             m_playlistURL.insert(m_playlistURL.begin(), strdup(tmp));
                             log_w("mediaseq %llu skipped", xMedSeq);
                             xMedSeq+= 2;
+                        }
+                        else if(!f_seqResync) {
+                            // Neither probe matched: xMedSeq is out of step with the live window, and nothing later
+                            // repairs it - the resync runs after the playlist has been cleared and xMedSeq is a
+                            // function static.  Rebuild the state a fresh connect builds, then take this window
+                            // from its own beginning.
+                            f_seqResync = true;
+                            log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
+                            f_mediaSeq_found = false;
+                            xMedSeq = 0;
+                            m_hashQueue.clear();
                         }
                     }
                 }
@@ -3708,7 +3728,7 @@ void Audio::showID3Tag(const char* tag, const char* value){
     if(!strcmp(tag, "TEXT")) sprintf(m_chbuf, "Lyricist: %s", value);
     if(!strcmp(tag, "TIME")) sprintf(m_chbuf, "Time: %s", value);
     if(!strcmp(tag, "TIT1")) sprintf(m_chbuf, "Grouping: %s", value);
-    if(!strcmp(tag, "TIT2")) { sprintf(m_chbuf, "Title: %s", value); if(audio_id3album) audio_id3album(value); }
+    if(!strcmp(tag, "TIT2")) { sprintf(m_chbuf, "Title: %s", value); if(audio_id3title) audio_id3title(value); }
     if(!strcmp(tag, "TIT3")) sprintf(m_chbuf, "Subtitle: %s", value);
     if(!strcmp(tag, "TLAN")) sprintf(m_chbuf, "Language: %s", value);
     if(!strcmp(tag, "TLEN")) sprintf(m_chbuf, "Length (ms): %s", value);

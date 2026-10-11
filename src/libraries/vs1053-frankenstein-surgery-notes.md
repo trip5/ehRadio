@@ -590,6 +590,80 @@ half, which is the part a future re-graft would otherwise quietly lose.
 
 ---
 
+## Post-Graft Patch Fixes (2026.10.11)
+
+### `TIT2` was routed to the album callback, not the title one
+
+`showID3Tag()` sent the Title tag to `audio_id3album()` (line 3711), so the album slot received the song's own
+title and ehRadio's second title line showed the song twice — or, when the station's `#EXTINF` line carried its
+own "Title - Artist" pair, a mixture of the two sources. Every neighbouring tag in that function is wired to its
+own callback; `audio_id3title` was declared in `audioVS1053Ex.h` and never called anywhere in the library, which
+is what identified it as a mis-wire rather than a deliberate choice.
+
+**Fix**: `TIT2` calls `audio_id3title(value)`. One line. Without it, ehRadio's title assembly cannot work on
+this backend: the artist would be paired with the song's own title.
+
+### The m3u8 manifest was re-fetched with no wait at all
+
+`Audio::loop()`'s m3u8 branch re-requested the manifest as soon as `parsePlaylist_M3U8()` returned NULL — the
+normal answer while the live playlist has no new segment yet — and, unlike the I2S library, it had no pause of
+any kind to fall back on. The same manifest was therefore fetched as fast as the socket allowed: on a real
+HLS/AAC station, ten or more `new request:` lines a second, each a blocking connect on the main loop, with the
+device barely responsive. (The alternating manifest/segment requests in a healthy log are this same mechanism
+working — HLS polls rather than holds a stream — so only the empty answer is the fault.)
+
+**Fix**: added `no_host_cnt` / `no_host_timer` to the m3u8 branch and armed `M3U8_NO_SEGMENT_WAIT_MS` (2000 ms)
+on every pass that finds no new segment beyond the first. A successful parse resets the counter and arms
+nothing, so a healthy stream polls exactly as before.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` only — `showID3Tag()` and the m3u8 branch of
+`Audio::loop()`. The ehRadio-side half of the same investigation (the two halves of the title line, and the
+deferred publish) is in `src/core/audiohandlers.cpp` and is recorded in `.github/code-summary.md`; the I2S
+library's matching refetch pause is in `i2s-frankenstein-surgery-notes.md`.
+
+### The media-sequence resync was unreachable, so only a pause/play could bring the stream back
+
+The first field result of the pause above: the repeated requests became one a second, no segment was fetched,
+the stream was silent, and **pause/play cured it**. That last detail is the diagnosis.
+
+`parsePlaylist_M3U8()` clears the parsed playlist at the end of its loop
+(`vector_clear_and_shrink(m_playlistContent)`, line 1822), and the resynchronisation block that follows opens
+with `if(m_playlistContent.size() == 0) return NULL;` (line 1843). That guard is therefore **always** true, so
+`xMedSeq = mediaSeq` — the repair — and the `packets lost` report behind it could never run. `xMedSeq` is a
+function static, reset only through `m_f_firstM3U8call`, which `setDefaults()` sets: a fresh connect. Once the
+live window had slid past the counter, the accept loop's two probes (`xMedSeq`, then `xMedSeq + 1`) both missed,
+nothing was queued, the parse returned NULL, and every later parse repeated that — silence plus a manifest
+request per poll period, until the user pressed pause and play. The one-segment gap has a designed heal (the
+`xMedSeq + 1` probe, which logs `mediaseq %llu skipped`); a two-segment gap had no path at all.
+
+**Fix**: in the accept loop, when neither probe matches — exact evidence that the counter is out of step, so no
+counter or timeout is needed — rebuild the state a fresh connect builds and say so once per parse:
+
+```cpp
+f_seqResync = true;
+log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
+f_mediaSeq_found = false;
+xMedSeq = 0;
+m_hashQueue.clear();
+```
+
+The rest of the window is then taken by the hash branch in the same pass, and the next parse re-derives the
+sequence from the window under exactly the conditions a connect does. A few seconds of audio may repeat: that is
+what the pause/play the user was doing also does, and it is the behaviour chosen over "join at the newest
+segment".
+
+Also changed: the pause is now armed on **every** empty answer, replacing the `no_host_cnt > 1` condition that
+allowed one immediate retry per cycle — two requests per period, the "one a second" that was measured.
+
+**Not changed**: the hash-scheme path (a station with no derivable media sequence) needs no resynchronisation —
+there is no counter to lose, and its 20-entry queue only withholds a segment until the window advances, which is
+self-healing.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — `parsePlaylist_M3U8()` and the m3u8 branch of
+`Audio::loop()`.
+
+---
+
 ## Open Items
 
 1. **Mutex guards on connect functions** (Step 9 deferred): `connecttohost()` and `connecttoFS()` should be wrapped with `mutex_playAudioData` to prevent race conditions. Same pattern Maleksm used.

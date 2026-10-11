@@ -304,3 +304,71 @@ What this was **not**, since that ground was walked first:
 **Where the value lives**: `AUDIO_STACK_SIZE` is a plain `static const size_t` in `Audio.h`, beside the static
 `xAudioStack[]` the task is handed. It is not read from `options.h` and is not scaled by `STACK_MULTIPLIER`, so
 it cannot be tuned from `myoptions.h` — the header itself has to be edited.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.11)
+
+### The m3u8 manifest was re-fetched with a pause that could never re-arm
+
+`Audio::loop()`'s m3u8 branch re-requested the manifest as soon as `parsePlaylist_M3U8()` returned NULL — the
+normal answer while the live playlist has no new segment yet. The pause that exists was armed only when
+`no_host_cnt == 2` **exactly**; the counter keeps incrementing past 2, so it never armed again and the same
+manifest was fetched as fast as the socket allowed.
+
+Measured on a real HLS/AAC station: ten or more `connect to: "…/playlist.m3u8"` lines a second, each a blocking
+connect run on the main loop (`Main loop stalled 819ms, worst stage player+saves`), with the station playing
+nothing and the device barely responsive until paused. The alternating manifest/segment fetches in a healthy log
+are this same mechanism working — HLS polls rather than holds a stream — so the fault is only the answer when
+the manifest has nothing new.
+
+**Fix**: the pause is re-armed on every pass that finds no new segment beyond the first
+(`if(!host && no_host_cnt > 1)`), through a named `M3U8_NO_SEGMENT_WAIT_MS` (2000 ms) so the intent is not a
+bare literal. A successful parse still resets the counter and arms nothing, so a healthy stream polls exactly as
+before. This is the first of the library-visible changes; the other two sides of the same investigation (the
+VS1053 library's `TIT2` wiring and the ehRadio title-line assembly) are recorded in
+`vs1053-frankenstein-surgery-notes.md` and `.github/code-summary.md`.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` only — the m3u8 branch of `Audio::loop()`.
+
+### The media-sequence resync was unreachable, so only a pause/play could bring the stream back
+
+The first field result of the pause above: the wall became one manifest fetch a second, no segment was fetched,
+the stream was silent, and **pause/play cured it**. That last detail is the diagnosis.
+
+`parsePlaylist_M3U8()` clears the parsed playlist at the end of its loop
+(`vector_clear_and_shrink(m_playlistContent)`), and the resynchronisation block that follows opens with
+`if(m_playlistContent.size() == 0) return NULL;`. That guard is therefore **always** true, so `xMedSeq =
+mediaSeq` — the repair — and the `packets lost` report behind it could never run. `xMedSeq` is a function static,
+reset only through `m_f_firstM3U8call`, which `Audio::setDefaults()` sets: a fresh connect. Once the live window
+had slid past the counter, the accept loop's two probes (`xMedSeq`, then `xMedSeq + 1`) both missed, nothing was
+queued, the parse returned NULL, and every later parse repeated that — silence plus a manifest fetch per poll
+period, until the user pressed pause and play. The one-segment gap has a designed heal (the `xMedSeq + 1` probe,
+which logs `mediaseq %llu skipped`); a two-segment gap had no path at all.
+
+**Fix**: in the accept loop, when neither probe matches — which is exact evidence that the counter is out of step,
+so no counter or timeout is needed — rebuild the state a fresh connect builds and say so once per parse:
+
+```cpp
+f_seqResync = true;
+log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
+f_mediaSeq_found = false;
+xMedSeq = 0;
+m_hashQueue.clear();
+```
+
+The rest of the window is then taken by the hash branch in the same pass, and the next parse re-derives the
+sequence from the window under exactly the conditions a connect does. A few seconds of audio may repeat: that is
+what the pause/play the user was doing also does, and it is the behaviour chosen over "join at the newest
+segment".
+
+Also changed: the pause is now armed on **every** empty answer. Arming it only on the second (`no_host_cnt > 1`)
+meant two fetches per period, which is the "one a second" that was measured.
+
+**Not changed**: the hash-scheme path (a station with no derivable media sequence) needs no resynchronisation —
+there is no counter to lose, and its 20-entry queue only withholds a segment until the window advances, which is
+self-healing. Nor was the helper called again: it indexes `m_linesWithSeqNr[2]` while guarding only `size() < 2`,
+so calling it more often would add exposure to a pre-existing out-of-range read on a two-segment window.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` — `parsePlaylist_M3U8()` and the m3u8 branch of
+`Audio::loop()`.

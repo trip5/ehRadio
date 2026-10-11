@@ -2,5 +2,4 @@
 .vscode
 /platformio.ini
 /myoptions.h
-/Notes.txt
 *.lck

@@ -344,7 +344,7 @@
 //#define CORE_MONITOR
 //#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 //#define BOOTLOG_TIME
-//#define SAVE_LOGS_TO_FS
+#define SAVE_LOGS_TO_FS
 
 /* --- Display --- */
 // Display Font:

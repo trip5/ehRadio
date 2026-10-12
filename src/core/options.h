@@ -24,9 +24,29 @@ or examine the examples in builds/trip5 and make your own!
   #include "../../myoptions.h" // write your variable values here
 #endif
 
-#if !(defined(ARDUINO_ESP32_DEV) || defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV))
-  #error define error in platformio.ini: only ARDUINO_ESP32_DEV, ARDUINO_ESP32S3_DEV, or ARDUINO_ESP32C3_DEV boards are supported
+#if !(defined(ARDUINO_ESP32_DEV) || defined(ARDUINO_ESP32S3_DEV))
+  #error Only ARDUINO_ESP32_DEV or ARDUINO_ESP32S3_DEV boards are supported!
 #endif
+
+#if !defined(BOARD_HAS_PSRAM)
+  #error PSRAM is required: add -DBOARD_HAS_PSRAM to build_flags in platformio.ini
+#endif
+
+// PSRAM Buffers (highest-case estimates, in allocation order: display.init() → player.init() → netserver.begin())
+//   Display framebuffer (480×320): ~74 KB  (TFT only, allocated first, display.init())
+//   VU canvas:                    ~154 KB  (TFT only, VU_MAX_WIDTH 280 * VU_MAX_HEIGHT 140 * 2 (there are 2)) 
+//   VS1053 audio buffer:          ~293 KB  (300000 bytes, player.init())
+//   I2S audio buffer:             ~640 KB  (UINT16_MAX * 10, player.init())
+//   VU/FFT Scratch                   8 KB  (vuScratchAlloc())
+//   SD File Manager                 68 KB  (allocated only when SD File Manager runs, asmBegin())
+//   WebUI files cache:            ~120 KB  (actually ~400 KB if using uncompressed files, allocated last, netserver.begin())
+// ---------------------------------------
+//   VS1053 & OLED total:          ~489 KB or ~769 KB (uncompressed WebUI files)
+//   I2S & OLED total:             ~836 KB or ~1116 KB
+//   VS1053 & TFT total:           ~717 KB or ~997 KB
+//   I2S & TFT total:             ~1064 KB or ~1344 KB
+// Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
+//   The log ring (if active with SAVE_LOGS_TO_FS) +16KB
 
 
 /* ============================== DISPLAY ============================== */
@@ -248,10 +268,6 @@ or examine the examples in builds/trip5 and make your own!
       #define SPIA_SCK 12
       #define SPIA_MISO 13
       #define SPIA_MOSI 11
-    #elif defined(CONFIG_IDF_TARGET_ESP32C3) // ESP32-C3 default FSPI/SPI2
-      #define SPIA_SCK 4
-      #define SPIA_MISO 5
-      #define SPIA_MOSI 6
     #endif
 	  #if defined(SPIA_DEFAULT_XMISO)
       #undef SPIA_MISO
@@ -268,9 +284,7 @@ or examine the examples in builds/trip5 and make your own!
       #define SPIB_SCK 14
       #define SPIB_MISO 12
       #define SPIB_MOSI 13
-    #elif defined(CONFIG_IDF_TARGET_ESP32C3) // ESP32-C3 default FSPI/SPI2
-      #error SPIB_DEFAULT defined but ESP32-C3 can not use a secondary SPI bus!
-    #else defined(CONFIG_IDF_TARGET_ESP32S3)
+    #else // ESP32-S3 has no default secondary SPI pins
       #error SPIB_DEFAULT defined but ESP32-S3 does not have default secondary SPI pins!
     #endif
   #endif
@@ -342,7 +356,7 @@ or examine the examples in builds/trip5 and make your own!
 /* Do not set VS1053_SPIBUS in myoptions.h */
 #if VS1053_CS != 255
   #if !defined(VS1053_SCK)
-    #error define error in myoptions.h: VS1053 enabled (VS1053_CS != 255) but VS1053_SCK not defined. Set VS1053_SPI 'A' or 'B' with matching SPIA_/SPIB_ bus pins, or define VS1053_SCK/MISO/MOSI directly.
+    #error define error: VS1053 enabled (VS1053_CS != 255) but VS1053_SCK not defined. Set VS1053_SPI 'A' or 'B' with matching SPIA_/SPIB_ bus pins, or define VS1053_SCK/MISO/MOSI directly.
   #elif defined(SPIB_SCK) && (VS1053_SCK == SPIB_SCK)
     #define VS1053_SPIBUS SPIB // VS1053 on Bus B
   #else
@@ -427,7 +441,7 @@ or examine the examples in builds/trip5 and make your own!
 
 /* --- CHECK DECODER OPTIONS --- */
 #if I2S_DOUT!=255 && VS1053_CS!=255
-  #error define error in myoptions.h: both I2S_DOUT and VS1053_CS are active - set I2S_DOUT 255 or VS1053_CS 255 to disable one
+  #error define error: both I2S_DOUT and VS1053_CS are active - set I2S_DOUT 255 or VS1053_CS 255 to disable one
 #endif
 
 /* Derived audio decoder gates - do NOT define these directly in myoptions.h. */
@@ -461,7 +475,7 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SDSPISPEED
   #if defined(ARDUINO_ESP32_DEV)
     #define SDSPISPEED 20000000 // safe
-  #elif defined(ARDUINO_ESP32S3_DEV) || defined(ARDUINO_ESP32C3_DEV)
+  #elif defined(ARDUINO_ESP32S3_DEV)
     #define SDSPISPEED 40000000 // S3 known to work at this speed
   #else
     #define SDSPISPEED 20000000 // safe
@@ -539,7 +553,7 @@ or examine the examples in builds/trip5 and make your own!
   #define SD_MAX_LEVELS 5 // search depth for files on the SD card
 #endif
 #if SD_MAX_LEVELS < 1 || SD_MAX_LEVELS > 10
-  #error define error in myoptions.h: SD_MAX_LEVELS must be between 1 and 10
+  #error define error: SD_MAX_LEVELS must be between 1 and 10
 #endif
 
 
@@ -649,7 +663,7 @@ or examine the examples in builds/trip5 and make your own!
   #define BTN_PRESS_TICKS 500
 #endif
 #if BTN_PRESS_TICKS <= BTN_CLICK_TICKS
-  #error define error in myoptions.h: BTN_PRESS_TICKS must be greater than BTN_CLICK_TICKS
+  #error define error: BTN_PRESS_TICKS must be greater than BTN_CLICK_TICKS
 #endif
 
 /* --- TOUCH SCREEN --- */
@@ -662,7 +676,7 @@ or examine the examples in builds/trip5 and make your own!
   #define TS_MODEL TS_MODEL_UNDEFINED
 #endif
 #if (TS_MODEL < 0) || (TS_MODEL > 3)
-  #error define error in myoptions.h: TS_MODEL must be TS_MODEL_XPT2046, TS_MODEL_GT911, or TS_MODEL_FT6336
+  #error define error: TS_MODEL must be TS_MODEL_XPT2046, TS_MODEL_GT911, or TS_MODEL_FT6336
 #endif
 
 #ifndef TS_CS
@@ -716,6 +730,11 @@ or examine the examples in builds/trip5 and make your own!
   #define SDOFFLINE_BTN_PULLUP true
 #endif
 
+/* --- Deep Sleep --- */
+// Wake is only possible on RTC-capable pins. ESP32 RTC GPIOs: 0, 2, 4, 12-15, 25-27, 32-39 / ESP32-S3/C3 RTC GPIOs: 0-21.
+// Inputs assigned to these pins will automatically be used for Wake. This includes TS_INT, and all ENC_*, ENC2_* and all BTN_* inputs.
+// Use this to disable Deep Sleep entirely:
+// #define DEEP_SLEEP_DISABLE
 
 /* --- IR --- */
 #ifndef IR_PIN
@@ -724,13 +743,6 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef IR_TIMEOUT
   #define IR_TIMEOUT 80 // kTimeout, see IRremoteESP8266 documentation
 #endif
-
-/* --- Deep Sleep --- */
-// Wake is only possible on RTC-capable pins. ESP32 RTC GPIOs: 0, 2, 4, 12-15, 25-27, 32-39 / ESP32-S3/C3 RTC GPIOs: 0-21.
-// Inputs assigned to these pins will automatically be used for Wake. This includes TS_INT, and all ENC_*, ENC2_* and all BTN_* inputs.
-// Use this to disable Deep Sleep entirely:
-// #define DEEP_SLEEP_DISABLE
-
 
 /* ============================== RTC ============================== */
 
@@ -742,7 +754,7 @@ or examine the examples in builds/trip5 and make your own!
   #define RTC_MODULE RTC_MODULE_UNDEFINED  /*  DS3231 or DS1307  */
 #endif
 #if RTC_MODULE < 0 || RTC_MODULE > 2
-  #error define error in myoptions.h: RTC_MODULE must be DS3231 or DS1307 (or leave undefined)
+  #error define error: RTC_MODULE must be DS3231 or DS1307 (or leave undefined)
 #endif
 #ifndef RTC_SDA
   #define RTC_SDA 255
@@ -779,107 +791,18 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef WIFI_ATTEMPTS // about 2 attempts per second
   #define WIFI_ATTEMPTS 16
 #endif
-#if WIFI_ATTEMPTS < 1
-  #error define error in myoptions.h: WIFI_ATTEMPTS must be at least 1
-#endif
-#ifndef WIFI_SETTLE_MS
-  #define WIFI_SETTLE_MS 1000 // ms to wait after network stack started to attempt connection
-#endif
-#ifndef WIFI_SCAN_DWELL_MS // max ms per channel during scan - too short means failure, will fallback to wifi.begin scan with 300ms
-  #define WIFI_SCAN_DWELL_MS 120 // * 13 channels 1560ms (+5000ms timeout)
-#endif
-#ifndef WIFI_CONNECT_POLL_MS
-  #define WIFI_CONNECT_POLL_MS 100 // how often the connect loop checks the station status
-#endif
-#ifndef WIFI_RETRY_SCALE // the second (and last) attempt at a candidate gets this multiple of WIFI_ATTEMPTS * 500 ms
-  #define WIFI_RETRY_SCALE 2 // 16 s against the first attempt's 8 s - lwIP retransmits a DISCOVER at about 0, 4 and 12 s
-#endif
-#ifndef WIFI_FAST_ATTEMPTS
-  #define WIFI_FAST_ATTEMPTS 4 // ~2 s: how long a directed reconnect to a known BSSID is given before a scan
-#endif
-#ifndef MAIN_LOOP_STALL_MS
-  #define MAIN_LOOP_STALL_MS 500 // ms an iteration of loop() may take before it reports which stage blocked
-#endif
-#ifndef NVS_SLOW_WRITE_MS
-  #define NVS_SLOW_WRITE_MS 50 // ms a single NVS commit may take before FUNCTIONLOG names the key
-#endif
-#ifndef STREAM_RETRY_SLOW_S
-  #define STREAM_RETRY_SLOW_S 60 // s between stream retries once the fast attempt budget is spent
-#endif
-#ifndef STREAM_RETRY_RESPAWN_MS
-  #define STREAM_RETRY_RESPAWN_MS 5000 // ms a resume may stay owed with no retry task before ticks() starts a new one
-#endif
-#ifndef STREAM_RESET_MAX
-  #define STREAM_RESET_MAX 3 // link resets allowed in one outage before the restart rung is reached
-#endif
-#ifndef RECOVERY_REBOOT_MAX
-  #define RECOVERY_REBOOT_MAX 2 // consecutive recovery restarts before the escalation gives up and retries patiently
-#endif
-#ifndef RECOVERY_HEALTHY_MS
-  #define RECOVERY_HEALTHY_MS 600000 // ms of continuous playback that clears the restart count: the wedge is gone
-#endif
-#ifndef NET_REFUSAL_MS
-  #define NET_REFUSAL_MS 700 // a failed connect faster than this was refused, so the link is fine
-#endif
-#ifndef NETHEALTH_TIMEOUT_MS
-  #define NETHEALTH_TIMEOUT_MS 700 // ms the stack probe waits for the bare-IP internet TCP connect
-#endif
-#ifndef NETHEALTH_GATEWAY_TIMEOUT_MS
-  #define NETHEALTH_GATEWAY_TIMEOUT_MS 400 // ms for the gateway probe: a LAN connect is normally tens of ms
-#endif
-#ifndef NETHEALTH_GATEWAY_PORT
-  #define NETHEALTH_GATEWAY_PORT 80 // TCP port tried on the router to tell a WAN outage from a wedged stack
+#if WIFI_ATTEMPTS < 4
+  #error define error: WIFI_ATTEMPTS must be at least 4
 #endif
 // How many seconds to wait after boot completed to Start the Async Services (other services are starting and too soon can crash netserver stack).  The less-important services started here (can take a full minute to complete if server connection issues):
 // verifies/downloads locale JSON file, checks for new version (triggers autoupdate), downloads PLAYLIST_DEFAULT_URL (if set), updates timezones.json.gz and rb_srvrs.json, cleans up stale search results
-// 3 s rather than 10: the delay lets the audio buffer fill before anything competes for WiFi, and with the
-// WebUI now held back until the services are done (see Startup::loop()) the only thing that can compete is
-// the services themselves, which is what the delay was protecting the buffer from in the first place.
+// 3 s rather than 10: the delay lets the audio buffer fill before anything competes for WiFi, and the WebUI is held back until the services are done (see Startup::loop())
 #ifndef STARTUP_ASYNC_SERVICES_DELAY
   #define STARTUP_ASYNC_SERVICES_DELAY 3
 #endif
  // How many seconds to wait after boot completed (including smart start and Async Services) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
   #ifndef BOOT_STABLE_TIME
   #define BOOT_STABLE_TIME 10
-#endif
-#ifndef SEARCHRESULTS_BUFFER
- // Buffer for chunked HTTP transfers from radio-browser.info. Defined in KB; conversion to bytes done in netserver.cpp.
- // ESP32-C3 has less RAM than base ESP32 — keep conservative at 4KB like base ESP32.
-  #if defined(ARDUINO_ESP32S3_DEV)
-    #define SEARCHRESULTS_BUFFER 32 // KB; matches radio-browser.info chunk size
-  #else // ESP32 and ESP32-C3
-    #define SEARCHRESULTS_BUFFER 4 // KB
-  #endif
-#elif SEARCHRESULTS_BUFFER < 4 || SEARCHRESULTS_BUFFER > 64
-  #error define error in myoptions.h: SEARCHRESULTS_BUFFER must be between 4 and 64 (value in KB)
-#endif
-#ifndef SEARCHRESULTS_YIELDINTERVAL
-  #define SEARCHRESULTS_YIELDINTERVAL 0 // With a large buffer, skipping is almost eliminated with 0
-#endif
-#ifdef MAX_PL_READ_BYTES
-  //#define MAX_PL_READ_BYTES 1024*64 // Makes chunked HTML transfers but only for playlist.csv and wifi.csv... might help I2S decoder with large playlists
-#endif
-/* Maximum lengths of character buffers */
-#ifndef WEATHER_STRING_L
-  #define WEATHER_STRING_L 512 // size of weather string, increased from yoRadio 254
-#endif
-#ifndef WEBSOCKET_BUFFER
-  #define WEBSOCKET_BUFFER 512 // increased from yoRadio 340
-#endif
-#ifndef MQTT_URL_SIZE
-  #define MQTT_URL_SIZE 512 // shared URL buffer cap for MQTT commands, artwork URLs, and browse URLs
-#endif
-#ifndef MQTT_STATUS_SETTLE_MS
-  #define MQTT_STATUS_SETTLE_MS 1500 // ms; a status change must stay unchanged this long before it is published
-#endif
-#ifndef MQTT_KEEPALIVE
-  #define MQTT_KEEPALIVE 60 // seconds; keeps NAT entries alive, and the broker waits 1.5x this before firing the last will
-#endif
-#ifndef STATION_FIELD_LENGTH
-  #define STATION_FIELD_LENGTH 170 // max length for station name, URL, and title fields
-#endif
-#if STATION_FIELD_LENGTH < 64
-  #error define error in myoptions.h: STATION_FIELD_LENGTH is too small (minimum 64, default 170)
 #endif
 // How many times to retry a failed stream connection before giving up
 #ifndef MAX_STREAM_RETRIES
@@ -904,145 +827,61 @@ or examine the examples in builds/trip5 and make your own!
   #define STREAM_TIMEOUT_MS 3000
 #endif
 
-// PSRAM Frame Buffer
-#ifndef USE_FBUFFER
-  #define USE_FBUFFER true // framebuffer: best to leave this on (will use PSRAM if available and SRAM if not)
-#endif
-
-// PSRAM Buffers (highest-case estimates, in allocation order: display.init() → player.init() → netserver.begin())
-//   Display framebuffer (480×320): ~74 KB  (allocated first, display.init())
-//   VS1053 audio buffer:          ~293 KB  (300000 bytes, player.init())
-//   I2S audio buffer:             ~640 KB  (UINT16_MAX * 10, player.init())
-//   WebUI files cache:       up to 300 KB  (actually ~60KB if using .gz files, allocated last, netserver.begin(); dynamic, falls back to LittleFS)
-// ---------------------------------------
-//   VS1053 total:                 ~667 KB  or ~427KB with .gz WebUI files
-//   I2S total:                   ~1014 KB  or ~774KB with .gz WebUI files
-// Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
-
 /* --- CPU CORES --- */
-/* ESP32 and ESP32-S3 have 2 cores (Main loop runs on Core 1). ESP32-C3 has 1 core (Main loop runs on Core 0) .*/
+/* ESP32 and ESP32-S3 are both dual-core (Main loop runs on Core 1). */
 /* Default VS1053 assignments: Core 0 Audio + Net + TCP / Core 1 Main + Display */
 /* Default I2S assignments: Core 0 Audio / Core 1 Main + Display + Net + TCP */
-#if defined(CONFIG_FREERTOS_UNICORE) // will automatically activate on compiling for ESP32-C3 or other single-core ESPs
-  #ifdef AUDIO_CORE
-    #error Do not try to define AUDIO_CORE on a single-core ESP - it will be handled automatically!
-  #else
-    #define AUDIO_CORE 0
-  #endif
-#else // If not 1 Core, then define core processes
-  #ifndef AUDIO_CORE
-    #define AUDIO_CORE 0
-  #endif
+#ifndef AUDIO_CORE
+  #define AUDIO_CORE 0
 #endif
-#if defined(CONFIG_FREERTOS_UNICORE)
-  #ifdef DSP_TASK_CORE_ID
-    #error Do not try to define DSP_TASK_CORE_ID on a single-core ESP - it will be handled automatically!
-  #else
-    #define DSP_TASK_CORE_ID 0
-  #endif
-#else
-  #ifndef DSP_TASK_CORE_ID
-    #define DSP_TASK_CORE_ID 1
-  #endif
+#ifndef DSP_TASK_CORE_ID
+  #define DSP_TASK_CORE_ID 1
 #endif
 
 // The following tree is duplicated in options.h AND options_overrides.h so if changes are needed, change both files
-#if defined(CONFIG_FREERTOS_UNICORE)
-  #ifdef NETWORK_CORE // need this extra check because both files may be pulled into the build
-    #if NETWORK_CORE!=0
-      #error Do not try to define NETWORK_CORE on a single-core ESP - it will be handled automatically!
-    #endif
-  #else
+#ifndef NETWORK_CORE
+  #if VS1053_CS!=255
     #define NETWORK_CORE 0
-  #endif
-#else
-  #ifndef NETWORK_CORE
-    #if VS1053_CS!=255
-      #define NETWORK_CORE 0
-    #else
-      #define NETWORK_CORE 1
-    #endif
+  #else
+    #define NETWORK_CORE 1
   #endif
 #endif
 
 /* --- TWEAKS FOR CORE PROCESSES --- */
-/* Board-scaled stack size multiplier */
-/* Applied automatically to FreeRTOS task stack defaults based on board SRAM capacity */
-/* Override in myoptions.h only if needed: #define STACK_MULTIPLIER 1 to disable scaling on S3 */
-/* Note: ESP32-C3 has LESS RAM than base ESP32 and defaults to 1x — same as base ESP32 */
+/* Stack sizes are in KB; conversion to bytes is done locally in each .cpp file via a _BYTES macro */
+/* Override in myoptions.h only if needed: #define STACK_MULTIPLIER 1 to disable scaling and use yoRadio defaults */
 #ifndef STACK_MULTIPLIER
-  #if defined(ARDUINO_ESP32S3_DEV)
-    #define STACK_MULTIPLIER 2 // ESP32-S3: double stack sizes (most SRAM available)
-  #else
-    #define STACK_MULTIPLIER 1 // ESP32 and ESP32-C3: conservative defaults
-  #endif
+  #define STACK_MULTIPLIER 2 // ESP32-S3: double stack sizes (most SRAM available)
 #endif
 #if STACK_MULTIPLIER != 1 && STACK_MULTIPLIER != 2
-  #error define error in myoptions.h: STACK_MULTIPLIER must be 1 or 2
+  #error define error: STACK_MULTIPLIER must be 1 or 2
 #endif
-
-/* Stack sizes are in KB; conversion to bytes is done locally in each .cpp file via a _BYTES macro */
-/* Delay values are in ms; pdMS_TO_TICKS() conversion is done locally in each .cpp file via a SET_ macro */
-/* The straight number without multiplier is from yoRadio ESP32 defaults - ESP32-S3 uses the multiplier */
-/* If working on an ESP32 or ESP32-C3 be warned that these numbers are actually untested and feedback is welcome! */
-
 /* Arduino loop() task (main.cpp) — SET_LOOP_TASK_STACK_SIZE() uses this directly in bytes */
 #ifndef LOOP_TASK_STACK_SIZE
-  #define LOOP_TASK_STACK_SIZE (8 * STACK_MULTIPLIER) // KB; 8 (ESP32/C3) or 16 (S3)
+  #define LOOP_TASK_STACK_SIZE (8 * STACK_MULTIPLIER) // KB; 8 (yoRadio) or 16
 #elif LOOP_TASK_STACK_SIZE < 4 || LOOP_TASK_STACK_SIZE > 64
-  #error define error in myoptions.h: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
+  #error define error: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
 #endif
-
 /* DspTask (display.cpp): render loop task */
 #ifndef DSP_TASK_STACK_SIZE
-  #define DSP_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+  #define DSP_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
 #elif DSP_TASK_STACK_SIZE < 2 || DSP_TASK_STACK_SIZE > 32
-  #error define error in myoptions.h: DSP_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #error define error: DSP_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
 #endif
-#ifndef DSP_TASK_DELAY
-  #define DSP_TASK_DELAY 10 // ms; minimum sleep between display iterations. Actual frame rate depends on display SPI write time — typically ~50fps at slow SPI speeds, up to 100fps on faster displays
-#endif
-#ifndef DSP_QUEUE_TICKS
-  #define DSP_QUEUE_TICKS 0 // ticks; xQueueReceive timeout inside display.loop(). 0 = non-blocking poll. Higher values (e.g. 5) reduce latency when queue is empty but are rarely needed; per-display conf files may override
-#endif
-#ifndef DSQ_SEND_DELAY
-  #define DSQ_SEND_DELAY 200 // ms; xQueueSend timeout in display.putRequest(). If queue full, calling task blocks up to this long before dropping the request silently — preferable to blocking the audio task
-#endif
-#ifndef DSP_BOOTMSG_DELAY_MS
-  #define DSP_BOOTMSG_DELAY_MS 2000 // ms a deferred boot-line message waits before it is shown (Display::putRequestDelayed)
-#endif
-#ifndef PLQ_SEND_DELAY
-  #define PLQ_SEND_DELAY 100 // ms; xQueueSend timeout in player.sendCommand(). Short timeout prevents blocking audio decode while still absorbing brief queue pressure
-#endif
-#if defined(ARDUINO_ESP32S3_DEV) // Minimum allocation bytes; min free heap before spawning a background task (search, curated, playback, rb_click)
-  #define MIN_MALLOC 24112 // ESP32-S3: known to be good, generous
-#else
-  #define MIN_MALLOC 12056 // ESP32 and ESP32-C3: tight...? good luck!
-#endif
-
 /* netserverLoopTask (netserver.cpp): runs netserver.loop() on its own pinned task */
 #ifndef NETSERVER_TASK_STACK_SIZE
-  #define NETSERVER_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+  #define NETSERVER_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
 #elif NETSERVER_TASK_STACK_SIZE < 2 || NETSERVER_TASK_STACK_SIZE > 32
-  #error define error in myoptions.h: NETSERVER_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #error define error: NETSERVER_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
 #endif
-#ifndef NETSERVER_TASK_DELAY
-  #define NETSERVER_TASK_DELAY 1 // ms; yield between netserver.loop() iterations
-#endif
-#ifndef NSQ_SEND_DELAY
-  #define NSQ_SEND_DELAY 300 // ms; xQueueSend timeout for nsQueue (requestOnChange). Use portMAX_DELAY to block indefinitely
-#endif
-#ifndef NS_QUEUE_DELAY
-  #define NS_QUEUE_DELAY 0 // ms; xQueueReceive timeout for nsQueue (processQueue). 0 = non-blocking poll
-#endif
-
 /* Network utility tasks (network.cpp, player.cpp): doSync, searchWiFi, retryStreamConnection */
 #ifndef NETWORK_TASK_STACK_SIZE
-  #define NETWORK_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (ESP32/C3) or 8 (S3)
+  #define NETWORK_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
 #elif NETWORK_TASK_STACK_SIZE < 2 || NETWORK_TASK_STACK_SIZE > 32
-  #error define error in myoptions.h: NETWORK_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #error define error: NETWORK_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
 #endif
-
+/* Minimum allocation bytes; min free heap before spawning a background task (search, curated, playback, rb_click) */
+#define MIN_MALLOC (12056 * STACK_MULTIPLIER)
 /* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
 /* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
 #ifndef DSP_TASK_PRIORITY
@@ -1060,7 +899,6 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef LOW_TASK_PRIORITY
   #define LOW_TASK_PRIORITY 1 // lowest: background/deferrable tasks (round-robin with loop())
 #endif
-
 
 /* --- VISUAL TWEAKS --- */
 // Since the audio buffer can never technically fill up (most streams prevent reading-ahead excessively),
@@ -1112,7 +950,6 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef VU_CAPTURE_SAMPLES
   #define VU_CAPTURE_SAMPLES 512 // rolling window and FFT size; must be a power of two
 #endif
-
 
 /* --- SOURCE OF UPDATE FILES --- */
 /* only used if FIRMWARE is defined as it is in Trip5's automatic Github builds */
@@ -1239,7 +1076,6 @@ or examine the examples in builds/trip5 and make your own!
   #define SOFTAP_REBOOT_DELAY 0
 #endif
 
-
 /* This bit will actually do something but needs to be handled a different way - configurable would be better */
 /* But I'm very concerned that a forgotten password means needing a way to factory-reset using hardware... */
 /* So this may never actually be implemented in a proper way */
@@ -1286,7 +1122,7 @@ or examine the examples in builds/trip5 and make your own!
 /* Save Logs to LittleFS */
 // #define SAVE_LOGS_TO_FS // Save the logs to LittleFS as a rotating file set for later viewing (at http://x.x.x.x./log.txt)
 // Turning on ALL_DEBUG_LOGS can consume 400-500KB per hour so even a 16MB Partition with 3.5MB Little FS will hold about 6-7 hours of logs
-// So be selective about which logs to save... or just don't turn on this option and use another method of logging
+// So be selective about which logs to save... or just don't turn on this option and use another method of logging (the log ring can be unstable)
 // The log is also available at /log and to clear the log go to /logclear
 #ifndef FS_REQUIRED_FREE_SPACE
   #define FS_REQUIRED_FREE_SPACE 150 // KB that must stay free in LittleFS: netserver aborts search and curated downloads below it, and it is the log ring's reserve too
@@ -1305,7 +1141,7 @@ or examine the examples in builds/trip5 and make your own!
 /* CPU CORE NAMES: Name the Cores for what they do... */
 /* Do not use any of these macros directly in myoptions.h! */
 /* Use #define CORE_MONITOR to show how busy the cores are... this gives them friendly names */
-#if !CONFIG_FREERTOS_UNICORE && defined(CORE_MONITOR)
+#if defined(CORE_MONITOR)
   #if AUDIO_CORE==0
     #define CORE_0A "Audio"
     #define CORE_1A ""
@@ -1627,7 +1463,7 @@ or examine the examples in builds/trip5 and make your own!
   #endif
 #endif
 #if TIME_SYNC_INTERVAL < 1 || TIME_SYNC_INTERVAL > 24
-  #error define error in myoptions.h: TIME_SYNC_INTERVAL must be a number from 1 to 24 (hours)
+  #error define error: TIME_SYNC_INTERVAL must be a number from 1 to 24 (hours)
 #endif
 #ifndef WEATHER_API
   #define WEATHER_API "OM1"
@@ -1636,7 +1472,7 @@ static_assert(
   __builtin_strcmp(WEATHER_API, "OM1")  == 0 ||
   __builtin_strcmp(WEATHER_API, "OW25") == 0 ||
   __builtin_strcmp(WEATHER_API, "OW30") == 0,
-  "define error in myoptions.h: WEATHER_API must be \"OM1\", \"OW25\", or \"OW30\""
+  "define error: WEATHER_API must be \"OM1\", \"OW25\", or \"OW30\""
 );
 #ifndef WEATHER_LAT
   #define WEATHER_LAT "44.64738"
@@ -1648,7 +1484,7 @@ static_assert(
   #define WEATHER_SYNC_INTERVAL 15
 #endif
 #if WEATHER_SYNC_INTERVAL < 10 || WEATHER_SYNC_INTERVAL > 60
-  #error define error in myoptions.h: WEATHER_SYNC_INTERVAL must be a number from 10 to 60 (minutes)
+  #error define error: WEATHER_SYNC_INTERVAL must be a number from 10 to 60 (minutes)
 #endif
 /* Most of the world uses Metric but you can override in myoptions.h */
 #ifndef WEATHER_METRIC
@@ -1682,7 +1518,7 @@ static_assert(
   __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "mph") == 0 ||
   __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "kn")  == 0 ||
   __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "m/s") == 0,
-  "define error in myoptions.h: WEATHER_WIND_SPEED_UNITS must be \"kmh\", \"mph\", \"kn\", or \"m/s\""
+  "define error: WEATHER_WIND_SPEED_UNITS must be \"kmh\", \"mph\", \"kn\", or \"m/s\""
 );
 #ifndef MQTT_ENABLE
   #define MQTT_ENABLE false

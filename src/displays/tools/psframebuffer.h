@@ -115,16 +115,14 @@ class  psFrameBuffer : public Adafruit_GFX {
     bool _psram = false;
     uint16_t _bgcolor;
     void _createBuffer(){
-      #if (defined(USE_FBUFFER) && USE_FBUFFER)
-        if(psramInit()) {
-          buffer = (uint16_t*) ps_calloc(_hh * _ww, sizeof(uint16_t));
-          _psram = true;
-          psramFrameBufferBytes += _hh * _ww * sizeof(uint16_t);
-        } else {
-          buffer = (uint16_t*) calloc(_hh * _ww, sizeof(uint16_t));
-          _psram = false;
-        }
-      #endif
+      if(psramInit()) {
+        buffer = (uint16_t*) ps_calloc(_hh * _ww, sizeof(uint16_t));
+        _psram = true;
+        psramFrameBufferBytes += _hh * _ww * sizeof(uint16_t);
+      } else {
+        buffer = (uint16_t*) calloc(_hh * _ww, sizeof(uint16_t));
+        _psram = false;
+      }
       if(buffer){
         for (int i = 0; i < _hh * _ww; i++)
           buffer[i] = _bgcolor;

@@ -23,22 +23,12 @@ in options.h so they stay out of each other's way!
 #endif
 
 // And this determines what core Network services are on
-// The following tree is duplicated in options_system.h AND options_overrides.h so if changes are needed, change both files
-#if defined(CONFIG_FREERTOS_UNICORE)
-  #ifdef NETWORK_CORE // need this extra check because both files may be pulled into the build
-    #if NETWORK_CORE!=0
-      #error Do not try to define NETWORK_CORE on a single-core ESP - it will be handled automatically!
-    #endif
-  #else
+// The following tree is duplicated in options.h AND options_overrides.h so if changes are needed, change both files
+#ifndef NETWORK_CORE
+  #if VS1053_CS!=255
     #define NETWORK_CORE 0
-  #endif
-#else
-  #ifndef NETWORK_CORE
-    #if VS1053_CS!=255
-      #define NETWORK_CORE 0
-    #else
-      #define NETWORK_CORE 1
-    #endif
+  #else
+    #define NETWORK_CORE 1
   #endif
 #endif
 

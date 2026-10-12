@@ -2,6 +2,7 @@
 #define player_h
 
 #include "options.h"
+#include "mqtt.h"
 
 #if defined(USE_AUDIO_I2S)
  #include "../libraries/I2S_Audio/Audio.h"

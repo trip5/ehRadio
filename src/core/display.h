@@ -4,6 +4,8 @@
 #include "common.h"
 #include "../displays/widgets/widgetsconfig.h"  // WidgetConfig types + layout switching pointers
 
+static constexpr uint32_t DSP_QUEUE_TICKS = 0; // xQueueReceive timeout inside display.loop(): 0 = non-blocking poll
+
 #ifndef DUMMYDISPLAY
 class ScrollWidget;
 class PlayListWidget;

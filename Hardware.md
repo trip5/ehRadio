@@ -8,14 +8,12 @@ which also contains tips about the hardware.
 
 ## ESP Board
 
+Only ESP32 and ESP32-S3 are supported. PSRAM is required.
+
 It is strongly recommended to use an ESP32-S3 board with at least 2MB of PSRAM and 8MB of flash.
 
 It may be possible to use a board with 4MB of flash but will require special partitioning.
 Due to how LittleFS works, it is recommended to use an 8MB partition file even if a 4MB board would otherwise be sufficient.
-
-This code may still run on an ESP32 but without PSRAM will have serious issues that may be unfixable.
-
-It is also possible to build with an ESP32-C3 but since that is not a dual-core CPU, it would be prudent to avoid larger and/or SPI displays.
 
 ### External Antenna
 

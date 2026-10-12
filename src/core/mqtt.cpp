@@ -17,6 +17,9 @@ static const char MQTT_ONLINE[] = "online";
 static const char* const MQTT_STATE_TOKENS[] = { "off", "playing", "idle", "buffering" };
 enum mqttState_e : uint8_t { MQTT_ST_OFF = 0, MQTT_ST_PLAYING, MQTT_ST_IDLE, MQTT_ST_BUFFERING };
 
+static constexpr uint32_t MQTT_STATUS_SETTLE_MS = 1500; // ms a status change must hold before it is published
+static constexpr uint32_t MQTT_KEEPALIVE         = 60;   // s; keeps NAT entries alive (broker will fires at 1.5x)
+
 void Mqtt::zeroBuf() { memset(topic, 0, sizeof(topic)); memset(status, 0, sizeof(status)); }
 
 // ---- Requests: called from the AsyncTCP/WiFi-event tasks, so they must not block ----

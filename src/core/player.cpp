@@ -23,6 +23,8 @@
 
 #define NETWORK_TASK_STACK_BYTES (NETWORK_TASK_STACK_SIZE * 1024)
 
+static constexpr uint32_t PLQ_SEND_DELAY = 100; // ms; xQueueSend timeout in player.sendCommand()
+
 Player player;
 QueueHandle_t playerQueue;
 

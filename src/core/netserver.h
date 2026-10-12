@@ -1,7 +1,12 @@
 #ifndef netserver_h
 #define netserver_h
 
+// ESP-IDF's FLAG_ATTR macro-generates a constexpr operator| that clashes with this library's own, which
+// GCC reports as a spurious -Wattributes.  Scoped to the include so other attribute warnings stay visible.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <ESPAsyncWebServer.h>
+#pragma GCC diagnostic pop
 #include "../displays/widgets/widgetsconfig.h"
 
 // SDMANACTIVE is the file manager's own open/closed state, pushed so its page can follow the device without

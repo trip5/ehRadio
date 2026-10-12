@@ -47,7 +47,7 @@ Each contributor's `myoptions.h` must have firmware definitions in this format:
 
 The comments after `FIRMWARE` are critical:
 - First field: bootloader board environment (e.g., `"board_esp32_s3_n16r8"`)
-- Second field: chip family (e.g., `"ESP32-S3"`, `"ESP32"`, `"ESP32-C3"`)
+- Second field: chip family (e.g., `"ESP32-S3"`, `"ESP32"`)
 - Third field: contributor name (e.g., `"Trip5"`, `"Kasperaitis"`)
 
 The `fw_env` used in all generated files is the FIRMWARE filename minus `.bin`, exactly as written — no folder prefix is added. Entries whose filename starts with `board_` are skipped (bare board binaries, not full firmware).

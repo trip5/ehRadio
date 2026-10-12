@@ -3,6 +3,7 @@
 #pragma once
 
 #include "options.h"
+#include "config.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <Ticker.h>
@@ -19,8 +20,6 @@ bool clockTrustworthy();
   #define _IS_RTC(p) ((p)==0||(p)==2||(p)==4||((p)>=12&&(p)<=15)||((p)>=25&&(p)<=27)||((p)>=32&&(p)<=39))
 #elif defined(ARDUINO_ESP32S3_DEV)
   #define _IS_RTC(p) ((p)<=21)
-#elif defined(ARDUINO_ESP32C3_DEV)
-  #define _IS_RTC(p) ((p)!=255)  // any input-capable GPIO works with esp_deep_sleep_enable_gpio_wakeup
 #endif
 
 // Build individual wake bits: only include pins on RTC GPIOs; skip pins left at 255

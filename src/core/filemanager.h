@@ -6,7 +6,12 @@
 #ifdef USE_SD
 
 #include <Arduino.h>
+// ESP-IDF's FLAG_ATTR macro-generates a constexpr operator| that clashes with this library's own, which
+// GCC reports as a spurious -Wattributes.  Scoped to the include so other attribute warnings stay visible.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <ESPAsyncWebServer.h>
+#pragma GCC diagnostic pop
 
 // SD card file manager: the /sdman browser UI and the runtime mode that makes it safe. SD builds only.
 // Runtime-only - nothing is persisted, so unplugging instead of pressing Done costs nothing.

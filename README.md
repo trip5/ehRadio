@@ -11,7 +11,7 @@
 ehRadio runs on an ESP32-S3 to play Internet radio streams.
 
 A radio may be built using an ESP32-S3, an audio decoder, a display, and some inputs.
-ESP32 or ESP32-C3 boards are possible but may require special work.
+ESP32-WROOM boards are possible but are untested. PSRAM is required so WROVER boards are not supported.
 In some cases, like for the ES3C28P, no peripherals are even needed.
 
 To develop, I prefer [VS Code](https://code.visualstudio.com/) but you may try other IDEs.
@@ -66,8 +66,8 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
 
 - Development is primarily focused on ESP32-S3
   - 8MB flash recommended (4MB possible but will break features)
-  - ESP-WROVER with PSRAM probably supported but untested
-  - ESP32-C3 possible but untested
+  - PSRAM is required - a board without it will not build
+  - ESP-WROVER with PSRAM likely supported but untested
 
 - Multiple decoders supported
   - I2S DAC Modules are recommended and well-supported

@@ -29,6 +29,8 @@
 #include "battery.h"
 
 extern const char batterytxtFmt[] PROGMEM;
+static constexpr uint32_t DSP_TASK_DELAY = 10;   // ms; minimum sleep between display iterations
+static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
 
 // These three flags are per-layout booleans in LayoutData now, not per-model macros.
 

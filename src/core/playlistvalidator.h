@@ -3,6 +3,7 @@
 #pragma once
 
 #include "options.h"
+#include "config.h"
 
 // Sequential playlist check, driven from the main loop (the task that owns the audio object).
 // One station at a time: connect, listen briefly, report pass/fail.  A redirect inside connecttohost()

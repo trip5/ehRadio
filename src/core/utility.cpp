@@ -7,9 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#ifndef ARDUINO_ESP32C3_DEV
-  #include <driver/rtc_io.h>
-#endif
+#include <driver/rtc_io.h>
 
 #include "backlightcontrols.h"
 #include "config.h"
@@ -80,8 +78,8 @@ void Utility::sleepCore() {
           rtc_gpio_pulldown_dis((gpio_num_t)i);
         }
       }
-      #if defined(ARDUINO_ESP32C3_DEV) || defined(ARDUINO_ESP32S3_DEV)
-        // S3/C3: native GPIO wake on LOW level (button PRESS, not release)
+      #if defined(ARDUINO_ESP32S3_DEV)
+        // S3: native GPIO wake on LOW level (button PRESS, not release)
         for (uint8_t i = 0; i < 40; i++) {
           if (mask & (1ULL << i)) {
             gpio_wakeup_enable((gpio_num_t)i, GPIO_INTR_LOW_LEVEL);

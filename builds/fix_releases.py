@@ -201,7 +201,7 @@ def generate_esp_web_tools_manifests(firmwares, output_dir, version=''):
         version = get_version_from_options_h()
 
     for board_env, chip_family, fw_env, friendly_name, _ in firmwares:
-        bl_offset = 0 if chip_family in ('ESP32-S3', 'ESP32-C3') else 4096
+        bl_offset = 0 if chip_family == 'ESP32-S3' else 4096
         manifest = {
             'name': f'ehRadio - {friendly_name}',
             'version': version,

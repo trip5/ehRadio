@@ -26,6 +26,9 @@
 
 SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
 
+// ms an iteration of loop() may take before it reports which stage blocked (moved out of options.h).
+static constexpr uint32_t MAIN_LOOP_STALL_MS = 500;
+
 size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
 
 #ifdef CORE_MONITOR

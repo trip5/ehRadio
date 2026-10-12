@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include "options.h"
+#include "mqtt.h"
 
 // One half of the title line: the song, or the second line (artist, else album).
 #define META_HALF_LN 64

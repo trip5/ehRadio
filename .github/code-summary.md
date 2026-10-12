@@ -210,9 +210,11 @@ Grouped (not one-by-one deep explained) areas:
 - Canonical fallback defaults and compile flags.
 - Includes `myoptions.h` when present.
 - **Owns all compile-time guardrails** inline, right next to each respective define.
-- Owns shared buffer sizing macros under `/* Maximum lengths of character buffers */`, including `MQTT_URL_SIZE` for
-  stream/artwork URL buffers used by `player`, `audiohandlers`, and MQTT status payload sizing, plus
-  `MQTT_STATUS_SETTLE_MS` (how long an MQTT status change must remain unchanged before it is published).
+- Holds only genuine user tweaks: hardware defaults, feature gates, and the one connection-attempt count worth
+  changing per site (`WIFI_ATTEMPTS`). Stable values that nobody tunes live with the code that reads them instead -
+  network timings in `network.cpp`, buffer sizes in `netserver.cpp` / `mqtt.cpp` / `config.h`, task delays in
+  `display.cpp` / `player.cpp`, and the two cross-cutting sizes (`STATION_FIELD_LENGTH` in `config.h`,
+  `MQTT_URL_SIZE` in `mqtt.h`).
 - Defines:
   - hardware defaults (pins, feature gates)
   - updater URLs (`FILESURL`, `UPDATEURL`, `CHECKUPDATEURL`) unless disabled
@@ -227,7 +229,7 @@ Grouped (not one-by-one deep explained) areas:
     SPIA_MISO, SPIA_MOSI)` in `Config::init()` when `SPIA_SCK` is defined; otherwise `SPI.begin()` uses hardware
     defaults.
   - **Bus B** = `SPIB` (`SPIClass SPIB(SPI_BUS_SECONDARY)` declared and initialized in `config.cpp`). Only exists when
-    `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` uses symbolic constants: `VSPI` (ESP32) / `FSPI` (ESP32-S3/C3) for the
+    `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` uses symbolic constants: `VSPI` (ESP32) / `FSPI` (ESP32-S3) for the
     primary bus, `HSPI` for the secondary bus on all targets.
   - **Bus pin defines** (set in `myoptions.h`): `SPIA_SCK/MISO/MOSI` manually, or use shorthands: `SPIA_DEFAULT` (chip
     default pins), `SPIA_DEFAULT_XMISO` (chip default SCK/MOSI, MISO=255 — for display-only Bus A). `SPIB_SCK/MISO/MOSI`
@@ -261,7 +263,7 @@ Grouped (not one-by-one deep explained) areas:
   mount frequency. The header comment records that SD modules carrying a 74LVC125A/level-shifter cannot work, because
   CMD must be bidirectional.
 - **I2S internal DAC**:
-  - `USE_AUDIO_ESP32_DAC` — defined directly in `myoptions.h` to use the ESP32 internal DAC (ESP32 only, not S3/C3).
+  - `USE_AUDIO_ESP32_DAC` — defined directly in `myoptions.h` to use the ESP32 internal DAC (ESP32 only, not S3).
     `I2S_INTERNAL` boolean is removed.
 - **Guardrail conventions** (maintain these when adding new options):
   - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g.
@@ -271,13 +273,15 @@ Grouped (not one-by-one deep explained) areas:
     `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
   - `static_assert` with `__builtin_strcmp` for enumerated string options (e.g. `WEATHER_API`,
     `WEATHER_WIND_SPEED_UNITS`). **Update the `static_assert` whenever a new provider/value is added.**
-  - `/* PREVENT BOARD-DEFINED PIN RE-USE */` section lives after the `/* ESP DEVBOARD */` LED block (requires `LED_PIN`
-    and `ESP_S3C3` to be defined first). Covers LED vs RST pin conflicts only — keep it narrowly scoped.
 - **What is intentionally NOT guarded**: booleans (compiler error is obvious), pin numbers (board-dependent range),
   free-form strings (`AP_SSID`, `MQTT_*`, URLs), color macros (R,G,B triplets), `AUTOBACKLIGHT(x)` (C macro function),
   `BATTERY_CURVE_MV/PCT` (already has `static_assert` in `battery.cpp`).
-- **PSRAM buffer sizing** — `PSRAM_BUFSIZE` controls the audio input buffer and FLAC reserved buffer sizes; the default
-  differs by board.
+- **PSRAM is mandatory** — `options.h` refuses any build without `BOARD_HAS_PSRAM` and accepts only `ARDUINO_ESP32_DEV`
+  / `ARDUINO_ESP32S3_DEV` (ESP32-C3 is rejected by name). Add `-DBOARD_HAS_PSRAM` to `build_flags` in `platformio.ini`.
+  The libraries keep their SRAM fallbacks as last-resort degradation, but a PSRAM-less build is no longer supported.
+- **PSRAM budget** — the per-consumer sizes and the per-build totals are tabulated at the top of `options.h`, right
+  after the board/PSRAM guards. The display framebuffer and VU canvas lines are TFT-only (an OLED build has neither);
+  the WebUI cache is opportunistic and falls back to LittleFS, so it is headroom rather than a hard requirement.
 - Buffer bar visual mapping:
   - `BUFFERBAR_VISUAL_FULL_PERCENT` controls where input-buffer fill is rendered as visually full.
   - default `82` means 82% raw fill maps to 100% bar width; set `100` to keep direct 1:1 mapping.
@@ -294,18 +298,16 @@ Grouped (not one-by-one deep explained) areas:
   library must agree with us about. `es3c28p` compiles the framework's `esp32-hal-*.c` files through it, which proves it
   stays C-safe.
 - **Contents**: the `myoptions.h` include (first, so user values beat every default here), the `VS1053_CS 255` default
-  (the core rule needs it; `myoptions.h` defines it only for VS1053 builds), the `NETWORK_CORE` tree, and the three
+  (the core rule needs it; `myoptions.h` defines it only for VS1053 builds), the `NETWORK_CORE` derivation, and the three
   `CONFIG_ASYNC_TCP_*` overrides.
-- **The `NETWORK_CORE` tree is written to be evaluated twice**, with no marker macro: this header is compiled first, so
-  `options.h` then meets the same lines with `NETWORK_CORE` already set. The dual-core branch is guarded by its own
-  `#ifndef`; the unicore branch's `#error` tests the value (`#if NETWORK_CORE!=0`, which is 0 at that point, made by
-  this header not the user) - a plain `#ifdef`/`#error` would fire on our own definition on any single-core build. Keep
-  the two trees identical.
+- **The `NETWORK_CORE` derivation is written to be evaluated twice**, with no marker macro: this header is compiled
+  first, so `options.h` then meets the same lines with `NETWORK_CORE` already set. The `#ifndef NETWORK_CORE` guard is
+  what makes the second evaluation a no-op. Keep the two copies identical.
 - **`myoptions.h` is the user channel**: values set there (e.g. `CONFIG_ASYNC_TCP_USE_WDT 0`) reach the libraries because
   it is read here before any default - only in builds carrying the force-include (root `platformio.ini` and
   `builds/trip5/platformio.ini`; the other `builds/*` templates do not, and there the classic `options.h` copy is live).
-- sdkconfig macros (`CONFIG_FREERTOS_UNICORE`, `CONFIG_IDF_TARGET_ESP32S3`) are defined at force-include time (a clean
-  S3 build proved the unicore branch live; no board-macro proxy is needed).
+- sdkconfig macros (`CONFIG_IDF_TARGET_ESP32S3`) are defined at force-include time, so a target check works here without
+  a board-macro proxy.
 - **The AsyncTCP core is pinned, not locked**: `CONFIG_ASYNC_TCP_RUNNING_CORE` defaults to `NETWORK_CORE` but both may be
   overridden. Its task runs at priority 10, above every task we create, so which core it sits on decides what it can
   preempt - on a VS1053 build it shares core 0 with the audio decode.
@@ -390,7 +392,8 @@ depending on the selected PlatformIO environment and macro definitions.
      - `netserver.setBootReady(true)` only after setup work is actually complete
      - **`netserver.begin()` deliberately does NOT happen here.** The WebUI is held back until the startup
        services are out of the way, because `begin()` is where the request queue, the listener, mDNS *and* the
-       PSRAM WebUI file cache (up to ~300 KB) are allocated, and a WebUI connection landing while a service makes
+       PSRAM WebUI file cache (~120 KB with .gz files; up to ~400 KB if only plain files) are allocated, and a WebUI
+       connection landing while a service makes
        its own TLS connection is what overwhelms the network stack. `Startup::loop()` starts it (see that
        section); the footer IP is the indicator, because `Display::_footerIp()` draws nothing until
        `netserver.isListening()`. The AP and SDOFFLINE paths still start it here — the captive portal is the only
@@ -449,7 +452,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Defines key constants for LittleFS paths and data file locations.
 - `theme_t` now includes screensaver-specific clock palette fields (`clockss`, `clockbgss`, `secondsss`, `dowss`,
   `datess`) so screensaver clock/date elements can use colors independent from normal PLAYER-mode clock colors.
-- `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (default 170, defined in `options.h`).
+- `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (170, defined in `config.h`).
   These are RAM-only fields — not NVS-stored. `BUFLEN` has been retired; use `STATION_FIELD_LENGTH` for station metadata
   buffers across the codebase.
 - `SD_PATH_LENGTH` (256, defined in `sdmanager.h`) is used for SD filesystem path buffers where paths may exceed 170
@@ -787,7 +790,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
     cover association *and* the lease, because `WL_CONNECTED` is GOT_IP and the late-GOT_IP mode measures 4.8 s on its
     own — that mode is one lost DISCOVER, as lwIP retransmits at about +0, +4 and +12 s, so a window can be spent on
     nothing but lost DISCOVERs and still be called a failure. Each candidate therefore gets exactly two windows: 8 s as
-    before, then a retry of `WIFI_ATTEMPTS * 500 * WIFI_RETRY_SCALE` (options.h, default **WIFI_RETRY_SCALE 2** = 16 s).
+    before, then a retry of `WIFI_ATTEMPTS * 500 * WIFI_RETRY_SCALE` (`network.cpp`, **WIFI_RETRY_SCALE 2** = 16 s).
     Only after the second failure is the next candidate tried, and only after that the SoftAP — worst case ~25 s per
     candidate against ~17 s before. The retry is a **real restart, not a re-association**: the shared helper
     `wifiRestartForRetry()` does `WiFi.disconnect(true, false)` (radio off, stored credentials kept), waits for the
@@ -864,7 +867,9 @@ stack with an exhausted socket pool also fails fast, so the first two attempts o
 an attempt, and only WEDGED is acted on: a station that is merely offline still gets the patient 15 s then 60 s
 tail forever, unchanged, because a reset would fix nothing there and costs a scan, a reassociation and DHCP.
 With the probe always asked, a stack that never answers is identified on the **first** attempt, so the reset
-lands about 8 s after the stream is lost instead of about 18 s.
+lands about 8 s after the stream is lost instead of about 18 s. The gateway leg tries a fixed port list
+(`kGatewayProbePorts`, `network.cpp`: 80, 53, 443, 8080) and stops at the first that answers, because a router's
+UI or DNS is frequently not on 80 and a wrong guess reads as "gateway silent" - a false WEDGED.
 
 **One spawner, and a ladder that cannot lose its task.** Everything that starts `retryStreamConnection` - the
 arm gate in `player.loop()`, `WiFiReconnected`, and now the self-heal - goes through **`spawnStreamRetry()`**
@@ -874,7 +879,7 @@ is checked, because `player.loop()` sets `network.lostPlaying = true` **before**
 else clears that flag except a fresh Wi-Fi reconnect event - so a silent failure closed the arm gate until a
 reboot. `ticks()` (the 1 s `Ticker` heartbeat, `ctimer.attach(1, ticks)`) self-heals the same way: if
 `lostPlaying` is set, no task is servicing it, `!beginReconnect` and the link is up, it re-spawns, rate limited
-by `STREAM_RETRY_RESPAWN_MS` (options.h), and escalates to a link reset once the re-spawns themselves keep
+by `STREAM_RETRY_RESPAWN_MS` (`network.cpp`), and escalates to a link reset once the re-spawns themselves keep
 failing. The `wifiReconnectionTask` spawn is checked and logged too, but has no equivalent fallback: the AP is
 otherwise only re-found on the next disconnect event.
 
@@ -1589,7 +1594,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **Publishing is state-driven and settled, not request-driven.** `loop()` compares the live values (station id, the
   derived state token, name, title, artwork URL) against two stored `StatusSnapshot`s - `reported` (what the broker
   holds) and `candidate` (the current combination, waiting to settle) - and publishes the candidate only once it has
-  stayed unchanged for `MQTT_STATUS_SETTLE_MS` (`options.h`, 1500 ms). A station switch mutates those inputs at
+  stayed unchanged for `MQTT_STATUS_SETTLE_MS` (`mqtt.cpp`, 1500 ms). A station switch mutates those inputs at
   different moments - the index moves in `utility.loadStation()`, the title becomes `[connecting]`, the stream's ICY
   headers overwrite the name, artwork and title land last - so publishing every combination would tell consumers stories
   that were never true for longer than a moment (the classic one: the new station name carrying the previous station's
@@ -3663,17 +3668,15 @@ Two macros control core assignment across the codebase:
 | `NETWORK_CORE` | `1` | `0` | Core for netserver and all network/utility tasks |
 | `DSP_TASK_CORE_ID` | `1` | `0` | Core for the display loop task (independent of `NETWORK_CORE`) |
 
-On single-core ESP32-C3 (`CONFIG_FREERTOS_UNICORE`), all three macros are forced to `0` automatically; defining any of
-them manually on a unicore build is a compile-time `#error`.
+Both supported targets are dual-core, so the three macros keep their defaults and are never forced.
 
 `NETWORK_CORE` is derived in **`options_overrides.h`** as well as here - a deliberate duplicate (the one place in this
 codebase where the same rule lives twice, because the value must reach AsyncTCP, a translation unit that never sees
 `options.h`). That header is force-included and compiled first, so it owns the value and the copy here is a no-op in
 those builds; in builds without the force-include (the other `builds/*` templates) the copy here is what defines it.
-Both copies are written to survive being evaluated twice: the dual-core branch is `#ifndef NETWORK_CORE`, and the
-unicore `#error` fires only when the value it finds is not 0, so it cannot mistake our own definition for one a user
-set. `CONFIG_ASYNC_TCP_RUNNING_CORE` defaults to `NETWORK_CORE` so the AsyncTCP internal event task follows
-automatically, and both are deliberately overridable in `myoptions.h`.
+Both copies are `#ifndef NETWORK_CORE`, so evaluating them twice is harmless. `CONFIG_ASYNC_TCP_RUNNING_CORE` defaults
+to `NETWORK_CORE` so the AsyncTCP internal event task follows automatically, and both are deliberately overridable in
+`myoptions.h`.
 
 The health of the force-include channel is observable: the Done-button panic in the SD manager (`LoadProhibited` on core
 1) has not recurred since the override landed, although that is a single observation - correlation, not a proven
@@ -3687,7 +3690,6 @@ A board-aware multiplier scales all five user-configurable FreeRTOS task stacks 
 |---|---|---|
 | ESP32-S3 | 2 | All base stack sizes doubled |
 | ESP32 | 1 | Base sizes unchanged |
-| ESP32-C3 | 1 | Base sizes unchanged (C3 has *less* RAM than base ESP32) |
 
 - Defined automatically after the board guard in `src/core/options.h`. Override in `myoptions.h` with `#define
   STACK_MULTIPLIER 1` or `2` if needed.
@@ -3696,8 +3698,8 @@ A board-aware multiplier scales all five user-configurable FreeRTOS task stacks 
   validates the manually-set value.
 - The multiplier applies **only** to the five configurable task stacks. Fixed-stack tasks (HTTPS workers, OTA) are
   unaffected.
-- `SEARCHRESULTS_BUFFER` and `CONFIG_ASYNC_TCP_QUEUE_SIZE` use separate per-board explicit values (not
-  `STACK_MULTIPLIER`) since they scale differently.
+- `SEARCHRESULTS_BUFFER` (32 KB, a constant in `netserver.cpp`) and `CONFIG_ASYNC_TCP_QUEUE_SIZE` (per-board, in
+  `options_overrides.h`) are set explicitly rather than scaled by `STACK_MULTIPLIER`, since they scale differently.
 
 ### Core 0 — Audio
 
@@ -3742,7 +3744,7 @@ A board-aware multiplier scales all five user-configurable FreeRTOS task stacks 
 Stack sizes and priorities are controlled by macros in `src/core/options.h` (`/* Tweaks for Core Processes */`). Higher
 priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used. Per-task
 local conversion macros (`_BYTES`) are defined at the top of each `.cpp` file (except `SET_LOOP_TASK_STACK_SIZE` which
-is an `Arduino.h` macro). Stack defaults scale with `STACK_MULTIPLIER` — values shown as ESP32/C3 (1x) / S3 (2x).
+is an `Arduino.h` macro). Stack defaults scale with `STACK_MULTIPLIER` — values shown as ESP32 (1x) / S3 (2x).
 
 | Task | File | Stack macro (default ESP32 / S3) | Priority macro (default) | Notes |
 |---|---|---|---|---|
@@ -3874,11 +3876,11 @@ libraries embedded directly in the repository, mostly inherited from yoRadio and
 - `SSD1322/` — SSD1322 OLED driver (slightly modified from JamesHagerman)
 
 ### Audio decoder libraries
-- `I2S_Audio/` — software I2S audio decoder (adapted from schreibfaul1/ESP32-audioI2S via Maleksm's yoRadio mod). PSRAM
-  buffer size now configurable via `PSRAM_BUFSIZE` macro.
+- `I2S_Audio/` — software I2S audio decoder (adapted from schreibfaul1/ESP32-audioI2S via Maleksm's yoRadio mod). The
+  audio input and FLAC reserved buffer sizes are set inside the library; PSRAM is required (enforced in `options.h`).
 - `VS1053_Audio/` — VS1053 hardware decoder driver (adapted from schreibfaul1/ESP32-vs1053_ext via Maleksm's yoRadio
-  mod). PSRAM buffer size now configurable via `PSRAM_BUFSIZE` macro. `stopSong()` SM_CANCEL sequence now guarded by
-  `if(m_f_running)` — prevents permanently stuck CANCEL bit when stop is called during init with no song playing.
+  mod). PSRAM is required. `stopSong()` SM_CANCEL sequence now guarded by `if(m_f_running)` — prevents permanently stuck
+  CANCEL bit when stop is called during init with no song playing.
   `VS_PATCH_ENABLE` forced `false` on this hardware — FLAC patches produce audio silence on this VS1053 variant.
 - `ES8311_Audio/` — ES8311 codec driver (written for ehRadio by kasperaitis)
 

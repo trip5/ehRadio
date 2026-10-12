@@ -50,6 +50,10 @@ extern uint32_t vuPsramBytes;
 #define MDNS_LENGTH 32
 #define EHDPNAME_LENGTH 32
 
+static constexpr size_t STATION_FIELD_LENGTH = 170; // Max length for station name, URL and title fields
+static constexpr size_t WEATHER_STRING_L = 512; // Weather string buffer
+static constexpr uint32_t NVS_SLOW_WRITE_MS = 50; // ms a single NVS commit may take before FUNCTIONLOG names the key
+
 #define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)

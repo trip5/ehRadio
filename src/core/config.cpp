@@ -5,9 +5,7 @@
 #include <esp_log.h>
 #include <ESPFileUpdater.h>
 #include <nvs_flash.h>
-#ifndef ARDUINO_ESP32C3_DEV
-  #include <driver/rtc_io.h>
-#endif
+#include <driver/rtc_io.h>
 #include "config.h"
 #include "backlightcontrols.h"
 #include "battery.h"

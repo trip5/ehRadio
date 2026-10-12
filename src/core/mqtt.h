@@ -2,7 +2,10 @@
 #define mqtt_h
 
 #include "options.h"
+#include "config.h"            // STATION_FIELD_LENGTH
 #include <PsychicMqttClient.h> // elims/PsychicMqttClient - the ESP-IDF MQTT client wrapper
+
+static constexpr size_t MQTT_URL_SIZE = 512; // Shared URL buffer cap for MQTT commands, artwork URLs and browse URLs
 
 class Mqtt {
 public:

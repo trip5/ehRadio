@@ -3,7 +3,8 @@
 patch_pio_ini_files.py - Patch platformio.ini files in builds/ subfolders.
 
 Usage:
-  python patch_pio_ini_files.py           # Mode 1: Audit library version mismatches
+  python patch_pio_ini_files.py           # Mode 1: Audit library differences
+                                          #         (versions, missing/extra, unparseable)
   python patch_pio_ini_files.py <folder>  # Mode 2: Sync [platformio], [ehradio], [library]
                                           #         sections from a master folder
 
@@ -40,6 +41,18 @@ class LibEntry:
     original_line:  str            # full raw line including newline chars
 
 
+@dataclass
+class RawLibEntry:
+    """A library line captured verbatim, even when its version cannot be read."""
+    identity:       str            # [library] alias key, or lib_deps name before '@'
+    raw_spec:       str            # value with any trailing '; comment' stripped
+    has_version:    bool           # whether parse_lib_version could read a version
+    section:        str            # "lib_deps" or "library"
+    source_folder:  str            # e.g. "trip5"
+    file_path:      Path
+    line_idx:       int            # 0-based index into the file's lines list
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared Utilities
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,15 +78,20 @@ def parse_lib_version(value):
     """
     Parse a library string like "bblanchon/ArduinoJson@^7.4.3 ; comment" into
     (lib_name, version_prefix, version_str, trailing).
-    The '@' is the delimiter; version_prefix is the chars between '@' and the
-    first digit (e.g. "^", "~", ">=", "").
-    Returns None if '@' or version digits are not found.
+
+    '@' is the delimiter for an explicit version. When there is no '@', a '#' git-ref
+    delimiter is accepted instead, so a ".git#v1.4" spec is version-checked too (the
+    lib name keeps the URL, the prefix becomes "#v"). version_prefix is the chars
+    between the delimiter and the first digit (e.g. "^", "~", ">=", "#v", "").
+
+    Returns None if neither delimiter or no version digits are found.
     """
     at = value.find("@")
-    if at == -1:
+    delim = at if at != -1 else value.find("#")
+    if delim == -1:
         return None
-    lib_name = value[:at].strip()
-    rest = value[at + 1:]  # e.g. "^7.4.3 ; comment"
+    lib_name = value[:delim].strip()
+    rest = value[delim + 1:]  # e.g. "^7.4.3 ; comment" or "v1.4"
     m = re.match(r'^([^0-9]*)([0-9][0-9.]*)(.*)', rest)
     if not m:
         return None
@@ -81,8 +99,11 @@ def parse_lib_version(value):
 
 
 def update_version_in_line(line, new_version):
-    """Replace the version digits after '@' in a raw line, preserving the prefix."""
-    return re.sub(r'(@[^0-9]*)([0-9][0-9.]*)', lambda m: m.group(1) + new_version, line, count=1)
+    """
+    Replace the version digits after the '@' (or '#') delimiter in a raw line,
+    preserving the prefix so "#v1.4" becomes "#v1.5".
+    """
+    return re.sub(r'([@#][^0-9]*)([0-9][0-9.]*)', lambda m: m.group(1) + new_version, line, count=1)
 
 
 def prompt_yn(message):
@@ -183,6 +204,184 @@ def parse_lib_entries(ini_path, folder, lines):
     return entries
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Mode 1 — Full Library Inventory (report-only categories)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def strip_lib_comment(value):
+    """Drop a trailing '; comment' from a library value and trim whitespace."""
+    semi = value.find(";")
+    return (value[:semi] if semi != -1 else value).strip()
+
+
+def inventory_identity(value, section, alias_key):
+    """
+    Identity used to match a library across files:
+      [library]  → its alias key (the left-hand side)
+      lib_deps   → the name before '@' (or a '#' git ref), else the whole spec
+    """
+    if section == "library":
+        return alias_key
+    spec = strip_lib_comment(value)
+    for delim in ("@", "#"):
+        pos = spec.find(delim)
+        if pos != -1:
+            return spec[:pos].strip()
+    return spec
+
+
+def spec_skeleton(value):
+    """
+    The part of a spec that is not its version: the library name when the spec parses,
+    otherwise the spec verbatim. Two specs with equal skeletons differ only by a version,
+    which the version-drift pass already reports.
+    """
+    parsed = parse_lib_version(value)
+    return parsed[0] if parsed else value
+
+
+def _add_raw_entry(entries, value, section, folder, path, idx, alias_key):
+    """Append a RawLibEntry for a library value, keeping versionless entries too."""
+    spec = strip_lib_comment(value)
+    if not spec:
+        return
+    entries.append(RawLibEntry(
+        identity=inventory_identity(value, section, alias_key),
+        raw_spec=spec,
+        has_version=parse_lib_version(spec) is not None,
+        section=section,
+        source_folder=folder,
+        file_path=path,
+        line_idx=idx,
+    ))
+
+
+def parse_library_inventory(ini_path, folder, lines):
+    """
+    Collect every library line from [ehradio] lib_deps and [library] - parsed or not.
+
+    Unlike parse_lib_entries nothing is dropped for lacking a version: this pass exists so
+    the audit can expose libraries the version registry cannot see. Interpolation lines
+    ('${...}') are still skipped - they are deliberate aliases, not libraries.
+    """
+    entries = []
+    in_section = None   # "ehradio" | "library" | None
+    in_lib_deps = False
+
+    for idx, raw_line in enumerate(lines):
+        line = raw_line.rstrip("\r\n")
+        stripped = line.strip()
+
+        if re.match(r'^\[', stripped):
+            m = re.match(r'^\[([^\]]+)\]', stripped)
+            sec = m.group(1) if m else None
+            in_section = sec if sec in ("ehradio", "library") else None
+            in_lib_deps = False
+            continue
+
+        if in_section is None:
+            continue
+        if stripped == "" or stripped.startswith(";"):
+            continue
+        if "${" in stripped:
+            continue
+
+        if in_section == "ehradio":
+            if re.match(r'^lib_deps\s*=', stripped):
+                in_lib_deps = True
+                val = re.sub(r'^lib_deps\s*=\s*', '', stripped).strip()
+                if val and not val.startswith(";") and not val.startswith("${"):
+                    _add_raw_entry(entries, val, "lib_deps", folder, ini_path, idx, None)
+                continue
+
+            if not in_lib_deps:
+                continue
+
+            if not line.startswith((" ", "\t")):
+                in_lib_deps = False
+                continue
+
+            _add_raw_entry(entries, stripped, "lib_deps", folder, ini_path, idx, None)
+
+        elif in_section == "library":
+            if "=" not in stripped:
+                continue
+            eq = stripped.index("=")
+            alias_key = stripped[:eq].strip()
+            value = stripped[eq + 1:].strip()
+            if value.startswith("${"):
+                continue
+            _add_raw_entry(entries, value, "library", folder, ini_path, idx, alias_key)
+
+    return entries
+
+
+def report_coverage(raw_entries, folders):
+    """
+    Print the report-only coverage categories; return True if anything was printed:
+      1. Missing / extra libraries - present in some files but not all
+      2. Total (non-version) mismatches - same library, a different spec
+      3. Unparseable entries - no readable version, so invisible to the version registry
+    """
+    all_folders = list(folders)
+    folder_set = set(all_folders)
+
+    by_id = {}  # (section, identity) -> {folder: {raw_spec, ...}}
+    for e in raw_entries:
+        per_folder = by_id.setdefault((e.section, e.identity), {})
+        per_folder.setdefault(e.source_folder, set()).add(e.raw_spec)
+
+    found = False
+
+    # 1. Missing / extra libraries
+    presence = []
+    for (section, identity), per_folder in by_id.items():
+        have = set(per_folder)
+        if have != folder_set:
+            missing = [f for f in all_folders if f not in have]
+            presence.append((section, identity, sorted(have), missing))
+    if presence:
+        found = True
+        print(f"Missing / extra libraries ({len(presence)}):")
+        for section, identity, have, missing in sorted(presence):
+            print(f"  [{section}] {identity}")
+            print(f"    present in: {', '.join(have)}")
+            print(f"    missing in: {', '.join(missing)}")
+        print()
+
+    # 2. Total (non-version) mismatches - specs that differ beyond the version digits
+    value_mismatches = []
+    for (section, identity), per_folder in by_id.items():
+        if set(per_folder) != folder_set:
+            continue  # presence already reported above
+        skeletons = {spec_skeleton(s) for specs in per_folder.values() for s in specs}
+        if len(skeletons) > 1:
+            value_mismatches.append((section, identity, per_folder))
+    if value_mismatches:
+        found = True
+        print(f"Total (non-version) mismatches ({len(value_mismatches)}):")
+        for section, identity, per_folder in sorted(value_mismatches):
+            print(f"  [{section}] {identity}")
+            for folder in all_folders:
+                specs = sorted(per_folder.get(folder, []))
+                print(f"    {folder}: {' | '.join(specs) if specs else '(absent)'}")
+        print()
+
+    # 3. Unparseable entries - no '@' or '#' version for the registry to read
+    unparseable = {}
+    for e in raw_entries:
+        if not e.has_version:
+            unparseable.setdefault((e.section, e.identity), set()).add(e.source_folder)
+    if unparseable:
+        found = True
+        print(f"Unparseable entries, no version ({len(unparseable)}):")
+        for (section, identity), fs in sorted(unparseable.items()):
+            print(f"  [{section}] {identity} - in {', '.join(sorted(fs))}")
+        print()
+
+    return found
+
+
 def build_registry(all_entries):
     """
     Build a registry keyed by (section, lib_name) that tracks the highest and
@@ -221,17 +420,22 @@ def run_version_audit():
         print(f"  {p.parent.name}/platformio.ini")
     print()
 
-    # Load files and collect all lib entries
+    # Load files and collect both the parsed entries and the raw inventory
     file_lines = {}
     all_entries = []
+    all_raw = []
     for p in patchable:
         lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
         file_lines[p] = lines
         all_entries.extend(parse_lib_entries(p, p.parent.name, lines))
+        all_raw.extend(parse_library_inventory(p, p.parent.name, lines))
 
-    reg = build_registry(all_entries)
+    folders = [p.parent.name for p in patchable]
     modified = set()
-    found_any = False
+
+    # ── Version drift (interactive) ─────────────────────────────────────────
+    reg = build_registry(all_entries)
+    version_found = False
 
     for section_label in ("lib_deps", "library"):
         mismatches = {
@@ -239,7 +443,7 @@ def run_version_audit():
             if k[0] == section_label and v["highest"][0] != v["lowest"][0]
         }
         for key, r in mismatches.items():
-            found_any = True
+            version_found = True
             hv, hp, hf = r["highest"]
             lv, lp, lf = r["lowest"]
             print(
@@ -256,8 +460,15 @@ def run_version_audit():
                 print(f"  → Updated to {hv} in all files.")
             print()
 
-    if not found_any:
+    if not version_found:
         print("No version mismatches found.")
+        print()
+
+    # ── Coverage audit (report-only) ────────────────────────────────────────
+    coverage_found = report_coverage(all_raw, folders)
+
+    if not version_found and not coverage_found:
+        print("No mismatches found.")
         return
 
     for p in modified:
@@ -375,13 +586,12 @@ def run_section_sync(master_folder):
         print("No other patchable platformio.ini files to patch.")
         return
 
+    print(f"Master file: {master_folder}/platformio.ini")
+    print()
+
     patched = 0
     for ini_path in patchable:
         folder = ini_path.parent.name
-        if not prompt_yn(f"[Master file: {master_folder}] Patch {folder}/platformio.ini? [Y/N]: "):
-            print(f"  Skipped.")
-            continue
-
         lines = ini_path.read_text(encoding="utf-8").splitlines(keepends=True)
         segs = parse_segments(lines)
         changed = False

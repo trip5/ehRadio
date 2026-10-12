@@ -466,8 +466,8 @@ void Display::_buildPager() {
   if (_metabackground) pages[PG_DIALOG]->addWidget(_metabackground);
   pages[PG_DIALOG]->addWidget(_meta);
   pages[PG_DIALOG]->addWidget(_nums);
-  #ifdef UPDATEURL
-    // configure scrolling update label and progress bar
+    // scrolling update/validate label and progress bar.  Built in every build - the online update drives it,
+    // and so does the playlist validator.
     // copy apSettConf scroll params but center position on dialog page
     ScrollConfig updConf = _bootConfig.apSettConf;
     updConf.widget.left = 0;
@@ -497,7 +497,6 @@ void Display::_buildPager() {
     _updValue->moveTo(mvValue);
     pages[PG_DIALOG]->addWidget(_updLabel);
     pages[PG_DIALOG]->addWidget(_updValue);
-  #endif
   
   pages[PG_DIALOG]->addPage(_footer);
   #if !PLAYLIST_MODE_PAGED
@@ -810,11 +809,8 @@ void Display::_switchMode(displayMode_e newmode) {
     _showNumbers(l10n(L10N_LBL_VOLUME), config.store.volume, numtxtFmt, config.store.volumepage);
   }
   if (newmode == LOST)      _showDialog(l10n(L10N_LBL_LOST));
-  if (newmode == UPDATING)  { _showDialog(l10n(L10N_LBL_UPDATE));
-    #ifdef UPDATEURL
-      _updFirstCall = true;
-    #endif
-  }
+  if (newmode == UPDATING)  { _showDialog(l10n(L10N_LBL_UPDATE)); _updFirstCall = true; }
+  if (newmode == VALIDATING) { _showDialog(l10n(L10N_LBL_VALIDATING)); _updFirstCall = true; }
   if (newmode == SLEEPING)  _showDialog(l10n(L10N_LBL_SLEEPING));
   if (newmode == SDCHANGE)  _showNumbers(l10n(L10N_LBL_WAITFORSD), -1, "%d", true);  // no count yet: SDFILEINDEX fills it in
   if (newmode == INFO || newmode == SETTINGS || newmode == TIMEZONE || newmode == WIFI) _showDialog("");
@@ -903,7 +899,6 @@ void Display::putRequest(displayRequestType_e type, int payload) {
 }
 
 void Display::updateProgress(const char* label, float progress) {
-  #ifdef UPDATEURL
     if (_updFirstCall) {
       _updFirstCall = false;
       delay(50); // allow display task to process NEWMODE/UPDATING queue item before drawing
@@ -912,24 +907,44 @@ void Display::updateProgress(const char* label, float progress) {
       _updLabel->setText(label);
     }
     if (_updValue) {
-      int bars = (int)(progress * _updBarWidth + 0.5f);
-      if (bars < 0) bars = 0;
-      if (bars > _updBarWidth) bars = _updBarWidth;
       const char barChar = '\016'; // play icon is progress
       char buf[68];
+      // Clamp the ratio BEFORE the float -> int cast: an out-of-range or NaN progress makes that conversion
+      // undefined, which leaves `bars` unconstrained for the analyser - that is what -Wstringop-overflow was
+      // reporting here, a negative int read as memset's size_t (a hypothetical ~4 GB).  `!(progress > 0.0f)` is
+      // deliberately NaN-safe.
+      if (!(progress > 0.0f))   progress = 0.0f;
+      else if (progress > 1.0f) progress = 1.0f;
+      // The width is bounded HERE because GCC cannot see the 2..64 clamp _showDialog() applies to the member:
+      // `int _updBarWidth` is set in another function, so all three sizes below would otherwise be unbounded.
+      // Bound it to the buffer, which is what those three uses actually need.
+      int width = _updBarWidth;
+      if (width < 0) width = 0;
+      if (width > (int)sizeof(buf) - 1) width = (int)sizeof(buf) - 1;
+      int bars = (int)(progress * width + 0.5f);
+      if (bars < 0) bars = 0;
+      if (bars > width) bars = width;
       memset(buf, barChar, bars);
-      memset(buf + bars, ' ', _updBarWidth - bars); // empty space is empty space
-      buf[_updBarWidth] = '\0';
+      memset(buf + bars, ' ', width - bars); // empty space is empty space
+      buf[width] = '\0';
       _updValue->setText(buf);
     }
-  #endif
+}
+
+// Blank the OTA/validator progress.  The label and the bar live on the dialog page, which the volume overlay and
+// the LOST/UPDATE dialogs reuse, so a finished or cancelled run would otherwise leave its bar on those screens.
+// updateProgress("", 0) draws the bar as all spaces - the same path a zero-progress update takes, so the widget
+// is genuinely repainted rather than merely emptied.
+void Display::clearProgress() {
+  _updFirstCall = false;
+  updateProgress("", 0.0f);
 }
 
 // Screens the display owns rather than borrows.  Both are holding patterns, not player pages: the self-drawing
 // widget requests are dropped while one is up (drawsOverOwnScreen) and the clock and weather are hidden, because
 // nothing repaints them afterwards and their page no longer ticks.
 bool Display::_ownScreen() const {
-  if (_mode == SDCHANGE || _mode == NUMBERS) return true;
+  if (_mode == SDCHANGE || _mode == NUMBERS || _mode == VALIDATING) return true;
   if (_mode == VOL && config.store.volumepage) return true;
   #ifdef USE_SD
     return filemanager.active();
@@ -1346,17 +1361,27 @@ void Display::_screensaverLine() {
 
 // Bring both screensaver widgets in line with the prefs and the active layout.  Called on every entry
 // into SCREENSAVER rather than once at boot: the meter's segmentation comes from bandsConf, its palette
-// from the theme and the line's size from metaConf, and the WebUI stays reachable while the device is
-// asleep, so a layout or theme switch has to land.  A layout with no VU box of its own is fine here -
-// the screensaver's meter is this widget, not the player page's.
+// from the theme and the line's size and scroll speed from weatherConf, and the WebUI stays reachable while
+// the device is asleep, so a layout or theme switch has to land.  A layout with no VU box of its own is
+// fine here - the screensaver's meter is this widget, not the player page's.
 void Display::_screensaverWidgets() {
   // --- the info line ---
   if (_ssStripH()) {
-    ScrollConfig conf = *metaConf_ptr;      // the scroll speed is the meta line's; the size is the weather conf's
+    ScrollConfig conf = *weatherConf_ptr;
     conf.widget.left = 0;
     conf.widget.top = _ssTextTop();
     conf.widget.textsize = ssTextSize();
     conf.width = dsp.width();
+    // Three quarters of the weather row's speed.  scrolldelta is pixels per step and scrolltime the ms between
+    // steps, so speed = delta/time and either one can carry the reduction; the step is preferred because it keeps
+    // the finer motion, but only where it divides exactly - a 1 px step (every OLED row) or the TFTs' 2 px scaled
+    // by 3/4 would truncate to 0, or to half the speed asked for, so those stretch the interval instead.
+    // startscrolldelay is left as weatherConf states it (0): the line moves as soon as it is up.
+    if (weatherConf_ptr->scrolldelta % 4 == 0) {
+      conf.scrolldelta = (uint8_t)(weatherConf_ptr->scrolldelta * 3 / 4);
+    } else {
+      conf.scrolltime = (uint16_t)(weatherConf_ptr->scrolltime * 4 / 3);
+    }
     // The mark is the widget's own now, so what a wrapping line shows reads exactly like the joins inside the
     // screensaver line above.
     // Black, never config.theme.background: the screensaver paints its own picture and its background is

@@ -14,7 +14,7 @@
       </div>
     </div>
     <div id="logo"></div>
-    <div class="gb nb local" data-command="settings">
+    <div class="gb nb local" id="settingsbtn" data-command="settings">
       <svg viewBox="0 0 24 24" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"></path>
           <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
@@ -67,13 +67,12 @@
     </div>
     <div class="modeitem gb" data-command="sd" id="modeweb">
       <svg viewBox="0 0 24 24" class="fill">
-       <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
+       <path d="M9,18a4,4,0,1,0-4-4A4,4,0,0,0,9,18Zm0-6a2,2,0,1,1-2,2A2,2,0,0,1,9,12Zm5,2a1,1,0,0,1,1-1h3a1,1,0,0,1,0,2H15A1,1,0,0,1,14,14Zm0,3a1,1,0,0,1,1-1h3a1,1,0,0,1,0,2H15A1,1,0,0,1,14,17Zm0-6a1,1,0,0,1,1-1h3a1,1,0,0,1,0,2H15A1,1,0,0,1,14,11Zm8.206-4.979-19-4a1,1,0,1,0-.412,1.958L12.4,6H2A1,1,0,0,0,1,7V21a1,1,0,0,0,1,1H22a1,1,0,0,0,1-1V7A1.055,1.055,0,0,0,22.206,6.021ZM21,20H3V8H21Z"></path>
       </svg>
     </div>
     <div class="modeitem gb hidden" data-command="web" id="modesd">
-      <svg viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="2"></circle>
-        <path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"></path>
+      <svg viewBox="0 0 24 24" class="fill">
+        <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
       </svg>
     </div>
     <div class="gb local" id="eqalbutton" data-command="toggle" data-target="equalizerbg">
@@ -161,7 +160,7 @@
 	      <path d="M15.5071469,14.0062893 L14.7166953,14.0062893 L14.4365352,13.7361349 C15.4170955,12.5954831 16.0074328,11.1146369 16.0074328,9.50371641 C16.0074328,5.91166381 13.095769,3 9.50371641,3 C5.91166381,3 3,5.91166381 3,9.50371641 C3,13.095769 5.91166381,16.0074328 9.50371641,16.0074328 C11.1146369,16.0074328 12.5954831,15.4170955 13.7361349,14.4365352 L14.0062893,14.7166953 L14.0062893,15.5071469 L19.0091481,20.5 L20.5,19.0091481 L15.5071469,14.0062893 L15.5071469,14.0062893 L15.5071469,14.0062893 Z M9.50371641,14.0062893 C7.01229274,14.0062893 5.00114351,11.9951401 5.00114351,9.50371641 C5.00114351,7.01229274 7.01229274,5.00114351 9.50371641,5.00114351 C11.9951401,5.00114351 14.0062893,7.01229274 14.0062893,9.50371641 C14.0062893,11.9951401 11.9951401,14.0062893 9.50371641,14.0062893 L9.50371641,14.0062893 L9.50371641,14.0062893 Z"></path>
         </svg>
 	    </div>
-    <span data-i18n="ttl_playlist_editor">Playlist Editor</span>
+    <span id="pleditortitle" data-i18n="ttl_playlist_editor">Playlist Editor</span>
       <div class="gb local" data-command="toggle" data-target="pleditorwrap">
         <svg viewBox="0 0 24 24" class="stroke">
           <path d="M18 6l-12 12"></path>
@@ -170,17 +169,18 @@
       </div>
     </h2>
     <div id="plImportWarning" class="pleditorwarning hidden" data-i18n="lbl_save_changes">Save to keep changes!</div>
-    <div id="pleheader"><span class="grabbable">&#8693;</span><span class="space"><input type="checkbox" id="selectAllCheckbox" onclick="selectAll(this)" /></span><span class="plename" data-i18n="lbl_name">Name</span><span class="pleurl" data-i18n="lbl_url">URL</span><span class="pleovol" data-i18n="lbl_ovol">Ovol</span></div>
+    <div id="pleheader"><span class="grabbable">&#8693;</span><span class="space"><input type="checkbox" id="selectAllCheckbox" onclick="selectAll(this)" /></span><span class="plename" data-i18n="lbl_name">Name</span><span class="pleurl" data-i18n="lbl_url">URL</span><span class="pleovol pl-editor-only" data-i18n="lbl_ovol">Ovol</span><span class="plestatus" data-i18n="lbl_status">Status</span></div>
     <ol id="pleditorcontent">
     </ol><!--pleditorcontent-->
     <div class="formbuttons">
-      <div class="fb local" data-command="pladd" data-i18n="btn_pl_add">Add</div>
+      <div class="fb local pl-editor-only" data-command="pladd" data-i18n="btn_pl_add">Add</div>
       <div class="fb local" data-command="pldel" data-i18n="btn_pl_remove">Remove</div>
-      <label class="fb" data-name="plreplace" onclick="triggerImport('replace')" data-i18n="btn_pl_replace">Replace</label>
-      <label class="fb" data-name="plmerge" onclick="triggerImport('merge')" data-i18n="btn_pl_merge">Merge</label>
+      <div id="plvalidatebtn" class="fb local pl-validator-only" data-command="plvalidate" data-i18n="btn_pl_validate">Check All Streams</div>
+      <label class="fb pl-editor-only" data-name="plreplace" onclick="triggerImport('replace')" data-i18n="btn_pl_replace">Replace</label>
+      <label class="fb pl-editor-only" data-name="plmerge" onclick="triggerImport('merge')" data-i18n="btn_pl_merge">Merge</label>
       <input id="file-upload" type="file" accept=".txt, .csv, .json" onchange="doPlImport(this)" hidden/>
-      <div class="fb local" data-command="plexport" data-i18n="btn_export">Export</div>
-      <div class="fb local" data-command="plshare" data-i18n="btn_share">Share</div>
+      <div class="fb local pl-editor-only" data-command="plexport" data-i18n="btn_export">Export</div>
+      <div class="fb local pl-editor-only" data-command="plshare" data-i18n="btn_share">Share</div>
       <div class="fb local" data-command="plsubmit" data-i18n="btn_save">Save</div>
       <div class="fb local" data-command="plundo" data-i18n="btn_pl_undo">Undo</div>
     </div>

@@ -56,14 +56,14 @@
 
 void IRAM_ATTR readEncoderISR() {
   #if ENC_DT!=255
-    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
+    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING || display.mode()==VALIDATING) return;
     encoder.readEncoder_ISR();
   #endif
 }
 
 void IRAM_ATTR readEncoder2ISR() {
   #if ENC2_DT!=255
-    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING) return;
+    if ((SD_CS==255 && display.mode()==LOST) || display.mode()==UPDATING || display.mode()==VALIDATING) return;
     encoder2.readEncoder_ISR();
   #endif
 }
@@ -117,7 +117,7 @@ void Controls::init() {
 }
 
 void Controls::loop() {
-  if (display.mode()==UPDATING || display.mode()==SDCHANGE) return;
+  if (display.mode()==UPDATING || display.mode()==SDCHANGE || display.mode()==VALIDATING) return;
   if (SD_CS==255 && display.mode()==LOST) return;
   backlightControls.controlsLoop();
   #if ENC_DT!=255

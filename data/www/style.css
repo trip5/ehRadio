@@ -87,7 +87,7 @@ input[type=range] {
 .gb.active.nb svg { width: 32px; }
 .gb svg.fill{ stroke: none; fill: var(--accent-color); }
 
-/* PLAYER & PLAYLIST EDITOR */
+/* PLAYER & PLAYLIST EDITOR & PLAYLIST VALIDATOR */
 #nameset { text-transform: var(--tt-uppercase); font-weight: bold; font-size: 22px; min-height: 26px; color: var(--accent-color); margin: 20px 0 8px 0; text-align: center; user-select: text; }
 #meta { text-transform: var(--tt-uppercase); font-size: 16px; min-height: 19px; margin-bottom: 14px; text-align: center; color: var(--main-hl-color); user-select: text; }
 #nameset, #meta { overflow-wrap: anywhere; }
@@ -149,8 +149,9 @@ input[type=range] {
 #pleheader .pleovol { width: 62px; }
 #pleditorcontent::-webkit-scrollbar { width: 5px; height: 8px; background-color: var(--main-bg-color); }
 #pleditorcontent::-webkit-scrollbar-thumb { background: var(--accent-dark); }
-#pleditorcontent { flex: 1 1 auto; overflow-y: scroll; height: 0px; border: var(--accent-color) 2px solid; box-sizing: border-box; scrollbar-color: var(--accent-dark) var(--main-bg-color); scrollbar-width: thin; 
-  background-image: url('data:image/png; base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAABAAgMAAACrYYWUAAAACVBMVEUnJycAAAAtLS3JOrneAAAAGElEQVQI12NYtYKBZgBoOAiFhtAIAQ0HALK+GReOr3bpAAAAAElFTkSuQmCC'); 
+#pleditorcontent { flex: 1 1 auto; overflow-y: scroll; height: 0px; border: var(--accent-color) 2px solid; box-sizing: border-box; scrollbar-color: var(--accent-dark) var(--main-bg-color); scrollbar-width: thin;
+  background-image: url('data:image/png; base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAABAAgMAAACrYYWUAAAACVBMVEUnJycAAAAtLS3JOrneAAAAGElEQVQI12NYtYKBZgBoOAiFhtAIAQ0HALK+GReOr3bpAAAAAElFTkSuQmCC');
+  background-attachment: local;   /* stripes scroll with the rows, as they do on #playlist */
 }
 #pleditorcontent li:nth-child(odd), #pleditorcontent li:nth-child(odd) input, #pleditorcontent li:nth-child(odd) span { background: var(--odd-bg-color); }
 .grabbable { cursor: copy; cursor: -moz-grab; cursor: -webkit-copy; }
@@ -161,8 +162,10 @@ input[type=range] {
 /* The editor input follows #playlist li span.text at every breakpoint (20 / 16 / 25 / 30), so the two lists read alike */
 .plecheck { width: 30px!important; }
 .plecheck input { line-height: 10px; height: auto; }
-.plename { width: 300px!important; }
-.pleurl { flex: 1; color: var(--main-hl-color)!important; }
+/* Name and URL share the free width as a ratio - 13:7 puts URL at ~35% - so Name takes the rest instead of
+   URL filling everything left of a fixed 300px Name (which was ~50% above the largest breakpoint). */
+.plename { flex: 13 1 0; min-width: 80px; }
+.pleurl { flex: 7 1 0; min-width: 40px; color: var(--main-hl-color)!important; }
 .pleovol { width: 53px!important; font-size: 16px!important; }
 .pleitem span.pleplay { width: 28px!important; height: 28px; text-indent: -1px; font-size: 12px!important; cursor: pointer; color: var(--main-text-color); border: transparent 2px solid; border-radius: 50%; margin: 2px; }
 @media (hover: hover) and (pointer: fine) { /* mouse only */  .pleitem span.pleplay:hover { background: var(--accent-dark)!important; color: var(--main-bg-color); border-color: var(--accent-color); } }
@@ -171,6 +174,25 @@ input[type=range] {
 .pleitem.dragging { opacity: 0.5; filter: grayscale(1); }
 .pleitem.drag-over-above { border-top: 4px solid var(--accent-color)!important; }
 .pleitem.drag-over-below { border-bottom: 4px solid var(--accent-color)!important; }
+/* The validator re-uses a lot of elements from the editor */
+#pleditorwrap .plestatus,
+#pleditorwrap .pl-validator-only { display: none; }
+#pleditorwrap.validator .pleplay,
+#pleditorwrap.validator .pleovol,
+#pleditorwrap.validator .pl-editor-only { display: none!important; }
+#pleditorwrap.validator .pl-validator-only { display: block; }
+#pleditorwrap.validator #pleheader .plestatus { display: flex; flex: 0 0 46px; align-items: center; justify-content: center; }
+#pleditorwrap.validator .pleitem .plestatus { display: flex; flex: 0 0 46px; align-items: center; justify-content: center; font-weight: bold; }
+.plestatus.pass { color: rgb(0, 200, 0); }
+.plestatus.fail { color: rgb(255, 60, 60); }
+#pleditorwrap.validator .grabbable { pointer-events: none; cursor: default; }
+#pleditorwrap.validator #pleheader .space input { display: none; }
+#pleditorwrap.validating #pleditor h2 .gb,
+#pleditorwrap.validating .pleitem,
+#pleditorwrap.validating .formbuttons .fb:not([data-command="plvalidate"]) { opacity: .5; pointer-events: none; }
+#pleditorwrap.validating .formbuttons .fb[data-command="plvalidate"] { opacity: 1; }
+body.plvalidating #settingsbtn,
+body.plvalidating #toggleplaylist { opacity: .5; pointer-events: none; }
 
 /* SETTINGS */
 .hr { height: 1px; width: 100%; background: var(--main-bg-color); }

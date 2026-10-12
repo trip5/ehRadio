@@ -67,6 +67,7 @@ class Display {
     bool deepsleep();
     void wakeup();
     void updateProgress(const char* label, float progress);
+    void clearProgress();
     #ifdef USE_SD
       // Redraws the SD Manager countdown
       void sdmanCountdown();
@@ -80,12 +81,10 @@ class Display {
   private:
     ScrollWidget *_meta = nullptr, *_title1 = nullptr, *_plcurrent = nullptr, *_weather = nullptr, *_title2 = nullptr;
     PlayListWidget *_plwidget = nullptr;
-    #ifdef UPDATEURL
-      ScrollWidget *_updLabel = nullptr;
-      TextWidget *_updValue = nullptr;
-      bool _updFirstCall = true;
-      int _updBarWidth = 10;
-    #endif
+    ScrollWidget *_updLabel = nullptr;
+    TextWidget *_updValue = nullptr;
+    bool _updFirstCall = true;
+    int _updBarWidth = 10;
     BitrateWidget *_fullbitrate = nullptr;
     FillWidget *_metabackground = nullptr, *_plbackground = nullptr, *_underline = nullptr, *_overline = nullptr;
     SliderWidget *_volbar = nullptr, *_bufferbar = nullptr;
@@ -194,6 +193,7 @@ class Display {
     uint16_t width() { return 0; }
     uint16_t height() { return 0; }
     void updateProgress(const char* label, float progress) {}
+    void clearProgress() {}
     #ifdef USE_SD
       void sdmanCountdown() {}
     #endif

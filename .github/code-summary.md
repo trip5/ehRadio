@@ -1011,7 +1011,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   up, above and below it - and that figure is the floor the walking clock is clamped to. `_sstext` is created and
   re-init'd like any other scroll line, so it carries the shared mark at its wrap, and `_screensaverLine()` joins the
   line's own parts with that same helper - the two cannot differ, and the character lives in one file (see the
-  widgets.cpp note below). See `plans/screensaver-panel-ownership.md`.
+  widgets.cpp note below). **The line runs at three quarters of the weather row's speed**:
+  `_screensaverWidgets()` scales `scrolldelta` by 3/4 where it divides exactly (a multiple of 4) and otherwise
+  stretches `scrolltime` by 4/3 - the step is preferred because it keeps the finer motion, but the OLEDs' 1 px step
+  (and the TFTs' 2 px) would truncate to 0 or to half the speed, so those take the interval path. The start delay
+  and both buffer sizes are `weatherConf`'s own, unmodified. See `plans/screensaver-panel-ownership.md` and
+  `plans/screensaver-line-scroll.md`.
 - **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
   `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
   both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
@@ -1144,6 +1149,35 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - reads `network` time/weather, `player` status
   - title changes now directly trigger `rgbled.trackChange()` and `backlightControls.restart()` instead of a weak hook
 
+## `src/core/playlistvalidator.cpp`
+- Owns the WebUI **Playlist Validator**: a sequential stream check driven from the main loop (the task that owns
+  the audio object), never from a second task.
+- `start()` stops playback synchronously, mutes via `Audio::getVolume()`/`setVolume()` (not the `Player::mute()`
+  toggle), sets the title indicator and queues `NEWMODE VALIDATING`; `loop()` walks the stations one at a time -
+  `Utility::loadStation(id)` then `Audio::connecttohost(url)`, so a redirect passes and a 404/connect failure
+  fails. A failure is retried up to `PLAYLIST_VALIDATE_ATTEMPTS`; a pass listens `PLAYLIST_VALIDATE_LISTEN_MS`
+  (both in `options.h`). `stop()` and the natural finish share one `_restore()` - unmute, clear the title, put
+  the saved station back and return to `PLAYER`.
+- Progress is reported over the WebSocket as **`PLVALIDATE`** (`{"plvalidate":{"start":1,"count":N}}`,
+  `{"plvalidate":{"i":N,"r":"pass"|"fail"}}`, `{"plvalidate":{"done":1}}`), read live from the module in
+  `NetServer::processQueue()`.
+- While active it owns the panel: `VALIDATING` is a dialog mode that reuses the OTA progress bar, `Controls`
+  ignores input, `commandhandler` refuses **every command except `plvalidate` and the read-only `get*` getters**
+  (a whitelist, so a command added later is refused by default) while blocking `plvalidate` itself in
+  HTTP/MQTT/Telnet, `audiohandlers` drops station/title/error updates so incoming metadata cannot paint over the
+  indicator, and `Player::loop()`'s stream-death branch is suppressed.
+- `_restore()` calls `Display::clearProgress()` so the progress bar - which lives on the shared dialog page the
+  volume overlay reuses - is blanked on both a natural finish and a Cancel.
+- `updateProgress()` clamps the ratio into 0..1 **before** the `float` -> `int` cast and bounds the bar width to
+  its own `char buf[68]`. Without the clamp the conversion is undefined for an out-of-range or NaN ratio, so GCC's
+  `-Wstringop-overflow` cannot bound the `memset` size and reports a hypothetical ~4 GB one; the width bound is
+  needed because the 2..64 clamp it would otherwise rely on is applied to the `int _updBarWidth` member in
+  `_showDialog()`, another function.
+- The panel indicator is localized: `L10N_LBL_VALIDATING` (`"VALIDATING"`, `display/en_US.json`) is used by
+  `display.cpp`'s `VALIDATING` branch, and the WebUI meta string comes from `Player::validatingLabel()` - an
+  accessor because `playlistvalidator.cpp` must not include `dsplocale.h` (a second copy of every locale table).
+  The WebUI keys carry English fallbacks in the sources and are translated by the maintainer's tools (Rule #8).
+
 ## `src/core/netserver.h`
 - Declares request enums, websocket/server globals, `StaticFileCache` class, `CachedFile` struct, and NetServer API.
 - `StaticFileCache` — PSRAM-backed cache for static WebUI files (files from `Config::wwwFiles[]`).
@@ -1152,6 +1186,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/core/netserver.cpp`
 - HTTP + WebSocket + upload/update + search/curated orchestration.
+- **`PLVALIDATE`** (a new `requestType_e`) carries the Playlist Validator's progress: start/count, one `{i, r}`
+  per station, then done. See `src/core/playlistvalidator.cpp`.
 - **The theme editor's API sits at the end of `handleNotFound()`, behind `#if defined(DSP_TFT) || DBGWUI`.**
   Eight routes serve `/editor.html` and nothing else links to them: `GET /theme-elements.json` (one object per
   element — its key and its label — in table order), `GET /themeall.json` (every id, empty slots included, because the editor's source
@@ -2862,6 +2898,33 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 ---
 
 ## WebUI Per-File Map (`data/www`)
+- **`player.html` carries the Playlist Editor and, in the same DOM, the Playlist Validator.** A `validator`
+  class on `#pleditorwrap` hides the play/Ovol columns and the Replace/Merge/Export/Share buttons and reveals a
+  Status column and Check All Streams, all through CSS so `submitPlaylist()`'s input indexing and `plRemove()`'s
+  `span[1]` lookup are untouched. The hide rule must outrank `.pleitem span { display:flex }` or the Status cell
+  shows in the editor - which it did; it is now `#pleditorwrap .plestatus` and the cell is centred both ways.
+  The mode is toggled from the settings gear while the editor is open, and each icon shows the mode you are
+  **in** (list icon in the editor, check icon in the Validator); closed, it is the settings gear again. Closing
+  - X or Save - resets the mode (`resetValidatorMode()`: classes, title, marks, running state) and updates the
+  gear only **after** the wrap is hidden, or the next open came up already in Validator with a toggle that was
+  "unaware". `script.js` marks each row from the `PLVALIDATE` events; a failure also ticks the row's checkbox and
+  appends a localized `(URL broken?)` to its Name once, so a saved list records the fault. While a sweep runs the
+  Check All Streams button becomes **Cancel** (`plvalidate=0`) and is the only control left active - every other
+  validator control is locked by the `validating` rule. In the Validator, Add is hidden (`pl-editor-only`); Save
+  and Undo return to **editor mode** instead of closing the overlay (editor mode still closes as before), while
+  the X still leaves to the playlist; and during a sweep the settings gear - the left-hand mode switch, outside
+  `#pleditorwrap` - is locked through `body.plvalidating`, as is `#toggleplaylist` in the toolbar, leaving Cancel
+  as the only active control. The editor list now carries `background-attachment: local`, so its striped
+  background scrolls with the rows like `#playlist`'s does. In the Validator the rows are not reorderable (the
+  `.grabbable` handle is `pointer-events:none` and `startDrag()` refuses) and the header's select-all checkbox is
+  hidden, leaving only the per-row boxes. The five new keys (`ttl_playlist_validator`,
+  `btn_pl_validate`, `btn_pl_cancel`, `lbl_status`, `msg_url_broken`) live in the **sources** with English
+  fallbacks; the locale files and the localization tools are the maintainer's (Rule #8), so the keys stay
+  untranslated until those tools are run. The editor's Name/URL columns are a **13:7 flex ratio** at the base rule
+  (URL ~35%) rather than a fixed 300px Name with URL taking the remainder, and the header Status cell uses the row
+  cell's `flex: 0 0 46px` treatment so it cannot shrink away. `clearValidationStatus()` is deliberately scoped to
+  `#pleditorcontent .plestatus`: the header cell carries `.plestatus` too, and a document-wide selector emptied its
+  "Status" label (the reserved space with no text).
 - **`editor.html` — the theme editor, and the only unlisted page.** It is reached by typing the URL; nothing
   links to it, and it deliberately does not follow the WebUI's `group_*` conventions or load `theme.css`
   (its colour fields must show the theme's values, not the WebUI's palette). Its script is inline, per the

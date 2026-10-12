@@ -139,6 +139,11 @@ function onMessage(event) {
       setTimeout(function(){ window.location.href=data.redirect; }, 4000);
       return;
     }
+    /* playlist validator progress */
+    if(typeof data.plvalidate !== 'undefined'){
+      handleValidationMessage(data.plvalidate);
+      return;
+    }
     if(typeof data.playermode !== 'undefined') { //Web, SD
       const wasSd = modesd;
       modesd = data.playermode=='modesd';
@@ -447,6 +452,7 @@ function initPLEditor(){
       <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="140" />
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>
       <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${item.dataset.ovol}" />
+      <span class="pleinput plestatus"></span>
       </li>`;
   });
   ple.innerHTML=html;
@@ -547,7 +553,8 @@ function plAdd(){
       <input class="pleinput plename" type="text" value="" maxlength="140" />\
       <input class="pleinput pleurl" type="text" value="" maxlength="140" />\
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>\
-      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />';
+      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />\
+      <span class="pleinput plestatus"></span>';
   ple.appendChild(plitem);
   ple.scrollTo({
     top: ple.scrollHeight,
@@ -587,6 +594,7 @@ function undoPlaylistChanges(){
   clearImportReviewFlags();
   generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
   uncheckSelectAll();
+  if (validatorMode) setValidatorMode(false);   // in the Validator, Undo discards and returns to the editor
 }
 
 function loadCuratedForReview(mode) {
@@ -656,7 +664,9 @@ function submitPlaylist(){
   let fileuploadinput=getId("file-upload");
   fileuploadinput.files = container.files;
   doPlUpload(fileuploadinput);
-  toggleTarget(0, 'pleditorwrap');
+  // In the Validator, Save stays in the overlay and returns to the editor; elsewhere it closes as before.
+  if (validatorMode) setValidatorMode(false);
+  else toggleTarget(0, 'pleditorwrap');
 }
 function doPlUpload(finput) {
   if (!finput.files || !finput.files[0]) return;
@@ -1023,7 +1033,8 @@ function addStationToEditor(name, url, ovol) {
     <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="140" />
     <input class="pleinput pleurl" type="text" value="${url}" maxlength="140" />
     <span class="pleinput pleplay" data-command="preview">&#9658;</span>
-    <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${ovol}" />`;
+    <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${ovol}" />
+    <span class="pleinput plestatus"></span>`;
   ple.appendChild(plitem);
 }
 
@@ -1167,6 +1178,8 @@ function toggleTarget(el, id){
         target.classList.remove("hidden");
         getId(target.dataset.target).classList.add("active");
         pleditorTimeout = null;
+        resetValidatorMode();     // the editor always opens in editor mode
+        updateGearIcon();
       }, 200);
       return; // Exit early, don't run the normal toggle below
     }
@@ -1179,6 +1192,100 @@ function toggleTarget(el, id){
     target.classList.toggle("hidden");
     getId(target.dataset.target).classList.toggle("active");
   }
+  // Both belong AFTER the hide: the gear reads whether the editor is open, and closing must strip the validator
+  // class or the next open comes up already in Validator (and the toggle then flips straight back).
+  if(id=='pleditorwrap'){
+    if(!pleditorOpen()) resetValidatorMode();
+    updateGearIcon();
+  }
+}
+/***--- playlist validator ---***/
+/* The editor DOM is reused, so the mode is one class on #pleditorwrap plus a gear that morphs in place.  Each
+   icon shows the mode you are IN: the list icon in the editor, the check icon in the Validator, and the ordinary
+   settings gear when the editor is closed.  Icons are placeholders and easy to swap. */
+var validatorMode = false;
+var validatorRunning = false;
+var GEAR_ICON = null;
+var ICON_EDITOR =
+  '<svg viewBox="0 0 48 48" class="stroke"><path stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M5 10L8 13L14 7 M5 24L8 27L14 21 M5 38L8 41L14 35 M21 24H43 M21 38H43 M21 10H43"/></svg>';
+var ICON_VALIDATOR =
+  '<svg viewBox="0 0 24 24" class="stroke"><path stroke-width="2" d="M20,15 C19,16 21.25,18.75 20,20 C18.75,21.25 16,19 15,20 C14,21 13.5,23 12,23 C10.5,23 10,21 9,20 C8,19 5.25,21.25 4,20 C2.75,18.75 5,16 4,15 C3,14 1,13.5 1,12 C1,10.5 3,10 4,9 C5,8 2.75,5.25 4,4 C5.25,2.75 8,5 9,4 C10,3 10.5,1 12,1 C13.5,1 14,3 15,4 C16,5 18.75,2.75 20,4 C21.25,5.25 19,8 20,9 C21,10 23,10.5 23,12 C23,13.5 21,14 20,15 Z M7,12 L10,15 L17,8"/></svg>';
+
+function pleditorOpen(){
+  const w = getId('pleditorwrap');
+  return !!w && !w.classList.contains('hidden');
+}
+function updateGearIcon(){
+  const g = getId('settingsbtn'); if(!g) return;
+  if(GEAR_ICON === null) GEAR_ICON = g.innerHTML;   // captured while it still is the settings gear
+  if(!pleditorOpen()){ g.innerHTML = GEAR_ICON; return; }
+  g.innerHTML = validatorMode ? ICON_VALIDATOR : ICON_EDITOR;
+}
+function setValidateButton(running){
+  const b = getId('plvalidatebtn'); if(!b) return;
+  b.textContent = running ? t('btn_cancel') : t('btn_pl_validate', 'Check All Streams');
+}
+function clearValidationStatus(){
+  // Rows only: the header carries .plestatus too, and a document-wide selector blanked its "Status" label.
+  const box = getId('pleditorcontent');
+  if(box) box.querySelectorAll('.plestatus').forEach(function(el){ el.textContent=''; el.classList.remove('pass','fail'); });
+}
+/* Back to a clean editor: drop both classes, restore the title, clear the marks and the running state. */
+function resetValidatorMode(){
+  validatorMode = false;
+  validatorRunning = false;
+  document.body.classList.remove('plvalidating');
+  const w = getId('pleditorwrap');
+  if(w){ w.classList.remove('validator'); w.classList.remove('validating'); }
+  const ttl = getId('pleditortitle');
+  if(ttl) ttl.textContent = t('ttl_playlist_editor', 'Playlist Editor');
+  setValidateButton(false);
+  clearValidationStatus();
+}
+function setValidatorMode(on){
+  validatorMode = !!on;
+  const w = getId('pleditorwrap'); if(w) w.classList.toggle('validator', validatorMode);
+  const ttl = getId('pleditortitle');
+  if(ttl) ttl.textContent = validatorMode ? t('ttl_playlist_validator', 'Playlist Validator') : t('ttl_playlist_editor', 'Playlist Editor');
+  clearValidationStatus();
+  updateGearIcon();
+}
+function setValidationRunning(on){
+  validatorRunning = !!on;
+  const w = getId('pleditorwrap'); if(w) w.classList.toggle('validating', validatorRunning);
+  document.body.classList.toggle('plvalidating', validatorRunning);   // reaches the settings gear, outside the wrap
+  setValidateButton(validatorRunning);
+}
+function onValidateButton(){
+  if(validatorRunning){ websocket.send('plvalidate=0'); return; }   // Cancel; the done message re-arms the button
+  if(!validatorMode) return;
+  clearValidationStatus();
+  uncheckSelectAll();
+  setValidationRunning(true);
+  websocket.send('plvalidate=1');
+}
+function handleValidationMessage(pv){
+  if(pv.start){ setValidationRunning(true); clearValidationStatus(); return; }
+  if(typeof pv.i !== 'undefined'){
+    const items = getId('pleditorcontent').getElementsByTagName('li');
+    const li = items[pv.i - 1]; if(!li) return;
+    const st = li.getElementsByClassName('plestatus')[0]; if(!st) return;
+    const pass = (pv.r === 'pass');
+    st.textContent = pass ? '\u2714' : '\u2716';
+    st.classList.toggle('pass', pass);
+    st.classList.toggle('fail', !pass);
+    if(!pass){
+      // Keep the row easy to remove: tick its checkbox, and mark the Name so a saved list records the fault.
+      const cb = li.getElementsByClassName('plcb')[0]; if(cb) cb.checked = true;
+      const nm = li.getElementsByClassName('plename')[0];
+      if(nm){
+        const note = '(' + t('msg_url_broken', 'URL broken?') + ')';
+        if(nm.value.indexOf(note) === -1) nm.value = (nm.value ? nm.value + ' ' : '') + note;
+      }
+    }
+    return;
+  }
+  if(pv.done){ setValidationRunning(false); return; }
 }
 function checkboxClick(cb, command){
   cb.classList.toggle("checked");
@@ -1368,12 +1475,17 @@ function continueLoading(mode){
       if(target.classList.contains("local")){
         switch(command){
           case "toggle": toggleTarget(target, target.dataset.target); break;
-          case "settings": window.location.href=`http://${hostname}/settings.html`; break;
+          case "settings":
+            // While the playlist editor is open the gear is the Validator toggle; otherwise it opens settings.
+            if(pleditorOpen()){ setValidatorMode(!validatorMode); }
+            else window.location.href=`http://${hostname}/settings.html`;
+            break;
           case "plimport": break;
           case "plexport": exportCurrentPlaylist(); uncheckSelectAll(); break;
           case "pladd": plAdd(); break;
           case "pldel": plRemove(); break;
           case "plsubmit": submitPlaylist(); break;
+          case "plvalidate": onValidateButton(); break;
           case "plundo": undoPlaylistChanges(); break;
           case "plshare": sharePlaylist(); break;
           case "fwupdate": window.location.href=`http://${hostname}/update.html`; break;
@@ -1694,6 +1806,7 @@ function updateIndices() {
 }
 
 function startDrag(target) {
+	if (validatorMode) return;   // the Validator has no reordering - the rows are not draggable there
 	const li = getLi(target);
 	if (li) {
 		dragged = li;

@@ -55,6 +55,9 @@ void DspCore::initDisplay() {
   config.theme.playlist[2] = GRAY_1;
   config.theme.playlist[3] = GRAY_1;
   config.theme.playlist[4] = GRAY_1;
+  #if defined(PLAYLIST_MODE_PAGED) && PLAYLIST_MODE_PAGED
+    for(byte i=0;i<5;i++) config.theme.playlist[i] = GRAY_3; // make them all light...
+  #endif
 #endif
 
   begin();

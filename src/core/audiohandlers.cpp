@@ -11,6 +11,7 @@
 #include "netserver.h"
 #include "player.h"
 #include "utility.h"
+#include "playlistvalidator.h"
 
 namespace {
 
@@ -226,6 +227,7 @@ void AudioHandlers::handleBitrate(const char* info) {
 }
 
 void AudioHandlers::handleShowStation(const char* info) {
+  if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   bool printable = isPrintable(info) && (strlen(info) > 0);
   if (player.remoteStationName) {
     config.setStation(printable ? info : config.station.name);
@@ -235,6 +237,7 @@ void AudioHandlers::handleShowStation(const char* info) {
 }
 
 void AudioHandlers::handleShowStreamTitle(const char* info) {
+  if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   if (handleAccountError(info)) return;  // error handled, don't display raw HTTP response as title
   #ifdef DEBUG_TITLES
     config.setTitle(DEBUG_TITLES);
@@ -260,6 +263,7 @@ void AudioHandlers::handleShowStreamTitle(const char* info) {
 }
 
 void AudioHandlers::handleError(const char* info) {
+  if (playlistValidator.active()) return;   // a failed probe is expected, not an error to display
   player.setError(info);
 }
 
@@ -269,6 +273,7 @@ void AudioHandlers::handleIcyLogo(const char* info) {
 }
 
 void AudioHandlers::handleId3Artist(const char* info) {
+  if (playlistValidator.active()) return;
   if (config.getMode() == PM_SDCARD) {
     // SD: the artist names the station, never the second title line.
     if (isPrintable(info)) config.setStation(info);
@@ -281,6 +286,7 @@ void AudioHandlers::handleId3Artist(const char* info) {
 }
 
 void AudioHandlers::handleId3Album(const char* info) {
+  if (playlistValidator.active()) return;
   if (player.lockOutput) return;
   if (!isPrintable(info)) return;
   if (_second.artist && _second.text[0]) return;  // artist outranks album for the current item
@@ -288,6 +294,7 @@ void AudioHandlers::handleId3Album(const char* info) {
 }
 
 void AudioHandlers::handleId3Title(const char* info) {
+  if (playlistValidator.active()) return;
   if (player.lockOutput) return;
   if (isPrintable(info)) _putHalf(_song, info, META_ID3, false);
 }

@@ -28,6 +28,7 @@ Order and sections match that file.
 | `shuffle` | Enable/disable SD shuffle; if enabled, advance to next entry. |
 | `start` | Start playback from last station. |
 | `stop` | Stop playback. |
+| `plvalidate` | Start (`1`) or stop (`0`) the playlist Validator sweep. Blocked in HTTP/MQTT/Telnet. |
 | `sleep` | Set sleep timer using for,after values (may be disabled by build) |
 | `mode` | Change playback mode: `0` = Radio/Web, `1` = SD card, out-of-range values cycle modes (`2` cycles in Telnet). |
 | `submitplaylist` | Stop playback before playlist submit flow. |

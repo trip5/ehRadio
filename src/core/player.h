@@ -35,6 +35,7 @@ class Player: public Audio {
     void sendCommand(playerRequestParams_t request);
     void resetQueue();
     void stopSync();  // synchronous stop — closes audio file before SD unmount
+    void stopStream();  // close the audio stream only, without _stop()'s title/notification side effects
     void stopInfo();
     void setError(const char *e);
     void setReady();
@@ -56,6 +57,7 @@ class Player: public Audio {
     bool hasError() { return strlen(_plError)>0; }
     plStatus_e status() { return _status; }
     bool isConnecting();  // the title still holds the localized "connecting" placeholder
+    const char* validatingLabel();  // the playlist validator's localized indicator string
     void setResumeFilePos(uint32_t pos) { _resumeFilePos = pos; }
   private:
     uint32_t    _resumeFilePos = 0;

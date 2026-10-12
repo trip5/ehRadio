@@ -885,6 +885,14 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef MAX_STREAM_RETRIES
   #define MAX_STREAM_RETRIES 3
 #endif
+// Playlist Validator: total probes per failing station (first try plus retries), and how long a connected
+// stream is listened to before it counts as a pass.
+#ifndef PLAYLIST_VALIDATE_ATTEMPTS
+  #define PLAYLIST_VALIDATE_ATTEMPTS 3
+#endif
+#ifndef PLAYLIST_VALIDATE_LISTEN_MS
+  #define PLAYLIST_VALIDATE_LISTEN_MS 1000
+#endif
 // Connection timeouts for socket connect/read (consumed by setConnectionTimeout() in player.cpp).
 // Leave undefined for library defaults (250ms HTTP, 2700ms SSL), or define in myoptions.h.
 #ifndef CONNECT_HTTP_HTTPS_TIMEOUT

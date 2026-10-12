@@ -11,6 +11,7 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "playlistvalidator.h"
 #include "utility.h"
 #ifdef USE_SD
   #include "filemanager.h"
@@ -37,7 +38,7 @@ bool CommandHandler::isBlockedForSource(const char *command, CommandSource sourc
     "getindex", "getactive",
     "getsystem", "getscreen", "getlocale", "getcontrols", "getweather", "getmqtt", "getbattery",
     "curated_import", "loadindex", "loadplaylist",
-    "newmode", "locale_webui",
+    "newmode", "locale_webui", "plvalidate",
     "irbtn", "chkid", "irclr"
   );
 }
@@ -54,6 +55,16 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
       return false;
     }
   #endif
+
+  // The playlist validator owns the audio for the whole sweep, so only its own command and the read-only state
+  // getters pass.  A whitelist, so a command added later is refused by default rather than needing to be listed.
+  // plvalidate is the Cancel path; the get* names only queue state to a client, which keeps a page loaded
+  // mid-sweep able to populate itself.
+  if (playlistValidator.active() &&
+      !cmdIs(command, "plvalidate",
+             "getindex", "getactive", "getsystem", "getscreen", "getlocale",
+             "getweather", "getcontrols", "getmqtt", "getbattery"))
+    return false;
 
   /* Websockets for Player */
   if (cmdIs(command, "toggle"))      { network.cancelStreamRetry(); controls.screenSaverExit(); player.toggle(); return true; }
@@ -84,6 +95,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "shuffle"))         { config.saveValue(&config.store.sdshuffle, static_cast<bool>(atoi(value))); if (config.store.sdshuffle) player.next(); return true; }
   if (cmdIs(command, "start"))           { controls.screenSaverExit(); if (config.getMode() == PM_WEB) return player.resumeLastWebSource(); player.sendCommand({PR_PLAY, config.lastStation()}); return true; }
   if (cmdIs(command, "stop"))            { network.cancelStreamRetry(); controls.screenSaverExit(); player.sendCommand({PR_STOP, 0}); return true; }
+  if (cmdIs(command, "plvalidate"))      { if (atoi(value)) playlistValidator.start(); else playlistValidator.stop(); return true; }
   #ifndef DEEP_SLEEP_DISABLE
     if (cmdIs(command, "sleep")) {
       if (value[0] == '\0') {

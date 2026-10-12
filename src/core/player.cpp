@@ -11,6 +11,7 @@
 #include "network.h"
 #include "rgbled.h"
 #include "utility.h"
+#include "playlistvalidator.h"
 #include "../locale/dsplocale.h"
 #ifdef USE_SD
   #include "filemanager.h"
@@ -97,6 +98,12 @@ void Player::stopSync() {
   _stop();  // synchronous stop — closes the audio file so SD can be unmounted safely
 }
 
+// Close the audio stream without _stop()'s side effects (a "[stopped]" title and client notifications).
+// The playlist validator drives the audio directly and must not churn the title between stations.
+void Player::stopStream() {
+  stopSong();
+}
+
 void Player::stopInfo() {
   //telnet.info();
   netserver.requestOnChange(MODE, 0);
@@ -114,6 +121,10 @@ void Player::setReady() {
 
 bool Player::isConnecting() {
   return strcmp_P(config.station.title, l10n(L10N_MSG_CONNECT)) == 0;
+}
+
+const char* Player::validatingLabel() {
+  return l10n(L10N_LBL_VALIDATING);
 }
 
 void Player::setError(const char *e) {
@@ -223,7 +234,7 @@ void Player::loop() {
     config.setTitle("");
   }
 
-  if (!isRunning() && _status==PLAYING) {
+  if (!playlistValidator.active() && !isRunning() && _status==PLAYING) {
     // Stream died unexpectedly - trigger reconnection if WiFi is still up
     if (config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
       FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
@@ -236,6 +247,7 @@ void Player::loop() {
     _stop(true);
   }
   if (strlen(burl) > 0) browseUrl();
+  playlistValidator.loop();
 }
 
 bool Player::queueResolvedUrl(const char* url) {

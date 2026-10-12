@@ -19,6 +19,7 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "playlistvalidator.h"
 #include "startup.h"
 #include "telnet.h"
 #include "utility.h"
@@ -775,6 +776,17 @@ void NetServer::processQueue() {
       case CURATED_PLAYLIST_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_playlist_done\":true}"); break;
       case CURATED_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_failed\":true}"); break;
       case ARTWORK:       break;
+      // Playlist validator progress: start, one result per station, then done.  The fields are read live from
+      // the validator, which stages the newest message before queueing the event.
+      case PLVALIDATE: {
+        switch (playlistValidator.message()) {
+          case PLV_MSG_START: snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"start\":1,\"count\":%u}}", (unsigned)playlistValidator.total()); break;
+          case PLV_MSG_ITEM:  snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"i\":%u,\"r\":\"%s\"}}", (unsigned)playlistValidator.reportIndex(), playlistValidator.reportResult() == PLV_RESULT_PASS ? "pass" : "fail"); break;
+          case PLV_MSG_DONE:  snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"done\":1}}"); break;
+          default: break;
+        }
+        break;
+      }
       #ifdef USE_SD
         case CHANGEMODE:    config.changeMode(config.newConfigMode); return; break;
       #endif

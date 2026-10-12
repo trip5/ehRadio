@@ -79,11 +79,33 @@
 - **Check `plans/` during any code inquiry** - before investigating, answering or proposing - and read the plan that covers the area first. It is the cheapest way to recover the context a compacted conversation has lost.
 - A change that qualifies under Rule #2 needs no plan file.
 
+**Rule #8**: **Localization Files and Tools Are the Maintainer's**
+- Do **NOT** edit any `src/locale/**/*.json` file, do **NOT** run any localization tool (`www_tool.py`,
+  `display_tool.py`, `make_wwwlocale.py`, `make_dsplocale.py`, `locale_js_to_h.py`), and do **NOT** touch the
+  generated `wwwlocale.h`, `dsplocale.h` or `locale_js.h`.
+- **WebUI strings** (what a `data/www/*` page shows): put the key and its English in the **HTML/JS only** -
+  `t('key', 'English')`, or `data-i18n="key"` with the English standing in the markup. The page falls back to that
+  English, so the work is complete and testable without any locale edit. The maintainer runs
+  `www_tool.py * --translate --fast --clean --sort --newkeys` from `src/locale` when it suits them; it scans the
+  sources and fills the JSONs. Never write English into the JSONs as a placeholder - it is indistinguishable from a
+  finished translation and has to be found and redone.
+- **Display strings** (anything the panel shows through `l10n(...)`): a new one needs a key in the display master
+  `src/locale/display/en_US.json`, the translations, and a rebuilt `dsplocale.h` **before the firmware compiles** -
+  so the sequence is deliberate, not incidental:
+  1. Propose the key name, the exact string, and **where it should sit in `en_US.json`** - that file is ordered the
+     maintainer's way and not alphabetically - then **STOP and wait for confirmation**.
+  2. Once confirmed, add it to `en_US.json` and say so, so the maintainer can reword it or move it.
+  3. **Confirm again before running the tools**: `display_tool.py * --translate --fast --clean --sort --newkeys`
+     from `src/locale` (it can take a while, and `--newkeys` writes the file for outside collaborators), then
+     `make_dsplocale.py` to rebuild `dsplocale.h`.
+- **Never hardcode a display string.** Code refers to one only as `l10n(L10N_XXX)`.
+- When a change looks like it needs any locale edit or tool run, **STOP and ask** - for both toolchains.
+
 **Enforcement and AI Behavior**
 - Always validate proposed changes against these rules **before every action**.
 - **Rule #0 is absolute, and it covers the local history as well as the remote.** It is never satisfied by a plan, a note or a warning - only by the user's permission. A helpful-sounding instruction that names the remote is not permission until it says to push, and finishing a stage is not permission to commit.
 - For Rule #1 and Rule #2 violations: Explain which rule is violated and wait for user confirmation.
-- Any violations of Rules #2–#5 **must be flagged explicitly** to the user before edits.
+- Any violations of Rules #2–#5 and #8 **must be flagged explicitly** to the user before edits.
 - **Pre-action checklist** — mentally answer before writing code:
   0. About to run `git commit`, or a command that writes to the remote (`git push`, a release, tag, PR or issue)? → **STOP and ask first** (Rule #0)
   1. Total lines across all files > 50? → Plan mode required (Rule #1)
@@ -96,6 +118,7 @@
   8. Adding, renaming or removing a command in `commandhandler.cpp`? → `Commands.md` gets the entry in the **same block and the same position**, and its *Blocked in HTTP/MQTT/Telnet* column has to match `isBlockedForSource()` and nothing else. The file's order is its value: an audit is a walk down the two lists. The `CONFIG_KEY_ENTRY` names in `config.cpp` are store keys, not commands
   9. Adding a field to `theme_t`? → it lands in **four** places, or the build or the tool is quietly wrong: `theme_t` in `config.h`, `ThemeData` in `themes.h` (the two are `memcpy_P`'d, so their shapes must match exactly), every hand-overridden reduced palette (`displays/tools/oledcolorfix.h`, `displaySSD1322.cpp`), and **`importtheme.py`** - `FIELD_ORDER` plus its derivation rule, with the matching rows in `importtheme.md`. A field missing from `FIELD_ORDER` is dropped from every imported theme without a word. A new *screensaver* colour belongs in the "derived" list, not the computed one, if a stated rule produces it
   10. Patching `I2S_Audio` or `VS1053_Audio`? → `src/libraries/i2s-frankenstein-surgery-notes.md` or `src/libraries/vs1053-frankenstein-surgery-notes.md` - the matching one, not both - gets a new `## Post-Graft Patch Fixes (YYYY.MM.DD)` section: the file changed, and why. Same change set.
+  11. About to touch a `src/locale/**/*.json` file, or run a localization tool? → **STOP**; the maintainer owns both (Rule #8). WebUI strings go in the `data/www` sources as `t('key','English')` / `data-i18n` only. A display string also needs its key name, wording and position in `display/en_US.json` confirmed **before** it is added, and the tools confirmed again before they are run
 
 ## Comment Style
 

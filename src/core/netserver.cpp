@@ -2190,19 +2190,29 @@ void handleIndex(AsyncWebServerRequest * request) {
     bool shouldRedirect = false;
     bool shouldRestart = false;
 
+    bool hasSleep = request->hasArg("sleep");
+    bool hasAfter = request->hasArg("after");
     String sleepValue;
-    if (request->hasArg("sleep")) {
+    if (hasSleep) {
       sleepValue = request->getParam("sleep")->value();
-      if (request->hasArg("after")) {
-        sleepValue += ",";
-        sleepValue += request->getParam("after")->value();
-      }
+    }
+    if (hasAfter) {
+      if (sleepValue.length() == 0) sleepValue = "0";
+      sleepValue += ",";
+      sleepValue += request->getParam("after")->value();
     }
 
+    bool dispatchedAfterSleep = false;
     for (int i = 0; i < paramsNr; ++i) {
       const AsyncWebParameter* p = request->getParam(i);
       String command = p->name();
-      if (command == "after") continue;
+      if (command == "after") {
+        if (!hasSleep && !dispatchedAfterSleep) {
+          dispatchedAfterSleep = true;
+          if (cmd.exec("sleep", sleepValue.c_str(), 0, CommandSource::HttpUrl)) handledAny = true;
+        }
+        continue;
+      }
 
       String value = (command == "sleep" && sleepValue.length() > 0) ? sleepValue : p->value();
       if (cmd.exec(command.c_str(), value.c_str(), 0, CommandSource::HttpUrl)) {

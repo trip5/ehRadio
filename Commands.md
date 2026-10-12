@@ -239,8 +239,9 @@ Handled in src/core/telnet.cpp before commandhandler dispatch.
 - HTTP single-command examples: `http://<radio-ip>/?toggle=1` and `curl "http://<radio-ip>/?volume=80"`
 - HTTP multi-param behavior: params are processed in URL order, each as a separate commandhandler dispatch.
 - HTTP multi-param example: `http://<radio-ip>/?volume=70&treble=4&bass=-2`
-- HTTP sleep behavior: `sleep` and `after` are merged into one sleep value before dispatch: `sleep=for,after`.
-- HTTP sleep examples: `http://<radio-ip>/?sleep=30` and `http://<radio-ip>/?sleep=30&after=5`
+- HTTP sleep behavior: `sleep` is the wake-up duration in minutes; `after` is the delay before entering sleep.
+- HTTP sleep examples: `http://<radio-ip>/?sleep=30`, `http://<radio-ip>/?sleep=30&after=5`, and
+  `http://<radio-ip>/?sleep&after=5` or `http://<radio-ip>/?sleep=0&after=5` for sleep without a wake timer.
 - MQTT and Telnet command formats: `key=value`, `key value`, `key(value)`.
 - MQTT examples (topic <mqtttopic>command): payload `toggle`, payload `volume=80`, payload `play 12`, payload `http://example.com/stream`
 - MQTT supports raw URL payloads and maps them to `burl`.

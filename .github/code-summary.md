@@ -1190,6 +1190,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - Contains embedded fallback HTML templates (`emptyfs_html`, `index_html`, `emergency_form`).
 
 ## `src/core/netserver.cpp`
+- HTTP sleep queries treat `sleep` as an optional wake-up duration and `after` as an independent delay before
+  deep sleep (both minutes); an omitted or zero wake duration leaves the timer wake source disabled. The HTTP
+  handler folds the two into one comma-encoded `sleep=sfor,after` command and skips the bare `after`.
 - HTTP + WebSocket + upload/update + search/curated orchestration.
 - **`PLVALIDATE`** (a new `requestType_e`) carries the Playlist Validator's progress: start/count, one `{i, r}`
   per station, then done. See `src/core/playlistvalidator.cpp`.

@@ -43,10 +43,11 @@
   config.theme.volbarin    = TFT_FG;
   config.theme.plcurrent   = TFT_BG;
   config.theme.plcurrentbg = TFT_FG;
-  config.theme.playlist[0] = TFT_BG;
-  config.theme.playlist[1] = TFT_BG;
-  config.theme.playlist[2] = TFT_BG;
-  config.theme.playlist[3] = TFT_BG;
-  config.theme.playlist[4] = TFT_BG;
+  config.theme.playlist[0] = TFT_FG;
+  config.theme.playlist[1] = TFT_FG;
+  config.theme.playlist[2] = TFT_FG;
+  config.theme.playlist[3] = TFT_FG;
+  config.theme.playlist[4] = TFT_FG;
+  // for(uint8_t i=0;i<5;i++) config.theme.playlist[i] = TFT_FG;
 
 #endif

@@ -85,6 +85,13 @@
 
 #endif
 
+// The selected conf file's own table, described for the layout JSON parser and
+// for the editor page.  This has to come AFTER the driver chain above, because
+// the constants at the bottom of conf_index.h are the conf file's macros.  A
+// build with no display defines neither DSP_TFT nor DSP_OLED, and the header
+// falls back to zeros for those.
+#include "conf/conf_index.h"
+
 //extern DspCore dsp;
 
 #endif

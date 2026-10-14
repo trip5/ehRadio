@@ -14,6 +14,7 @@
 #include "utility.h"
 #include "../locale/dsplocale.h"
 #include "../displays/themeregistry.h"
+#include "../displays/layoutregistry.h"
 #ifdef USE_SD
   #include "filemanager.h" // the SD manager parks the startup services the way SD playback does
 #endif
@@ -279,6 +280,17 @@ void Startup::checkLittleFSandVer() {
   // could see.  This is the only place that can do it correctly: loadTheme()'s earlier call cannot judge a
   // custom id at all, so persisting from there would forget a perfectly good custom theme on every boot.
   if (config.store.themeId != themeIdWanted) config.saveValue(&config.store.themeId, config.store.themeId);
+
+  // The custom layout slots are optional files too, and they follow the same two-phase rule: loadLayout()
+  // already ran before the filesystem was mounted, so the id is re-resolved now that the slots are known and
+  // the correction is persisted when it differs, for the reason just given.  A build with no display has no
+  // registry and no slot files at all, so there is nothing to load and nothing to correct.
+  #ifndef DUMMYDISPLAY
+    layoutLoadSlots();
+    const uint8_t layoutIdWanted = config.store.layoutId;
+    config.loadLayout();
+    if (config.store.layoutId != layoutIdWanted) config.saveValue(&config.store.layoutId, config.store.layoutId);
+  #endif
 
   if (!config.wwwFilesExist) {
     utility.deleteMainwwwFile();

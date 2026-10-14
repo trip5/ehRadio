@@ -12,7 +12,6 @@
 #include "../../core/player.h"    //  for VU widget
 #include "../../core/utility.h"
 
-
 /************************
       FILL WIDGET
  ************************/
@@ -32,8 +31,8 @@ void FillWidget::init(FillConfig conf, uint16_t bgcolor){
 // exists to enclose.
 void FillWidget::_draw(){
   if(!_active) return;
-  if (_outlined) dsp.drawRect(_config.left, _config.top, _width, _height, _bgcolor);
-  else           dsp.fillRect(_config.left, _config.top, _width, _height, _bgcolor);
+  if (_outlined) dsp.drawRect(_config.offset, _config.top, _width, _height, _bgcolor);
+  else           dsp.fillRect(_config.offset, _config.top, _width, _height, _bgcolor);
 }
 
 void FillWidget::setHeight(uint16_t newHeight){
@@ -53,7 +52,7 @@ void TextWidget::_charSize(uint8_t textsize, uint8_t& width, uint16_t& height){
   height = textsize * CHARHEIGHT;
 }
 
-void TextWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor) {
+void TextWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize) {
   Widget::init(wconf, fgcolor, bgcolor);
   _buffsize = buffsize;
   if (_text)    { free(_text);    _text = nullptr; }
@@ -65,7 +64,6 @@ void TextWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uin
   _charSize(_config.textsize, _charWidth, _textheight);
   _textwidth = _oldtextwidth = _oldleft = 0;
   _textPainted = false;   // a re-init is a new layout: the old rectangle no longer describes where this widget is
-  _uppercase = uppercase;
 }
 
 void TextWidget::setText(const char* txt) {
@@ -124,20 +122,22 @@ void TextWidget::_paint() {
 }
 
 void TextWidget::setText(int val, const char *format){
-  char buf[_buffsize];
-  snprintf(buf, _buffsize, format, val);
+  // A fixed array: a stack VLA is a GCC extension, and a formatted value is a number or a short label.
+  // setText() truncates to the widget's own buffer anyway, which is what decides what is drawn.
+  char buf[WIDGET_BUFF_SIZE];
+  snprintf(buf, sizeof(buf), format, val);
   setText(buf);
 }
 
 void TextWidget::setText(const char* txt, const char *format){
-  char buf[_buffsize];
-  snprintf(buf, _buffsize, format, txt);
+  char buf[WIDGET_BUFF_SIZE];
+  snprintf(buf, sizeof(buf), format, txt);
   setText(buf);
 }
 
 uint16_t TextWidget::_realLeft(bool w_fb) {
   uint16_t realwidth = (_width>0 && w_fb)?_width:dsp.width();
-  uint16_t offset = w_fb?0:_config.left;
+  uint16_t offset = w_fb?0:_config.offset;
   // Text wider than the space it is being placed in would wrap these subtractions to ~65500 and paint the string
   // clean off the panel - which reads as "nothing was drawn" rather than as "drawn in the wrong place".  Park it
   // at the edge instead.  A ScrollWidget with a too-long string never reaches here: it scrolls in _draw().
@@ -208,8 +208,8 @@ const char* scrollMark() {
   return mark;
 }
 
-ScrollWidget::ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
-  init(conf, fgcolor, bgcolor);
+ScrollWidget::ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize) {
+  init(conf, fgcolor, bgcolor, buffsize);
 }
 
 ScrollWidget::~ScrollWidget() {
@@ -218,10 +218,10 @@ ScrollWidget::~ScrollWidget() {
   if (_window) { free(_window);  _window = nullptr; }
 }
 
-void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor) {
-  TextWidget::init(conf.widget, conf.buffsize, conf.uppercase, fgcolor, bgcolor);
+void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize) {
+  TextWidget::init(conf.widget, fgcolor, bgcolor, buffsize);
   if (_window) { free(_window); _window = nullptr; }
-  _x = conf.widget.left;
+  _x = conf.widget.offset;
   _startscrolldelay = conf.startscrolldelay;
   _scrolldelta = conf.scrolldelta;
   _scrolltime = conf.scrolltime;
@@ -278,7 +278,7 @@ void ScrollWidget::_refreshMark() {
 // is what lets a later, shorter text erase the row instead of only its own narrower box - without it the old line's
 // pixels survive around a dialog's shorter header, which no background bar covers on a panel that has none.
 void ScrollWidget::_spanPainted() {
-  _oldleft = _config.left;
+  _oldleft = _config.offset;
   _oldtextwidth = _width;
   _textPainted = true;
 }
@@ -315,7 +315,7 @@ void ScrollWidget::setText(const char* txt) {
   // Re-derive the window from the new text - but only while the line is on screen: a hidden line never
   // edits the panel, and its pixels were taken off when it hid.  _draw() syncs again on the way back.
   if (_active) _syncWindow();
-  _x = (_fb && _fb->ready())?0:_config.left;
+  _x = (_fb && _fb->ready())?0:_config.offset;
   if (dsp.getScrollId() == this) dsp.setScrollId(NULL);
   _scrolldelay = millis();
   // Recorded whether or not the widget is drawn, so a hidden widget still knows which string it holds and a
@@ -346,8 +346,8 @@ void ScrollWidget::setText(const char* txt) {
         _fb->display();
       #endif
       } else {
-        dsp.fillRect(_config.left,  _config.top, _width, _textheight, _bgcolor);
-        dsp.setCursor(_config.left, _config.top);
+        dsp.fillRect(_config.offset,  _config.top, _width, _textheight, _bgcolor);
+        dsp.setCursor(_config.offset, _config.top);
         snprintf(_window, _width / _charWidth * 4 + 5, "%s", _text); //TODO
         { uint16_t maxVis = _width / _charWidth + 1;   // the entering glyph is drawn and clipped, not dropped
           if (utf8_strlen(_window) > maxVis) {
@@ -355,7 +355,7 @@ void ScrollWidget::setText(const char* txt) {
             *cut = '\0';
           }
         }
-        dsp.setClipping({_config.left, _config.top, _width, _textheight});
+        dsp.setClipping({_config.offset, _config.top, _width, _textheight});
         dsp.resetUTF8();
         dsp.print(_window);
         dsp.clearClipping();
@@ -393,8 +393,8 @@ void ScrollWidget::setText(const char* txt) {
 }
 
 void ScrollWidget::setText(const char* txt, const char *format){
-  char buf[_buffsize];
-  snprintf(buf, _buffsize, format, txt);
+  char buf[WIDGET_BUFF_SIZE];
+  snprintf(buf, sizeof(buf), format, txt);
   setText(buf);
 }
 
@@ -402,7 +402,7 @@ void ScrollWidget::loop() {
   if(_locked) return;
   _refreshMark();
   if (!_doscroll || _config.textsize == 0 || (dsp.getScrollId() != NULL && dsp.getScrollId() != this)) return;
-  uint16_t fbl = _fb->ready()?0:_config.left;
+  uint16_t fbl = _fb->ready()?0:_config.offset;
   if (_checkDelay(_x == fbl ? _startscrolldelay : _scrolltime, _scrolldelay)) {
     _calcX();
     if (_active) _draw();
@@ -433,7 +433,7 @@ void ScrollWidget::_draw() {
   _syncWindow();          // the text may have changed width since this window was last made
   _setTextParams();
   if (_doscroll) {
-    uint16_t fbl = (_fb && _fb->ready())?0:_config.left;
+    uint16_t fbl = (_fb && _fb->ready())?0:_config.offset;
     uint16_t _newx = fbl - _x;
     uint16_t charOffset = _newx / _charWidth;
     const char* _cursor = utf8_offset(_text, charOffset);
@@ -465,9 +465,9 @@ void ScrollWidget::_draw() {
       _fb->display();
     #endif
     } else {
-      dsp.fillRect(_config.left, _config.top, _width, _textheight, _bgcolor);
+      dsp.fillRect(_config.offset, _config.top, _width, _textheight, _bgcolor);
       dsp.setCursor(_x + hiddenChars * _charWidth, _config.top);
-      dsp.setClipping({_config.left, _config.top, _width, _textheight});
+      dsp.setClipping({_config.offset, _config.top, _width, _textheight});
       dsp.resetUTF8();
       dsp.print(_window);
       dsp.resetUTF8();
@@ -510,7 +510,7 @@ void ScrollWidget::_draw() {
 void ScrollWidget::_calcX() {
   if (!_doscroll || _config.textsize == 0) return;
   _x -= _scrolldelta;
-  uint16_t fbl = _fb->ready()?0:_config.left;
+  uint16_t fbl = _fb->ready()?0:_config.offset;
   if (-_x > _textwidth + _sepwidth - fbl) {
     _x = fbl;
     dsp.setScrollId(NULL);
@@ -536,8 +536,8 @@ bool ScrollWidget::_checkDelay(int m, uint32_t &tstamp) {
 // _realLeft(true) is where the text sits inside the span, so the window starts there.  Inside the new
 // window that same call returns 0, which is why nothing else in this class had to change.
 void ScrollWidget::_windowRect(uint16_t& x, uint16_t& w){
-  if (_doscroll || _textwidth == 0) { x = _config.left; w = _width; return; }
-  x = _config.left + _realLeft(true);
+  if (_doscroll || _textwidth == 0) { x = _config.offset; w = _width; return; }
+  x = _config.offset + _realLeft(true);
   w = _textwidth;
   if (w > _width) w = _width;                // cannot happen while the text fits, but never wider than the span
   if ((uint32_t)x + w > (uint32_t)dsp.width())   // a conf that reaches past the glass: stop at the edge
@@ -574,7 +574,7 @@ void ScrollWidget::_reset(){
   dsp.setScrollId(NULL);
   _scrolldelay = millis();
   _syncWindow(true);
-  _x = _fb && _fb->ready()?0:_config.left;
+  _x = _fb && _fb->ready()?0:_config.offset;
 }
 
 /************************
@@ -597,9 +597,9 @@ void SliderWidget::_drawslider() {
   uint16_t innerHeight = _height - _outlined * 2;
   uint32_t clampedValue = (_max == 0) ? 0 : min(_value, _max);
   uint16_t valwidth = (_max == 0) ? 0 : map(clampedValue, 0, _max, 0, innerWidth);
-  dsp.fillRect(_config.left + _outlined, _config.top + _outlined, innerWidth, innerHeight, _bgcolor);
+  dsp.fillRect(_config.offset + _outlined, _config.top + _outlined, innerWidth, innerHeight, _bgcolor);
   if (valwidth > 0) {
-    dsp.fillRect(_config.left + _outlined, _config.top + _outlined, valwidth, innerHeight, _fgcolor);
+    dsp.fillRect(_config.offset + _outlined, _config.top + _outlined, valwidth, innerHeight, _fgcolor);
   }
   _oldvalwidth = valwidth;
 }
@@ -608,13 +608,13 @@ void SliderWidget::_draw() {
   if(_locked) return;
   _clear();
   if(!_active) return;
-  if (_outlined) dsp.drawRect(_config.left, _config.top, _width, _height, _oucolor);
+  if (_outlined) dsp.drawRect(_config.offset, _config.top, _width, _height, _oucolor);
   _drawslider();
 }
 
 void SliderWidget::_clear() {
   _oldvalwidth = 0;
-  dsp.fillRect(_config.left, _config.top, _width, _height, _bgcolor);
+  dsp.fillRect(_config.offset, _config.top, _width, _height, _bgcolor);
 }
 void SliderWidget::_reset() {
   _oldvalwidth = 0;
@@ -663,7 +663,7 @@ uint16_t _textWidth(const ClockFontSel& cf, const char *txt){
 /************************
       NUM WIDGET
  ************************/
-void NumWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor) {
+void NumWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize) {
   Widget::init(wconf, fgcolor, bgcolor);
   _buffsize = buffsize;
   // This widget's own size index: numConf.textsize.
@@ -675,7 +675,6 @@ void NumWidget::init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint
   _oldtext = (char *) malloc(sizeof(char) * _buffsize);
   memset(_oldtext, 0, _buffsize);
   _textwidth = _oldtextwidth = _oldleft = 0;
-  _uppercase = uppercase;
   // The PIXEL size (15/35/52/70, or the built-in cell for index 0), not the size index: it is the
   // built-in font's multiplier on the index-0 path and the erase offset on the GFXfont path, where
   // the ink sits ABOVE the cursor because every clock glyph has yOffset = -height.
@@ -714,8 +713,8 @@ void NumWidget::setText(const char* txt) {
 }
 
 void NumWidget::setText(int val, const char *format){
-  char buf[_buffsize];
-  snprintf(buf, _buffsize, format, val);
+  char buf[WIDGET_BUFF_SIZE];
+  snprintf(buf, sizeof(buf), format, val);
   setText(buf);
 }
 
@@ -766,7 +765,7 @@ void ProgressWidget::init(WidgetConfig conf, ProgressConfig pconf, uint16_t fgco
   // zeroes _width.
   const uint16_t bufbytes = (uint16_t)(strlen(_frameL) + _runway + strlen(_frameR)
                                        + _barwidth * (PROGRESS_DOT_BYTES - 1) + 1);
-  TextWidget::init(conf, bufbytes, false, fgcolor, bgcolor);
+  TextWidget::init(conf, fgcolor, bgcolor, bufbytes);
 }
 
 // Where the blob sits on this frame: it grows in at the speaker, slides right one column per frame, and then its head
@@ -965,10 +964,10 @@ void ClockWidget::_getTimeBounds() {
       _clockwidth = _timewidth + _space + rightside;
   }
   switch(_config.align){
-    case WA_LEFT: _clockleft = _config.left; break;
-    case WA_RIGHT: _clockleft = dsp.width()-_clockwidth-_config.left; break;
+    case WA_LEFT: _clockleft = _config.offset; break;
+    case WA_RIGHT: _clockleft = dsp.width()-_clockwidth-_config.offset; break;
     default:
-      _clockleft = (dsp.width()/2 - _clockwidth/2)+_config.left;
+      _clockleft = (dsp.width()/2 - _clockwidth/2)+_config.offset;
       break;
   }
   _dotsleft = 0;
@@ -1014,13 +1013,13 @@ void ClockWidget::_printClock(bool force){
     #endif
   }
   if(force){
-    _clearClock();
+    _clearClock(false);   // wipe the buffer only: this path paints and displays the whole window below
     _getTimeBounds();
     // Theme-aware rather than panel-type-based: the glow is only meaningful where the clock's own
     // background differs from what the digits sit on, so on a one-bit panel (clockbg == background)
     // this is the same no-op the old !DSP_OLED guard gave, while a colour theme that sets them equal
     // is now skipped too.
-    if(config.store.clockglow && clockBgColor != bgColor) {
+    if(editorOpt(config.store.clockglow) && clockBgColor != bgColor) {
       gfx.setTextColor(clockBgColor, bgColor);
       gfx.setCursor(_left(), _top());
       gfx.print(_glow);
@@ -1078,7 +1077,7 @@ void ClockWidget::_printClock(bool force){
       // leaves the previous character's pixels behind.  Then the glow, which fills the cells the
       // digits sit in - the same treatment clockbg gives the clock, in this style's own character.
       gfx.fillRect(sx, sy, _secwidth, secPx, bgColor);
-      if (config.store.clockglow && secondsBgColor != bgColor) {
+      if (editorOpt(config.store.clockglow) && secondsBgColor != bgColor) {
         gfx.setFont(secFont);
         gfx.setTextSize(1);
         gfx.setTextColor(secondsBgColor, bgColor);
@@ -1101,7 +1100,7 @@ void ClockWidget::_printClock(bool force){
   gfx.setTextSize(_cf.font==nullptr?_cf.textPx:1);
   gfx.setFont(_cf.font);
   #ifndef DSP_OLED
-    gfx.setTextColor(dots ? clockColor : (config.store.clockglow?clockBgColor:bgColor), bgColor);
+    gfx.setTextColor(dots ? clockColor : (editorOpt(config.store.clockglow)?clockBgColor:bgColor), bgColor);
   #else
     if(clockInTitle) {
       gfx.setTextColor(dots ? config.theme.meta:config.theme.metabg, config.theme.metabg);
@@ -1116,18 +1115,52 @@ void ClockWidget::_printClock(bool force){
   if(_fb && _fb->ready()) _fb->display();
 }
 
-void ClockWidget::_clearClock(){
+void ClockWidget::_clearClock(bool push){
   // Nothing to clear when the layout omits the clock: the geometry below is only valid after init(), so clearing
   // would fill a rectangle at indeterminate coordinates.
   if(!_present) return;
   uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
   #ifdef PSFBUFFER
-    if(_fb && _fb->ready()) { _fb->clear(); return; }
+    if(_fb && _fb->ready()) {
+      // psFrameBuffer::clear() fills the PSRAM buffer ONLY - it never touches the panel - so an erase that means
+      // to take the clock off the screen has to display the wiped window itself.  That is `push`, true for every
+      // caller except _printClock()'s force path, which paints this same window and displays it a few lines
+      // later (and must not blit a wiped window first: that would show as a flash).
+      //
+      // Deliberately NOT gated on painted().  lock() calls _reset() first, which recreates the buffer and so
+      // clears _painted, so a guard here would skip exactly the erase that matters.  The OLED path below fills
+      // its rect unconditionally too, and the clock owns this rectangle for its whole life - so the two families
+      // behave identically.
+      // An erase that does not take is worth being able to read, so the diagnostic stays under WIDGET_DEBUG: it
+      // prints the window in PANEL coordinates, the framebuffer's own size, and whether the panel ever received
+      // it.  _left()/_top() are BUFFER coordinates - a clock at top 218 with a 70 px cell lives at panel y 148 -
+      // so it is this pair, not those, that matters when the rectangle is the suspect.
+      #ifdef WIDGET_DEBUG
+        FUNCTIONLOG("Widgets.debug", "erase=FRAMEBUFFER active=%d locked=%d win=%d,%d %dx%d fb=%dx%d push=%d painted=%d",
+                    (int)isActive(), (int)locked(), (int)_clockleft, (int)(_config.top - _timeheight),
+                    (int)_clockwidth, (int)(_clockheight + 1), (int)_fb->width(), (int)_fb->height(),
+                    (int)push, (int)_fb->painted());
+      #endif
+      _fb->clear();
+      if (push) _fb->display();
+      return;
+    }
   #endif
-  if (_cf.font == nullptr)
+  if (_cf.font == nullptr) {
+    #ifdef WIDGET_DEBUG
+      FUNCTIONLOG("Widgets.debug", "erase=fillRect active=%d locked=%d rect=%d,%d %ux%u",
+                  (int)isActive(), (int)locked(), (int)_left(), (int)_top(),
+                  (unsigned)(_clockwidth+1), (unsigned)(_clockheight+1));
+    #endif
     dsp.fillRect(_left(), _top(), _clockwidth+1, _clockheight+1, bgColor);
-  else
+  } else {
+    #ifdef WIDGET_DEBUG
+      FUNCTIONLOG("Widgets.debug", "erase=fillRect active=%d locked=%d rect=%d,%d %ux%u",
+                  (int)isActive(), (int)locked(), (int)_left(), (int)(_top()-_timeheight),
+                  (unsigned)(_clockwidth+2), (unsigned)(_clockheight+1));
+    #endif
     dsp.fillRect(_left(), _top()-_timeheight, _clockwidth+2, _clockheight+1, bgColor);
+  }
 }
 
 void ClockWidget::draw(){
@@ -1142,7 +1175,7 @@ void ClockWidget::_draw(){
 
 void ClockWidget::_reset(){
   if(!_present) return;   // omit-by-layout: _fb was never created, so there is nothing to reset
-  // _getTimeBounds() derives _clockleft/_clockwidth from _config.left and align, and _left() returns _clockleft on
+  // _getTimeBounds() derives _clockleft/_clockwidth from _config.offset and align, and _left() returns _clockleft on
   // non-framebuffer builds - so this has to run on every display, not just PSFBUFFER ones, or a moveTo()'s horizontal
   // component is silently ignored (the vertical one works, because _top() reads _config.top directly).
   _getTimeBounds();
@@ -1195,17 +1228,17 @@ void BitrateWidget::_draw(){
   if (!_active) return;
   _clear();
   if(!_active || (_format == BF_UNKNOWN && _bitrate==0)) return;
-  dsp.drawRect(_config.left, _config.top, _dimension, _dimension, _fgcolor);
-  dsp.fillRect(_config.left, _config.top + _dimension/2, _dimension, _dimension/2, _fgcolor);
+  dsp.drawRect(_config.offset, _config.top, _dimension, _dimension, _fgcolor);
+  dsp.fillRect(_config.offset, _config.top + _dimension/2, _dimension, _dimension/2, _fgcolor);
   dsp.setFont();
   dsp.setTextSize(_config.textsize);
   dsp.setTextColor(_fgcolor, _bgcolor);
   if (_bitrate == 0) _buf[0] = '\0'; // work-around so we get blank space on badge instead of 0 (for VS1053)
     else snprintf(_buf, 6, "%d", _bitrate);
-  dsp.setCursor(_config.left + _dimension/2 - _charWidth*strlen(_buf)/2 + 1, _config.top + _dimension/4 - _textheight/2+1);
+  dsp.setCursor(_config.offset + _dimension/2 - _charWidth*strlen(_buf)/2 + 1, _config.top + _dimension/4 - _textheight/2+1);
   dsp.print(_buf);
   dsp.setTextColor(_bgcolor, _fgcolor);
-  dsp.setCursor(_config.left + _dimension/2 - _charWidth*3/2 + 1, _config.top + _dimension - _dimension/4 - _textheight/2);
+  dsp.setCursor(_config.offset + _dimension/2 - _charWidth*3/2 + 1, _config.top + _dimension - _dimension/4 - _textheight/2);
   switch(_format){
     case BF_MP3:  dsp.print("MP3"); break;
     case BF_AAC:  dsp.print("AAC"); break;
@@ -1218,7 +1251,7 @@ void BitrateWidget::_draw(){
 }
 
 void BitrateWidget::_clear() {
-  dsp.fillRect(_config.left, _config.top, _dimension, _dimension, _bgcolor);
+  dsp.fillRect(_config.offset, _config.top, _dimension, _dimension, _bgcolor);
 }
 
 
@@ -1228,37 +1261,44 @@ void BitrateWidget::_clear() {
 void PlayListWidget::init(ScrollWidget* current){
   Widget::init({0, 0, 0, WA_LEFT}, 0, 0);
   _current = current;
-#if PLAYLIST_MODE_PAGED
+  // The mode is a runtime option now, so both geometries are computed and _paged remembers the one init() took.  It
+  // is re-taken whenever the widget is re-inited, which is what APPLYSTATE does.
+  _paged = editorOpt(config.store.playlistPages);
   _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
-  _plPlaylistTop = TFT_FRAMEWDT;
-  _plPlaylistBottom = dsp.height() - TFT_FRAMEWDT;
-  uint16_t available = _plPlaylistBottom - _plPlaylistTop;
-  _plPageSize = available / _plItemHeight;
-  if (_plPageSize < 1) _plPageSize = 1;
-  uint16_t totalHeight = _plPageSize * _plItemHeight;
-  _plYStart = _plPlaylistTop + (available - totalHeight) / 2;
-  _plPageStart = 0;
-  _plPrevItem = 0;
-#else
-  _plItemHeight = playlistConf_ptr->widget.textsize*(CHARHEIGHT-1)+playlistConf_ptr->widget.textsize*4;
-  _plTtemsCount = round((float)dsp.height()/_plItemHeight);
-  if(_plTtemsCount%2==0) _plTtemsCount++;
-  _plCurrentPos = _plTtemsCount/2;
-  _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf_ptr->widget.textsize*2;
-#endif
+  if (_paged) {
+    _plPlaylistTop = TFT_BORDER;
+    _plPlaylistBottom = dsp.height() - TFT_BORDER;
+    uint16_t available = _plPlaylistBottom - _plPlaylistTop;
+    _plPageSize = available / _plItemHeight;
+    if (_plPageSize < 1) _plPageSize = 1;
+    uint16_t totalHeight = _plPageSize * _plItemHeight;
+    _plYStart = _plPlaylistTop + (available - totalHeight) / 2;
+    _plPageStart = 0;
+    _plPrevItem = 0;
+  } else {
+    _plTtemsCount = round((float)dsp.height()/_plItemHeight);
+    if(_plTtemsCount%2==0) _plTtemsCount++;
+    _plCurrentPos = _plTtemsCount/2;
+    _plYStart = (dsp.height() / 2 - _plItemHeight / 2) - _plItemHeight * (_plTtemsCount - 1) / 2 + playlistConf_ptr->widget.textsize*2;
+  }
+}
+
+// currentTop() used to be two inline bodies behind one #if.  It is one function with both shapes now, because the
+// option is runtime: both of them position the playlist highlight, so it takes the branch init() took.
+uint16_t PlayListWidget::currentTop() {
+  if (!_paged) return _plYStart + _plCurrentPos * _plItemHeight;
+  if (_plPrevItem == 0) return _plYStart;
+  uint8_t slot = (_plPrevItem - _plPageStart);
+  return _plYStart + slot * _plItemHeight;
 }
 
 // --- Dispatcher ---
 void PlayListWidget::drawPlaylist(uint16_t currentItem) {
-#if PLAYLIST_MODE_PAGED
-  _drawPaged(currentItem);
-#else
-  _drawFade(currentItem);
-#endif
+  if (_paged) _drawPaged(currentItem);
+  else        _drawFade(currentItem);
 }
 
 // ==================== FADE MODE (original centered) ====================
-#if !PLAYLIST_MODE_PAGED
 
 uint8_t PlayListWidget::_fillPlMenu(int from, uint8_t count) {
   static char names[31][STATION_FIELD_LENGTH / 2];
@@ -1290,16 +1330,13 @@ void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
   } else {
     uint8_t plColor = (abs(pos - _plCurrentPos)-1)>4?4:abs(pos - _plCurrentPos)-1;
     dsp.setTextColor(config.theme.playlist[plColor], config.theme.background);
-    dsp.setCursor(TFT_FRAMEWDT, _plYStart + pos * _plItemHeight);
+    dsp.setCursor(TFT_BORDER, _plYStart + pos * _plItemHeight);
     dsp.fillRect(0, _plYStart + pos * _plItemHeight - 1, dsp.width(), _plItemHeight - 2, config.theme.background);
     dsp.print(item);
   }
 }
 
-#endif // FADE MODE
-
 // ==================== PAGED MODE ====================
-#if PLAYLIST_MODE_PAGED
 
 void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name){
   dsp.setTextSize(playlistConf_ptr->widget.textsize);
@@ -1307,13 +1344,13 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
   int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize;
   if (selected) {
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentbg);
-    dsp.fillRect(TFT_FRAMEWDT, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);
+    dsp.fillRect(TFT_BORDER, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);
     dsp.setTextColor(config.theme.plcurrent, config.theme.plcurrentbg);
   } else {
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.background);
     dsp.setTextColor(config.theme.playlist[0], config.theme.background);
   }
-  dsp.setCursor(TFT_FRAMEWDT, textY);
+  dsp.setCursor(TFT_BORDER, textY);
   if (name && name[0] != '\0') {
     if (config.store.numplaylist) {
       char label[STATION_FIELD_LENGTH / 2 + 6];
@@ -1361,8 +1398,6 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
     _printPLitemPaged(itemIndex, _plYStart + i * _plItemHeight, itemIndex == currentItem, names[i]);
   }
 }
-
-#endif // PAGED MODE
 
 
 #endif // #if DSP_MODEL!=DSP_DUMMY

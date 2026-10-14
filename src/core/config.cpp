@@ -22,6 +22,7 @@
 #include "../displays/dspcore.h"
 #include "../displays/themes.h"
 #include "../displays/themeregistry.h"
+#include "../displays/layoutregistry.h"
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
@@ -33,10 +34,8 @@ const char* const Config::wwwFiles[] = {"options.js", "script.js", "script2.js",
                                         "editor.html", "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
 const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 
-// The theme slots are optional files rather than required ones, so they are here purely to keep
-// pruneLittleFS() from deleting them: that function compares each /data file's basename against this
-// list, which is why THEME_SLOT_FILES holds bare names and not paths.
-const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, THEME_SLOT_FILES};
+const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, THEME_SLOT_FILES, LAYOUT_SLOT_FILES};
+// The theme and layout slots are optional files rather than required ones, so they are here purely to keep pruneLittleFS() from deleting them
 const size_t Config::dataFilesCount = sizeof(Config::dataFiles) / sizeof(Config::dataFiles[0]);
 
 #if defined(SPI_BUS_SECONDARY)
@@ -410,6 +409,7 @@ void Config::initPlaylistMode() {
 
 void Config::_initHW() {
   loadTheme();
+  loadLayout();
   #if IR_PIN!=255
     loadIR();
   #endif
@@ -435,6 +435,16 @@ void Config::loadTheme() {
   #endif
 }
 
+void Config::loadLayout() {
+  // Through the registry for the same reason loadTheme() is: the id may name a user slot, and it may name
+  // one whose file has since been deleted, so layoutValidId() resolves it to something real or to 0.  The
+  // values themselves are read by the display task, which copies from this same id into activeLayout.
+  // A build with no display has no registry and no layouts at all, so the stored id is left exactly as it was.
+  #ifndef DUMMYDISPLAY
+    config.store.layoutId = layoutValidId(config.store.layoutId);
+  #endif
+}
+
 void Config::defaultSettings(const char *val, uint8_t clientId) {
   if (strcmp(val, "controls") == 0) {
     saveValue(&store.smartstart, (bool)SMART_START);
@@ -457,8 +467,10 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.systemFontId, (uint8_t)DISPLAYFONT);
     saveValue(&store.clockFontId, (uint8_t)CLOCKFONT);
     saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
+    saveValue(&store.playlistPages, (bool)PLAYLIST_MODE_PAGED);
     saveValue(&store.clock12, (bool)CLOCK_TWELVE);
     saveValue(&store.clockglow, (bool)CLOCKGLOW);
+    saveValue(&store.pretextALLCAPS, (bool)PRETEXT_ALLCAPS);
     saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
     saveValue(&store.vumeter, (bool)SHOW_VU_METER);
@@ -1026,6 +1038,8 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(systemFontId, "sysfont"),
   CONFIG_KEY_ENTRY(clockFontId, "clockfont"),
   CONFIG_KEY_ENTRY(clockglow, "clockglow"),
+  CONFIG_KEY_ENTRY(playlistPages, "plpaged"),
+  CONFIG_KEY_ENTRY(pretextALLCAPS, "allcaps"),
   CONFIG_KEY_ENTRY(brightness, "bright"),
   CONFIG_KEY_ENTRY(screensaverEnabled, "scrnsvren"),
   CONFIG_KEY_ENTRY(screensaverBlank, "scrnsvrbl"),

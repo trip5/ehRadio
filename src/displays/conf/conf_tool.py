@@ -19,6 +19,7 @@ MASTER TEMPLATE:  ../widgets/widgetsconfig.h   (struct LayoutData, struct BootDa
 
 USAGE:
     py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]
+    py conf_tool.py --fromjson <layout.json> [--name "Name"] [--target <file.h>] [--dry-run]
     py conf_tool.py --check [<conf_file>] [--strict]
     py conf_tool.py --import <conf_file> --name "Name" [--target <file.h>] [--dry-run]
 
@@ -173,6 +174,13 @@ class Master:
             self._parse_struct(sname, attr)
         if not self.layout:
             die(f"master '{path}' has no struct LayoutData - cannot continue")
+        # A phantom field is worse than a missing one: it is emitted into every conf, and the build then fails on a
+        # designated initialiser for a member that does not exist.  The struct states its own count just below, so
+        # the parse checks itself against it rather than trusting the scan.
+        m = re.search(r'#define\s+LAYOUT_FIELD_COUNT\s+(\d+)', self.text)
+        if m and len(self.layout) != int(m.group(1)):
+            die(f"master '{path}': parsed {len(self.layout)} LayoutData field(s) where LAYOUT_FIELD_COUNT says "
+                f"{m.group(1)} - a comment inside the struct probably carries an unbalanced brace")
 
     def _parse_struct(self, name, attr):
         lines = self.text.split('\n')
@@ -187,7 +195,10 @@ class Master:
         while i < len(lines):
             raw = lines[i]
             s = raw.strip()
-            depth += raw.count('{') - raw.count('}')
+            # count_braces(), NOT raw.count(): a section header inside the struct carries braces in a COMMENT, and
+            # `/* MOVES   { left, top, width */` never closes its own.  Counting the raw text walks the depth upwards
+            # so the struct never ends, and every later `type name;` in the file is then read as a member.
+            depth += count_braces(raw)
             if s.startswith('/*') and not s.endswith('*/'):
                 block = [s]
                 i += 1
@@ -277,7 +288,7 @@ def trunc_name(n):
 def count_braces(line):
     """Brace delta of one line, ignoring braces inside comments.
 
-    The section headers carry {{ left, top, fontsize, align }, buffsize, ... } and there is one
+    The section headers carry {{ offset, top, fontsize, align }, width, ... } and there is one
     per group in every entry, so counting the raw text walks the depth upwards for ever and no
     block ever closes."""
     s = re.sub(r'/\*.*?\*/', '', line)
@@ -370,6 +381,40 @@ def trim_bands_conf(val):
     return val
 
 
+def trim_scroll_conf(val):
+    """ScrollConfig no longer carries buffsize or uppercase, and an old source still passes both - emitting
+    them verbatim is a "too many initializers" error.  The buffer is WIDGET_BUFF_SIZE in options.h (every conf
+    wrote the same 140) and uppercase never did anything (PRETEXT_ALLCAPS replaced it), so both are dropped.
+
+    The leading widget group is kept whole, because it has braces of its own; only a remainder of exactly the
+    old six parts is trimmed, and a comment anywhere in it stops the trim so a value a human wrote is never
+    silently rearranged."""
+    s = val.strip()
+    if not (s.startswith('{') and s.endswith('}')):
+        return val
+    m = re.match(r'^(\{[^}]*\})\s*,?\s*(.*)$', s[1:-1].strip(), re.S)
+    if not m:
+        return val
+    group, tail = m.group(1), m.group(2)
+    if '//' in tail or '/*' in tail:
+        return val
+    rest = [p.strip() for p in tail.split(',') if p.strip()]
+    if len(rest) != 6:
+        return val
+    return '{{ ' + group[1:-1].strip() + ' }, ' + ', '.join(rest[2:]) + ' }'
+
+
+def force_vu_boombox(value):
+    """A BOOMBOX_STYLE variant's VU orientation: the fourth cell of vuConf, set to WA_CENTER.
+
+    `boomboxVU` was a field of its own until round 4 folded the two VU transform booleans into
+    `vuConf.align`, so an old `#ifdef BOOMBOX_STYLE` block now selects the boombox by orientation instead."""
+    m = re.match(r'^(\{\s*[^,{}]+\s*,\s*[^,{}]+\s*,\s*[^,{}]+\s*,\s*)([^,{}]+)(\s*\})$', value.strip())
+    if not m:
+        return value
+    return m.group(1) + 'WA_CENTER' + m.group(3)
+
+
 # ------------------------------------------------------------------------------
 #  The retired `width = -1` in a MOVE
 # ------------------------------------------------------------------------------
@@ -405,11 +450,11 @@ def _brace_parts(value):
     return [p.strip() for p in m.group(1).split(',')]
 
 
-def _widget_left_top(owner_value):
-    """The left/top pair out of a WidgetConfig or a ScrollConfig initialiser, verbatim, else None.
+def _widget_offset_top(owner_value):
+    """The offset/top pair out of a WidgetConfig or a ScrollConfig initialiser, verbatim, else None.
 
-    WidgetConfig is `{ left, top, textsize, align }`; ScrollConfig wraps one: `{ { left, top, ... },
-    buffsize, ... }`.  So: take the nested widget group when there is one, its first two parts always."""
+    WidgetConfig is `{ offset, top, textsize, align }`; ScrollConfig wraps one: `{ { offset, top, ... },
+    width, ... }`.  So: take the nested widget group when there is one, its first two parts always."""
     v = _clean_value(owner_value)
     m = re.search(r'\{\s*\{([^}]*)\}', v)
     parts = ([p.strip() for p in m.group(1).split(',')] if m
@@ -423,13 +468,13 @@ def expand_move(move_value, owner_value):
     """The owner's own coordinates for a MOVE still written with the retired `width = -1`.
 
     None means "nothing to do": no `-1`, no owner, or an owner the tool cannot read.  An owner at
-    `left = 0, top = 0` is also left alone, because its copy would read `{ 0, 0, 0 }` - the `{ }`
+    `offset = 0, top = 0` is also left alone, because its copy would read `{ 0, 0, 0 }` - the `{ }`
     spelling for "yield to the VU" - and quietly turning "stay put" into "disappear" is worse than
     leaving one line for the author to look at."""
     mv = _brace_parts(move_value)
     if not mv or len(mv) != 3 or mv[2] != '-1':
         return None
-    own = _widget_left_top(owner_value)
+    own = _widget_offset_top(owner_value)
     if own is None:
         return None
     if own[0] == '0' and own[1] == '0':
@@ -579,7 +624,17 @@ class BlockModel:
             out.extend(self.prefix.get(field, []))
             if field in self.values:
                 comment = self._field_comment(field)
-                line = f'{self.indent}.{field:19s} = {self.values[field]},'
+                # A value that is a whole initialiser can carry a dropped member inside it, which clean's
+                # field-level pass cannot see - so the two that were dropped are trimmed here.
+                value = self.values[field]
+                if self.master.type.get(field) == 'ScrollConfig':
+                    value = trim_scroll_conf(value)
+                # A MOVE whose cells are all zero is the same value as `{ }`, which is how the confs spell it, so a
+                # `{ 0, 0, 0 }` written by hand or by an older import is normalised here.  Any comment it carries -
+                # "clock disappears when VU is on" - is left alone.
+                elif self.master.type.get(field) == 'MoveConfig' and move_is_zero(value):
+                    value = MOVE_EMPTY_TEXT
+                line = f'{self.indent}.{field:19s} = {value},'
                 if comment:
                     line += ' ' + comment
                 out.append(line)
@@ -1070,11 +1125,9 @@ def emit_import_entry(name, configs, master, hidden_fields, boombox_style=False)
         if hdr is not None and gf.get(field):
             out.append(f'{indent}{hdr}')
         if ftype == 'bool':
-            # Written either way, so every entry lists every field.  A BoomBox variant carries the
-            # flag itself: the old format spelled it BOOMBOX_STYLE rather than a field.
-            on = (field == 'boomboxVU' and boombox_style) or str(vals.get(field, '')).lower() == 'true'
-            if field == 'boomboxVU' and on:
-                out.append(f'{indent}/* BOOMBOX VU: middle-out */')
+            # Written either way, so every entry lists every field.  A BoomBox variant is no longer a flag of
+            # its own: it is vuConf's orientation, applied to that value below.
+            on = str(vals.get(field, '')).lower() == 'true'
             out.append(f'{indent}.{field:19s} = {"true" if on else "false"},'
                        + ((' ' + master.comment[field]) if master.comment.get(field) else ''))
             continue
@@ -1087,6 +1140,10 @@ def emit_import_entry(name, configs, master, hidden_fields, boombox_style=False)
             value = normalise_value(vals[field])
             if field == 'bandsConf':
                 value = trim_bands_conf(value)
+            if ftype == 'ScrollConfig':
+                value = trim_scroll_conf(value)
+            if field == 'vuConf' and boombox_style:
+                value = force_vu_boombox(value)
             if field in MOVE_OWNERS:
                 # The retired `width = -1` arrives from a community conf too, so the import writes it
                 # out the same way the clean pass does - from this entry's own clockConf/weatherConf.
@@ -1094,13 +1151,19 @@ def emit_import_entry(name, configs, master, hidden_fields, boombox_style=False)
                 if expanded is not None:
                     print(f'  {name}: .{field} written out from the retired width -1: {value} -> {expanded}')
                     value = expanded
-            out.append(f'{indent}.{field:19s} = {value},')
+            # An empty field is already spelled the way the conf files spell it, comment and all, so its comma
+            # is inside the value and this line adds none.
+            out.append(f'{indent}.{field:19s} = {value}' + ('' if value == EMPTY_TEXT else ','))
             converted += 1
         else:
             out.append(f'{indent}.{field:19s} = {{ }},                                                   // <--------- NEEDS EDITING!')
             not_found += 1
     out.append('    },')
-    return '\n'.join(out), converted, not_found
+    # A community conf written before the rename spells the edge inset TFT_FRAMEWDT, and the cells come across
+    # verbatim, so the one name that changed is translated here.  This is the only macro name the tool handles
+    # at all now that reviving a number back into a name has been removed.
+    text = re.sub(r'\bTFT_FRAMEWDT\b', 'TFT_BORDER', '\n'.join(out))
+    return text, converted, not_found
 
 
 META_HAIRLINE_MAX = 3   # a fill this thin is a rule under the title; anything thicker is a band
@@ -1110,7 +1173,7 @@ def _fill_height(value):
     """The height of a FillConfig initialiser: 0 for an empty one, the number for a plain integer
     height, or None when the height is an expression we cannot read.
 
-    The initialiser is `{ { left, top, fontsize, align }, width, height, outlined }`, so the widget
+    The initialiser is `{ { offset, top, fontsize, align }, width, height, outlined }`, so the widget
     group is skipped and the remaining fields are split: width first, then the height.  The regex the
     old oled_swap() used for this (`}, <digits>, <bool>}`) cannot match that shape at all - the width
     sits between the brace and the height - which is why its height test never fired and only an
@@ -1372,6 +1435,187 @@ def run_import(community_path, name, target, dry_run, script_dir):
 
 
 # ==============================================================================
+#  From-JSON pass - a layout saved by the editor, back into a conf entry
+# ==============================================================================
+# The slot files the device stores hold NUMBERS, because no browser can validate a macro and no expression
+# can be validated at all.  This pass writes them back as numbers, which is what was stored:
+#
+#   { "metaConf": { "offset": 8, "top": 8, ... } }   ->   .metaConf = {{ 8, 8, ...
+#
+# The tool does NOT put macro NAMES back any more.  It used to revive an exact constant (`8` -> `TFT_FRAMEWDT`),
+# a divided one (`1000` -> `SCROLLDELAY/5`) and a small fraction (`25` -> `SCROLLTIME*5/4`), searching every
+# cell for any constant it happened to equal - which is how `numofbands = 10` came back as `TFT_FRAMEWDT` in a
+# shipped conf file.  A macro means something in the cells written for it and nothing in a cell that merely
+# shares its value, so a number stays a number.  The align names and the booleans are still spelled, because
+# those are names for an enum rather than for a number.
+
+# How a field's cells nest in C: the widget group gets braces of its own and the rest follow in the same
+# level.  The cell ORDER is never assumed - it comes from the document, which writes it in the conf file's
+# order - so this table only says which types carry a group.
+GROUPED_TYPES = ('ScrollConfig', 'FillConfig', 'BitrateConfig')
+ALIGN_NAMES = {0: 'WA_LEFT', 1: 'WA_CENTER', 2: 'WA_RIGHT'}
+BOOL_CELLS = ('outlined',)
+
+def _read_json(path):
+    import json
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _plain_number(val):
+    """A stored value written as the number it is.  A layout document holds numbers, so this is usually just
+    int(); anything else is written as it came, so a hand-made file cannot make the pass throw."""
+    try:
+        return str(int(val))
+    except (TypeError, ValueError):
+        return str(val)
+
+
+# The load-bearing lines are never abbreviated: an all-zero station or playlist line is a broken document, and
+# that has to stay visible as a value rather than hide behind a comment that reads "unused".
+REQUIRED_FIELDS = ('metaConf', 'playlistConf')
+# What an all-zero field is written as.  It is the spelling the conf files already use, comment and all, so it
+# is formatted as a whole and never has a comma appended to it.
+EMPTY_TEXT = '{ }, // unused'
+# A MOVE with every cell zero is written `{ }` as well, but with NO comment: the confs spell it that way for the same
+# reason, and for a MOVE the zeros are a value - hide while the meter runs, or "no move" for weatherMove - so calling
+# it "unused" would be a lie.
+MOVE_EMPTY_TEXT = '{ }'
+
+
+def move_is_zero(text):
+    """True when a MOVE's stored text is all zeros, which is the same value `{ }` spells.  An expression is not a
+    zero and is left exactly as it was found."""
+    inner = text.strip()
+    if inner.startswith('{') and inner.endswith('}'):
+        inner = inner[1:-1].strip()
+    if inner == '':
+        return True
+    for part in inner.split(','):
+        try:
+            if int(part.strip()) != 0:
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def is_empty_field(field, ftype, v):
+    """The device's own rule, and there is only ONE of it now: every cell zero means absent, which is also how
+    a conf spells it (`{ }`).  presentOf() in widgetsconfig.h is the same test in C++, and the editor's
+    per-card checkbox is the same statement made by hand.
+
+    A cell the document leaves out reads as 0, the rule for a document that leaves a key out.  A MOVE counts as
+    empty now too - the confs and the editor both spell its zeros `{ }`, and only the COMMENT differs, which is the
+    caller's business (see MOVE_EMPTY_TEXT).  The two load-bearing lines, above, are still never abbreviated."""
+    if field in REQUIRED_FIELDS:
+        return False
+    for k in v:
+        val = v.get(k)
+        if (int(val) if isinstance(val, int) else (_num(val) or 0)) != 0:
+            return False
+    return True
+
+
+def entry_from_doc(doc, master):
+    """[(field, C text)] for every field the document carries, in master order.  Numbers stay numbers - nothing
+    here turns a value back into a macro name (see the pass comment above)."""
+    rec = doc.get('layout') if isinstance(doc.get('layout'), dict) else doc
+    out = []
+    for field, ftype in master.layout:
+        v = rec.get(field)
+        if v is None:
+            continue
+        if ftype == 'bool':
+            out.append((field, 'true' if v in (1, True, 'true') else 'false'))
+            continue
+        if not isinstance(v, dict):
+            continue
+        if is_empty_field(field, ftype, v):
+            # C zero-initialises the whole struct, so "nothing here" is a brace pair - the same spelling the conf
+            # files already use for a field that is present but makes nothing, which is exactly what the device
+            # means by an all-zero one.  A MOVE keeps the braces without the comment: for a MOVE the zeros are a
+            # value, so it is present and hiding rather than "unused".
+            out.append((field, MOVE_EMPTY_TEXT if ftype == 'MoveConfig' else EMPTY_TEXT))
+            continue
+        parts = []
+        for cell, val in v.items():
+            if cell in BOOL_CELLS:
+                parts.append('true' if val else 'false')
+            elif cell == 'align':
+                # WA_* is how the types that READ align spell it (the clock's centring, the VU's orientation).
+                # A fill's align cell draws nothing - the master header documents it as a literal 0 and that is
+                # what every conf file now carries - so the round trip writes the number back, not a name.
+                if ftype == 'FillConfig':
+                    parts.append(str(int(val)))
+                else:
+                    parts.append(ALIGN_NAMES.get(int(val), str(val)))
+            else:
+                parts.append(_plain_number(val))
+        if ftype in GROUPED_TYPES and len(parts) > 4:
+            text = '{{ ' + ', '.join(parts[:4]) + ' }, ' + ', '.join(parts[4:]) + ' }'
+        else:
+            text = '{ ' + ', '.join(parts) + ' }'
+        out.append((field, text))
+    return out
+
+
+def run_fromjson(json_path, name, target, dry_run, script_dir):
+    master = Master(os.path.join(script_dir, MASTER_REL))
+    if not os.path.exists(json_path):
+        die(f"file not found: {json_path}")
+    doc = _read_json(json_path)
+    if not isinstance(doc, dict):
+        die("that file is not a layout document (it is an array, so it is a backup - one at a time, please)")
+    m = re.match(r'^(\d+)x(\d+)$', str(doc.get('screen') or ''))
+    width, height = (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    if not name:
+        name = doc.get('name') or os.path.splitext(os.path.basename(json_path))[0]
+
+    if target:
+        out_name = os.path.basename(target)
+    else:
+        if width is None or height is None:
+            die("the document carries no \"screen\", so --target has to name the conf file")
+        cands = [f for f in os.listdir(script_dir)
+                 if re.match(rf'^display(TFT|OLED){width}x{height}conf\.h$', f)]
+        if len(cands) != 1:
+            die(f"{len(cands)} conf file(s) here match {width}x{height} - name one with --target")
+        out_name = cands[0]
+    target_full = os.path.join(script_dir, out_name)
+    if not os.path.exists(target_full):
+        # --import creates a conf file; this pass has a conf file's macros to read, so it has to exist.
+        die(f"{out_name} does not exist - use --import to create a conf file")
+
+    conf_text = read_text(target_full)
+    configs = entry_from_doc(doc, master)
+    if not configs:
+        die("the document carries no field this tool knows - is it a layout file?")
+
+    print(f"\nAppending {out_name} as \"{name}\"...")
+    et, conv, nf = emit_import_entry(trunc_name(name), configs, master, set())
+    print(f"  {trunc_name(name)}: {conv} values from the document, {nf} needing editing")
+
+    lines = conf_text.split('\n')
+    ls, le = find_block(lines, r'_layouts\[\]\s+PROGMEM\s*=\s*\{')
+    if ls is None:
+        die(f"{out_name} has no _layouts[]")
+    ns, ne = find_block(lines, r'_layoutNames\[\]\[\d+\]\s+PROGMEM\s*=\s*\{')
+    if ns is None:
+        die(f"{out_name} has no _layoutNames[]")
+    old_names = [l.strip().strip(',').strip('"') for l in lines[ns + 1:ne] if l.strip()]
+    names_block = [lines[ns]] + [f'    "{n}",' for n in old_names + [trunc_name(name)]] + ['};']
+    out = lines[:ns] + names_block + lines[ne + 1:]
+    shift = len(names_block) - (ne - ns + 1)
+    ls2, le2 = ls + shift, le + shift
+    # At the END of _layouts[], which is also the end of the array, so no layout's index moves and a
+    # persisted config.store.layoutId cannot come to mean a different layout.
+    out = out[:le2] + [et] + out[le2:]
+
+    finish(target_full, '\n'.join(out), dry_run, out_name)
+
+
+# ==============================================================================
 #  Check pass - intersecting rectangles
 # ==============================================================================
 # The player page is a set of widgets that each own a rectangle and paint the background inside it, so
@@ -1421,7 +1665,7 @@ def _num(text):
 
 
 def _outer_parts(value):
-    """The fields after the widget group: ScrollConfig (buffsize, upper, width...), FillConfig
+    """The fields after the widget group: ScrollConfig (width, scrolldelay...), FillConfig
     (width, height, outlined), BitrateConfig (dimension)."""
     v = _clean_value(value)
     m = re.match(r'^\{\s*\{[^}]*\}\s*,?\s*(.*?)\s*\}$', v, re.S)
@@ -1429,7 +1673,7 @@ def _outer_parts(value):
 
 
 def _group(value):
-    """The widget group of any config: [left, top, fontsize, align] as text, or None when the field is
+    """The widget group of any config: [offset, top, fontsize, align] as text, or None when the field is
     empty.  ScrollConfig / FillConfig / BitrateConfig wrap one; a WidgetConfig IS one."""
     v = _clean_value(value)
     if not v or re.fullmatch(r'\{\s*\}', v):
@@ -1440,8 +1684,8 @@ def _group(value):
 
 
 def _xy(group, align, width, screen_w):
-    """(x0, x1) for a widget whose own width is known.  `left` means different things per align, and
-    the tool can follow it only for a numeric `left`: an expression leaves the pair unknown."""
+    """(x0, x1) for a widget whose own width is known.  `offset` means different things per align, and
+    the tool can follow it only for a numeric `offset`: an expression leaves the pair unknown."""
     left, top = _num(group[0]), _num(group[1])
     if top is None:
         return None
@@ -1475,7 +1719,7 @@ def _box(field, model, screen_w):
     if field in ('metaConf', 'title1Conf', 'title2Conf', 'playlistConf', 'weatherConf'):
         # ScrollConfig: the WINDOW is the rectangle (width x fontsize*CHARHEIGHT) under every align -
         # _realLeft() only places the text inside it.
-        width = _num(outer[2]) if len(outer) > 2 else None
+        width = _num(outer[0]) if outer else None
         if width is None or size is None:
             return None
         x0, x1 = _xy(g, align, width, screen_w)
@@ -1483,7 +1727,7 @@ def _box(field, model, screen_w):
 
     if field in ('volbarConf', 'bufferbarConf', 'metaBGConf', 'metaBGConfInv',
                  'underLineConf', 'overLineConf', 'playlBGConf'):
-        # FillConfig: { { left, top, size, align }, width, height, outlined } - align is ignored.
+        # FillConfig: { { offset, top, size, align }, width, height, outlined } - align is ignored.
         if len(outer) < 2:
             return None
         w, h = _num(outer[0]), _num(outer[1])
@@ -1493,7 +1737,7 @@ def _box(field, model, screen_w):
         return (left, left + w, top, top + h, True)
 
     if field == 'fullbitrateConf':
-        # BitrateConfig: { { left, top, size, align }, dimension } - a square.
+        # BitrateConfig: { { offset, top, size, align }, dimension } - a square.
         if not outer:
             return None
         dim = _num(outer[0])
@@ -1503,8 +1747,8 @@ def _box(field, model, screen_w):
         return (left, left + dim, top, top + dim, True)
 
     if field == 'vuConf':
-        # VuConfig + BandsConfig: the box is bands.width*2 + bands.space by bands.height, and rotateVU
-        # swaps which axis is which.  The level axis is bands.width unless rotated.
+        # VuConfig + BandsConfig: the box is bands.width*2 + bands.space by bands.height, and the rotated
+        # orientation (vuConf.align == WA_RIGHT) swaps which axis is which.
         bands = model.values.get('bandsConf')
         b = _brace_parts(bands) if bands else None
         if not b or len(b) < 3:
@@ -1513,7 +1757,7 @@ def _box(field, model, screen_w):
         left = _num(g[0])
         if bw is None or bh is None or sp is None or left is None:
             return None
-        rot = str(model.values.get('rotateVU', 'false')).lower() == 'true'
+        rot = 'WA_RIGHT' in str(model.values.get('vuConf', ''))
         w = bh if rot else bw * 2 + sp
         h = bw * 2 + sp if rot else bh
         return (left, left + w, top, top + h, True)
@@ -1539,11 +1783,17 @@ def _box(field, model, screen_w):
 
 
 def _move_box(field, model, screen_w, move_field):
-    """The rectangle a MOVE puts its widget at, or the string 'hidden' for a `{ }` yield, or None when
-    the move does not apply (a MOVE that is empty does nothing, and neither does a `-1`)."""
+    """The rectangle a MOVE puts its widget at, or the string 'hidden' for a yield, or None when the move
+    cannot be read (an expression, or the retired `-1`).
+
+    `{ }` and a field that is not written at all are the SAME thing to the device: both are `MoveConfig` zeros,
+    and `moveZeroed()` reads those as the yield.  So both come back 'hidden' here too.  An earlier version
+    returned None for `{ }`, which left the widget on the page and under-reported its collisions - the bug the
+    round-7 `--clean` normalisation of a zeroed MOVE to `{ }` exposed (the OLED confs already spelled it that
+    way, so their reports were short too)."""
     mv = model.values.get(move_field)
-    if mv is None:
-        return None
+    if mv is None or re.fullmatch(r'\{\s*\}', _clean_value(mv)):
+        return 'hidden'                  # absent or `{ }`: the same zeros the device yields on
     parts = _brace_parts(mv)
     if not parts or len(parts) != 3:
         return None
@@ -1551,7 +1801,7 @@ def _move_box(field, model, screen_w, move_field):
     if x is None or y is None or w is None:
         return None
     if x == 0 and y == 0 and w == 0:
-        return 'hidden'                  # `{ }`: yields to the VU
+        return 'hidden'                  # `{ 0, 0, 0 }`, the other spelling of `{ }`
     if w < 0:
         return None                      # the retired spelling, still inert
     size = None
@@ -1599,7 +1849,9 @@ def _boxes_for_state(model, screen_w, kind):
                 boxes[field] = box
     elif kind == 'playing':
         box = _move_box('weatherConf', model, screen_w, 'weatherMove')
-        if isinstance(box, tuple):
+        if box == 'hidden':
+            boxes['weatherConf'] = None
+        elif isinstance(box, tuple):
             boxes['weatherConf'] = box
         boxes['vuConf'] = None
     else:
@@ -1724,12 +1976,14 @@ def main():
         print("  py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]")
         print("  py conf_tool.py --check [<conf_file>] [--strict]")
         print("  py conf_tool.py --import <conf_file> --name \"Name\" [--dry-run]")
+        print("  py conf_tool.py --fromjson <layout.json> [--name \"Name\"] [--dry-run]")
         print("Run with --help for the full help (also the top of this file).")
         sys.exit(2)
 
     clean = '--clean' in argv
     check = '--check' in argv
     do_import = '--import' in argv
+    do_fromjson = '--fromjson' in argv
     dry_run = '--dry-run' in argv
     strict = '--strict' in argv
     comments = 'keep'
@@ -1751,6 +2005,10 @@ def main():
             if i + 1 >= len(argv):
                 die("--import requires a conf file")
             source = argv[i + 1]; i += 2; continue
+        if a == '--fromjson':
+            if i + 1 >= len(argv):
+                die("--fromjson requires a layout file")
+            source = argv[i + 1]; i += 2; continue
         if a == '--comments':
             if i + 1 >= len(argv):
                 die("--comments requires a value: " + ' or '.join(COMMENT_MODES))
@@ -1771,8 +2029,8 @@ def main():
         die(f"unknown --comments value '{comments}' - use one of: {', '.join(COMMENT_MODES)}")
     if do_import and comments != 'keep':
         die("--comments applies to --clean: --import already writes the master's comments")
-    if (clean + do_import + check) > 1:
-        die("--clean, --check and --import are separate modes - run one at a time")
+    if (clean + do_import + check + do_fromjson) > 1:
+        die("--clean, --check, --import and --fromjson are separate modes - run one at a time")
     if do_import and not name:
         die("--import requires --name \"Name\"")
     if strict and not check:
@@ -1784,8 +2042,10 @@ def main():
         run_check(script_dir, check_file, strict)
     elif do_import:
         run_import(source, name, target, dry_run, script_dir)
+    elif do_fromjson:
+        run_fromjson(source, name, target, dry_run, script_dir)
     else:
-        die("no mode given - use --clean, --check or --import (see --help)")
+        die("no mode given - use --clean, --check, --import or --fromjson (see --help)")
 
 
 if __name__ == '__main__':

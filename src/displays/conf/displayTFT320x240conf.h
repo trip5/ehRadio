@@ -5,22 +5,22 @@
 #ifndef displayTFT320x240conf_h
 #define displayTFT320x240conf_h
 
-#define TFT_FRAMEWDT    8
-#define MAX_WIDTH       DSP_WIDTH-TFT_FRAMEWDT*2
+#define TFT_BORDER    8
+#define MAX_WIDTH       DSP_WIDTH-TFT_BORDER*2
 #define BOOTLOGOTOP     68
 
 const BootData _bootConfig PROGMEM = {
-        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
-        .apTitleConf         = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_CENTER }, 140, false, MAX_WIDTH, 0, 3, SCROLLTIME },
-        .apSettConf          = {{ TFT_FRAMEWDT, 240-TFT_FRAMEWDT-16, 2, WA_LEFT }, 140, false, MAX_WIDTH, 0, 2, SCROLLTIME },
-        /* LINES + RECTANGLES  {{ left, top, fontsize, align }, width, height, outlined } */
-        .apTitleBGConf       = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 38, false },
-        /* WIDGETS             { left, top, fontsize, align } */
+        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
+        .apTitleConf         = {{ TFT_BORDER, TFT_BORDER, 3, WA_CENTER }, MAX_WIDTH, 0, 3, SCROLLTIME },
+        .apSettConf          = {{ TFT_BORDER, 240-TFT_BORDER-16, 2, WA_LEFT }, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
+        .apTitleBGConf       = {{ 0, 0, 0, 0 }, DSP_WIDTH, 38, false },
+        /* WIDGETS             { offset, top, fontsize, align } */
         .bootstrConf         = { 0, 182, 1, WA_CENTER },
-        .apNameConf          = { TFT_FRAMEWDT, 66, 2, WA_CENTER },
-        .apName2Conf         = { TFT_FRAMEWDT, 90, 2, WA_CENTER },
-        .apPassConf          = { TFT_FRAMEWDT, 130, 2, WA_CENTER },
-        .apPass2Conf         = { TFT_FRAMEWDT, 154, 2, WA_CENTER },
+        .apNameConf          = { TFT_BORDER, 66, 2, WA_CENTER },
+        .apName2Conf         = { TFT_BORDER, 90, 2, WA_CENTER },
+        .apPassConf          = { TFT_BORDER, 130, 2, WA_CENTER },
+        .apPass2Conf         = { TFT_BORDER, 154, 2, WA_CENTER },
         .bootWdtConf         = { 0, 162, 1, WA_CENTER },
         /* BOOT PROGRESS       { frame interval, line character width, progress characters } */
         .bootPrgConf         = { 90, 14, 4 },
@@ -35,95 +35,90 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
-        .title1Conf          = {{ TFT_FRAMEWDT, 48, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
-        .title2Conf          = {{ TFT_FRAMEWDT, 72, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
-        .playlistConf        = {{ TFT_FRAMEWDT, 112, 2, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
-        .weatherConf         = {{ TFT_FRAMEWDT, 87, 2, WA_LEFT }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME },
-        /* SLIDER BARS         {{ left, top, fontsize, align }, width, height, outlined } */
-        .volbarConf          = {{ TFT_FRAMEWDT, 240-TFT_FRAMEWDT-6, 0, WA_LEFT }, MAX_WIDTH, 6, true },
-        .bufferbarConf       = {{ 0, 239, 0, WA_LEFT }, DSP_WIDTH, 1, false },
-        /* LINES + RECTANGLES  {{ left, top, fontsize, align }, width, height, outlined } */
-        .metaBGConf          = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 38, false },
-        .metaBGConfInv       = {{ 0, 38, 0, WA_LEFT }, DSP_WIDTH, 1, false },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
+        .title1Conf          = {{ TFT_BORDER, 48, 2, WA_LEFT }, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = {{ TFT_BORDER, 72, 2, WA_LEFT }, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
+        .weatherConf         = {{ TFT_BORDER, 87, 2, WA_LEFT }, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
+        .volbarConf          = {{ TFT_BORDER, 240-TFT_BORDER-6, 0, 0 }, MAX_WIDTH, 6, true },
+        .bufferbarConf       = {{ 0, 239, 0, 0 }, DSP_WIDTH, 1, false },
+        /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
+        .metaBGConf          = {{ 0, 0, 0, 0 }, DSP_WIDTH, 38, false },
+        .metaBGConfInv       = {{ 0, 38, 0, 0 }, DSP_WIDTH, 1, false },
         .underLineConf       = { }, // unused
         .overLineConf        = { }, // unused
-        .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
-        /* WIDGETS             { left, top, fontsize, align } */
+        .playlBGConf         = {{ 0, 107, 0, 0 }, DSP_WIDTH, 24, false },
+        /* WIDGETS             { offset, top, fontsize, align } */
         //.bitrateConf         = { 70, 191, 1, WA_LEFT },
         .bitrateConf         = { }, // unused
         .voltxtConf          = { 0, 214, 1, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, 214, 1, WA_LEFT },
-        .iptxtConf           = { TFT_FRAMEWDT, 214, 1, WA_LEFT },
-        .rssiConf            = { TFT_FRAMEWDT, 208, 2, WA_RIGHT },
-        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .iptxtConf           = { TFT_BORDER, 214, 1, WA_LEFT },
+        .rssiConf            = { TFT_BORDER, 208, 2, WA_RIGHT },
+        /* NUMBERS FONT        { offset, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
         .numConf             = { 0, 150, 3, WA_CENTER },
         .clockConf           = { 8, 176, 3, WA_RIGHT },
-        /* VU BARS WIDGET      { left, top, 1, align } */
-        .vuConf              = { TFT_FRAMEWDT, 100, 1, WA_LEFT },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
-        .fullbitrateConf     = {{ DSP_WIDTH-TFT_FRAMEWDT-34, 43, 2, WA_LEFT }, 42 },
+        /* VU BARS WIDGET      { offset, top, 0, align (WA_LEFT=default / WA_CENTER=boombox / WA_RIGHT=rotate 90) } */
+        .vuConf              = { TFT_BORDER, 100, 0, WA_LEFT },
+        /* CODEC BADGE         {{ offset, top, fontsize, align }, dimension} */
+        .fullbitrateConf     = {{ DSP_WIDTH-TFT_BORDER-34, 43, 2, WA_LEFT }, 42 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 24, 100, 4, 2, 10 },
-        /* MOVES               { left, top, width */
+        /* MOVES               { left, top, width } */
         .clockMove           = { 8, 176, 0 },
-        .weatherMove         = { TFT_FRAMEWDT, 97, MAX_WIDTH },
-        .weatherMoveVU       = { 70, 97, MAX_WIDTH-70+TFT_FRAMEWDT },
+        .weatherMove         = { TFT_BORDER, 97, MAX_WIDTH },
+        .weatherMoveVU       = { 70, 97, MAX_WIDTH-70+TFT_BORDER },
         /* TRANSFORMS          boolean */
         .fullClock           = true, // the divider and the day/date column right of the time
         .seconds             = true, // the seconds block right of the time
-        .boomboxVU           = false, // VU drawn as a "boombox" horizontal meter
-        .rotateVU            = false, // VU rotated 90 degrees
         .shareWeatherIP      = false, // IP and weather share the same row
         .shareBattRSSI       = false, // RSSI and battery share the same row
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // BoomBox (VaraiTamas)
-        /* SCROLLS             {{ left, top, fontsize, align }, buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_FRAMEWDT, TFT_FRAMEWDT, 3, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
-        .title1Conf          = {{ TFT_FRAMEWDT, 48, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
-        .title2Conf          = {{ TFT_FRAMEWDT, 72, 2, WA_LEFT }, 140, true, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
-        .playlistConf        = {{ TFT_FRAMEWDT, 112, 2, WA_LEFT }, 140, true, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
-        .weatherConf         = {{ TFT_FRAMEWDT, 87, 2, WA_CENTER }, 140, true, MAX_WIDTH, 0, 2, SCROLLTIME },
-        /* SLIDER BARS         {{ left, top, fontsize, align }, width, height, outlined } */
-        .volbarConf          = {{ TFT_FRAMEWDT, 240-TFT_FRAMEWDT-6, 0, WA_LEFT }, MAX_WIDTH, 4, true },
-        .bufferbarConf       = {{ 0, 239, 0, WA_LEFT }, DSP_WIDTH, 1, false },
-        /* LINES + RECTANGLES  {{ left, top, fontsize, align }, width, height, outlined } */
-        .metaBGConf          = {{ 0, 0, 0, WA_LEFT }, DSP_WIDTH, 38, false },
-        .metaBGConfInv       = {{ 0, 38, 0, WA_LEFT }, DSP_WIDTH, 1, false },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, SCROLLDELAY, 3, SCROLLTIME*5/4 },
+        .title1Conf          = {{ TFT_BORDER, 48, 2, WA_LEFT }, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .title2Conf          = {{ TFT_BORDER, 72, 2, WA_LEFT }, MAX_WIDTH-44, SCROLLDELAY, 2, SCROLLTIME },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
+        .weatherConf         = {{ TFT_BORDER, 87, 2, WA_CENTER }, MAX_WIDTH, 0, 2, SCROLLTIME },
+        /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
+        .volbarConf          = {{ TFT_BORDER, 240-TFT_BORDER-6, 0, 0 }, MAX_WIDTH, 4, true },
+        .bufferbarConf       = {{ 0, 239, 0, 0 }, DSP_WIDTH, 1, false },
+        /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
+        .metaBGConf          = {{ 0, 0, 0, 0 }, DSP_WIDTH, 38, false },
+        .metaBGConfInv       = {{ 0, 38, 0, 0 }, DSP_WIDTH, 1, false },
         .underLineConf       = { },
         .overLineConf        = { },
-        .playlBGConf         = {{ 0, 107, 0, WA_LEFT }, DSP_WIDTH, 24, false },
-        /* WIDGETS             { left, top, fontsize, align } */
-        //.bitrateConf         = { TFT_FRAMEWDT, 148, 1, WA_RIGHT },
+        .playlBGConf         = {{ 0, 107, 0, 0 }, DSP_WIDTH, 24, false },
+        /* WIDGETS             { offset, top, fontsize, align } */
+        //.bitrateConf         = { TFT_BORDER, 148, 1, WA_RIGHT },
         .bitrateConf         = { }, // unused
         // ??? chtxtConf     = { 210 ,214, 1, WA_LEFT };
         .voltxtConf          = { 0, 214, 1, WA_CENTER },
         .batteryConf         = { (DSP_WIDTH*2)/3+2, 214, 1, WA_LEFT },
-        .iptxtConf           = { TFT_FRAMEWDT, 214, 1, WA_LEFT },
-        .rssiConf            = { TFT_FRAMEWDT, 214-6, 2, WA_RIGHT },
-        /* NUMBERS FONT        { left, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
+        .iptxtConf           = { TFT_BORDER, 214, 1, WA_LEFT },
+        .rssiConf            = { TFT_BORDER, 214-6, 2, WA_RIGHT },
+        /* NUMBERS FONT        { offset, top, fontsize (1=15/10, 2=35/15, 3=52/21, 4=70/28), align } */
         .numConf             = { 0, 120+30, 3, WA_CENTER },
-        .clockConf           = { TFT_FRAMEWDT, 170, 3, WA_RIGHT },
-        /* VU BARS WIDGET      { left, top, 1, align } */
-        .vuConf              = { 24, 198, 1, WA_CENTER },
-        /* CODEC BADGE         {{ left, top, fontsize, align }, dimension} */
-        // ??? namedayConf   = { TFT_FRAMEWDT, 139, 1, WA_LEFT };
-        // ??? dateConf      = { TFT_FRAMEWDT *2, 169, 1, WA_LEFT };
+        .clockConf           = { TFT_BORDER, 170, 3, WA_RIGHT },
+        /* VU BARS WIDGET      { offset, top, 0, align (WA_LEFT=default / WA_CENTER=boombox / WA_RIGHT=rotate 90) } */
+        .vuConf              = { 24, 198, 0, WA_CENTER },
+        /* CODEC BADGE         {{ offset, top, fontsize, align }, dimension} */
+        // ??? namedayConf   = { TFT_BORDER, 139, 1, WA_LEFT };
+        // ??? dateConf      = { TFT_BORDER *2, 169, 1, WA_LEFT };
         .fullbitrateConf     = {{ 8, 124, 2, WA_LEFT }, 41 },
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
         .bandsConf           = { 130, 5, 4, 2, 20 },
-        /* MOVES               { left, top, width */
-        .clockMove           = { TFT_FRAMEWDT, 170, 0 },
+        /* MOVES               { left, top, width } */
+        .clockMove           = { TFT_BORDER, 170, 0 },
         .weatherMove         = { 10, 95, MAX_WIDTH },
-        .weatherMoveVU       = { TFT_FRAMEWDT, 95, MAX_WIDTH },
+        .weatherMoveVU       = { TFT_BORDER, 95, MAX_WIDTH },
         /* TRANSFORMS          boolean */
         .fullClock           = true, // the divider and the day/date column right of the time
         .seconds             = true, // the seconds block right of the time
-        /* BOOMBOX VU: middle-out */
-        .boomboxVU           = true, // VU drawn as a "boombox" horizontal meter
-        .rotateVU            = false, // VU rotated 90 degrees
         .shareWeatherIP      = false, // IP and weather share the same row
         .shareBattRSSI       = false, // RSSI and battery share the same row
         .rssiDigit           = false, // signal drawn as a number, not bars
@@ -132,7 +127,7 @@ const LayoutData _layouts[] PROGMEM = {
 
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
-const char rssiFmt[]              PROGMEM = "WiFi %d";
+const char rssiFmt[]              PROGMEM = "WiFi %d%%";
 const char iptxtFmt[]             PROGMEM = "\037 %s";
 const char voltxtFmt[]            PROGMEM = "%d";
 const char batterytxtFmt[] PROGMEM = "%d%%";

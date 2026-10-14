@@ -6,6 +6,12 @@
 
 static constexpr uint32_t DSP_QUEUE_TICKS = 0; // xQueueReceive timeout inside display.loop(): 0 = non-blocking poll
 
+// What a re-init reads its two halves from.  The stored ids are the ordinary path; a staged variant is an
+// editor preview, where the web handler has already parsed the new document into a scratch copy.  They are
+// separate modes rather than one flag because the two previews stage different things: a theme preview must
+// keep the stored layout, and a layout preview must keep the live theme.
+enum applyMode_e : uint8_t { APPLY_STORED = 0, APPLY_STAGED_THEME, APPLY_STAGED_LAYOUT };
+
 #ifndef DUMMYDISPLAY
 class ScrollWidget;
 class PlayListWidget;
@@ -95,6 +101,7 @@ class Display {
     Page *_footer = nullptr;
     Page *_overLinePage = nullptr;
     VuWidget *_vuwidget = nullptr;
+    bool _vuNotDrawable = false;
     VuWidget *_ssvu = nullptr;
     ScrollWidget *_sstext = nullptr;
     bool _ssFailed = false;
@@ -116,13 +123,14 @@ class Display {
     uint32_t _droppedRequests = 0;
     uint32_t _deferredDueMs = 0;
     void _createDspTask();
+    void _applyBitrate();
     void _reinitWidgets();
     void _setLayoutPointers();
     void _syncLineRule(FillWidget*& w, const FillConfig* conf, bool under);
     void _applyMetaInvert();
-    // inPlace is the editor's live preview: the same re-init, but the current page is refilled where
+    // A staged mode is the editor's live preview: the same re-init, but the current page is refilled where
     // it stands instead of the device being sent to the player page, so nothing else changes.
-    void _applyState(bool inPlace = false);
+    void _applyState(applyMode_e mode = APPLY_STORED);
     void _showDialog(const char *title);
     void _showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage);
     void _setReturnTicker(uint8_t time_s);
@@ -143,9 +151,12 @@ class Display {
     void _enterScreensaver(displayMode_e mode);
     void _buildJsonCache();
     void _buildThemeListJson();
+    void _buildLayoutListJson();
     String _themeListJson;
     uint16_t _themeListGen;
+    uint16_t _layoutListGen;
     bool _previewPending;
+    bool _layoutPreviewPending;
     String _layoutListJson;
     String _systemFontListJson;
     String _clockFontListJson;

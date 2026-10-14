@@ -10,17 +10,8 @@
 // column width (VU_HISTORY_MIN_PX). Sized at compile time so the widget needs no heap.
 #define VU_HISTORY_MAX 100
 
-// The meter's pixel budget: no box the widget chooses may exceed VU_MAX_WIDTH x VU_MAX_HEIGHT, and the cap
-// engages only above it - so a small panel, an OLED and a layout's own box all keep what they are given.  A
-// guarded define, so a build can override either.  VU_MAX_HEIGHT is also the Lissajous's square, which is
-// deliberately half the rectangle's budget rather than the same area: an X-Y plot reads right in a square,
-// and a same-area square doubles its pixels and halves its frame rate for detail the figure cannot use.
-#ifndef VU_MAX_WIDTH
-  #define VU_MAX_WIDTH 280
-#endif
-#ifndef VU_MAX_HEIGHT
-  #define VU_MAX_HEIGHT 140
-#endif
+// The meter's pixel budget, VU_MAX_WIDTH x VU_MAX_HEIGHT, lives in widgetsconfig.h now: this header includes it,
+// and so does conf_index.h, which lends the same two numbers to the editor page as CONF_VU_MAX_*.
 
 // A meter box in panel coordinates, plus the two row heights the bar family needs (zero for every other
 // style).  Produced by resolveScreensaverBox(), so the window, the bar ratios and the budget live beside the
@@ -34,11 +25,14 @@ struct VuBox {
 class VuWidget: public Widget {
   public:
     VuWidget() {}
-        VuWidget(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor)
-            { init(wconf, bands, vumaxcolor, vumincolor, vupeakcolor, bgcolor, vuaxiscolor); }
+    // `drawable` is the layout's VU verdict, resolved once at load by vuResolveBox() (layoutregistry.h): false
+    // means the box does not fit the panel, so no canvas is taken and nothing is painted.  The widget stays
+    // present, which is what keeps the clock and the weather hiding as though the meter were there.
+        VuWidget(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor, bool drawable = true)
+            { init(wconf, bands, vumaxcolor, vumincolor, vupeakcolor, bgcolor, vuaxiscolor, drawable); }
     ~VuWidget();
     using Widget::init;
-        void init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor);
+        void init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor, bool drawable = true);
     void loop();
     // The screensaver's own instance: a box the layout knows nothing about, with the two layout
     // transforms overridden (rotate forced on, boombox ignored) and the style pinned instead of read
@@ -87,11 +81,14 @@ class VuWidget: public Widget {
     // vustyle=<n> command only queues SHOWVUMETER and the style has to switch live.  The screensaver's
     // instance is pinned to screensaverVUStyle by initScreensaver() instead.
     uint8_t _styleOverride = 0xFF;
-    // The screensaver's box IS the rotated shape, so its instance overrides the two layout transforms:
-    // rotateVU forced on (that is what makes the level axis the long one and stacks the channels) and
-    // boomboxVU off, or a conf carrying the ribbon flag would draw its shape into a box the layout
-    // never described.  False on the player's own widget, which follows the conf.
+    // The screensaver's box IS the rotated shape, so its instance overrides the layout's orientation: rotate
+    // forced on (that is what makes the level axis the long one and stacks the channels) and the boombox form
+    // off, or a conf asking for WA_CENTER would draw its shape into a box the layout never described.  False on
+    // the player's own widget, which follows vuConf.align.
     bool _forceRotate = false;
+    // The layout's verdict from vuResolveBox(): false means the box does not fit the panel, so this instance
+    // takes no canvas and paints nothing.  The screensaver's own meter always fits, so it is true there.
+    bool _drawable = true;
     // Whether the canvas buffer came from PSRAM, so the destructor can hand the byte count back to the
     // Core Monitor's figure.  The canvas is a plain allocation rather than a psFrameBuffer, so the
     // accounting is this widget's to keep.

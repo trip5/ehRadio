@@ -46,7 +46,6 @@ or examine the examples in builds/trip5 and make your own!
 //   VS1053 & TFT total:           ~717 KB or ~997 KB
 //   I2S & TFT total:             ~1064 KB or ~1344 KB
 // Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
-//   The log ring (if active with SAVE_LOGS_TO_FS) +16KB
 
 
 /* ============================== DISPLAY ============================== */
@@ -215,33 +214,18 @@ or examine the examples in builds/trip5 and make your own!
   #endif
 #endif
 
-/* Playlist Mode: some displays have trouble displaying the fancy "fade" playlist - this list may be incomplete */
-// ILI9488 uses 24 bits per pixel instead of 16 or 8, resulting in a 33% slower refresh rate... making a nasty slowdown on a big display when it needs to redraw the entire screen
-// use PLAYLIST_MODE_PAGED true if your display has issues on the playlist screen or if you just want to use page mode (but it doesn't scroll long station names)
-#if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 // These screens are known to be slow to refresh and benefit from a simpler playlist mode
-  #ifndef PLAYLIST_MODE_PAGED
-    #define PLAYLIST_MODE_PAGED true
-  #endif
-#else
-  #ifndef PLAYLIST_MODE_PAGED
-    #define PLAYLIST_MODE_PAGED false
-  #endif
-#endif
-
 /* Scrolling Speed: may be manually tweaked using myoptions.h */
 /* check dspconf.h for the actual per-class defaults */
 // pixels per second = scrolldelta * 1000 / scrolltime]
 // Here are the defaults for OLED and TFT displays:
 // #define SCROLLDELAY 5000 // delay time (ms) for widgets: meta, title1, title2 / playlist mode scroll divides by 5
-// #define SCROLLTIME 15 // time (ms) per pixel-column movement (a column of font pixels, not display pixels)
+// #define SCROLLTIME 20 // time (ms) per pixel-column movement (a column of font pixels, not display pixels)
 
-/* Pre-processed Text: Prefer ALL CAPS? Maybe all latin accents removed from your display? */
-// #define PRETEXT_ALLCAPS
+/* Pre-processed Text: Need all latin accents removed from your display? */
+// These are leftovers and may not be useful anymore...
 // #define PRETEXT_FOLDACCENT
 // #define PRETEXT_FOLDCYRILLIC
 
-/* If using PRETEXT_ALLCAPS, why not do the same to your WebUI? */
-// #define WWW_CASETRANSFORM
 
 /* ============================== SPI BUSES AND PINS ============================== */
 
@@ -1217,8 +1201,6 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef BATTERY_CURVE_PCT
   #define BATTERY_CURVE_PCT 100, 95, 90, 80, 70, 55, 30, 10, 0
 #endif
-/* No Battery but need to see the widget? */
-// #define BATTERY_FORCE_DISPLAY 0 // 0, 25, 50, 75, 100
 
 
 /* ============================== USER DEFAULTS ============================== */
@@ -1324,6 +1306,19 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef NUMBERED_PLAYLIST
   #define NUMBERED_PLAYLIST false
 #endif
+// Some displays have trouble displaying the fancy "fade" playlist...
+// ILI9488 uses 24 bits per pixel instead of 16 or 8, resulting in a 33% slower refresh rate... making a nasty slowdown on a big display when it needs to redraw the entire screen
+// use PLAYLIST_MODE_PAGED true if your display has issues on the playlist screen or if you just want to use page mode (but it doesn't scroll long station names)
+#if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 // These screens are known to be slow to refresh and benefit from a simpler playlist mode
+  #ifndef PLAYLIST_MODE_PAGED
+    #define PLAYLIST_MODE_PAGED true
+  #endif
+#else
+  #ifndef PLAYLIST_MODE_PAGED
+    #define PLAYLIST_MODE_PAGED false
+  #endif
+#endif
+
 #ifndef CLOCK_TWELVE
   #define CLOCK_TWELVE false
 #endif
@@ -1337,6 +1332,9 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 #ifndef VOLUME_PAGE
   #define VOLUME_PAGE false
+#endif
+#ifndef PRETEXT_ALLCAPS
+  #define PRETEXT_ALLCAPS false
 #endif
 #if defined(SCREEN_BRIGHTNESS) && (SCREEN_BRIGHTNESS < 1 || SCREEN_BRIGHTNESS > 100)
   #warning "define warning in myoptions.h: SCREEN_BRIGHTNESS is out of range (1-100), reverting to default 100"

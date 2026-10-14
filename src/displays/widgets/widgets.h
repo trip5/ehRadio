@@ -6,6 +6,10 @@
 #define CHARWIDTH   6
 #define CHARHEIGHT  8
 
+// Widget text buffers: one size for every scrolling line and text widget
+// Every conf used to carry this as ScrollConfig.buffsize and every one of them wrote 140...
+#define WIDGET_BUFF_SIZE 140
+
 class psFrameBuffer;
 
 class Widget{
@@ -18,11 +22,13 @@ class Widget{
       _fgcolor  = fgcolor;
       _bgcolor  = bgcolor;
       _width = _backMove.width = 0;
-      _backMove.x = _config.left;
+      _backMove.x = _config.offset;
       _backMove.y = _config.top;
       _moved = _locked = false;
     }
-    void setAlign(WidgetAlign align){
+    // A number, like the member it writes: callers pass either a WA_* name or a stored cell, and an enum
+    // converts to an integer but not the other way round.
+    void setAlign(uint8_t align){
       _config.align = align;
     }
     // _present = the active layout provides this widget, set only by hideByLayout()/showByLayout(). It outranks
@@ -45,7 +51,7 @@ class Widget{
       if(mv.width<0) return;
       _moved = true;
       if(_active && !_locked) _clear();
-      _config.left = mv.x;
+      _config.offset = mv.x;
       _config.top = mv.y;
       if(mv.width>0) _width = mv.width;
       _reset();
@@ -54,7 +60,7 @@ class Widget{
     void moveBack(){
       if(!_moved) return;
       if(_active && !_locked) _clear();
-      _config.left = _backMove.x;
+      _config.offset = _backMove.x;
       _config.top = _backMove.y;
       _width = _backMove.width;
       _moved = false;
@@ -75,10 +81,10 @@ class Widget{
 class TextWidget: public Widget {
   public:
     TextWidget() {}
-    TextWidget(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor) { init(wconf, buffsize, uppercase, fgcolor, bgcolor); }
+    TextWidget(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE) { init(wconf, fgcolor, bgcolor, buffsize); }
     ~TextWidget();
     using Widget::init;
-    void init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor);
+    void init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     // Virtual because a subclass held as a TextWidget* must still be entered through its own overloads. The boot line
     // is that case: a ScrollWidget kept in a TextWidget*, where only ScrollWidget::setText() sets _doscroll and
     // measures with its own _charWidth. Bound statically, the base ran instead, so the scroll state was never
@@ -90,11 +96,9 @@ class TextWidget: public Widget {
     // string is the one already up, which is right for a value that only moves on events and wrong for a line
     // something else may paint over: the SD manager's countdown blank was issued once and never repeated.
     void repaint();
-    bool uppercase() { return _uppercase; }
   protected:
     char *_text = nullptr;
     char *_oldtext = nullptr;
-    bool _uppercase;
     // Initialised, so a widget that has never been init()'d is inert rather than full of stack garbage.
     uint8_t _charWidth = 0;
     uint16_t  _buffsize = 0, _textwidth = 0, _oldtextwidth = 0, _oldleft = 0, _textheight = 0;
@@ -131,10 +135,10 @@ class ScrollWidget: public TextWidget {
     ScrollWidget(){}
     // The mark this line joins its tail and its head with is no longer the caller's business: scrollMark() owns
     // the character and the holiday swap in one place (see plans/holiday-icons.md).
-    ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor);
+    ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     ~ScrollWidget();
     using Widget::init;
-    void init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor);
+    void init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     void loop();
     void setText(const char* txt) override;
     void setText(const char* txt, const char *format) override;
@@ -204,7 +208,7 @@ struct ClockFontSel {
 class NumWidget: public TextWidget {
   public:
     using Widget::init;
-    void init(WidgetConfig wconf, uint16_t buffsize, bool uppercase, uint16_t fgcolor, uint16_t bgcolor);
+    void init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     void setText(const char* txt) override;
     void setText(int val, const char *format) override;
   protected:
@@ -306,7 +310,9 @@ class ClockWidget: public Widget {
     void _reset();
     void _getTimeBounds();
     void _printClock(bool force=false);
-    void _clearClock();
+    // `push` is whether the erase itself must take the panel (see the definition): every caller wants that
+    // except _printClock()'s force path, which repaints and displays the same window a few lines later.
+    void _clearClock(bool push = true);
     bool _getTime();
     uint16_t _left();
     uint16_t _top();
@@ -339,16 +345,10 @@ class PlayListWidget: public Widget {
     void drawPlaylist(uint16_t currentItem);
     inline uint16_t itemHeight(){ return _plItemHeight; }
 
-    #if PLAYLIST_MODE_PAGED
-      void resetState() { _plPrevItem = 0; }
-      inline uint16_t currentTop(){ 
-        if (_plPrevItem == 0) return _plYStart;
-        uint8_t slot = (_plPrevItem - _plPageStart);
-        return _plYStart + slot * _plItemHeight; 
-      }
-    #else
-      inline uint16_t currentTop(){ return _plYStart+_plCurrentPos*_plItemHeight; }
-    #endif
+    // Both playlist paths are compiled now: playlistPages is a runtime option (it was PLAYLIST_MODE_PAGED), so the
+    // state and the two painters always exist and currentTop()/drawPlaylist() choose between them.
+    void resetState() { _plPrevItem = 0; }
+    uint16_t currentTop();
 
   private:
     ScrollWidget* _current;
@@ -357,16 +357,14 @@ class PlayListWidget: public Widget {
     uint8_t _fillPlMenu(int from, uint8_t count);
     void _printPLitem(uint8_t pos, const char* item);
 
-    #if PLAYLIST_MODE_PAGED
-      uint8_t  _plPageSize;
-      uint16_t _plPageStart, _plPrevItem;
-      uint16_t _plPlaylistTop, _plPlaylistBottom;
-      void _drawPaged(uint16_t currentItem);
-      void _printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name);
-    #else
-      uint16_t _plTtemsCount, _plCurrentPos;
-      void _drawFade(uint16_t currentItem);
-    #endif
+    uint8_t  _plPageSize;
+    uint16_t _plPageStart, _plPrevItem;
+    uint16_t _plPlaylistTop, _plPlaylistBottom;
+    uint16_t _plTtemsCount, _plCurrentPos;
+    bool     _paged;          // playlistPages() as init() read it; the option is a runtime setting now
+    void _drawPaged(uint16_t currentItem);
+    void _printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name);
+    void _drawFade(uint16_t currentItem);
 };
 
 #endif

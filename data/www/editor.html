@@ -3,15 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Theme Editor</title>
+<title>Theme and Layout Editor</title>
 <link rel="stylesheet" href="style.css">
+<script src="conf.js"></script>
 <style>
   /* Only the rules this page needs.  theme.css is deliberately left out: the colour fields must show
      the theme's own values, not the WebUI's palette, and nothing here is trying to look dressed up. */
   #editorwrap { max-width: 900px; margin: 0 auto; padding: 10px; }
-  #editorwrap h3 { margin: 4px 0 10px; }
+  /* Twice the body size: the two halves of the page are what the eye has to find first. */
+  #editorwrap h3 { margin: 4px 0 10px; font-size: 2em; }
   .erow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
   .erow label { min-width: 8em; }
+  .erow label.wide { min-width: 0; }
+  /* The two widget switches share one row: each is a side column and the list of what they reach is the middle one,
+     stated once rather than twice.  .wrow turns off the row's own wrapping, so the three columns cannot break onto
+     separate lines, and the middle column's flex-basis is 0 - with `auto` its base size is the whole list's width,
+     which is wide enough to push the third column off the row even though it would fit once grown into. */
+  .erow.wrow { flex-wrap: nowrap; }
+  .erow label.wside { flex: 0 0 12%; min-width: 0; display: flex; align-items: center; justify-content: center;
+                      gap: 6px; font-weight: normal; text-align: center; }
+  .erow .wlist { flex: 1 1 0; min-width: 0; text-align: center; }
+  /* The panel this build drives, under the section heading.  Sized with the cards' own labels, so it reads as part
+     of the editor rather than as a caption. */
+  .info { font-size: 115%; opacity: .75; margin: 0 0 8px; }
   .hint { opacity: .75; font-size: 90%; }
   /* One size for the whole table.  The cells used to be 92% while a form control kept the user agent's
      own size - and a control does not inherit font size - so the two columns could never match. */
@@ -28,18 +42,55 @@
   #elemhead { cursor: pointer; }
   #elemhead:hover { text-decoration: underline dotted; }
   #tname { width: 22em; }
-  #msg { min-height: 1.4em; margin: 2px 0 10px; }
-  #msg.good { color: rgb(0, 240, 0); }
-  #msg.bad  { color: rgb(255, 0, 0); }
+  #msg, #lmsg { min-height: 1.4em; margin: 2px 0 10px; }
+  #msg.good, #lmsg.good { color: rgb(0, 240, 0); }
+  #msg.bad, #lmsg.bad { color: rgb(255, 0, 0); }
+  /* One card per LayoutData field, so a field's own cells stay together and read in the conf file's order. */
+  .card { border: 1px solid #444; border-radius: 4px; margin: 0 0 8px; padding: 4px 6px; }
+  .chead { display: flex; align-items: baseline; gap: 8px; }
+  /* The card name and its cell labels are the Element column's size on the theme half, so the two halves read
+     at one size.  The tag and the group headers are deliberately left smaller. */
+  .cname { font-weight: bold; font-size: 115%; }
+  .ctag { opacity: .55; font-size: 80%; }
+  .cright { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  /* align-items and vertical-align together: without them a select and its label sit high of the number boxes. */
+  .cells { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 4px; }
+  .cells label, .card > label { font-size: 115%; }
+  .cells input, .cells select { font: inherit; vertical-align: middle; }
+  .cells input[type=number] { width: 5em; }
+  .card input.warn { outline: 1px solid rgb(255, 120, 120); }
+  /* Struck through means the device will draw nothing for this card: either its checkbox is off - and then the
+     numbers are kept on the page but written as zeros - or nothing is set that could draw at all. */
+  .card.empty .cname { color: #888; text-decoration: line-through; }
+  .card.off .cells { opacity: .5; }
+  .enbox { margin: 0 6px 0 0; }
+  .hintline { display: none; font-size: 80%; opacity: .7; margin-top: 2px; }
+  .card.off .hintline { display: block; }
+  /* A cell the type carries but never reads: still shown, so the conf's shape stays visible, but greyed and
+     not editable, because an edit there could not matter.  See CONF_CELL_BIT in conf_index.h. */
+  .cells label.unused { opacity: .55; }
+  .ghead { margin: 12px 0 4px; opacity: .75; font-size: 95%; letter-spacing: .04em; }
+  /* The VU's pixel budget, explained where the meter's box is set.  Informational: it never clamps or refuses.
+     pre-line keeps the two sentences on their own lines without a second element. */
+  .vubudget { margin: 4px 0 8px; opacity: .85; white-space: pre-line; }
+  /* Reset (undo) and Clear (trash).  The gap is what keeps Clear off the end of Reset. */
+  .rbtn { font: inherit; line-height: 1; padding: 0 4px; background: none; border: 1px solid #666;
+          border-radius: 3px; color: inherit; cursor: pointer; }
+  .rbtn + .rbtn { margin-left: 10px; }
+  .rbtn:hover { border-color: #bbb; }
+  #grid th.acts, #grid td.acts { width: 1%; white-space: nowrap; }
 </style>
 </head>
 <body>
 <div id="editorwrap">
+  <section id="themebox">
   <h3>Theme Editor</h3>
+  <div class="info">RGB is for human readability only and is automatically stepped to match the conversion to 565 used in the code.</div>
 
   <div class="erow">
     <label for="srce">Load theme</label>
     <select id="srce"></select>
+    <button id="sreload" title="re-reads the selected theme, discarding unsaved edits">Reload</button>
   </div>
 
   <div class="erow">
@@ -66,10 +117,55 @@
           <th class="num" title="32 levels, step 8">Red</th>
           <th class="num" title="64 levels, step 4">Green</th>
           <th class="num" title="32 levels, step 8">Blue</th>
-          <th>Swatch</th><th class="num">565</th></tr>
+          <th>Swatch</th><th class="num">565</th><th class="acts"></th></tr>
     </thead>
     <tbody id="body"></tbody>
   </table>
+  </section>
+
+  <section id="laybox">
+  <h3>Layout Editor</h3>
+
+  <div class="info" id="dspinfo">Display info loads here</div>
+
+  <div class="erow">
+    <label for="lsrce">Load layout</label>
+    <select id="lsrce"></select>
+    <button id="lreload" title="re-reads the selected layout, discarding unsaved edits">Reload</button>
+  </div>
+
+  <div class="erow">
+    <label for="ldest">Custom Layout</label>
+    <select id="ldest"></select>
+    <button id="lsave" title="writes this slot and makes it the layout in use">Save</button>
+    <button id="ldelete" title="removes this slot">Delete</button>
+    <button id="lexport" title="downloads this slot as a json file">Export</button>
+    <button id="lexportall" title="backs up every saved slot as one json file">Backup All</button>
+    <button id="limport" title="one layout overwrites the selected slot; several fill every free slot">Import</button>
+    <input type="file" id="limportfile" accept=".json,application/json" style="display:none">
+  </div>
+
+  <!-- The two switches are runtime only: a reboot hands the device back as the user left it.  They are the same set
+       of settings pulled in opposite directions, so the page keeps them mutually exclusive and the device also gives
+       force-on priority (editorOpt()) - a stale page cannot make them fight.  The list of settings is stated once,
+       between the two, and each switch is a side column with the check box beside its own word. -->
+  <div class="erow wrow">
+    <label class="wside" for="lwidgetson">Temporary On
+      <input type="checkbox" id="lwidgetson"></label>
+    <div class="wlist">Weather (All), VU (Bars & Peaks), Battery, Invert Title, Clock Glow, Paged Playlist, All Caps, Volume Page, Audio Buffer Bar, and some extra characters to titles.</div>
+    <label class="wside" for="lwidgetsoff"><input type="checkbox" id="lwidgetsoff">
+      Temporary Off</label>
+  </div>
+
+  <div class="erow">
+    <label for="lname">Name</label>
+    <input type="text" id="lname" maxlength="32" placeholder="layout name">
+  </div>
+
+  <div id="lmsg" class="hint"></div>
+
+  <div id="laycards"></div>
+  </section>
 </div>
 
 <script>
@@ -91,6 +187,23 @@ var SHOWKEYS = false; // the element column shows labels by default; the Element
 var NAMES = {};       // theme id -> name, from themeall.json; "" for a custom slot holding nothing
 var CUSTOM_BASE = 0;  // the first custom id, derived from the list the firmware sends
 var MSG = null;
+// The theme exactly as the Load dropdown last produced it, kept for the per-row Reset: Reset means "what this
+// row held when it was loaded", not "whatever the device happens to be using now".
+var LOADED = null;
+// Reset (undo) and Clear (trash), as text: no image, no icon font, and the same glyphs the layout cards use.
+var BTN_RESET = '\u238C', BTN_CLEAR = '\uD83D\uDDD1';
+
+// One builder for the two little buttons that sit on every row and every card.  type=button so a stray Enter
+// inside a card can never submit anything, and the title is the whole explanation.
+function actButton(glyph, title, fn) {
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rbtn';
+  b.textContent = glyph;
+  b.title = title;
+  b.addEventListener('click', fn);
+  return b;
+}
 
 function msg(text, bad) {
   MSG.textContent = text || '';
@@ -171,6 +284,14 @@ function buildGrid() {
     tdV.className = 'v565';
     row.appendChild(tdV);
 
+    // Reset's own column, at the END so it never moves as the numbers change width.  No Clear: an element's
+    // "nothing" IS black, which is what Reset already puts back.
+    var tdA = document.createElement('td');
+    tdA.className = 'acts';
+    tdA.appendChild(actButton(BTN_RESET, 'Put this element back to what was loaded',
+                              function() { resetRow(rowIndex); }));
+    row.appendChild(tdA);
+
     body.appendChild(row);
     var entry = { cell: cell, nums: nums, swatch: sw, v565: tdV };
     ROWS.push(entry);
@@ -190,6 +311,15 @@ function buildGrid() {
   document.getElementById('elemhead').addEventListener('click', function() { setElemView(!SHOWKEYS); });
   setElemView(SHOWKEYS);
 }
+
+// Reset reads the LOADED document, and a key it does not carry resolves to black - the same rule the device
+// applies to a document that leaves a key out.  Clear is not "the default", it is "nothing painted".
+function resetRow(i) {
+  var v = (LOADED && LOADED.colors) ? LOADED.colors[ELEM[i].key] : 0;
+  setRow(i, v);
+  onEdit(i);
+}
+
 
 // Rewrites the element column in place - text only, never a rebuild - which is the same rule the
 // dropdown refresh follows: the rows ARE what the user is editing, so nothing may recreate them.
@@ -273,6 +403,7 @@ function refreshLabels() {
 
 // --- loading and saving ----------------------------------------------------
 function fillFrom(theme) {
+  LOADED = theme;                        // what the per-row Reset reads, from here on
   document.getElementById('tname').value = theme.name || '';
   // A key the document does not carry is zeroed, which is the same rule the device applies.
   ELEM.forEach(function(el, i) { setRow(i, theme.colors ? theme.colors[el.key] : 0); });
@@ -322,8 +453,9 @@ function loadTheme(id, quiet) {
 var previewTimer = null;
 var lastSent = '';
 // How long the page stays quiet before repainting the panel.  A preview is a full widget re-init, so a
-// colour hunt that clicks an arrow twenty times should not be twenty repaints.
-var PREVIEW_DELAY = 1000;
+// colour hunt that clicks an arrow twenty times should not be twenty repaints - and a burst of them can
+// overrun the device and crash it, so this is generous rather than responsive.  Shared by both halves.
+var PREVIEW_DELAY = 3000;
 
 function preview() {
   // A preview shows the grid on the panel and changes nothing else: no file, no selection.  Identical
@@ -423,9 +555,784 @@ function writeImport(themes, free) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The layout half.
+//
+// A layout is edited the way the conf file writes it: one card per LayoutData field, its own cells in the
+// field's own order, grouped by the conf file's section headers.  The device sends the field table (each
+// field's type, cells and flags) and its own conf macros, so this page keeps no list that could drift - and
+// nothing symbolic is ever stored: a cell holds a number, and the constant a number happens to equal is
+// only ever a label on that cell.
+// ---------------------------------------------------------------------------
+var HAS_THEMES  = (typeof editorThemes === 'undefined') ? true : editorThemes;
+var HAS_LAYOUTS = (typeof editorLayouts === 'undefined') ? false : editorLayouts;
+var CONF = (typeof confDsp === 'undefined') ? null : confDsp;
+var DSP_FAMILY = (typeof dspFamily === 'undefined') ? '' : dspFamily;   // 'TFT' / 'OLED' / '' with no display
+
+var CT_WIDGET = 0, CT_SCROLL = 1, CT_FILL = 2, CT_BITRATE = 3, CT_BANDS = 4, CT_MOVE = 5, CT_BOOL = 6;
+var CK_NUM = 0, CK_ALIGN = 1, CK_BOOL = 2;
+var CONF_FONT_INDEX = 2;
+var CONF_REQUIRED = 1;
+var CONF_ALIGN_ORIENT = 8;
+var ALIGN_LABELS = ['Left', 'Centre', 'Right'];
+// The VU's align cell is not alignment at all - it is which of the three forms the meter takes, and the conf
+// says so too.  See CONF_ALIGN_ORIENT in conf_index.h and plans/layout-editor-round4.md.
+var ORIENT_LABELS = ['Default', 'Boombox', 'Rotate 90'];
+var WA_RIGHT = 2;    // WidgetAlign: WA_LEFT/WA_CENTER/WA_RIGHT - only the last swaps the box's two sides
+
+var LGROUPS = [], LFIELDS = [], LCARDS = {}, LNAMES = {}, LBASE = 0, LMSG = null;
+var layTimer = null, layLastSent = '';
+var vubudget = null;                 // the budget line, created with the VU BARS WIDGET group header
+// The layout exactly as the Load dropdown last produced it, which is what a card's Reset reads.
+var LLOADED = null;
+
+function lmsg(text, bad) {
+  LMSG.textContent = text || '';
+  LMSG.className = bad ? 'bad' : 'good';
+}
+
+// The VU box the firmware will draw, resolved from the two cards exactly as vuResolveBox() resolves it on the
+// device (layoutregistry.cpp): the bar family's two channels are `width * 2 + space` across one side and
+// `height` along the other, and WA_RIGHT swaps which is which.  An over-budget box (by area) is clamped to
+// VU_MAX_WIDTH x VU_MAX_HEIGHT by its sides first - that is what the meter then draws - so the edge test is
+// of the box that would really appear.  Returns null when the two cards are not on the page.
+//
+// The macro values that used to sit in each cell's tooltip (the border, the panel width, the scroll defaults)
+// are stated once, under the Display type line, by setDspInfo() - a label repeated on every cell that happens
+// to equal a constant said less than one sentence beside the panel's own name does.
+function vuBoxResolved() {
+  var vc = LCARDS['vuConf'], bc = LCARDS['bandsConf'];
+  if (!CONF || !vc || !vc.inputs || !bc || !bc.inputs) return null;
+  var num = function(c, k) { var i = c.inputs[k]; return i ? (parseInt(i.value, 10) || 0) : 0; };
+  var rotate = (num(vc, 'align') === WA_RIGHT);
+  var gap = num(bc, 'space');
+  var bw = Math.max(1, num(bc, 'width')), bh = Math.max(1, num(bc, 'height'));
+  var rawW = rotate ? bh : (bw * 2 + gap);
+  var rawH = rotate ? (bw * 2 + gap) : bh;
+  var boxW = rawW, boxH = rawH;
+  if (CONF.vuMaxWidth && CONF.vuMaxHeight &&
+      boxW * boxH > CONF.vuMaxWidth * CONF.vuMaxHeight) {
+    if (boxW > CONF.vuMaxWidth)  boxW = CONF.vuMaxWidth;
+    if (boxH > CONF.vuMaxHeight) boxH = CONF.vuMaxHeight;
+  }
+  var off = num(vc, 'offset'), top = num(vc, 'top');
+  return {
+    left: off, top: top,
+    rawW: rawW, rawH: rawH, w: boxW, h: boxH,
+    pastEdge: (off + boxW) > CONF.width || (top + boxH) > CONF.height
+  };
+}
+
+// Advisory only, and this is what remains for a value that came IN from a document: the clamp below never rewrites
+// a loaded value, because a scroll window wider than the panel is a deliberate trick in the shipped confs
+// (displayTFT220x176's meta/playlist/weather lines use DSP_WIDTH+10) and the clock's `top` is the BOTTOM of its
+// digits.  So an over-panel number is marked here rather than refused, and only the two load-bearing lines block a
+// save.
+function paintWarnings() {
+  LFIELDS.forEach(function(f) {
+    var c = LCARDS[f.key];
+    if (!c.inputs) return;
+    var off = parseInt(c.inputs.offset && c.inputs.offset.value, 10) || 0;
+    var top = parseInt(c.inputs.top && c.inputs.top.value, 10) || 0;
+    ['offset', 'top'].forEach(function(k) {
+      var inp = c.inputs[k];
+      if (!inp) return;
+      var over = (k === 'offset') ? (off >= CONF.width) : (top >= CONF.height);
+      if (over) inp.classList.add('warn'); else inp.classList.remove('warn');
+    });
+  });
+  // The VU gets a second test, because its box is not one cell: the meter is `bandsConf.width * 2 + space`
+  // wide, so cells that each fit on their own can still put the box past the panel - and the device then draws
+  // NO meter (vuResolveBox() in layoutregistry.cpp resolves that at load).  The mark says which of the two
+  // lines to shrink.  Advisory only: a save is never refused and no cell is clamped.
+  var box = vuBoxResolved();
+  if (box) {
+    ['width', 'height', 'space'].forEach(function(k) {
+      var inp = LCARDS['bandsConf'].inputs[k];
+      if (inp) { if (box.pastEdge) inp.classList.add('warn'); else inp.classList.remove('warn'); }
+    });
+    if (box.pastEdge) ['offset', 'top'].forEach(function(k) {
+      var inp = LCARDS['vuConf'].inputs[k];
+      if (inp) inp.classList.add('warn');     // the generic pass above removes this one, so only add here
+    });
+  }
+}
+
+// The VU's pixel budget, put where the meter's BOX is set - the VU BANDS group, which is where bandsConf lives.
+// (It used to sit under VU BARS WIDGET, whose only card is vuConf, the position and orientation.)  VuWidget::init()
+// scales a box that is over VU_MAX_WIDTH x VU_MAX_HEIGHT by one factor and re-centres it, so a box far over the
+// budget arrives as a smaller, differently shaped meter than the numbers suggest - the "2:1 rectangle" with no word
+// of warning.  This is that word.  Informational only: nothing here clamps a cell or refuses a save.
+//
+// The whole line hides when the panel cannot produce a box over the budget: a box is never larger than the panel, so
+// a display whose AREA is within VU_MAX_WIDTH x VU_MAX_HEIGHT has nothing to warn about (every OLED, and the small
+// TFTs).  Area rather than either side alone, because the budget is an area - a 240x240 panel is over it and a
+// 220x176 one is under it, though each is over one side or the other.
+function paintBudget() {
+  if (!vubudget) return;
+  if (!CONF || !CONF.vuMaxWidth || !CONF.vuMaxHeight ||
+      CONF.width * CONF.height <= CONF.vuMaxWidth * CONF.vuMaxHeight) {
+    vubudget.style.display = 'none';
+    vubudget.textContent = '';
+    return;
+  }
+  var box = vuBoxResolved();
+  if (!box) { vubudget.style.display = 'none'; return; }
+  var budget = CONF.vuMaxWidth * CONF.vuMaxHeight;
+  // The USED figure is the box as typed, not the clamped one: these are the reader's own numbers being
+  // measured, and a box over the budget is exactly what this line exists to report.  What the meter then
+  // draws is NOT stated - the clamp is silent, so a "drawn about WxH" claim would promise something the
+  // editor cannot keep (and for a box past the panel edge the honest answer is that nothing is drawn).
+  var used = box.rawW * box.rawH;
+  var head = 'Max Width: ' + CONF.vuMaxWidth + ' / Max Height: ' + CONF.vuMaxHeight +
+             ' will be enforced if the VU exceeds the pixel budget.';
+  vubudget.style.display = '';
+  vubudget.textContent = head + '\nThis VU uses: ' + used + ' / ' + budget + ' maximum pixels.';
+}
+
+// Two questions that look like one, and they need two answers.
+//
+// `anyCellSet()` is what the card's CHECKBOX states - "is anything here set?" - and for a MOVE that is the same
+// question as for every other card, because an unticked box writes those cells as zeros.  So a zeroed move comes
+// back unticked, which is how it was saved.
+//
+// `allCellsZero()` is the different question "would the device draw nothing for this card", where a MOVE is exempt:
+// its zeros are a VALUE (hide while the meter runs, or for weatherMove "no move"), so a zeroed move must not be
+// marked empty/grey.  Only the empty mark asks this one.
+function anyCellSet(f) {
+  var c = LCARDS[f.key];
+  if (!c || !c.inputs) return false;
+  for (var i = 0; i < f.cells.length; i++) {
+    var inp = c.inputs[f.cells[i].key];
+    if (!inp) continue;
+    if (inp.type === 'checkbox') { if (inp.checked) return true; }
+    else if ((parseInt(inp.value, 10) || 0) !== 0) return true;
+  }
+  return false;
+}
+
+// The device's own rule, and there is only ONE of it now: every cell zero means the field is absent, which is
+// also how a conf spells it (`{ }`).  So this is not a second opinion about types, just a count of non-zeros -
+// the clock and the digits included, and a MOVE excluded because a zeroed move is a value rather than an absence.
+function allCellsZero(f) {
+  var c = LCARDS[f.key];
+  if (!c || !c.inputs) return false;                  // a bool switch is off, not empty
+  if (f.type === CT_MOVE) return false;
+  for (var i = 0; i < f.cells.length; i++) {
+    var inp = c.inputs[f.cells[i].key];
+    if (!inp) continue;
+    if (inp.type === 'checkbox') { if (inp.checked) return false; }
+    else if ((parseInt(inp.value, 10) || 0) !== 0) return false;
+  }
+  return true;
+}
+
+// A card is marked when the device would draw nothing for it, and the checkbox is the first word on that:
+// unticked means "write this field as zeros", whatever the numbers on the page happen to say.
+function paintEmpty(f) {
+  var c = LCARDS[f.key];
+  if (!c || !c.card) return;
+  var off = !!(c.enable && !c.enable.checked);
+  if (off) c.card.classList.add('off'); else c.card.classList.remove('off');
+  if (off || allCellsZero(f)) c.card.classList.add('empty'); else c.card.classList.remove('empty');
+}
+
+// Which cards get a checkbox: every card but a bool (which is its own switch) and the two load-bearing lines, which
+// a save refuses to lose - the same CONF_REQUIRED the device and conf_tool.py read.  A MOVE gets one like anything
+// else, and its off position writes the zeros that mean "hide while the meter runs".
+function hasEnable(f) {
+  // Everything but a bool (its own switch) and the two load-bearing lines.  MOVEs included: their zeros are a
+  // value rather than an absence - "step aside" for clockMove and weatherMoveVU, "no move" for weatherMove -
+  // but the checkbox states exactly what the file would, and the wording is deliberately deferred.
+  return f.type !== CT_BOOL && !(f.flags & CONF_REQUIRED);
+}
+
+function buildCards() {
+  var host = document.getElementById('laycards');
+  host.innerHTML = '';
+  var group = -1;
+  LFIELDS.forEach(function(f) {
+    if (f.group !== group) {
+      group = f.group;
+      var g = document.createElement('div');
+      g.className = 'ghead';
+      g.textContent = LGROUPS[group] || '';
+      host.appendChild(g);
+      if (LGROUPS[group] === 'VU BANDS') {           // the budget line sits between the header and its cards
+        vubudget = document.createElement('div');
+        vubudget.className = 'vubudget';
+        host.appendChild(vubudget);
+      }
+    }
+    var card = document.createElement('div');
+    card.className = 'card';
+    var head = document.createElement('div');
+    head.className = 'chead';
+    var nm = document.createElement('span');
+    nm.className = 'cname';
+    nm.textContent = f.label;
+    nm.title = f.key;                    // the conf file's own spelling is one hover away
+    head.appendChild(nm);
+    // The tag and the two buttons share the right end, so the name keeps the left and the tag never drifts.
+    var right = document.createElement('span');
+    right.className = 'cright';
+    var tag = document.createElement('span');
+    tag.className = 'ctag';
+    tag.textContent = f.cells.length ? f.cells.map(function(c) { return c.key; }).join(' ') : 'on / off';
+    right.appendChild(tag);
+    right.appendChild(actButton(BTN_RESET, 'Put this card back to what was loaded',
+                                function() { resetCard(f); }));
+    right.appendChild(actButton(BTN_CLEAR, 'Clear this card to nothing (all zeros)',
+                                function() { clearCard(f); }));
+    head.appendChild(right);
+    card.appendChild(head);
+
+    if (f.type === CT_BOOL) {
+      var lab = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(' on'));
+      card.appendChild(lab);
+      LCARDS[f.key] = { card: card, bool: cb, cells: [], inputs: null, enable: null };
+      cb.addEventListener('input', onLayoutEdit);
+    } else {
+      var cells = document.createElement('div');
+      cells.className = 'cells';
+      var entry = { card: card, bool: null, cells: [], inputs: {} };
+      if (hasEnable(f)) {
+        // The checkbox states what the file gets, instead of the page guessing from the numbers: off writes
+        // this field as nothing ({ }) while the numbers stay here for the next time it is ticked.
+        var en = document.createElement('input');
+        en.type = 'checkbox';
+        en.className = 'enbox';
+        en.checked = true;
+        en.title = 'Off writes this field as nothing ({ }); the numbers stay on the page until you export';
+        head.insertBefore(en, head.firstChild);
+        entry.enable = en;
+        en.addEventListener('change', onLayoutEdit);
+        var note = document.createElement('div');
+        note.className = 'hintline';
+        note.textContent = 'Off: this field is written as nothing, so the numbers here are not in the file.';
+        card.appendChild(note);
+      }
+      f.cells.forEach(function(c, ci) {
+        var cl = document.createElement('label');
+        var unused = !!(f.unused & (1 << ci));        // the table says this type carries the cell but never reads it
+        var orient = (c.kind === CK_ALIGN) && !!(f.flags & CONF_ALIGN_ORIENT);
+        cl.appendChild(document.createTextNode((orient ? 'Orientation' : c.label) + (unused ? ' (unused) ' : ' ')));
+        var inp;
+        if (c.kind === CK_ALIGN) {
+          inp = document.createElement('select');
+          (orient ? ORIENT_LABELS : ALIGN_LABELS).forEach(function(t, i) {
+            var o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = t;
+            inp.appendChild(o);
+          });
+        } else if (c.kind === CK_BOOL) {
+          inp = document.createElement('input');
+          inp.type = 'checkbox';
+        } else {
+          inp = document.createElement('input');
+          inp.type = 'number';
+          inp.min = '0';
+          if (c.key === 'fontsize' && (f.flags & CONF_FONT_INDEX)) {
+            inp.max = '4';
+            inp.title = '0 is the system font, 1..4 are 15/35/52/70 px';
+          }
+        }
+        if (unused) {
+          cl.classList.add('unused');                 // shown, so the conf's shape stays visible...
+          inp.disabled = true;
+          inp.title = 'not read for this type';
+        }
+        cl.appendChild(inp);
+        cells.appendChild(cl);
+        entry.cells.push(c);
+        entry.inputs[c.key] = inp;
+        // Which field and cell this input is, so an edit can clamp itself against the panel without walking the table.
+        inp.dataset.field = f.key;
+        inp.dataset.cell = c.key;
+        inp.addEventListener('input', onLayoutEdit);
+        inp.addEventListener('change', onLayoutEdit);
+      });
+      card.appendChild(cells);
+      LCARDS[f.key] = entry;
+    }
+    host.appendChild(card);
+  });
+}
+
+// The document the device parses, built fresh from the cards: every field, so a save always writes a whole
+// layout and a missing key can only be one a hand edit removed.
+function layoutDoc() {
+  var screen = CONF ? (CONF.width + 'x' + CONF.height) : '';
+  var doc = { name: document.getElementById('lname').value, screen: screen, layout: {} };
+  LFIELDS.forEach(function(f) {
+    var c = LCARDS[f.key];
+    if (f.type === CT_BOOL) { doc.layout[f.key] = c.bool.checked ? 1 : 0; return; }
+    var off = !!(c.enable && !c.enable.checked);   // the checkbox decides the file, not the numbers
+    var o = {};
+    f.cells.forEach(function(cell) {
+      var inp = c.inputs[cell.key];
+      if (off) o[cell.key] = 0;
+      else if (inp.type === 'checkbox') o[cell.key] = inp.checked ? 1 : 0;
+      else o[cell.key] = parseInt(inp.value, 10) || 0;
+    });
+    doc.layout[f.key] = o;
+  });
+  return doc;
+}
+
+// The panel's own limits, per cell, so the editor cannot be used to place a widget off the panel.  `left`/`top` are
+// a position - at most the last pixel column or row - and a `width`/`height` gets what is left after the offset,
+// which is the whole point of asking the device for its size: 10 px in from the left leaves 470 on a 480 panel.
+// The codec badge is square, so its `dimension` answers to whichever of the two rooms is smaller.
+//
+// Two deliberate omissions.  The band geometry (`bandsConf`) also has `width` and `height` cells but no `left`/`top`
+// to measure from, so those answer null and are left alone.  And a field whose remaining room is not positive
+// answers null rather than 0, so an already-over-panel value loaded from a conf cannot be forced to zero.
+// Keyed by CELL NAME, so a renamed cell must be renamed here too: a key that matches nothing silently
+// drops that cell's limit.  The widget group's first cell is `offset` now (round 9).
+var LIMITED_CELLS = { offset: 1, top: 1, width: 1, height: 1, dimension: 1 };
+
+function cellMax(field, cellKey) {
+  if (!CONF || !LIMITED_CELLS[cellKey]) return null;
+  var c = LCARDS[field.key];
+  if (!c || !c.inputs) return null;
+  var num = function(k) { var i = c.inputs[k]; return i ? (parseInt(i.value, 10) || 0) : null; };
+  if (cellKey === 'left')  return CONF.width - 1;
+  if (cellKey === 'top')   return CONF.height - 1;
+  var l = num('left'), t = num('top');
+  if (cellKey === 'width')    { if (l === null) return null; var rw = CONF.width - l;  return rw > 0 ? rw : null; }
+  if (cellKey === 'height')   { if (t === null) return null; var rh = CONF.height - t; return rh > 0 ? rh : null; }
+  if (cellKey === 'dimension') {
+    if (l === null || t === null) return null;
+    var dw = CONF.width - l, dh = CONF.height - t;
+    if (dw <= 0 || dh <= 0) return null;
+    return Math.min(dw, dh);
+  }
+  return null;
+}
+
+// Published as the input's own `max`, so the spinner and the browser's validation agree with the clamp instead of
+// only the keystroke path knowing.  Only the five cells above are touched, which keeps the clock/digit `fontsize`
+// cap of 4 that the card builder set.
+function paintLimits(field) {
+  var c = LCARDS[field.key];
+  if (!c || !c.inputs) return;
+  field.cells.forEach(function(cell) {
+    if (!LIMITED_CELLS[cell.key]) return;
+    var inp = c.inputs[cell.key];
+    if (!inp || inp.disabled || inp.type !== 'number') return;
+    var m = cellMax(field, cell.key);
+    if (m === null) inp.removeAttribute('max'); else inp.setAttribute('max', String(m));
+  });
+}
+
+// The clamp itself, and it runs on the ONE cell the user just changed.  A loaded document is never passed through
+// here - fillLayout calls paintLimits() only - so the two shipped confs that exceed the panel on purpose keep their
+// values.  A cleared or non-numeric box is left alone too: the device reads a missing key as zero.
+function clampEdited(ev) {
+  if (!CONF || !ev || !ev.target || ev.target.type !== 'number' || ev.target.disabled) return;
+  var inp = ev.target;
+  var field = LCARDS[inp.dataset.field];
+  if (!field) return;
+  var m = cellMax(field, inp.dataset.cell);
+  if (m === null) return;
+  var v = parseInt(inp.value, 10);
+  if (!isNaN(v) && v > m) inp.value = String(m);
+}
+
+function fillLayout(doc) {
+  LLOADED = doc;                         // what a card's Reset reads, from here on
+  document.getElementById('lname').value = doc.name || '';
+  var rec = doc.layout || doc;
+  LFIELDS.forEach(function(f) {
+    var c = LCARDS[f.key];
+    var v = rec[f.key];
+    if (f.type === CT_BOOL) { c.bool.checked = (v === 1 || v === true); return; }
+    var o = (v && typeof v === 'object') ? v : {};
+    f.cells.forEach(function(cell) {
+      var inp = c.inputs[cell.key];
+      var val = o[cell.key];
+      if (val === undefined) val = 0;      // a key the document leaves out is zeroed, the device's own rule
+      if (inp.type === 'checkbox') inp.checked = (val === 1 || val === true);
+      else inp.value = String(val);
+    });
+    if (c.enable) c.enable.checked = anyCellSet(f);      // a field the document zeroed comes back unticked, MOVEs too
+    paintLimits(f);                                      // the limits only - a loaded value is never clamped
+    paintEmpty(f);
+  });
+  paintWarnings();
+  paintBudget();
+}
+
+function layoutPreview() {
+  // A preview shows the cards on the panel and changes nothing else: no file, no selection, no NVS.
+  var json = JSON.stringify(layoutDoc());
+  if (json === layLastSent) return Promise.resolve();
+  layLastSent = json;
+  return post('layoutapply', { data: json }).catch(function(e) { lmsg('Preview failed: ' + e.message, true); });
+}
+
+function onLayoutEdit(ev) {
+  clampEdited(ev);                       // the edited cell first, so everything after it reads the clamped value
+  LFIELDS.forEach(function(f) {
+    var c = LCARDS[f.key];
+    if (!c.inputs) return;
+    paintLimits(f);
+    paintEmpty(f);
+  });
+  paintWarnings();
+  paintBudget();
+  if (layTimer) clearTimeout(layTimer);
+  layTimer = setTimeout(function() { layTimer = null; layoutPreview(); }, PREVIEW_DELAY);
+}
+
+// Reset reads the loaded document and Clear writes zeros - the same pair the theme rows carry.  Clear is not a
+// delete: the field stays in the layout and the device simply draws nothing for it.
+function resetCard(f) {
+  var rec = (LLOADED && (LLOADED.layout || LLOADED)) || {};
+  setCardFrom(f, rec[f.key]);
+  paintEmpty(f);
+  onLayoutEdit();
+}
+
+function clearCard(f) {
+  setCardFrom(f, null);
+  var c = LCARDS[f.key];
+  if (c.enable) c.enable.checked = false;   // Clear is "off", where unticking alone would only hide the numbers
+  paintEmpty(f);
+  onLayoutEdit();
+}
+
+// One field of one document into its card.  A key the document leaves out resolves to zero, the device's own
+// rule, and a bool to off.
+function setCardFrom(f, v) {
+  var c = LCARDS[f.key];
+  if (f.type === CT_BOOL) { c.bool.checked = (v === 1 || v === true); return; }
+  var o = (v && typeof v === 'object') ? v : {};
+  f.cells.forEach(function(cell) {
+    var inp = c.inputs[cell.key];
+    var val = o[cell.key];
+    if (val === undefined) val = 0;
+    if (inp.type === 'checkbox') inp.checked = (val === 1 || val === true);
+    else inp.value = String(val);
+  });
+  if (c.enable) c.enable.checked = anyCellSet(f);      // so Reset and Clear move the checkbox with the cells
+}
+
+// Every id is listed, so a built-in reads as its name and a custom slot carries its own tag - the same
+// decoration rule as the theme list, and for the same reason: the device sends a bare name or "".
+function layoutSourceLabel(id) {
+  var n = LNAMES[String(id)] || '';
+  if (id < LBASE) return n || String(id);
+  var tag = '[ Custom Layout ' + (id - LBASE + 1) + ' ]';
+  return n ? tag + ' ' + n : tag;
+}
+
+// The target list says what Save would overwrite.
+function layoutDestLabel(slot) {
+  var n = layoutSlotName(slot);
+  return n ? '[ ' + (slot + 1) + ' ] ' + n : '[ ' + (slot + 1) + ' ] (empty)';
+}
+
+function layoutSlotName(slot) { return LNAMES[String(LBASE + slot)] || ''; }
+
+// Rewrites the option labels in place: the id set never changes, only which ids hold a layout, so nothing the
+// user has typed or selected may move.
+function refreshLNames() {
+  return fetch('layoutall.json').then(function(r) { return r.json(); }).then(function(all) {
+    LNAMES = all;
+    LBASE = Object.keys(LNAMES).length - 10;
+    var srce = document.getElementById('lsrce');
+    Array.prototype.forEach.call(srce.options, function(o) { o.textContent = layoutSourceLabel(Number(o.value)); });
+    var dest = document.getElementById('ldest');
+    Array.prototype.forEach.call(dest.options, function(o) { o.textContent = layoutDestLabel(parseInt(o.value, 10)); });
+  });
+}
+
+function layoutFreeSlots() {
+  var free = [];
+  for (var slot = 0; slot < 10; slot++) if (layoutSlotName(slot) === '') free.push(slot);
+  return free;
+}
+
+function fieldLabel(key) {
+  for (var i = 0; i < LFIELDS.length; i++) if (LFIELDS[i].key === key) return LFIELDS[i].label;
+  return key;
+}
+
+// What BLOCKS a save, and the device refuses both as well: a layout cannot lose the station line (dialogs
+// write into it) or the playlist line (the playlist page is built on it).
+function layoutProblems(doc) {
+  var bad = [];
+  var L = doc.layout || {};
+  ['metaConf', 'playlistConf'].forEach(function(k) {
+    var o = L[k] || {};
+    if (!(o.buffsize > 0) && !(o.fontsize > 0)) bad.push(fieldLabel(k) + ' cannot be empty');
+  });
+  return bad;
+}
+
+function saveLayout() {
+  var doc = layoutDoc();
+  var bad = layoutProblems(doc);
+  if (bad.length) { lmsg('Cannot save: ' + bad.join('; '), true); return; }
+  var slot = parseInt(document.getElementById('ldest').value, 10);
+  post('xlayout', { action: 'save', slot: slot, data: JSON.stringify(doc) })
+    .then(function() {
+      // The device has already written the slot, selected it and repainted, so the cards are now the layout in
+      // use: point the source list at it and let the labels catch up.
+      layLastSent = '';
+      return refreshLNames();
+    })
+    .then(function() {
+      document.getElementById('lsrce').value = String(LBASE + slot);
+      lmsg('Saved to Custom Layout ' + (slot + 1) + ' and put in use');
+    })
+    .catch(function(e) { lmsg('Save failed: ' + e.message, true); });
+}
+
+function deleteLayout(btn) {
+  // Two steps, in the same spirit as the theme half: the first click arms, the second acts.
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Confirm delete';
+    setTimeout(function() { btn.dataset.armed = ''; btn.textContent = 'Delete'; }, 5000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = 'Delete';
+  var slot = parseInt(document.getElementById('ldest').value, 10);
+  var wasSource = document.getElementById('lsrce').value === String(LBASE + slot);
+  post('xlayout', { action: 'delete', slot: slot })
+    .then(function() { layLastSent = ''; return refreshLNames(); })
+    .then(function() {
+      if (wasSource) {
+        // The layout the cards came from no longer exists; the device has fallen back to built-in 0 itself.
+        document.getElementById('lsrce').value = '0';
+        return loadLayout(0, true);
+      }
+    })
+    .then(function() { lmsg('Deleted Custom Layout ' + (slot + 1)); })
+    .catch(function(e) { lmsg('Delete failed: ' + e.message, true); });
+}
+
+// A layout file records the screen it was made for, and every number in it is a pixel position for that panel, so a
+// file from another size is refused rather than imported into a layout it was never drawn for.  A document with no
+// "screen" at all is let through: unlike the panel this build is driving, that field is not something a hand-made
+// file has to carry.
+function screenRefusal(doc) {
+  if (!CONF || !doc) return '';
+  var got = String(doc.screen || '');
+  if (got === '') return '';
+  var want = CONF.width + 'x' + CONF.height;
+  if (got === want) return '';
+  return 'That file is for ' + got + ' - this display is ' + want + '!';
+}
+
+// The panel this build drives, said before anything is changed, so the editor cannot be mistaken for another
+// board's - with the two numbers a hand-written conf would otherwise have to look up: the edge inset the conf
+// spells as a macro, and the scroll defaults it inherits from dspconf.h.  Stated HERE once, rather than as a
+// tooltip on every cell that happens to equal one.
+function setDspInfo() {
+  var el = document.getElementById('dspinfo');
+  if (!el) return;
+  if (!CONF) { el.textContent = ''; return; }
+  var lines = ['Display type: ' + (DSP_FAMILY ? DSP_FAMILY + ' ' : '') + CONF.width + 'x' + CONF.height];
+  if (CONF.hasConfMacros) {
+    lines.push('Recommended on this display to allow ' + CONF.framewdt + ' pixels on the edges as a border');
+    lines.push('Also, use Scroll delay = ' + CONF.scrollDelay + ' and Scroll time = ' + CONF.scrollTime + ' for titles');
+  }
+  el.innerHTML = lines.join('<br>');
+}
+
+function importLayout(doc) {
+  // An array is a backup; a plain object is a single layout.  The device never writes a one-element array.
+  if (Array.isArray(doc)) {
+    var items = doc.filter(function(t) { return t && typeof t === 'object'; });
+    if (items.length === 0) { lmsg('That file holds no layouts', true); return; }
+    for (var si = 0; si < items.length; si++) {
+      var refusal = screenRefusal(items[si]);
+      if (refusal) { lmsg(refusal, true); return; }
+    }
+    // The free-slot list is asked for fresh rather than trusted from page state, and the capacity check runs
+    // before the first write, so a file that does not fit changes nothing at all.
+    fetch('layoutall.json').then(function(r) { return r.json(); }).then(function(all) {
+      LNAMES = all;
+      LBASE = Object.keys(LNAMES).length - 10;
+      var free = layoutFreeSlots();
+      if (items.length > free.length) {
+        lmsg('That file has ' + items.length + ' layouts but only ' + free.length + ' slot' +
+             (free.length === 1 ? ' is' : 's are') + ' free. Delete some layouts and try again.', true);
+        return;
+      }
+      return writeLayoutImport(items, free);
+    }).catch(function(e) { lmsg('Import failed: ' + e.message, true); });
+    return;
+  }
+  if (doc && typeof doc === 'object') {
+    var bad = screenRefusal(doc);
+    if (bad) { lmsg(bad, true); return; }
+    // One layout goes into the selected slot, overwriting with no warning - the only destructive thing Import
+    // can do, and only ever to the slot the user chose.  `use` is left off, so the device treats it exactly
+    // like Save: the slot is written AND becomes the layout in use.
+    var slot = parseInt(document.getElementById('ldest').value, 10);
+    post('xlayout', { action: 'save', slot: slot, data: JSON.stringify(doc) })
+      .then(function() { fillLayout(doc); layLastSent = ''; return refreshLNames(); })
+      .then(function() {
+        document.getElementById('lsrce').value = String(LBASE + slot);
+        lmsg('Imported ' + (doc.name || 'that layout') + ' into Custom Layout ' + (slot + 1) + ' and put it in use');
+      })
+      .catch(function(e) { lmsg('Import failed: ' + e.message, true); });
+    return;
+  }
+  lmsg('That file is not a layout', true);
+}
+
+function writeLayoutImport(items, free) {
+  // Into the free slots in order, never over an occupied one, and use=0 so the device stays on the layout it
+  // was using: putting layouts back is not the same as choosing one of them.
+  var chain = Promise.resolve();
+  var used = [];
+  items.forEach(function(t, i) {
+    var slot = free[i];
+    used.push(slot + 1);
+    chain = chain.then(function() {
+      return post('xlayout', { action: 'save', slot: slot, use: 0, data: JSON.stringify(t) });
+    });
+  });
+  return chain.then(function() { layLastSent = ''; return refreshLNames(); })
+    .then(function() {
+      lmsg('Restored ' + items.length + ' layout' + (items.length === 1 ? '' : 's') + ' into Custom Layout' +
+           (used.length === 1 ? ' ' : 's ') + used.join(', '));
+    });
+}
+
+function loadLayout(id, quiet) {
+  return fetch('layoutdata.json?id=' + id).then(function(r) {
+    if (!r.ok) throw new Error('empty');
+    return r.json();
+  }).then(function(d) {
+    fillLayout(d);
+    if (!quiet) { layoutPreview(); lmsg('Loaded ' + (d.name || id)); }
+  }).catch(function() {
+    // An empty slot has nothing to load, so the cards are left exactly as they are rather than zeroed.
+    if (!quiet) lmsg('That slot is empty - the cards are unchanged', true);
+  });
+}
+
+function initLayouts() {
+  if (!HAS_LAYOUTS) { document.getElementById('laybox').style.display = 'none'; return; }
+  Promise.all([
+    fetch('layout-elements.json').then(function(r) { return r.json(); }),
+    fetch('layoutall.json').then(function(r) { return r.json(); }),
+    fetch('layoutactive.json').then(function(r) { return r.json(); })
+  ]).then(function(res) {
+    LGROUPS = res[0].groups || [];
+    LFIELDS = res[0].fields || [];
+    LFIELDS.forEach(function(f) { f.cells = f.cells || []; });
+    LNAMES = res[1];
+    LBASE = Object.keys(LNAMES).length - 10;
+    setDspInfo();
+    buildCards();
+
+    // The source list: every id, built-ins first, the custom slots decorated.  Changing it loads that layout
+    // into the cards and shows it on the panel.
+    var srce = document.getElementById('lsrce');
+    Object.keys(LNAMES).forEach(function(id) {
+      var o = document.createElement('option');
+      o.value = id;
+      o.textContent = layoutSourceLabel(Number(id));
+      srce.appendChild(o);
+    });
+    srce.addEventListener('change', function(ev) { loadLayout(ev.target.value); });
+    // Re-reads the source the dropdown is already on, which is what re-picking it does - the way back from a mess
+    // of edits without having to select something else first.  `quiet` is left unset, so the panel shows it at once.
+    document.getElementById('lreload').addEventListener('click', function() { loadLayout(srce.value); });
+
+    // The target list is only a save target: it decides where Save writes and never touches the cards, which is
+    // what lets a layout be copied, tweaked and saved into a different slot.
+    var dest = document.getElementById('ldest');
+    for (var s = 0; s < 10; s++) {
+      var d = document.createElement('option');
+      d.value = String(s);
+      d.textContent = layoutDestLabel(s);
+      dest.appendChild(d);
+    }
+    document.getElementById('lsave').addEventListener('click', saveLayout);
+    document.getElementById('ldelete').addEventListener('click', function(ev) { deleteLayout(ev.target); });
+    document.getElementById('lexport').addEventListener('click', function() {
+      var slot = parseInt(dest.value, 10);
+      if (layoutSlotName(slot) === '') { lmsg('That slot is empty - nothing to export', true); return; }
+      window.location = 'xlayout.json?slot=' + slot;
+    });
+    document.getElementById('lexportall').addEventListener('click', function() {
+      window.location = 'xlayoutall.json';
+    });
+    var lfile = document.getElementById('limportfile');
+    document.getElementById('limport').addEventListener('click', function() {
+      lfile.value = '';   // so choosing the same file twice in a row still fires a change
+      lfile.click();
+    });
+    lfile.addEventListener('change', function() {
+      var f = lfile.files && lfile.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        var doc = null;
+        try { doc = JSON.parse(reader.result); }
+        catch (e) { lmsg('That file is not valid JSON', true); return; }
+        importLayout(doc);
+      };
+      reader.onerror = function() { lmsg('Could not read that file', true); };
+      reader.readAsText(f);
+    });
+
+    var active = String(res[2].id);
+    if (LNAMES[active] === undefined) active = '0';
+    srce.value = active;
+    loadLayout(active, true);
+
+    // The two switches belong to the device, not to the page or to a file, so they are read back here and every
+    // press goes straight there: two pages open at once cannot disagree about which widgets are being shown.
+    var won  = document.getElementById('lwidgetson');
+    var woff = document.getElementById('lwidgetsoff');
+    // The switch is a DEVICE setting rather than part of the document, and its re-apply settles on the
+    // STORED layout - so on its own it undoes every unsaved edit on the page, which is why ticking
+    // Temporary On put the widgets back where they were before the edit.  A field edit already pushes the
+    // document; the switch now does too, and clearing layLastSent is what makes the push happen even when
+    // the page's own edits were the last thing sent.
+    function pushWidgetMode(mode, said) {
+      post('editorwidgets', { mode: mode })
+        .then(function() { lmsg(said); layLastSent = ''; return layoutPreview(); })
+        .catch(function(e) { lmsg('Could not change the widget switches: ' + e.message, true); });
+    }
+    won.checked  = !!res[2].widgetsOn;
+    woff.checked = !!res[2].widgetsOff;
+    // Ticking one clears the other, so the device never receives both; it also gives force-on priority if it ever did.
+    won.addEventListener('change', function() {
+      if (won.checked) woff.checked = false;
+      pushWidgetMode(won.checked ? 'on' : 'none',
+                     won.checked ? 'Widgets forced on for editing' : 'Widgets shown as configured');
+    });
+    woff.addEventListener('change', function() {
+      if (woff.checked) won.checked = false;
+      pushWidgetMode(woff.checked ? 'off' : 'none',
+                     woff.checked ? 'Widgets forced off' : 'Widgets shown as configured');
+    });
+  }).catch(function(e) { lmsg('Could not read the layout lists: ' + e.message, true); });
+}
+
 // --- wiring ----------------------------------------------------------------
-document.addEventListener('DOMContentLoaded', function() {
+function initThemes() {
   MSG = document.getElementById('msg');
+  // An OLED has no theme to edit - the panel is one bit and its palette is the driver's - so the half is
+  // hidden rather than left to fail.  The flag comes from the build, in conf.js.
+  if (!HAS_THEMES) { document.getElementById('themebox').style.display = 'none'; return; }
 
   Promise.all([
     fetch('theme-elements.json').then(function(r) { return r.json(); }),
@@ -458,6 +1365,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     srce.addEventListener('change', function(ev) { loadTheme(ev.target.value); });
+    // Same as the layout half: re-read the selected theme, discarding whatever was edited since it was loaded.
+    document.getElementById('sreload').addEventListener('click', function() { loadTheme(srce.value); });
 
     document.getElementById('save').addEventListener('click', function() {
       var slot = parseInt(dest.value, 10);
@@ -546,8 +1455,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (NAMES[active] === undefined) active = '0';
     srce.value = active;
     loadTheme(active, true);
-  }).catch(function(e) { msg('Could not read the theme lists: ' + e.message, true); });
-});
+    }).catch(function(e) { msg('Could not read the theme lists: ' + e.message, true); });
+  }
+  
+  document.addEventListener('DOMContentLoaded', function() {
+    LMSG = document.getElementById('lmsg');
+    initThemes();
+    initLayouts();
+  });
 </script>
 </body>
 </html>

@@ -342,9 +342,7 @@
 /* --- Debug? --- */
 //#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
-//#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
 //#define BOOTLOG_TIME
-#define SAVE_LOGS_TO_FS
 
 /* --- Display --- */
 // Display Font:
@@ -356,22 +354,16 @@
 //#define CLOCKFONT CHUNKY6
 //#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
-#define CLOCKFONT LEDCLOCK
+//#define CLOCKFONT LEDCLOCK
 
 // Transform:
-//#define PRETEXT_ALLCAPS
+// PRETEXT_ALLCAPS is a runtime option now (config.store.pretextALLCAPS, WebUI "All Caps"), and it drives the WebUI's
+// own casing too; WWW_CASETRANSFORM is gone and defining it here does nothing.
 //#define PRETEXT_FOLDACCENT
 //#define PRETEXT_FOLDCYRILLIC
-//#define WWW_CASETRANSFORM
-//#define CLOCKGLOW false
-//#define PLAYLIST_MODE_PAGED false
 //#define EVERYDAY_IS_CANADA_DAY
 
 // Other:
 //#define DEEP_SLEEP_DISABLE
-
-//#undef VS_PATCH_ENABLE    
-//#define VS_PATCH_ENABLE true
-
 
 #endif // myoptions_h

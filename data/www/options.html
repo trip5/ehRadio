@@ -62,11 +62,11 @@
           <div class="title"><span data-i18n="ttl_screen">Screen</span></div>
           <div class="reset" data-name="screen" title="reset"></div>
           <div class="flex-row">
-            <div class="inputwrap center group_display hidden">
+            <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_flip_screen">Flip Screen</span>
               <div class="checkbox" id="flip" data-command="flipscreen"><div class="knob"></div></div>
             </div>
-            <div class="inputwrap center group_display hidden">
+            <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_invert_screen">Invert Screen</span>
               <div class="checkbox" id="inv" data-command="invertdisplay"><div class="knob"></div></div>
             </div>
@@ -103,11 +103,17 @@
               </select>
             </div>
           </div>
-          <div class="flex-row group_display hidden">
+          <div class="flex-row">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_numbered_playlist">Numbered Playlist</span>
               <div class="checkbox" id="nump" data-command="numplaylist"><div class="knob"></div></div>
             </div>
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_paged_playlist">Paged Playlist</span>
+              <div class="checkbox" id="plpaged" data-command="playlistpages"><div class="knob"></div></div>
+            </div>
+          </div>
+          <div class="flex-row">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_clock12">12-Hour Clock</span>
               <div class="checkbox" id="clock12" data-command="clock12"><div class="knob"></div></div>
@@ -118,6 +124,10 @@
             </div>
           </div>
           <div class="flex-row">
+            <div class="inputwrap center">
+              <span class="inputtitle" data-i18n="lbl_all_caps">All Caps</span>
+              <div class="checkbox" id="allcaps" data-command="allcaps"><div class="knob"></div></div>
+            </div>
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_volume_page">Volume Page</span>
               <div class="checkbox" id="volpg" data-command="volumepage"><div class="knob"></div></div>
@@ -171,7 +181,7 @@
             </div>
           </div>
           <div class="row-title"><span data-i18n="ttl_screensaver">Screensaver</span></div>
-          <div class="flex-row group_display hidden">
+          <div class="flex-row">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_while_not_playing">While Not Playing</span>
               <div class="checkbox ssoption" id="scre" data-command="screensaverenabled"><div class="knob"></div></div>
@@ -185,7 +195,7 @@
               <input type="number" id="scrt" data-command="screensavertimeout" value="" maxlength="3" min="5" max="65520" />
             </div>
           </div>
-          <div class="flex-row group_display hidden">
+          <div class="flex-row">
             <div class="inputwrap center">
               <span class="inputtitle" data-i18n="lbl_while_playing">While Playing</span>
               <div class="checkbox ssoption" id="scrpe" data-command="screensaverplayingenabled"><div class="knob"></div></div>

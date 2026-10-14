@@ -1,6 +1,7 @@
 #include "pretext.h"
 #include "dspstats.h"   // Core Monitor counters
 #include "pretext_fold.h"   // generated stepping table
+#include "../../core/config.h"   // config.store.pretextALLCAPS, the runtime form of PRETEXT_ALLCAPS
 
 #include <string.h>
 
@@ -199,11 +200,13 @@ uint16_t preText(uint32_t cp, const GFXfont *font) {
   // not need the fold chain, so the pair measures how much real work is left.
   cmCountPreTextCall();
 
-  const uint32_t asked = cp;  // cache key: the caller's codepoint
+  const bool caps = editorOpt(config.store.pretextALLCAPS);
+  // The cache is keyed on the caller's codepoint, which is taken BEFORE the transform, so the flag has to be part of
+  // the key or turning all-caps off would keep serving the capped entry.  Codepoints stop at 0x10FFFF, so the top
+  // bit is free: folding it in costs nothing and needs no cache flush.
+  const uint32_t asked = cp | (caps ? 0x80000000u : 0u);  // cache key: the caller's codepoint, plus the caps flag
 
-  #ifdef PRETEXT_ALLCAPS
-    cp = allCaps(cp);
-  #endif
+  if (caps) cp = allCaps(cp);
   #if defined(PRETEXT_FOLDACCENT) || defined(PRETEXT_FOLDCYRILLIC)
     // Kept as a deliberate "force fold": take a step even where the glyph
     // exists, for an intentionally ASCII-only display.

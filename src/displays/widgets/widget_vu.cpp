@@ -83,16 +83,24 @@ VuWidget::~VuWidget() {
 // vustyle=<n> command only queues SHOWVUMETER, so the value has to be read on every frame rather than
 // latched at init.  The screensaver's instance is pinned to screensaverVUStyle instead.
 uint8_t VuWidget::_style() const {
+  // The layout editor's force-on pins this to the segmented bar every layout is designed against, so a layout can
+  // be positioned and sized while the device's own style setting says something else.  Force-off is not a style -
+  // it hides the meter outright (see vuLive()) - so only force-on is honoured here.
+  if (widgetsEditorForceOn) return VU_STYLE_BARS;
   return (_styleOverride == 0xFF) ? config.store.vustyle : _styleOverride;
 }
 
 // The same split for the peaks/axis switch, and for the same reason: with peers to respect, a screensaver
 // meter must be able to show its markers and reference lines while the player page's box does not.
 bool VuWidget::_vupeak() const {
-  return (_styleOverride == 0xFF) ? config.store.vupeak : config.store.screensaverVUpeak;
+  // The player's box follows the option through the editor's switches; the screensaver's pinned instance keeps the
+  // screensaver's own setting, exactly as it does for the style.
+  if (_styleOverride == 0xFF) return editorOpt(config.store.vupeak);
+  return config.store.screensaverVUpeak;
 }
 
 bool VuWidget::ready() {
+  if (!_drawable) return false;      // the box does not fit: present, but it paints nothing
   #if defined(DSP_TFT)
     return _canvas && _canvasBuf;
   #else
@@ -128,7 +136,7 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
   if (b.width < 1) b.width = 1;
   if (b.height < 1) b.height = 1;
   WidgetConfig wc;
-  wc.left = box.left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
+  wc.offset = box.left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
   // Black, never config.theme.background: the screensaver paints its own picture and its background is always
   // black - the clock and the info line do the same while isScreensaver.  The four VU colours stay the live
   // theme's, which is what makes the meter look like the theme's; only what it erases to is black.
@@ -197,38 +205,29 @@ VuBox VuWidget::resolveScreensaverBox(uint16_t areaW, uint16_t areaH, uint8_t st
   return box;
 }
 
-// The largest linear factor, in 1/256ths, that brings an area of w x h down to `budget` or less.  Run once
-// per init, so a search costs nothing and reads clearer than a square root would.
-static uint16_t vuScaleToBudget(uint32_t w, uint32_t h, uint32_t budget) {
-  const uint64_t area = (uint64_t)w * h;
-  uint16_t f = 256;
-  while (f > 1 && ((area * f * f) >> 16) > budget) f--;
-  return f;
-}
-
-void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor) {
+void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor, uint16_t vumincolor, uint16_t vupeakcolor, uint16_t bgcolor, uint16_t vuaxiscolor, bool drawable) {
+  // A meter that has stopped fitting must take its old pixels with it, once - and this is the last moment
+  // with the geometry they were drawn at, because _clear() reads _config and _bands, which the lines below
+  // replace.  Only the transition matters: a meter that was already not drawable has nothing on the panel.
+  if (!drawable && _drawable) _clear();
+  _drawable = drawable;
   // A screensaver instance forces rotate on: that is what makes the level axis the long one and stacks the
-  // two channels, which is the shape its box was measured for.  The player's widget follows the conf.  It is
-  // resolved first because the budget below reads it.
-  _rotate = _forceRotate || (rotateVU_ptr ? *rotateVU_ptr : false);
-  // The pixel budget, applied to a conf's box only when that box exceeds VU_MAX_WIDTH x VU_MAX_HEIGHT: both
-  // dimensions are scaled by one factor, so the shape survives, and the box is re-centred in the space the
-  // conf gave it.  Every shipped layout's VU box is inside the budget, so this leaves them all alone - and
-  // the screensaver's box has been through the same budget already, which makes this a no-op for it.
-  const uint32_t budget = (uint32_t)VU_MAX_WIDTH * VU_MAX_HEIGHT;
-  const uint16_t boxW = _rotate ? bands.height : (uint16_t)(bands.width * 2 + bands.space);
-  const uint16_t boxH = _rotate ? (uint16_t)(bands.width * 2 + bands.space) : bands.height;
-  if ((uint32_t)boxW * boxH > budget) {
-    const uint16_t f = vuScaleToBudget(boxW, boxH, budget);
-    const uint16_t nW = (uint16_t)(((uint32_t)boxW * f) >> 8);
-    const uint16_t nH = (uint16_t)(((uint32_t)boxH * f) >> 8);
-    wconf.left = (int16_t)(wconf.left + (uint16_t)((boxW - nW) / 2));
-    wconf.top  = (int16_t)(wconf.top + (uint16_t)((boxH - nH) / 2));
-    const uint16_t across = _rotate ? nH : nW;         // the side the two channels share
-    const uint16_t room = (across > bands.space) ? (uint16_t)(across - bands.space) : 0;
-    bands.width = (room > 1) ? (uint16_t)(room / 2) : 1;
-    bands.height = _rotate ? nW : nH;
-  }
+  // two channels, which is the shape its box was measured for.  The player's widget follows the conf.  The
+  // orientation is `vuConf.align` now: WA_RIGHT is the
+  // rotated form, WA_CENTER the boombox, WA_LEFT the default.  Two separate booleans used to say this, and the
+  // align cell was already the third voice in the same argument - align is only ever read when !_rotate.
+  _rotate = _forceRotate || (wconf.align == WA_RIGHT);
+  // The one presence rule (presentOf()) says a VU with ANY cell set is present, so a hand-made conf can now
+  // arrive with a zeroed perheight - and _drawBars() divides by it.  Clamped HERE, where the value enters,
+  // which is exactly what lets the presence rule have no exception of its own.
+  if (bands.perheight == 0) bands.perheight = 1;
+  if (bands.width == 0)     bands.width     = 1;
+  if (bands.height == 0)    bands.height    = 1;
+  // The pixel budget is NOT applied here any more: a layout's box is resolved once, at load, by
+  // vuResolveBox() in layoutregistry.cpp - which clamps an over-budget box to the same 280x140 rectangle
+  // resolveScreensaverBox() produces, so the player's meter and the screensaver's agree - and the
+  // screensaver's box has already been through that rule.  This draws the box it is handed, and _drawable
+  // says whether to draw at all.
   Widget::init(wconf, bgcolor, bgcolor);
   _vumaxcolor = vumaxcolor;
   _vumincolor = vumincolor;
@@ -262,11 +261,15 @@ void VuWidget::init(WidgetConfig wconf, VUBandsConfig bands, uint16_t vumaxcolor
       _canvasBuf = nullptr;
       delete _canvas; _canvas = nullptr;
     }
-    const uint16_t cw = _rotate ? _bands.height : (uint16_t)(_bands.width * 2 + _bands.space);
-    const uint16_t ch = _rotate ? (uint16_t)(_bands.width * 2 + _bands.space) : _bands.height;
-    _canvas = new VuCanvas(cw, ch);
-    _canvasBuf = vuCanvasBuffer(cw, ch, _canvasPsram);
-    vuCanvasTake(_canvas, _canvasBuf);
+    // A meter the layout could not fit takes no canvas at all: a huge box is exactly the allocation that
+    // would fail, and a failed one looks just like a meter that never draws.
+    if (_drawable) {
+      const uint16_t cw = _rotate ? _bands.height : (uint16_t)(_bands.width * 2 + _bands.space);
+      const uint16_t ch = _rotate ? (uint16_t)(_bands.width * 2 + _bands.space) : _bands.height;
+      _canvas = new VuCanvas(cw, ch);
+      _canvasBuf = vuCanvasBuffer(cw, ch, _canvasPsram);
+      vuCanvasTake(_canvas, _canvasBuf);
+    }
   #endif
 }
 
@@ -307,12 +310,13 @@ bool VuWidget::_fillLocal(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
   #if defined(DSP_TFT)
     _canvas->fillRect(x, y, w, h, color);
   #else
-    dsp.fillRect(_config.left + x, _config.top + y, w, h, color);
+    dsp.fillRect(_config.offset + x, _config.top + y, w, h, color);
   #endif
   return true;
 }
 
 void VuWidget::_draw(){
+  if(!_drawable) return;             // the layout's box does not fit the panel - see vuResolveBox()
   if(!_active || _locked) return;
   #if defined(DSP_TFT)
     if (!_canvas || !_canvasBuf) return;   // no canvas: nothing to stage, nothing to blit - see ready()
@@ -390,14 +394,13 @@ void VuWidget::_drawBars(bool led){
   if (h > _bands.vspace) h -= _bands.vspace;
   else h = 1;
 
-  // One of the two layout transforms is read live down here, so a screensaver box overrides it.  rotateVU
-  // is already folded into _rotate by init() and every test below reads that member; boomboxVU is not, and
-  // the ribbon shape belongs to a conf that asked for it - a screensaver box was measured for the plain
-  // stacked form and would otherwise be repainted in the layout's shape.
-  const bool bb = _forceRotate ? false : *boomboxVU_ptr;
-
+  // The layout's orientation is read live down here, so a screensaver box overrides it.  The rotated form is
+  // already folded into _rotate by init() and every test below reads that member; the boombox form is
+  // `_config.align == WA_CENTER`, and a screensaver box was measured for the plain stacked form, so it is not
+  // folded in.  With the orientation expressed by align alone there is no "horizontal but not boombox" form any
+  // more, so each test below reduces to the two live ones: _rotate, or the boombox.
   if (led) {
-    if (_rotate || (_config.align && !bb)) {
+    if (_rotate) {
       measL = vuSnapLit(measL, step, len);
       measR = vuSnapLit(measR, step, len);
     } else if (_config.align) {              // BoomBox left channel is cleared from x = 0
@@ -421,7 +424,7 @@ void VuWidget::_drawBars(bool led){
     pkL = (_peakL < peakThk || _peakL > len) ? peakThk : _peakL;
     pkR = (_peakR < peakThk || _peakR > len) ? peakThk : _peakR;
     if (led) {
-      if (_rotate || (_config.align && !bb)) {
+      if (_rotate) {
         pkL = vuSnapLit(pkL, step, len);
         pkR = vuSnapLit(pkR, step, len);
       } else if (_config.align) {
@@ -445,13 +448,9 @@ void VuWidget::_drawBars(bool led){
     uint16_t colorL, colorR;
     if (_rotate) {
       colorL = colorR = (i > len - step * 3) ? _vumaxcolor : _vumincolor;
-    } else if (_config.align) {
-      if (!bb) {
-        colorL = colorR = (i > len - step * 4) ? _vumaxcolor : _vumincolor;
-      } else {
-        colorL = (i > step) ? _vumincolor : _vumaxcolor;
-        colorR = (i > len - step * 3) ? _vumaxcolor : _vumincolor;
-      }
+    } else if (_config.align) {                        // BoomBox: the channels read from opposite ends
+      colorL = (i > step) ? _vumincolor : _vumaxcolor;
+      colorR = (i > len - step * 3) ? _vumaxcolor : _vumincolor;
     } else {
       colorL = colorR = (i < step * 3) ? _vumaxcolor : _vumincolor;
     }
@@ -463,13 +462,8 @@ void VuWidget::_drawBars(bool led){
     _fillLocal(len - measL, 0, measL, thk, _bgcolor);
     _fillLocal(len - measR, thk + _bands.space, measR, thk, _bgcolor);
   } else if (_config.align) {
-    if (!bb) {
-      _fillLocal(len - measL, 0, measL, thk, _bgcolor);
-      _fillLocal(cw - measR, 0, measR, thk, _bgcolor);
-    } else {
-      _fillLocal(0, 0, measL, thk, _bgcolor);
-      _fillLocal(cw - measR, 0, measR, thk, _bgcolor);
-    }
+    _fillLocal(0, 0, measL, thk, _bgcolor);
+    _fillLocal(cw - measR, 0, measR, thk, _bgcolor);
   } else {
     _fillLocal(0, 0, thk, measL, _bgcolor);
     _fillLocal(thk + _bands.space, 0, thk, measR, _bgcolor);
@@ -483,13 +477,8 @@ void VuWidget::_drawBars(bool led){
       _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
       _fillLocal(len - pkR, thk + _bands.space, peakThk, thk, _vupeakcolor);
     } else if (_config.align) {
-      if (!bb) {
-        _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
-        _fillLocal(cw - pkR, 0, peakThk, thk, _vupeakcolor);
-      } else {
-        _fillLocal(pkL - peakThk, 0, peakThk, thk, _vupeakcolor);
-        _fillLocal(cw - pkR, 0, peakThk, thk, _vupeakcolor);
-      }
+      _fillLocal(pkL - peakThk, 0, peakThk, thk, _vupeakcolor);
+      _fillLocal(cw - pkR, 0, peakThk, thk, _vupeakcolor);
     } else {
       _fillLocal(0, pkL - peakThk, _bands.width, peakThk, _vupeakcolor);
       _fillLocal(thk + _bands.space, pkR - peakThk, _bands.width, peakThk, _vupeakcolor);
@@ -1046,11 +1035,11 @@ void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
     }
   #else
     if (_rotate) {
-      dsp.fillRect(_config.left + pos, _config.top + off, h, _bands.width, color);
+      dsp.fillRect(_config.offset + pos, _config.top + off, h, _bands.width, color);
     } else if (_config.align) {
-      dsp.fillRect(_config.left + off + pos, _config.top, h, _bands.height, color);
+      dsp.fillRect(_config.offset + off + pos, _config.top, h, _bands.height, color);
     } else {
-      dsp.fillRect(_config.left + off, _config.top + pos, _bands.width, h, color);
+      dsp.fillRect(_config.offset + off, _config.top + pos, _bands.width, h, color);
     }
   #endif
 }
@@ -1124,10 +1113,11 @@ void VuWidget::loop(){
 }
 
 void VuWidget::_clear(){
+  if (!_drawable) return;            // nothing was ever drawn, so there is nothing to erase
   if (_rotate)
-    dsp.fillRect(_config.left, _config.top, _bands.height, _bands.width * 2 + _bands.space, _bgcolor);
+    dsp.fillRect(_config.offset, _config.top, _bands.height, _bands.width * 2 + _bands.space, _bgcolor);
   else
-    dsp.fillRect(_config.left, _config.top, _bands.width * 2 + _bands.space, _bands.height, _bgcolor);
+    dsp.fillRect(_config.offset, _config.top, _bands.width * 2 + _bands.space, _bands.height, _bgcolor);
 }
 
 void VuWidget::_reset(){
@@ -1155,7 +1145,7 @@ void VuWidget::_reset(){
 void VuWidget::_blit() {
   #if defined(DSP_TFT)
     dsp.startWrite();
-    dsp.setAddrWindow(_config.left, _config.top, _cw, _ch);
+    dsp.setAddrWindow(_config.offset, _config.top, _cw, _ch);
     dsp.writePixels((uint16_t*)_canvas->getBuffer(), _cw * _ch);
     dsp.endWrite();
   #endif

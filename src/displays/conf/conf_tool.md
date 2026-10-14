@@ -22,12 +22,20 @@ The tool keeps no list of its own, so a field added to the master appears in eve
 time `--clean` runs. Edit the master with its comments and re-run; do not hand-edit the field lists
 in the tool.
 
+**The parse checks itself.** The struct states its own `LAYOUT_FIELD_COUNT`, and a disagreement stops the run with an
+error rather than writing the field list out. That guard exists because of a real failure: a comment inside
+`struct LayoutData` used to carry an unbalanced `{`, so a raw brace count never saw the struct end, and the scan ran
+on into the rest of the header and read a later `return stored;` as a member - which then went into every conf as a
+designated initialiser for a field that does not exist, and the build failed. A comment's braces are now ignored, and
+the count is what catches anything else of the sort.
+
 ## Usage
 
 ```
 py conf_tool.py --clean [--comments=keep|fill|master] [--dry-run]
 py conf_tool.py --check [<conf_file>] [--strict]
 py conf_tool.py --import <conf_file> --name "Name" [--target <file.h>] [--dry-run]
+py conf_tool.py --fromjson <layout.json> [--name "Name"] [--target <file.h>] [--dry-run]
 ```
 
 There is no bare invocation on purpose: run with no mode and it prints a two-line pointer and
@@ -83,7 +91,7 @@ Three values, and the default is `keep`:
 | `fill` | as `keep`, plus the master's comment on a field the conf has none for, so a conf that never documented a field comes to match the master |
 | `master` | `fill`, plus the master's wording where the conf already carried a comment, so a sentence that drifted is corrected |
 
-Only a field the **master itself comments** can be affected, and today that is the seven `TRANSFORMS`
+Only a field the **master itself comments** can be affected, and today that is the five `TRANSFORMS`
 booleans at the end of `struct LayoutData`. Every other field carries a section header and no
 per-field comment, so there is nothing for `fill` or `master` to apply - which is why `keep` is the
 default: the two other modes are a correction tool for drifted sentences, not a mass documentation
@@ -259,9 +267,9 @@ const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, false};
 ### What it handles
 
 - **`#ifdef BOOMBOX_STYLE` blocks** produce two entries: the standard one and one named
-  `" (BoomBox)"`, the latter emitted as `.boomboxVU = true`. The old format spelled the flag
-  `BOOMBOX_STYLE`; that detection and the layout **names** are unchanged, because they describe the
-  old file, not ehRadio.
+  `" (BoomBox)"`, the latter with `vuConf`'s `align` set to `WA_CENTER` (the boombox orientation) by
+  `force_vu_boombox()`. The old format spelled the flag `BOOMBOX_STYLE`; that detection and the layout
+  **names** are unchanged, because they describe the old file, not ehRadio.
 - **`#define HIDE_*`** zeroes the matching config and keeps the original as a comment below it:
 
   ```c
@@ -275,6 +283,10 @@ const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, false};
   values that use it.
 - **`bandsConf`** loses an obsolete sixth value (`fadespeed`; the fade rate now comes from the band
   length and `VU_FADE_MS`). Only a plain integer is dropped, so a real expression is never lost.
+- **`ScrollConfig`** loses `buffsize` and `uppercase`, which are no longer members. Every conf passed the same
+  `140`, which is now `WIDGET_BUFF_SIZE` in `options.h`, and `uppercase` never did anything. The leading widget
+  group is kept whole (it has braces of its own) and only a remainder of exactly the old six parts is trimmed,
+  so a comment or an expression anywhere in it stops the trim rather than being silently rearranged.
 - **OLED targets** get `metaBGConf` / `metaBGConfInv` sorted by height, because ehRadio selects
   `metaBGConfInv` when *invert title* is on and OLEDs default to inverted: the hairline (height 3 or
   less) goes to `metaBGConf`, the rectangle to `metaBGConfInv`. Two hairlines or two rectangles are left
@@ -303,3 +315,47 @@ Read the temp, fill in the `// <--------- NEEDS EDITING!` values by hand, then i
 `py conf_tool.py --clean` afterwards to be sure the file matches the master.
 
 See [`layout_key.md`](layout_key.md) for what every field means and how to choose the numbers.
+
+---
+
+## Mode 4 — `--fromjson`, a layout saved by the on-device editor
+
+The device's layout editor stores **numbers**, because no browser can validate a macro and an expression
+cannot be validated at all: a slot file holds `{ "name", "screen", "layout": { "<field>": { "<cell>": n } } }`
+and nothing symbolic. This mode is the way back the other way — it appends the document to a
+`display*conf.h` as a conforming layout entry:
+
+```
+py conf_tool.py --fromjson layout3.json --name "My Layout"
+py conf_tool.py --fromjson layout3.json --target displayTFT320x240conf.h --dry-run
+```
+
+- **The target is the document's own `"screen"`**, matched against this directory (`320x240` finds
+  `displayTFT320x240conf.h`). `--target` overrides it, and if neither says which file, the tool stops rather
+  than guessing — `--import` can *create* a conf file, but this mode needs the file to exist.
+- **`--name` defaults to the document's own name.** The entry is appended to `_layouts[]` and the name to
+  `_layoutsNames[]`, at the **end**, so no existing layout's index moves and a persisted
+  `config.store.layoutId` cannot come to mean a different layout. The `.new.h` temp and the install prompt are
+  the same as `--import`'s.
+- **Numbers stay numbers.** The tool USED to put macro names back wherever a value equalled a constant — an
+  exact one (`8` → `TFT_FRAMEWDT`), a divided one (`1000` → `SCROLLDELAY/5`), a small fraction (`25` →
+  `SCROLLTIME*5/4`) — searching every cell of every field. That is why a `bandsConf` cell meaning "how many
+  bands" could come back as `TFT_FRAMEWDT` merely because both were 10, and it was found that way in a shipped
+  conf file. A macro means something only in the cells written for it, so the revival is gone (round 8) and a
+  number stays a number.
+- **Two things are still spelled, because they name an enum rather than a number.** `align` comes back as
+  `WA_LEFT`/`WA_CENTER`/`WA_RIGHT` — a `WA_CENTER` on `vuConf` is the boombox orientation and a `WA_RIGHT` on it
+  is rotated 90 — and `outlined` as `true`/`false`. **The one exception is a `FillConfig`'s `align` cell**,
+  which draws nothing: it comes back as the bare number the header writes (`0`), not a `WA_*` name, so the round
+  trip matches the conf files and the documented form.
+- **A field the document does not carry** is written as `{ }` with the `// <--------- NEEDS EDITING!` marker,
+  exactly as `--import` does — which only happens for a hand-made partial file, since the editor always sends
+  all 30 fields.
+- **An all-zero field comes back as `{ }, // unused`.** There is one presence rule and it is the device's own
+  (`presentOf()` in `widgetsconfig.h`): every cell zero means absent, which is also exactly how a conf spells
+  it, and how the editor's per-card checkbox states it. `MoveConfig` is deliberately excluded, since a zeroed
+  move means *stay put* rather than *nothing here*, and so are `metaConf` and `playlistConf`: an all-zero
+  station or playlist line is a broken document, and it has to stay visible as a value rather than hide behind
+  a comment that reads "unused".
+- **The boot screens are not in the document at all.** `_bootConfig` is one `BootData` per conf file rather
+  than one per layout, so nothing here can change the AP or SD-manager screens.

@@ -21,6 +21,14 @@
 #include "utility.h"
 #include "../locale/dsplocale.h"
 
+// The weather has TWO questions, and the layout editor's switch answers both.  `weatherWanted()` opens the
+// FETCH gates, which round 3 deliberately left closed - a layout can only be positioned against a real line,
+// so with the switch on the device fetches rather than showing a stand-in.  `weatherDetail()` pretends the
+// four display switches are on, so the line is the longest one any layout could show.  Neither touches
+// config.store, and display.cpp's `weatherLive()` is the sibling that decides VISIBILITY.
+static inline bool weatherWanted() { return editorOpt(config.store.showweather); }
+static inline bool weatherDetail(bool stored) { return editorOpt(stored); }
+
 #define NETWORK_TASK_STACK_BYTES (NETWORK_TASK_STACK_SIZE * 1024)
 
 static constexpr uint32_t WIFI_SETTLE_MS               = 1000;   // ms after the stack starts before connecting
@@ -203,7 +211,7 @@ void ticks() {
       network.forceTimeSync = true;
     }
     uint16_t weatherSyncInterval = (uint16_t)config.store.weathersyncinterval * 60;
-    if (config.store.showweather && weatherSyncTicks >= weatherSyncInterval) {
+    if (weatherWanted() && weatherSyncTicks >= weatherSyncInterval) {
       weatherSyncTicks=0;
       network.forceWeather = true;
     }
@@ -988,7 +996,7 @@ void doSync(void * pvParameters) {
       }
     }
   }
-  if (network.weatherBuf && config.store.showweather && network.forceWeather) {
+  if (network.weatherBuf && weatherWanted() && network.forceWeather) {
     // Fetch weather without interrupting display (keep showing cached data)
     network.forceWeather = false;
     if (!getWeather(network.weatherBuf) && shouldClearWeatherCacheOnFailure()) {
@@ -1083,7 +1091,8 @@ bool MyNetwork::buildWeatherString() {
   #if (DSP_MODEL!=DSP_DUMMY)
     if (!weatherBuf) return false;
 
-    // If no cached data or cache expired, show loading message
+    // No cached data, or the cache has expired: the loading line, which the fetch already on its way will
+    // replace.  There is deliberately no sample string - a layout is positioned against real weather now.
     if (!WeatherCache::valid) {
       snprintf(weatherBuf, WEATHER_STRING_L, "%s", l10n(L10N_LBL_W_LOADING));
       display.putRequest(NEWWEATHER);
@@ -1129,19 +1138,21 @@ bool MyNetwork::buildWeatherString() {
     written = snprintf(p, remaining, "%s, %.1f%s", desc, temp_display, tempUnit);
     if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     
-    if (config.store.weatherfeels && remaining > 1) {
+    // The four detail switches, each through the one helper, so the editor's switch can present the longest
+    // line a layout could ever show without writing config.store.
+    if (weatherDetail(config.store.weatherfeels) && remaining > 1) {
       written = snprintf(p, remaining, " ~ %s %.1f%s", l10n(L10N_LBL_W_FEELSLIKE), feels_display, tempUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherpressure && remaining > 1) {
+    if (weatherDetail(config.store.weatherpressure) && remaining > 1) {
       written = snprintf(p, remaining, " ~ %s %.0f %s", l10n(L10N_LBL_W_PRESSURE), press_display, pressUnit);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherhumidity && remaining > 1) {
+    if (weatherDetail(config.store.weatherhumidity) && remaining > 1) {
       written = snprintf(p, remaining, " ~ %s %d%%", l10n(L10N_LBL_W_HUMIDITY), WeatherCache::humidity);
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= written; }
     }
-    if (config.store.weatherwind && remaining > 1) {
+    if (weatherDetail(config.store.weatherwind) && remaining > 1) {
       written = snprintf(p, remaining, " ~ %s %.1f %s [%s]", l10n(L10N_LBL_W_WIND), wind_display, windUnit, l10n_wind(wind_dir_idx));
       if (written > 0 && (size_t)written < remaining) { p += written; remaining -= (size_t)written; }
     }

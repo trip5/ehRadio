@@ -272,44 +272,6 @@ void handleReady(AsyncWebServerRequest *request) {
   request->send(response);
 }
 
-#ifdef SAVE_LOGS_TO_FS
-// /log.txt: the whole log ring as one text file, oldest file first.  The chunked loader hands the callback a running byte offset,
-// which is exactly what logRingReadAt() wants, so the layout is snapshotted once at the start of the request and the offsets stay stable
-// - anything logged while the client is downloading is beyond the snapshot and is simply not part of this response.
-static size_t logChunk(uint8_t* buffer, size_t maxLen, size_t index) {
-  return logRingReadAt(index, buffer, maxLen);
-}
-
-void handleLog(AsyncWebServerRequest *request) {
-  if (logRingServeBusy()) {
-    request->send(409, "text/plain", "a log download is already in progress\n");
-    return;
-  }
-  const size_t total = logRingSnapshot();
-  if (total == 0) {
-    request->send(200, "text/plain", "no log stored\n");
-    return;
-  }
-  AsyncWebServerResponse *response = request->beginChunkedResponse("text/plain", logChunk);
-  response->addHeader("Cache-Control", "no-store");
-  request->send(response);
-}
-
-// /logclear empties the ring (state file too)
-void handleLogClear(AsyncWebServerRequest *request) {
-  if (logRingServeBusy()) {   // the wipe would pull the files out from under that download
-    request->send(409, "text/plain", "a log download is in progress - wait for it to finish\n");
-    return;
-  }
-  const size_t had = logRingClear();   // wipes and reports the bytes, without snapshotting over anyone
-  char body[48];
-  snprintf(body, sizeof(body), "log cleared (%u bytes)\n", (unsigned)had);
-  AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", body);
-  response->addHeader("Cache-Control", "no-store");   // a cached 200 would make a second clear look like a no-op
-  request->send(response);
-}
-#endif
-
 void handleSearchPost(AsyncWebServerRequest *request) {
   // handle preview or add to playlist
   bool addtoplaylist = false;
@@ -408,14 +370,6 @@ bool NetServer::begin(bool quiet) {
 
   webserver.on("/", HTTP_ANY, handleIndex);
   webserver.on("/ready", HTTP_GET, handleReady);
-  #ifdef SAVE_LOGS_TO_FS
-    // The saved log ring, oldest file first (logging.h). Both spellings: /log is the friendly one, /log.txt is what a
-    // curl or an old bookmark carries. This router matches an exact path or that path plus "/", so neither shadows the
-    // other and a bare /sdman route is impossible for the manager; /logclear is a different path, not /log plus "/".
-    webserver.on("/log", HTTP_GET, handleLog);
-    webserver.on("/log.txt", HTTP_GET, handleLog);
-    webserver.on("/logclear", HTTP_GET, handleLogClear);
-  #endif
   webserver.on("/locale.json", HTTP_GET, handleDynamicLocale);
   webserver.on("/wwwlocale.json", HTTP_GET, handleWWWLocaleIndex);
   webserver.on("/dsplocale.json", HTTP_GET, [](AsyncWebServerRequest *request) {

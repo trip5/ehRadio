@@ -775,8 +775,8 @@ void Utility::pruneLittleFS() {
 
   // As with verifyLittleFS, the root listing only yields directory entries under LittleFS, so
   // the two directories are walked explicitly. Directory entries themselves are never removed.
-  // Keep this list closed to these two: /logs (the log ring, see logging.h) is root-level on purpose, and a sweep
-  // widened to the root would delete the very log someone is trying to read.
+  // Keep this list closed to these two: the config and playlist files live at the root, and a sweep widened to it
+  // would delete them.
   static const char* const dirs[] = {"/www", "/data"};
   for (const char* dir : dirs) {
     File root = LittleFS.open(dir);

@@ -301,12 +301,6 @@ void Startup::checkLittleFSandVer() {
     #endif
   }
   LITTLEFSTIMELOG("Cleanup and write branches");
-
-  // The file log ring starts here: after the mount, after the write-read health check and after the pruning,
-  // because anything earlier would race the format-on-failure path.  Nothing is lost by the late start -
-  // logRingWrite() buffered boot lines into the RAM ring and the boot banner written here marks the boundary.
-  logRingInit();
-  LITTLEFSTIMELOG("logRingInit");
 }
 
 void Startup::initNetwork() {

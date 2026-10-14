@@ -1096,20 +1096,15 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 /* Print the previous boot's crash at boot */
-#define COREDUMP_SUMMARY_AT_BOOT // BOOTLOG the last core dump's task, PC, backtrace and ELF SHA into the serial log and
-                                 // into the log ring, so /log.txt carries the crash.  ESP-IDF writes that dump itself:
+#define COREDUMP_SUMMARY_AT_BOOT // BOOTLOG the last core dump's task, PC, backtrace and ELF SHA into the serial log.
+                                 // ESP-IDF writes that dump itself:
                                  // every partition table here already reserves a "coredump" partition and the prebuilt
                                  // libraries are built with core-dump-to-flash in ELF format.  Nothing is printed when
                                  // there is no dump.  Comment this out to leave the dump alone entirely.
 // #define COREDUMP_KEEP_DUMP    // keep the dump in flash after reporting it, for esp-coredump and the Espressif tools
 
-/* Save Logs to LittleFS */
-// #define SAVE_LOGS_TO_FS // Save the logs to LittleFS as a rotating file set for later viewing (at http://x.x.x.x./log.txt)
-// Turning on ALL_DEBUG_LOGS can consume 400-500KB per hour so even a 16MB Partition with 3.5MB Little FS will hold about 6-7 hours of logs
-// So be selective about which logs to save... or just don't turn on this option and use another method of logging (the log ring can be unstable)
-// The log is also available at /log and to clear the log go to /logclear
 #ifndef FS_REQUIRED_FREE_SPACE
-  #define FS_REQUIRED_FREE_SPACE 150 // KB that must stay free in LittleFS: netserver aborts search and curated downloads below it, and it is the log ring's reserve too
+  #define FS_REQUIRED_FREE_SPACE 150 // KB that must stay free in LittleFS: netserver aborts search and curated downloads below it
 #endif
 
 #ifndef BOOTLOG_TX_TIMEOUT_MS

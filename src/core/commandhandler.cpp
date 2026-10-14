@@ -295,7 +295,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
 
   /* Options: Danger Zone */
   if (cmdIs(command, "reboot", "boot"))  { FUNCTIONLOG("REBOOT", "Reboot triggered by command."); delay(10); ESP.restart(); return true; }
-  if (cmdIs(command, "format"))  { player.sendCommand({PR_STOP, 0}); FUNCTIONLOG("FORMAT", "Formatting LittleFS."); logRingShutdown(); delay(10); LittleFS.format(); FUNCTIONLOG("REBOOT", "Rebooting."); delay(10); ESP.restart(); return true; }
+  if (cmdIs(command, "format"))  { player.sendCommand({PR_STOP, 0}); FUNCTIONLOG("FORMAT", "Formatting LittleFS."); delay(10); LittleFS.format(); FUNCTIONLOG("REBOOT", "Rebooting."); delay(10); ESP.restart(); return true; }
   if (cmdIs(command, "reset"))   { FUNCTIONLOG("RESET", "Reset all settings requested."); config.defaultSettings(value, cid); return true; } // also used by Section resets
 
   /* IR Recorder */

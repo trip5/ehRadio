@@ -1543,7 +1543,7 @@ void FileManager::loop() {
 
   // An upload that has gone quiet is released here - the one close allowed over an open upload, and bounded, unlike
   // the 180 s user clock that used to end a live transfer mid-file. Never while a write is executing: a handle closed
-  // under another task is the cross-task hazard the log ring was fixed for, so a wedged write goes to the watchdog.
+  // under another task is the cross-task hazard that lfs_file_seek asserts on, so a wedged write goes to the watchdog.
   // The reason is set before the close so a late hUploadDone() reports "stalled", not a success.
   // The quiet time is read once, before the test, and the value tested is the value logged: reading it again in the
   // arguments let a chunk arriving between the two make a 30 s silence report "quiet for 0ms".

@@ -102,51 +102,6 @@ Grouped (not one-by-one deep explained) areas:
     `Serial.setTxTimeoutMs()` under `#if ARDUINO_USB_CDC_ON_BOOT`. Not zero: at zero the first failed ring-buffer send
     gives up immediately and `tries` hits zero, so a burst such as the 40-line config dump comes out truncated rather
     than merely bounded. Measured cost before the change: about 4.6 ms per line, 186 ms for the config dump alone.
-  - **File logging (`SAVE_LOGS_TO_FS`, live in `logging.h`/`logging.cpp`; it began as `logring.*`, which is why the
-    identifiers still read `logRing*`).** Switched on by an uncommented `#define SAVE_LOGS_TO_FS` in `myoptions.h` (as
-    in `builds/trip5/myoptions.h`). Every test is `#ifdef`, so the define needs no value - and, for the same reason,
-    `#define SAVE_LOGS_TO_FS 0` would still switch it on: to turn it off, comment the line out. When on,
-    `emitLogMessage()` takes **both** of its branches to `logRingWrite(text, complete, critical)`: a complete line goes
-    straight out, and a **fragment** - the `X` variants' partial text, and the progress dots now that `serialLogDot()`
-    routes through the funnel - accumulates in a pending buffer and rides out joined to the line that closes the run, so
-    the file reads the way serial did (`netserver.begin....done`). The run carries the stamp taken when its first
-    fragment arrived, so the timestamp marks when the work started rather than when the newline came. Lines whose
-    category is `ERROR`, `Network`, `Player` or `Services` flush to flash immediately (the last lines before a reboot
-    are the ones that explain it); everything else rides a RAM ring (16 KB in PSRAM, 2 KB of internal heap when there is
-    none) drained by `logRingFlush()` from `loop()`, outside the loop's stage attribution, and written through a static
-    internal-DRAM staging buffer because a flash write runs with the cache disabled and must never be handed a PSRAM
-    pointer. `FS_REQUIRED_FREE_SPACE` (options.h) is the ring's reserve as well as netserver's download floor: the ten
-    files share `total - reserve`, so each caps at about 335 KB here and the ring as a whole is the filesystem minus
-    that reserve - 440 KB/h with `ALL_DEBUG_LOGS` and `CORE_MONITOR` (86% of it Core Monitor) is about 7.5 h of history.
-    One `File::write()` can trigger an uninterruptible sector erase, so `Max Main Loop Time` reads ~118 ms with the ring
-    on against ~3 ms without, and the 15 ms flush budget cannot preempt the single write it is inside. Serving is
-    snapshot-based: `logRingSnapshot()` fixes the file list and each size for one request (so anything logged during the
-    download cannot shift an offset) and `logRingReadAt()` re-reads it file by file, keeping its `File` open across
-    chunk callbacks rather than open/seek/close per chunk - 730 opens is what made a 1.1 MB `/log` take 21 s to load and
-    to save. While such a handle is open `flush()` writes nothing at all, because littlefs can relocate the tail of the
-    newest file when it compacts a directory; the RAM ring absorbs the pause, and a request that stops reading is
-    treated as abandoned after `SERVE_IDLE_MS` (5 s) and its handle dropped. Layout, rotation, sizing, the reboot-safe
-    `/logs/idx` state and the `/log` reader are documented here rather than in a page of their own: the feature is
-    normally built out, so it does not warrant one.
-  - The ring has two URIs. `/log` (and its `/log.txt` spelling, which is what curls and old bookmarks carry) streams the
-    whole ring as one text file, chunked, with the layout snapshotted per request; `/logclear` wipes it and answers with
-    how much was there. Clearing is a URI of its own rather than `?clear=1` on the reader, so that a bookmark, a history
-    entry or a reload button can never destroy the log whose name it carries.
-  - **One owner per file handle, and one lock (`_ioLock`) for the ring's flash I/O.** The download used to keep its
-    `File` open between chunk callbacks while `flush()`, `logRingSnapshot()` and `logRingClear()` closed that handle from
-    other tasks, so a seek landed on a handle littlefs no longer had open and the device aborted with
-    `assert failed: lfs_file_seek lfs.c:... (lfs_mlist_isopen(...))`. `logRingReadAt()` opens, seeks, reads and closes
-    inside the one call, and every flash touch in the ring (`flush()`, `currentSize()`, `ensureFile()`, `saveIdx()`, the
-    callers of `rotate()`, `logRingSnapshot()`, `logRingClear()`, `logRingInit()`) runs under `_ioLock` - a real mutex,
-    never a critical section, because a flash write must not run with interrupts disabled. `flush()` takes it with a
-    zero-tick try and skips when busy (two flushes could interleave their appends and each advance `_cur`), and never
-    rotates while a download is live, because a rotate deletes the oldest slot a snapshot starts from.
-  - One download at a time: while `logRingServeBusy()` is true a second `/log` gets 409, and `/logclear` refuses rather
-    than wiping files out from under it. A download that reads nothing for `SERVE_IDLE_MS` (5 s) counts as abandoned, so
-    a client that walks away cannot lock the ring closed. `logRingClear()` returns the bytes it removed, so the
-    confirmation text no longer snapshots first (that snapshot rewrote a live download's layout). `logRingShutdown()`
-    (called by the danger-zone `format` command before `LittleFS.format()`) flushes and disables the ring for the rest
-    of the boot.
 - Contract detail:
   - `Telnet::printf(...)` is telnet-only transport and no longer mirrors to serial.
   - Normal logs no longer route through `Telnet::printf(...)`; `logging.cpp` uses `Telnet::logLine(...)` /
@@ -155,7 +110,7 @@ Grouped (not one-by-one deep explained) areas:
     behavior (for example client-targeted telnet responses and OTA progress streaming).
 
 ### Crash report (the core dump, read back on the next boot)
-- A panic cannot be written into the ring (nothing of ours runs after one, and the ring lives in PSRAM), but a core dump
+- A panic cannot be logged by us (nothing of ours runs after one), but a core dump
   is recorded on every crash: `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` with `DATA_FORMAT_ELF=y` is built into the
   framework's prebuilt ESP32-S3 libraries, and every partition table in `builds/partitions/` ends with a 64 KB
   `coredump` partition. `src/core/crashreport.h` / `crashreport.cpp` only read it back.
@@ -168,8 +123,7 @@ Grouped (not one-by-one deep explained) areas:
   both it and `CONFIG_ESP_COREDUMP_*` must hold or the file compiles to empty stubs.
 - `main.cpp` calls it right after the 1 second pre-log delay, inside the same `CORE_DEBUG_LEVEL`/`ALL_DEBUG_LOGS` guard,
   and that delay also fires when a dump is waiting (after a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT
-  reason, not `ESP_RST_POWERON`). Because the block runs before `logRingInit()`, its lines sit in the RAM ring and are
-  appended once the ring is ready - the crash lands at the end of the log, after the lines that led up to it.
+  reason, not `ESP_RST_POWERON`). The block runs early in `setup()`, so the crash is logged before the rest of the boot.
 - The summary API exists only in the ELF core-dump build of the IDF libraries, so `crashreport.cpp` is guarded by `#if
   defined(COREDUMP_SUMMARY_AT_BOOT) && CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`; both
   sdkconfig macros are 1 here, and the map file confirms `esp_core_dump_get_summary` links in from
@@ -2626,7 +2580,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `not_active` - a batch destroyed by our own timer, with the log naming an idle timeout that had not happened.
   `hDone()` had always refused to close over an upload; the timer did not, and that asymmetry was the bug.
 - **The one close allowed over an open upload is guarded by `_upInWrite`.** Closing a `File` another task is inside
-  is the cross-task hazard the log ring was fixed for, so the stall branch does nothing while a write is executing -
+  is the cross-task hazard that `lfs_file_seek` asserts on, so the stall branch does nothing while a write is executing -
   it marks the reason (`stalled`) so the transfer ends deterministically at its next step, and a genuinely wedged
   write is left to the task watchdog, which `sdFeedWatchdog()` feeds *outside* the write and which will therefore
   reset the device by itself. A locked manager is the better failure there; a corrupted handle is not.

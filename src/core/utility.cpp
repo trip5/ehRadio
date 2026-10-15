@@ -15,36 +15,31 @@
 #include "player.h"
 #include "../displays/tools/pretext.h"
 
-bool clockTrustworthy() {
-  // The clock may only print a time the device can stand behind. Two ways it could not, both visible at boot:
-  //   1. Nothing has set the time yet - network.timeinfo is a zeroed struct, i.e. year 1900, so 1901 or less IS the
-  //      "never set" state and no arbitrary epoch floor is needed: the zeroed struct is its own marker.
-  //   2. The RTC and the clock disagree. RTC::getTime()/setTime() carry whatever zone the chip holds, so a chip set by
-  //      another tool (or before the timezone changed) holds UTC - indistinguishable from a correct time except by an
-  //      agreement test, which is the UTC step the RTC radio showed.
-  // When the system clock itself is unset there is nothing to agree WITH: offline with an RTC (the SD-offline case) the
-  // chip is the only source and is trusted, the year test above having already rejected a zeroed chip; online it is NOT
-  // trusted, because the agreement test needs a local zone and the timezone only arrives at the WiFi-connect event.
-  if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
-  // Before the system clock is real, `localtime()` has no timezone to apply, so a chip holding UTC agrees with it
-  // perfectly - the UTC step above. Until then the chip is only trusted offline. "Real" needs a floor: before SNTP the
-  // clock is seconds since boot, a valid-looking positive time_t, so one year of epoch is the smallest honest floor.
+// Fills 'out' with the current local time and returns true only when the system clock is real. "Real" needs a floor:
+// before SNTP the clock is seconds since boot - a valid-looking positive time_t - so one year of epoch is the smallest
+// honest floor, and below it localtime() has no timezone to apply either. This is the one place that read happens:
+// clockTrustworthy() and refreshClock() both ask here instead of each calling time(NULL) and localtime_r().
+bool systemLocalTime(struct tm& out) {
   const time_t now = time(nullptr);
-  const bool sysClockSet = (now > 31536000);
-  if (!sysClockSet) return network.status == SDOFFLINE;
-  #if RTCSUPPORTED
-    if (config.isRTCFound()) {
-      struct tm sysTm;
-      if (!localtime_r(&now, &sysTm)) return false;
-      if (network.timeinfo.tm_year != sysTm.tm_year) return false;                  // a halted cell reads 2000
-      int dmin = (network.timeinfo.tm_hour * 60 + network.timeinfo.tm_min)
-               - (sysTm.tm_hour * 60 + sysTm.tm_min);
-      if (dmin >  720) dmin -= 1440;                                                // compare across midnight
-      if (dmin < -720) dmin += 1440;
-      if (dmin > 1 || dmin < -1) return false;                                      // the chip is in another zone
-    }
-  #endif
-  return true;
+  if (now <= 31536000) return false;                 // seconds since boot, not a date
+  return localtime_r(&now, &out) != nullptr;
+}
+
+bool clockTrustworthy() {
+  // The clock may only print a time the device can stand behind.  network.timeinfo is now a pure cache filled by
+  // refreshClock(), so the only question left is whether it holds anything real:
+  //   1. Nothing has set it yet - a zeroed struct is year 1900, so 1901 or less IS the "never set" state and the
+  //      zeroed struct is its own marker; the no-RTC radio showed 00:00 here until the first doSync().
+  //   2. With the system clock unset there is nothing to check against, and localtime() has no timezone to apply
+  //      either (configTzTime() only runs at the WiFi-connect event).  Offline the RTC chip is the only source there
+  //      will ever be, so it is trusted; online it is not, because SNTP and doSync() have not spoken yet.
+  // No agreement test is needed any more: refreshClock() copies the system clock whenever it is set, so an RTC in
+  // another zone can no longer reach the glass; the chip only fills the cache while the system clock is unset, which
+  // is exactly the "nothing to agree with" case handled below.  The chip is kept honest by doSync()'s rtc.setTime().
+  if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
+  struct tm sysTm;
+  if (systemLocalTime(sysTm)) return true;                     // the system clock is authoritative once set
+  return network.status == SDOFFLINE;                          // no system clock: trust the chip only offline
 }
 
 namespace {

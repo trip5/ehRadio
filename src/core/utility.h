@@ -10,6 +10,10 @@
 
 bool clockTrustworthy();
 
+// Fills 'out' with the current local time and returns true only when the system clock is real
+// (past the one-year epoch floor).  The single place the time(NULL)/localtime_r() read lives.
+bool systemLocalTime(struct tm& out);
+
 /* ===== Deep Sleep Wake GPIO Mask =====
    All defined input pins on RTC-capable GPIOs are automatically used as wake sources.
    ANY interaction (button press release, rotary turn) wakes the device.

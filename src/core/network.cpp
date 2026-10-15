@@ -141,6 +141,30 @@ bool spawnStreamRetry() {
   return ok == pdPASS;
 }
 
+// The one place network.timeinfo is made current, and the only place ticks() queues CLOCK.  timeinfo is a pure cache
+// of the most reliable clock available, refreshed every tick and never advanced by hand - the authority order is:
+//   1. the system clock, once SNTP has set it.  It is disciplined and keeps running across a WiFi outage too, so it is
+//      read regardless of network.status (the old code switched to a hand-incremented copy the moment the link
+//      dropped, which is exactly the drift the display used to bounce on);
+//   2. otherwise the RTC chip, when one is present - the only source across an offline boot;
+//   3. otherwise nothing, leaving timeinfo as it is.  The old tm_sec++/mktime() increment is gone: with no source it
+//      only ever advanced a struct there was nothing to show (clockTrustworthy() gates the print anyway).
+static void refreshClock() {
+  struct tm localNow;
+  if (systemLocalTime(localNow)) {          // system clock set - it wins, whatever the network state
+    network.timeinfo = localNow;
+    display.putRequest(CLOCK);
+    return;
+  }
+  #if RTCSUPPORTED
+    if (config.isRTCFound()) {              // no system clock: the chip is the only source there is
+      rtc.getTime(&network.timeinfo);
+      mktime(&network.timeinfo);
+      display.putRequest(CLOCK);
+    }
+  #endif
+}
+
 void ticks() {
   if (!display.ready()) return; //waiting for SD is ready
   // Self-heal the ladder.  lostPlaying is the IOU ("the user is owed a resume"): it is set BEFORE the task is
@@ -194,16 +218,6 @@ void ticks() {
     if (network.forceTimeSync || network.forceWeather) {
       xTaskCreatePinnedToCore(doSync, "doSync", NETWORK_TASK_STACK_BYTES, NULL, LOW_TASK_PRIORITY, &syncTaskHandle, NETWORK_CORE);
     }
-    // check at :01s mark (fix network clock not matching system clock after Daylight Savings Time changes)
-    if (network.timeinfo.tm_sec == 1) {
-      time_t now = time(NULL);
-      struct tm localNow;
-      localtime_r(&now, &localNow);
-      if ((network.timeinfo.tm_min != localNow.tm_min) || (network.timeinfo.tm_hour != localNow.tm_hour)) {
-        timeSyncTicks = 0;
-        network.forceTimeSync = true;
-      }
-    }
     // Time sync interval: config value is in hours, convert to seconds
     uint32_t timeSyncInterval = (uint32_t)config.store.timesyncinterval * 3600;
     if (timeSyncTicks >= timeSyncInterval) {
@@ -242,19 +256,7 @@ void ticks() {
       }
     }
   }
-  #if RTCSUPPORTED
-    if (config.isRTCFound()) {
-      rtc.getTime(&network.timeinfo);
-      mktime(&network.timeinfo);
-      display.putRequest(CLOCK);
-    }
-  #else
-    if (network.timeinfo.tm_year>100 || network.status == SDOFFLINE) {
-      network.timeinfo.tm_sec++;
-      mktime(&network.timeinfo);
-      display.putRequest(CLOCK);
-    }
-  #endif //#if RTCSUPPORTED
+  refreshClock();
   if (player.isRunning() && config.getMode()==PM_SDCARD) {
     if (network.status == SDOFFLINE) player.getAudioCurrentTime();  // bypass netserver (not running in offline mode)
     else netserver.requestOnChange(SDPOS, 0);

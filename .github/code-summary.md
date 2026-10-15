@@ -3917,20 +3917,42 @@ palettes live with their own drivers.
   base class calls itself from `setActive()` and from the layout show/hide helpers - so `Pager::setPage()` and every
   layout change repaint the clock. Gating `Display::_time()` does NOT cover those: that only handles the tick updates,
   which is why a gate there changed nothing at all.
-- `clockTrustworthy()` (`utility.cpp`, declared in `utility.h`) is asked at the top of `_printClock()`. It refuses two
-  states. First, nothing has set the time yet: `network.timeinfo.tm_year + 1900 <= 1901` is the zeroed struct, which is
-  what the no-RTC radio showed as `00:00` until the first `doSync()` (1901 rather than a modern floor, so a device that
-  never syncs can never cross it). Second, an RTC that disagrees with an established system clock by more than a minute,
-  or in the year - because `RTC::getTime()`/`setTime()` carry whatever zone the chip happens to hold, so a chip set by
-  another tool prints a plausible-looking UTC, right year and right minute, which no plausibility test can catch.
-- **The comparison needs an established system clock, and that is a separate condition** (`now > 31536000`, one year of
-  epoch - far above any uptime, far below any real date). `localtime()` only becomes local once `configTzTime()` has
-  run, which happens at the WiFi-connect event, so before that a UTC chip agrees with `localtime()` perfectly and gets
-  printed as local. That was the RTC radio's remaining UTC step after the first attempt at this gate. With the clock
-  unset the chip is trusted only when `network.status == SDOFFLINE` (the chip is the only source there will ever be);
-  online it is blocked until SNTP and `doSync()` have spoken.
+- `clockTrustworthy()` (`utility.cpp`, declared in `utility.h`) is asked at the top of `_printClock()`. With
+  `network.timeinfo` now a pure cache (see below) it asks one thing: has anything set the cache? `network.timeinfo.tm_year
+  + 1900 <= 1901` is the zeroed struct, which is what the no-RTC radio showed as `00:00` until the first `doSync()` (1901
+  rather than a modern floor, so a device that never syncs can never cross it). **There is no RTC-agreement test any
+  more**: the cache is copied from the system clock whenever that is set, so an RTC in another zone can no longer reach
+  the glass - the chip only fills the cache while the system clock is unset, which is the one case with nothing to agree
+  with.
+- **"Is the system clock set" and "what is its local time" are one read**, `systemLocalTime()` (`utility.cpp`, declared in
+  `utility.h`): the one-year-epoch floor (`now > 31536000`, far above any uptime, far below any real date), the
+  `time(NULL)` and the `localtime_r()`. Both `clockTrustworthy()` and `refreshClock()` ask it instead of each doing that
+  read themselves. `localtime()` only becomes local once `configTzTime()` has run, which happens at the WiFi-connect
+  event. When the system clock is unset the chip is trusted only when `network.status == SDOFFLINE` (the chip is the only
+  source there will ever be); online it is blocked until SNTP and `doSync()` have spoken.
 - The first genuine paint needs no help from the gate: `ticks()` (RTC) and `doSync()` (network) both request `CLOCK` the
   moment they have something to show, and `_getTime()` reports a change because `_timebuffer` starts at `"00:00"`.
+
+### One producer for network.timeinfo: refreshClock() (network.cpp, utility.cpp)
+- **`refreshClock()` (`network.cpp`) is the single place `network.timeinfo` is made current and the only place `ticks()`
+  queues `CLOCK`.** `network.timeinfo` is a **pure cache** of the most reliable clock available, refreshed every tick and
+  never advanced by hand. The authority order is:
+    1. **the system clock**, once SNTP has set it (`systemLocalTime()`). It is disciplined and keeps running across a
+       WiFi outage, so it is read **regardless of `network.status`**;
+    2. **otherwise the RTC chip**, when one is present - the only source across an offline boot;
+    3. **otherwise nothing**, leaving the cache as it is.
+- **The old hand-incremented clock is gone.** `ticks()` used to advance a second, private clock (`tm_sec++` + `mktime()`)
+  in parallel with the SNTP-disciplined system clock, which is why the display drifted and "bounced" when NTP snapped it
+  back. Two more defects went with it: the increment was used while merely *offline* (worse than the system clock, which
+  is still valid then), and in RTC builds the chip overwrote the cache every tick even when the system clock was
+  authoritative, letting an inaccurate cell lead the display. With no source the increment only ever advanced a struct
+  there was nothing to show, because `clockTrustworthy()` gates the print.
+- **The `:01s` RTC-drift check is deleted.** With the cache copied from the system clock whenever that is set, the cached
+  value and `localtime()` can never disagree, so the check could never fire. The chip is kept in step by `doSync()`'s
+  periodic `rtc.setTime()` instead. This is the ESP8266/yoRadio single-clock shape finally restored: one authoritative
+  source, cached for the display.
+- A seconds-level skip or repeat during an NTP slew is expected and correct - the display is honestly tracking the real
+  clock.
 
 ### ClockWidget colon blink (widgets.cpp)
 - The seconds-area `fillRect` at line 813 is guarded by `if (Clock_GFXfontPtr != NULL)` — its Y-position formula

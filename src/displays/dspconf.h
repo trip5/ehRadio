@@ -45,7 +45,6 @@
     #include "conf/displayTFT480x320conf.h"
   #elif DSP_WIDTH==428 && DSP_HEIGHT==142
     #include "conf/displayTFT428x142conf.h"
-    #warning "428x142 layouts are completely untested!"
   #elif DSP_WIDTH==320 && DSP_HEIGHT==240
     #include "conf/displayTFT320x240conf.h"
   #elif DSP_WIDTH==284 && DSP_HEIGHT==76

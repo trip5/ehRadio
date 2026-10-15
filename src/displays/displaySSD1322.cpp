@@ -55,9 +55,6 @@ void DspCore::initDisplay() {
   config.theme.playlist[2] = GRAY_1;
   config.theme.playlist[3] = GRAY_1;
   config.theme.playlist[4] = GRAY_1;
-  if (config.store.playlistPages) {
-    for(byte i=0;i<5;i++) config.theme.playlist[i] = GRAY_3; // make them all light when in paged mode
-  }
 #endif
 
   begin();
@@ -67,7 +64,12 @@ void DspCore::initDisplay() {
   setTextWrap(false);
 }
 
-void DspCore::clearDsp(bool black){ clearDisplay(); }
+void DspCore::clearDsp(bool black) {
+  if (config.store.playlistPages) {
+    for(byte i=0;i<5;i++) config.theme.playlist[i] = GRAY_3; // make them all light when in paged mode (this is the easiest place to put it)
+  }
+  clearDisplay();
+}
 void DspCore::flip(){
 #if DSP_WIDTH==DSP_HEIGHT
   if(ROTATE_90){

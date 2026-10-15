@@ -200,6 +200,12 @@
   #define BTN_NEXT           42
 #elif defined(ILI9488_PCM_1BUTTON_FULL)
   #define BTN_NEXT           13
+  #define IR_BUTTON_MODE     0xFF0FF0
+  #define IR_BUTTON_UP       0xFFCF30
+  #define IR_BUTTON_DOWN     0xFF2FD0
+  #define IR_BUTTON_PREV     0xFF8F70
+  #define IR_BUTTON_NEXT     0xFF4FB0
+  #define IR_BUTTON_PLAY     0xFFAF50
 #elif defined(ES3C28P)
   #define TS_MODEL           TS_MODEL_FT6336
   #define TS_SDA             16
@@ -248,6 +254,7 @@
 
 #if defined(ILI9488_PCM_1BUTTON_FULL)
   #define IR_PIN          14
+  #define IR_BUTTON_POWER 0xFF0FF0
   #define RTC_MODULE      DS1307
   #define RTC_SDA         17
   #define RTC_SCL         18
@@ -365,5 +372,11 @@
 
 // Other:
 //#define DEEP_SLEEP_DISABLE
+
+#define GITHUBURL "https://ehradiotest.donotbend.net" // used by the ESPFileUpdater in BrowserClient (and in URLs below)
+#define FILESURL GITHUBURL "/" // + FILE for SPIFFS files (this version)
+#define UPDATEURL GITHUBURL "/" // + FIRMWARE for the file
+#define CHECKUPDATEURL GITHUBURL "/version.txt" // automatically extracted from options.h during Github workflow
+#define VERSIONSTRING "ehRadio Version" // the file above should have a line that contains this followed by a version number
 
 #endif // myoptions_h

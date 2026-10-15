@@ -727,6 +727,65 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef IR_TIMEOUT
   #define IR_TIMEOUT 80 // kTimeout, see IRremoteESP8266 documentation
 #endif
+// Optional default IR codes, seeded into the store only when NVS holds no valid store (see Config::loadIR()).
+// Value is the hex "Code" from irrecord.html or the serial log, for example 0xFF0FF0; 0 means no default.
+#ifndef IR_BUTTON_POWER
+  #define IR_BUTTON_POWER 0
+#endif
+#ifndef IR_BUTTON_MUTE
+  #define IR_BUTTON_MUTE 0
+#endif
+#ifndef IR_BUTTON_UP
+  #define IR_BUTTON_UP 0
+#endif
+#ifndef IR_BUTTON_DOWN
+  #define IR_BUTTON_DOWN 0
+#endif
+#ifndef IR_BUTTON_PREV
+  #define IR_BUTTON_PREV 0
+#endif
+#ifndef IR_BUTTON_NEXT
+  #define IR_BUTTON_NEXT 0
+#endif
+#ifndef IR_BUTTON_PLAY
+  #define IR_BUTTON_PLAY 0
+#endif
+#ifndef IR_BUTTON_MODE
+  #define IR_BUTTON_MODE 0
+#endif
+#ifndef IR_BUTTON_HASH
+  #define IR_BUTTON_HASH 0
+#endif
+#ifndef IR_BUTTON_N0
+  #define IR_BUTTON_N0 0
+#endif
+#ifndef IR_BUTTON_N1
+  #define IR_BUTTON_N1 0
+#endif
+#ifndef IR_BUTTON_N2
+  #define IR_BUTTON_N2 0
+#endif
+#ifndef IR_BUTTON_N3
+  #define IR_BUTTON_N3 0
+#endif
+#ifndef IR_BUTTON_N4
+  #define IR_BUTTON_N4 0
+#endif
+#ifndef IR_BUTTON_N5
+  #define IR_BUTTON_N5 0
+#endif
+#ifndef IR_BUTTON_N6
+  #define IR_BUTTON_N6 0
+#endif
+#ifndef IR_BUTTON_N7
+  #define IR_BUTTON_N7 0
+#endif
+#ifndef IR_BUTTON_N8
+  #define IR_BUTTON_N8 0
+#endif
+#ifndef IR_BUTTON_N9
+  #define IR_BUTTON_N9 0
+#endif
 
 /* ============================== RTC ============================== */
 

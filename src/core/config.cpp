@@ -590,38 +590,39 @@ void Config::setDefaults() {
 #if IR_PIN!=255
 /* ===== IR code storage =====
    One NVS key per remote button in the dedicated "ehradioir" namespace, each holding that button's
-   3 codes. The behaviour id travels in the same row as the field offset and NVS key, so the table
-   cannot fall out of sync and row order is irrelevant. */
+   3 codes. The behaviour id and the compile-time default travel in the same row as the field offset
+   and NVS key, so the table cannot fall out of sync and row order is irrelevant. */
 struct irKeyMapEntry {
   size_t      fieldOffset;
   const char* key;
   size_t      size;
   uint8_t     action;
+  uint64_t    def;  // IR_BUTTON_* value for slot 0, written into a reset store only; 0 = no default
 };
 
-#define IR_KEY_ENTRY(field, keyname, act) { offsetof(irstore_t, field), keyname, sizeof(((irstore_t*)0)->field), act }
+#define IR_KEY_ENTRY(field, keyname, act, def) { offsetof(irstore_t, field), keyname, sizeof(((irstore_t*)0)->field), act, def }
 
 static const irKeyMapEntry irKeyMap[] = {
-  IR_KEY_ENTRY(power,  "power",  IRACT_POWER),
-  IR_KEY_ENTRY(mute,   "mute",   IRACT_MUTE),
-  IR_KEY_ENTRY(up,     "up",     IRACT_UP),
-  IR_KEY_ENTRY(down,   "down",   IRACT_DOWN),
-  IR_KEY_ENTRY(prev,   "prev",   IRACT_PREV),
-  IR_KEY_ENTRY(next,   "next",   IRACT_NEXT),
-  IR_KEY_ENTRY(play,   "play",   IRACT_PLAY),
-  IR_KEY_ENTRY(mode,   "mode",   IRACT_MODE),
-  IR_KEY_ENTRY(hash,   "hash",   IRACT_HASH),
-  IR_KEY_ENTRY(n0,     "n0",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n1,     "n1",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n2,     "n2",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n3,     "n3",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n4,     "n4",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n5,     "n5",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n6,     "n6",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n7,     "n7",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n8,     "n8",     IRACT_DIGIT),
-  IR_KEY_ENTRY(n9,     "n9",     IRACT_DIGIT),
-  {0, nullptr, 0, 0} // Yup, 4 fields - don't delete the last line!
+  IR_KEY_ENTRY(power,  "power",  IRACT_POWER,  IR_BUTTON_POWER),
+  IR_KEY_ENTRY(mute,   "mute",   IRACT_MUTE,   IR_BUTTON_MUTE),
+  IR_KEY_ENTRY(up,     "up",     IRACT_UP,     IR_BUTTON_UP),
+  IR_KEY_ENTRY(down,   "down",   IRACT_DOWN,   IR_BUTTON_DOWN),
+  IR_KEY_ENTRY(prev,   "prev",   IRACT_PREV,   IR_BUTTON_PREV),
+  IR_KEY_ENTRY(next,   "next",   IRACT_NEXT,   IR_BUTTON_NEXT),
+  IR_KEY_ENTRY(play,   "play",   IRACT_PLAY,   IR_BUTTON_PLAY),
+  IR_KEY_ENTRY(mode,   "mode",   IRACT_MODE,   IR_BUTTON_MODE),
+  IR_KEY_ENTRY(hash,   "hash",   IRACT_HASH,   IR_BUTTON_HASH),
+  IR_KEY_ENTRY(n0,     "n0",     IRACT_DIGIT,  IR_BUTTON_N0),
+  IR_KEY_ENTRY(n1,     "n1",     IRACT_DIGIT,  IR_BUTTON_N1),
+  IR_KEY_ENTRY(n2,     "n2",     IRACT_DIGIT,  IR_BUTTON_N2),
+  IR_KEY_ENTRY(n3,     "n3",     IRACT_DIGIT,  IR_BUTTON_N3),
+  IR_KEY_ENTRY(n4,     "n4",     IRACT_DIGIT,  IR_BUTTON_N4),
+  IR_KEY_ENTRY(n5,     "n5",     IRACT_DIGIT,  IR_BUTTON_N5),
+  IR_KEY_ENTRY(n6,     "n6",     IRACT_DIGIT,  IR_BUTTON_N6),
+  IR_KEY_ENTRY(n7,     "n7",     IRACT_DIGIT,  IR_BUTTON_N7),
+  IR_KEY_ENTRY(n8,     "n8",     IRACT_DIGIT,  IR_BUTTON_N8),
+  IR_KEY_ENTRY(n9,     "n9",     IRACT_DIGIT,  IR_BUTTON_N9),
+  {0, nullptr, 0, 0, 0} // Yup, 5 fields - don't delete the last line!
 };
 static const size_t irKeyMapCount = sizeof(irKeyMap) / sizeof(irKeyMap[0]) - 1;
 
@@ -639,6 +640,17 @@ void Config::loadIR() {
     prefs.clear();
     uint16_t m = IR_MAGIC;
     prefs.putBytes(IR_MAGIC_KEY, &m, sizeof(m));
+    // Defaults land here and nowhere else: a store carrying the magic is the user's own set.  They are
+    // written through immediately, because the next boot finds the magic valid, reads no key for them
+    // and leaves the memset value standing.
+    uint8_t seeded = 0;
+    for (size_t i = 0; i < irKeyMapCount; ++i) {
+      if (irKeyMap[i].def == 0) continue;
+      uint8_t* field = (uint8_t*)&irstore + irKeyMap[i].fieldOffset;
+      ((uint64_t*)field)[0] = irKeyMap[i].def;
+      if (prefs.putBytes(irKeyMap[i].key, field, irKeyMap[i].size) == irKeyMap[i].size) ++seeded;
+    }
+    if (seeded) FUNCTIONLOG("loadIR", "Seeded %u default IR code(s)", (unsigned)seeded);
   } else {
     for (size_t i = 0; i < irKeyMapCount; ++i) {
       uint8_t* field = (uint8_t*)&irstore + irKeyMap[i].fieldOffset;

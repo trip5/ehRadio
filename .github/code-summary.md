@@ -416,6 +416,12 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   `mute`, `up`, `down`, `prev`, `next`, `play`, `mode`, `hash`, `n0`…`n9`). It is persisted in its own NVS namespace
   (`ehradioir`) through a dedicated key map in `config.cpp`; buttons are addressed by name, never by array position. The
   old positional `ircodes_t` blob was removed.
+- Compile-time default IR codes come from the `IR_BUTTON_*` macros (0 fallbacks in `options.h`, values in
+  `myoptions.h`), carried in the `def` column of `irKeyMap[]`. A struct initialiser on `irstore_t` cannot supply them,
+  because `loadIR()` memsets the store before reading it: the defaults are seeded into slot 0 by `loadIR()` and
+  persisted in the same session, and only in the magic-mismatch branch. A store that already carries `IR_MAGIC` is the
+  user's own set and is never overwritten, so defaults exist only on an uninitialised store (fresh board, full NVS
+  erase, `setDefaults()`). `0` means no default, matching the empty-slot sentinel of `clearIR()`/`clearDuplicateIR()`.
 - `Config::saveValue(...)` API now has two simple overloads only:
   - typed: `saveValue(T* field, const T& value)`
   - string: `saveValue(char* field, const char* value)`
@@ -466,6 +472,9 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - named IR code storage in the dedicated `ehradioir` NVS namespace (`IR_MAGIC` 1812 stored under key `irset`, one key
     per button via `irKeyMap[]`); helpers `loadIR()`, `saveIR()` / `saveIR(button)`, `irCodes()`, `clearIR()`,
     `clearDuplicateIR()`, `irButtonByName()`, `irButtonCount()`, `irButtonKey()`, `irAction()`
+  - compile-time default IR codes: `IR_BUTTON_*` (0 fallbacks in `options.h`, values in `myoptions.h`) held in the `def`
+    column of `irKeyMap[]`, seeded into slot 0 of a reset store and persisted by `loadIR()`; a store that already
+    carries `IR_MAGIC` is never touched
   - `deleteOldKeys()` also drops the legacy `ircodes` key and the former persisted `dspon` key from the `ehradio`
     namespace (`dspon` is now runtime-only state and must not be restored on boot)
 - SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is

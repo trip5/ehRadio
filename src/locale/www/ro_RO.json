@@ -1,11 +1,11 @@
 {
   "locale_code": "ro_RO",
-  "locale": "română",
+  "locale": "Română",
   "locale_en": "Romanian",
   "ttl_add_search": "Adaugă criteriu de căutare",
   "ttl_auto_dimming": "Auto Diminuire",
   "ttl_battery": "Baterie",
-  "ttl_controls": "Controle",
+  "ttl_controls": "Controale",
   "ttl_curated": "Liste selectate",
   "ttl_dangerzone": "Zonă periculoasă",
   "ttl_download": "Descarcă {0}",

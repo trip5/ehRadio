@@ -237,8 +237,9 @@ void Controls::irLoop() {
       if (netserver.irRecordEnable) {
         uint64_t* irSlot = config.irCodes(static_cast<uint8_t>(config.irindex));
         if (irSlot != nullptr) {
+          FUNCTIONLOG("Controls.IR", "--------------------------");
           String irText = resultToHumanReadableBasic(&irResults);
-          FUNCTIONLOG("Controls.IR", "%s", irText.c_str());
+          SERIALLOG("%s", irText.c_str());
           FUNCTIONLOG("Controls.IR", "--------------------------");
           irSlot[config.irchck] = irResults.value;
           // Only one slot can win at match time, so drop this code from every other slot.

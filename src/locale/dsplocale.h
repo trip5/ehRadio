@@ -203,7 +203,7 @@ const char* const l10n_names[37] PROGMEM = {
   "norsk",  // no_NO
   "polski",  // pl_PL
   "português",  // pt_PT
-  "română",  // ro_RO
+  "Română",  // ro_RO
   "русский язык",  // ru_RU
   "slovenčina",  // sk_SK
   "slovenščina",  // sl_SI
@@ -6334,7 +6334,7 @@ const char dsplocale_index[] PROGMEM = R"DSEND(
   "no_NO": "norsk",
   "pl_PL": "polski",
   "pt_PT": "português",
-  "ro_RO": "română",
+  "ro_RO": "Română",
   "ru_RU": "русский язык",
   "sk_SK": "slovenčina",
   "sl_SI": "slovenščina",

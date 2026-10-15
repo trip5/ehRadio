@@ -2,7 +2,7 @@
 """
 makefont.py — build one clock font STYLE from its folder of PNGs.
 
-    py makefont.py LED
+    py makefont.py LEDClock
     py makefont.py Chunky6px
     py makefont.py Chunky6 --tight-bounds
 

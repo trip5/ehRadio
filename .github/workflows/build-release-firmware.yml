@@ -131,7 +131,7 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${VERSION}" >> $GITHUB_OUTPUT
           echo "Final version: ${VERSION}"
-          echo "ehRadio Version $(grep -oP '#define RADIOVERSION "\K[^"]+' src/core/options.h)" > version.txt
+          echo "ehRadio (Trip5) Version $(grep -oP '#define RADIOVERSION "\K[^"]+' src/core/options.h)" > version.txt
 
       - name: Validate version matches options.h
         run: |

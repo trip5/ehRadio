@@ -530,16 +530,16 @@ void NetServer::processQueue() {
                                                                 act += F("\"group_display\",");
             #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
                                                                 act += F("\"group_vu_ss\",");
-              if (presentOf(*vuConf_ptr) || DBGWUI)             act += F("\"group_vu\",");
+            if (presentOf(*vuConf_ptr) || DBGWUI)               act += F("\"group_vu\",");
                                                            else act += F("\"hide_group_vu\",");
-              if (config.store.screensaverVU || DBGWUI)         act += F("\"group_vu_ss_style\",");
+            if (config.store.screensaverVU || DBGWUI)           act += F("\"group_vu_ss_style\",");
                                                            else act += F("\"hide_group_vu_ss_style\",");
             #endif
             if (presentOf(*bufferbarConf_ptr) || DBGWUI)        act += F("\"group_buffer\",");
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            if (config.theme.clockbg != config.theme.background || DBGWUI)
+            if ((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0) || DBGWUI)
                                                                 act += F("\"group_clockglow\",");
                                                            else act += F("\"hide_group_clockglow\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");

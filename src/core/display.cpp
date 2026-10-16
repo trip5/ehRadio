@@ -1759,6 +1759,7 @@ void Display::_reinitWidgets() {
 }
 
 void Display::_setLayoutPointers() {
+  layoutSanitize(&activeLayout);
   // The VU's box is resolved HERE, the one place every copy into activeLayout passes through - layoutCopy()
   // for a compiled conf or a LittleFS slot, layoutStagingCopyTo() for the editor's own push.  Resolving once,
   // at load, is what lets the widget draw what it is given and nothing re-test the numbers per frame.  It

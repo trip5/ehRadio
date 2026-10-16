@@ -727,13 +727,18 @@ void NumWidget::_getBounds() {
 }
 
 void NumWidget::_draw() {
-  // Index 0 has no clock font at all, and the number/volume page has always needed one: the guard
-  // was "TIME_SIZE < 2" when that was 0 and 1.
-  if(!_active || _cf.index == 0) return;
+  // Size index 0 is the SYSTEM font, and it is a valid answer here.  The guard used to refuse it outright ("the
+  // number/volume page has always needed one: TIME_SIZE < 2"), which is why a 0 in numConf drew NOTHING at all
+  // while setText() went on erasing the cells - and the three small panels whose confs ask for 0 (the 128x32
+  // OLED, the 284x76 and the 160x80, all with a clockConf at 0 beside it) never showed the number.
+  // Nothing else was needed to support it: the ink sits BELOW the cursor at _config.top - setText()'s erase
+  // already reads it that way, `_textheight * CHARHEIGHT` from that same top, the mirror of the clock whose
+  // glyphs sit above their baseline - the bounds are 6 px per character out of _charWidth(), and the size is
+  // _cf.textPx.  This widget draws to the panel directly, so it needs none of the clock's framebuffer care.
+  if(!_active) return;
   dsp.setTextSize(_cf.font==nullptr?_cf.textPx:1);
   dsp.setFont(_cf.font);
   dsp.setTextColor(_fgcolor, _bgcolor);
-  if(!_active) return;
   dsp.setCursor(_realLeft(), _config.top);
   dsp.print(_text);
   // Recorded here as well as in setText(), because a page switch reaches this through setActive() alone.
@@ -897,9 +902,24 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
   // _space and _clockheight are all derived from it.
   _superfont = _cf.index;
   _space = (5*_superfont)/2; //magick
-  if(_fullclock){
-    _dateheight = _superfont<4?1:2;
-    _clockheight = _timeheight + _space + CHARHEIGHT * _dateheight;
+  // One row's worth of gap for this size, for the seconds' gap and for the date's own row.  Identical to
+  // _space for 1..4, and a whole built-in character row at index 0 - where _space is 0, which is what put the
+  // date ON the time's row there.  A clock font's ink sits above its cursor and the built-in cell's below it,
+  // so a full row is the honest gap at that size.
+  _rowgap = (_superfont == 0) ? (uint8_t)CHARHEIGHT : _space;
+  // The date's row height in built-in cells: one, or two at the 70 px size whose date is drawn larger.  Sized
+  // for every case rather than only inside the fullClock branch, because it is also what the compact box and
+  // the erase math read.
+  _dateheight = _superfont<4?1:2;
+  if(_cf.font == nullptr){
+    // Size index 0 draws with the SYSTEM font, and its cell sits BELOW the cursor where a clock glyph's sits
+    // ABOVE it.  The window therefore starts at the clock's own `top` (see _begin) and has to carry that cell
+    // itself, plus the date's row when fullClock is on - 8, or 16.  Sized for a clock font instead, only the
+    // digits' first row fell inside the window with fullClock off, which is what "a few pixels, all in the same
+    // row" was.
+    _clockheight = (uint8_t)(CHARHEIGHT * _cf.textPx * (1 + (_fullclock ? _dateheight : 0)));
+  } else if(_fullclock){
+    _clockheight = _timeheight + _rowgap + CHARHEIGHT * _dateheight;
   } else {
     _clockheight = _timeheight;
   }
@@ -914,7 +934,14 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
 void ClockWidget::_begin(){
   #ifdef PSFBUFFER
     uint16_t bgColor = config.isScreensaver ? 0 : config.theme.background;
-    _fb->begin(&dsp, _clockleft, _config.top-_timeheight, _clockwidth, _clockheight+1, bgColor);
+    // How far ABOVE `_config.top` the window has to reach.  A clock font's glyph has yOffset = -height, so its
+    // ink is above its baseline and the whole _timeheight must be inside the window; the system font's ink is
+    // below its cursor, so at size index 0 there is nothing to reserve and the window starts AT `top`.  _top()
+    // reports the matching row base inside the window, so the two have to be read together.  Computed here
+    // rather than taken from _top() because on the very first call the buffer does not exist yet and _top()
+    // would still answer with the panel row.
+    const uint16_t topOff = (_cf.font == nullptr) ? 0 : _timeheight;
+    _fb->begin(&dsp, _clockleft, _config.top - topOff, _clockwidth, _clockheight+1, bgColor);
   #endif
 }
 
@@ -933,12 +960,49 @@ uint16_t ClockWidget::_left(){
   if(_fb && _fb->ready()) return 0; else return _clockleft;
 }
 uint16_t ClockWidget::_top(){
-  if(_fb && _fb->ready()) return _timeheight; else return _config.top;
+  // The buffer row where this clock's ink begins.  A clock font's ink ENDS at _timeheight (the date row
+  // follows below it); the system font's BEGINS there, so at size index 0 the row base is the window's own row
+  // 0 - the system font would otherwise raise the time a whole cell.  Must agree with _begin()'s window.
+  if(_fb && _fb->ready()) return (_cf.font == nullptr) ? 0 : _timeheight;
+  else return _config.top;
+}
+
+// The date line the full clock prints, built in one place so the print and the box's geometry always agree:
+// at the compact sizes the DATE is usually the wider of the clock's two rows, and the box is sized for it.
+void ClockWidget::_dateString(){
+  sprintf(_tmp, "%2d %s %d", network.timeinfo.tm_mday, l10n_month(network.timeinfo.tm_mon), network.timeinfo.tm_year+1900);
+  strlcpy(_datebuf, _tmp, sizeof(_datebuf));
+}
+
+// Where a row of width rowW starts, for the sizes that align each of the clock's rows on its own.  The box is
+// the wider of the two rows, so an inset inside it IS that row's own alignment: at WA_CENTER both rows centre
+// on the same axis, at WA_RIGHT both end at the box's right edge, at WA_LEFT both start at its left.
+uint16_t ClockWidget::_rowLeft(uint16_t rowW){
+  if(!_compactClock() || rowW >= _clockwidth) return _left();
+  switch(_config.align){
+    case WA_CENTER: return (uint16_t)(_left() + (_clockwidth - rowW)/2);
+    case WA_RIGHT:  return (uint16_t)(_left() + (_clockwidth - rowW));
+    default:        return _left();
+  }
+}
+
+// Whether this clock glows at all: the stored setting AND a clock font to glow with.  The size index 0 case is
+// why it is a predicate rather than a repeated test - init() can only put the digit '0' in _glow/_glowSec when
+// there is no clock font (they exist to be MEASURED there: _timewidth and _secwidth are read off them), so
+// printing them would paint a literal "00:00" behind the time and "00" behind the seconds.  Size 0 therefore
+// draws no glow anywhere, and the WebUI does not offer the setting while the clock is that size (GETACTIVE in
+// netserver.cpp).  Three draws ask: the time's glow, the seconds' glow, and the colon's OFF colour - that last
+// one is deliberately the glow colour so the block stays unbroken while the colon blinks, which is exactly what
+// must not be punched into the background at size 0.  The theme's own colour test stays with each caller, which
+// is the only place that knows which pair is in question: clockbg vs background, or secondsbg vs background.
+bool ClockWidget::_glowOn(){
+  return _cf.font != nullptr && editorOpt(config.store.clockglow);
 }
 
 void ClockWidget::_getTimeBounds() {
   // _glow is built from this style's glow character in init(), so a live font switch rebuilds it
   // there exactly as a layout change does - nothing here reads a macro.
+  if(_fullclock) _dateString();     // the width below is a max() of the two rows, and the date is one of them
   _timewidth = _textWidth(_cf, _glow);
   uint8_t fs = _superfont>0?_superfont:_cf.textPx;
   // How wide the seconds block is.  With a seconds font in this style it is MEASURED from that
@@ -955,9 +1019,21 @@ void ClockWidget::_getTimeBounds() {
     _secwidth = (uint16_t)(CHARWIDTH * fs * 2);
   }
   rightside = _secwidth;
+  // The clock's own row, needed by the box below and by the print (which aligns the two rows separately at the
+  // compact sizes).  The one expression serves every size; only the compact ones read it.
+  _rowwidth = (uint16_t)(_timewidth + (_showSeconds ? _rowgap + _secwidth : 0));
   if(_fullclock){
-    rightside += _space*2+1; //2space+vline
-    _clockwidth = _timewidth+rightside;
+    if(_compactClock()){
+      // No divider column at these sizes, so the box is exactly the two rows' own needs: the time with the
+      // seconds after it, and the date below it.  The DATE can be the wider of the two (at index 0 it usually
+      // is), so the box takes whichever is wider - which is also what keeps a framebuffer window from clipping
+      // a row that aligning into a narrower box would push out of the window.
+      const uint16_t datew = (uint16_t)(utf8_strlen(_datebuf) * CHARWIDTH * _dateheight);
+      _clockwidth = (datew > _rowwidth) ? datew : _rowwidth;
+    } else {
+      rightside += _space*2+1; //2space+vline
+      _clockwidth = _timewidth+rightside;
+    }
   } else {
     // Anything to the right of the time is the layout's .seconds, not _superfont: with _superfont
     // now the size index it is non-zero for every panel that has a clock font, which would have
@@ -965,7 +1041,7 @@ void ClockWidget::_getTimeBounds() {
     if(!_showSeconds)
       _clockwidth = _timewidth;
     else
-      _clockwidth = _timewidth + _space + rightside;
+      _clockwidth = _timewidth + _rowgap + rightside;
   }
   switch(_config.align){
     case WA_LEFT: _clockleft = _config.offset; break;
@@ -1019,20 +1095,25 @@ void ClockWidget::_printClock(bool force){
   if(force){
     _clearClock(false);   // wipe the buffer only: this path paints and displays the whole window below
     _getTimeBounds();
+    // Where the time's row starts.  At the compact sizes each of the clock's two rows is aligned on its own, so
+    // the time's row starts at its own inset rather than at the box's edge (above those sizes _rowLeft is the
+    // box's edge, i.e. no change).  The glow goes HERE too, not at the box's edge: it fills the cells the digits
+    // sit in, so it has to start exactly where they do - and at the compact sizes the box is the wider of the two
+    // rows, so the box's edge sits up to the date's own width away from the digits.
+    uint16_t timeLeft = _rowLeft(_rowwidth);
     // Theme-aware rather than panel-type-based: the glow is only meaningful where the clock's own
     // background differs from what the digits sit on, so on a one-bit panel (clockbg == background)
     // this is the same no-op the old !DSP_OLED guard gave, while a colour theme that sets them equal
-    // is now skipped too.
-    if(editorOpt(config.store.clockglow) && clockBgColor != bgColor) {
+    // is now skipped too.  _glowOn() holds the other half of the rule: no clock font, no glow.
+    if(_glowOn() && clockBgColor != bgColor) {
       gfx.setTextColor(clockBgColor, bgColor);
-      gfx.setCursor(_left(), _top());
+      gfx.setCursor(timeLeft, _top());
       gfx.print(_glow);
     }
     if(clockInTitle)
       gfx.setTextColor(config.theme.meta, config.theme.metabg);
     else
       gfx.setTextColor(clockColor, bgColor);
-    uint16_t timeLeft = _left();
     const char* timeText = _timebuffer;
     if (config.store.clock12 && _timebuffer[0] == ' ') {
       timeLeft += _charWidth(_cf, (unsigned char)_glow[0]);
@@ -1043,7 +1124,10 @@ void ClockWidget::_printClock(bool force){
     if(_fullclock){
       // lines, date & dow
       _linesleft = _left()+_timewidth+_space;
-      if(showFullClockOnScreensaver){
+      // A compact clock has no divider column, so the divider and the day of week are dropped rather than
+      // squeezed into it - there is a single pixel for the line and an 8 px row for the DOW beside a 15 px
+      // time.  The date is the part worth keeping, and it takes the row below on its own.
+      if(showFullClockOnScreensaver && !_compactClock()){
         gfx.drawFastVLine(_linesleft, _top()-_timeheight, _timeheight, config.theme.div);
         gfx.drawFastHLine(_linesleft, _top()-(_timeheight)/2, CHARWIDTH * _superfont * 2 + _space, config.theme.div);
         gfx.setFont();
@@ -1051,21 +1135,37 @@ void ClockWidget::_printClock(bool force){
         gfx.setCursor(_linesleft+_space+1, _top()-CHARHEIGHT * _superfont);
         gfx.setTextColor(dowColor, bgColor);
         gfx.print(l10n_dow(network.timeinfo.tm_wday));
-        sprintf(_tmp, "%2d %s %d", network.timeinfo.tm_mday, l10n_month(network.timeinfo.tm_mon), network.timeinfo.tm_year+1900);
-        strlcpy(_datebuf, _tmp, sizeof(_datebuf));
+      }
+      if(showFullClockOnScreensaver){
+        _dateString();
         uint16_t _datewidth = utf8_strlen(_datebuf) * CHARWIDTH*_dateheight;
+        gfx.setFont();      // the date is a built-in-font row, whatever face the time is drawn in
         gfx.setTextSize(_dateheight);
-        #if DSP_MODEL==DSP_GC9A01A
-          gfx.setCursor((dsp.width()-_datewidth)/2, _top() + _space);
-        #else
-          gfx.setCursor(_left()+_clockwidth-_datewidth, _top() + _space);
-        #endif
+        uint16_t dx;
+        if(_compactClock()){
+          // On its own row the date is aligned independently, by the same rule the time's row uses.
+          dx = _rowLeft(_datewidth);
+        } else {
+          #if DSP_MODEL==DSP_GC9A01A
+            dx = (dsp.width()-_datewidth)/2;
+          #else
+            dx = _left()+_clockwidth-_datewidth;
+          #endif
+        }
+        gfx.setCursor(dx, _top() + _rowgap);
         gfx.setTextColor(dateColor, bgColor);
         gfx.print(_datebuf);
       }
     }
   }
-  if ((_fullclock || _showSeconds) && (!_fullclock || showFullClockOnScreensaver) && (_fullclock || showSecondsOnScreensaver)) {
+  // What the seconds column is asked for.  At the two compact sizes there is no divider column for the
+  // seconds to sit in, so fullClock there means the DATE ALONE: they are drawn only when the layout asks
+  // for them with .seconds - and then _rowwidth already counts them, so the time's row, the alignment and
+  // the ink all agree.  Drawing them while the box left them out is exactly what made the centred time
+  // look off.  Above those sizes fullClock has always implied the seconds beside the divider, and it
+  // still does.
+  const bool drawSeconds = _showSeconds || (_fullclock && !_compactClock());
+  if (drawSeconds && (!_fullclock || showFullClockOnScreensaver) && (_fullclock || showSecondsOnScreensaver)) {
     // The seconds column.  With a seconds sibling in the style (10, 15, 21 or 28 px for size index
     // 1..4 - see secondsSizePx()) the digits are drawn with the CLOCK font, ink-top aligned with
     // where the built-in cell's ink has always begun; without a sibling, the built-in font at
@@ -1074,14 +1174,20 @@ void ClockWidget::_printClock(bool force){
     // CHARWIDTH * fs * 2, so a style can be swapped without moving the column.
     const GFXfont* secFont = secondsFontFor(_cf.index);
     uint8_t  secPx = secondsSizePx(_cf.index);
-    uint16_t sx = _fullclock ? _linesleft+_space+1 : _left()+_timewidth+_space;
-    uint16_t sy = _fullclock ? _top()-_timeheight   : _top()-_timeheight+_space;  // the ink top
+    // The x: the divider column's gap goes with the divider, so the compact sizes - and every size without
+    // fullClock - put the seconds one row-gap after the time, and only the divider sizes keep _linesleft.
+    uint16_t sx = (_fullclock && !_compactClock()) ? (uint16_t)(_linesleft+_space+1)
+                                                   : (uint16_t)(_rowLeft(_rowwidth)+_timewidth+_rowgap);
+    // The y is the ink top of the time's own row.  With no clock font (size index 0) that row BEGINS at the
+    // cursor instead of ending there, so the seconds follow the time rather than being raised a row above it.
+    uint16_t sy = (_cf.font == nullptr) ? _top()
+                 : (uint16_t)(_top()-_timeheight+(_fullclock ? 0 : _space));  // the ink top
     if (secFont) {
       // Clear first: a GFXfont paints only the lit pixels, so a narrower glyph ("1" after "0")
       // leaves the previous character's pixels behind.  Then the glow, which fills the cells the
       // digits sit in - the same treatment clockbg gives the clock, in this style's own character.
       gfx.fillRect(sx, sy, _secwidth, secPx, bgColor);
-      if (editorOpt(config.store.clockglow) && secondsBgColor != bgColor) {
+      if (_glowOn() && secondsBgColor != bgColor) {
         gfx.setFont(secFont);
         gfx.setTextSize(1);
         gfx.setTextColor(secondsBgColor, bgColor);
@@ -1094,7 +1200,16 @@ void ClockWidget::_printClock(bool force){
       gfx.setCursor(sx, sy + secPx);
     } else {
       gfx.setFont();
-      gfx.setTextSize(_superfont);
+      // _superfont is the size INDEX and is 0 with no clock font, where the built-in cell's multiplier is
+      // _cf.textPx - the same substitution _getTimeBounds() makes when it measures the seconds' width.
+      const uint8_t fs = _superfont > 0 ? _superfont : _cf.textPx;
+      // Clear the pair's cells first, exactly as the sibling branch above does and for the same reason: on a
+      // framebuffer a glyph paints only its LIT pixels (psFrameBuffer::write() renders through _writeGlyph(),
+      // which never touches a background), so "35" leaves behind every pixel "36" does not cover and the seconds
+      // smear into one another.  They are the one thing redrawn in place every second - the time and the date
+      // get the force path's clear.  _secwidth is exactly the pair's width and CHARHEIGHT * fs its height.
+      gfx.fillRect(sx, sy, _secwidth, (uint16_t)(CHARHEIGHT * fs), bgColor);
+      gfx.setTextSize(fs);
       gfx.setTextColor(secondsColor, bgColor);
       gfx.setCursor(sx, sy);
     }
@@ -1104,7 +1219,7 @@ void ClockWidget::_printClock(bool force){
   gfx.setTextSize(_cf.font==nullptr?_cf.textPx:1);
   gfx.setFont(_cf.font);
   #ifndef DSP_OLED
-    gfx.setTextColor(dots ? clockColor : (editorOpt(config.store.clockglow)?clockBgColor:bgColor), bgColor);
+    gfx.setTextColor(dots ? clockColor : (_glowOn()?clockBgColor:bgColor), bgColor);
   #else
     if(clockInTitle) {
       gfx.setTextColor(dots ? config.theme.meta:config.theme.metabg, config.theme.metabg);
@@ -1113,7 +1228,9 @@ void ClockWidget::_printClock(bool force){
     }
   #endif
   dots=!dots;
-  gfx.setCursor(_left()+_dotsleft, _top());
+  // The colon is drawn here, apart from the time string, so it is the position that is easiest to forget: it
+  // follows the same row base as the time itself (identical to the box's edge above the compact sizes).
+  gfx.setCursor(_rowLeft(_rowwidth)+_dotsleft, _top());
   gfx.print(":");
   gfx.setFont();
   if(_fb && _fb->ready()) _fb->display();

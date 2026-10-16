@@ -36,6 +36,15 @@ const LayoutData* layoutSource(uint8_t id);
 // empty, so a caller can fall back rather than apply a zeroed layout.
 bool layoutCopy(uint8_t id, void* dst);
 
+// Correct a zero text size in place: 0 is not a size on a field that multiplies the system font's cell (it
+// collapses the row, and on a scroll line it is the widget's own "init has not run" sentinel, which is the
+// crash a font size of 0 caused), while it IS the system font on the two CONF_FONT_INDEX fields - the clock and
+// the large number, which the 128x32 OLED, the 284x76 and the 160x80 ask for - and those are left alone.
+// Called from the same place vuResolveBox() is, for the same reason: every copy into activeLayout passes
+// through it, so a compiled conf, a LittleFS slot and the editor's push are all corrected, including a slot
+// that already holds a 0.
+void layoutSanitize(LayoutData* data);
+
 // Resolve a layout's VU box ONCE, in place, and say whether the meter can be drawn at all.  The display
 // calls this right after every copy into activeLayout, so a compiled conf, a LittleFS slot and the editor's
 // own push are all resolved here and nowhere else - the widget then draws what it is handed, and nothing

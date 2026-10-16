@@ -373,9 +373,4 @@
 // Other:
 //#define DEEP_SLEEP_DISABLE
 
-#ifndef DSP_LOCALE
-  #define DSP_LOCALE "ru_RU"
-#endif
-
-
 #endif // myoptions_h

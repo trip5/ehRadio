@@ -843,10 +843,16 @@ function buildCards() {
         } else {
           inp = document.createElement('input');
           inp.type = 'number';
-          inp.min = '0';
+          // A text size of 0 is only meaningful where the field declares it a SIZE INDEX (CONF_FONT_INDEX: the
+          // clock and the large number, where 0 IS the system font).  Everywhere else the cell multiplies the
+          // system font's own cell, and a 0 there collapses the row - worse, the scroll lines read 0 as "not
+          // initialised yet" and stay half-built, which is what crashed the device.  The device clamps it too.
+          inp.min = (c.key === 'fontsize' && !(f.flags & CONF_FONT_INDEX)) ? '1' : '0';
           if (c.key === 'fontsize' && (f.flags & CONF_FONT_INDEX)) {
             inp.max = '4';
             inp.title = '0 is the system font, 1..4 are 15/35/52/70 px';
+          } else if (c.key === 'fontsize') {
+            inp.title = '1 to 4: the system font at one to four times its size';
           }
         }
         if (unused) {
@@ -946,10 +952,15 @@ function clampEdited(ev) {
   var inp = ev.target;
   var field = LCARDS[inp.dataset.field];
   if (!field) return;
-  var m = cellMax(field, inp.dataset.cell);
-  if (m === null) return;
   var v = parseInt(inp.value, 10);
-  if (!isNaN(v) && v > m) inp.value = String(m);
+  if (isNaN(v)) return;
+  // The cell's own floor first, and whether or not the cell has a panel-derived ceiling: a font size below 1
+  // where the cell multiplies the system font is the value the device has to clamp, so the page does not offer
+  // it.  Typed or pasted, not only spun.
+  var lo = parseInt(inp.min, 10);
+  if (!isNaN(lo) && v < lo) { inp.value = String(lo); v = lo; }
+  var m = cellMax(field, inp.dataset.cell);
+  if (m !== null && v > m) inp.value = String(m);
 }
 
 function fillLayout(doc) {

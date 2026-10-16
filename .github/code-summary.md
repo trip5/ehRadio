@@ -3268,6 +3268,27 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   were there (the neighbours' gates were deliberately left alone). `VuWidget::init()`'s scale-and-recentre budget
   block and `vuScaleToBudget()` are gone. The stored slot keeps the typed numbers, so the editor's warning still
   has something to point at.
+- **A text size of 0 is not a size, and `layoutSanitize()` is where that is enforced.**  The cell means two
+  different things, and `conf_index.h` already records which: on `numConf` and `clockConf` it is a size INDEX
+  whose 0 IS the system font (`CONF_FONT_INDEX`), and three shipped confs ask for it - the 128x32 OLED, the
+  284x76 and the 160x80 set both to 0; on every other field it multiplies the system font's own cell.  A 0 there
+  collapses the row, and worse: the scroll widgets read `textsize == 0` as their own "init has not run" sentinel
+  (`_setTextParams()`, `_calcX()`, the scroll step), so a station-name or title line set to 0 in the editor's
+  font-size box stayed half-built and crashed the device.  `layoutSanitize(LayoutData*)`
+  (`layoutregistry.h`/`.cpp`) walks `_confFields` and, per field: skips the `CONF_FONT_INDEX` ones, so the clock
+  and the number keep 0 and those three panels are untouched; finds the fontsize cell BY NAME in
+  `_confCells[type]` (the cell lists own that order, so a second copy of its index would be the thing that
+  drifts) and skips it where the field marks it `unused` - a fill's is a literal 0 and the VU's is a presence
+  marker, and writing a 1 into an empty conf would flip `presentOf()`, which counts `textsize` as one of its
+  presence bits; clamps `0 -> 1` only where the field is already PRESENT, since that same `presentOf()` read
+  before the clamp is exactly "present, ignoring textsize", so an all-zero conf stays the spelling for an omitted
+  widget; and touches only `CT_WIDGET`/`CT_SCROLL`/`CT_BITRATE`.  It is called from `Display::_setLayoutPointers()`
+  beside `vuResolveBox()` - the one place every copy into `activeLayout` passes through - so a compiled conf, a
+  LittleFS slot AND the editor's staged push are corrected, including a slot that already holds a 0, which a
+  parser-side clamp would leave crashing on every boot.  `editor.html` sets the font-size box's own `min` to 1
+  wherever the field is not `CONF_FONT_INDEX` (and keeps `0`, `max` 4 and the "0 is the system font" title where
+  it is), and `clampEdited()` now enforces that floor as well as the panel-derived ceiling - typed or pasted, not
+  only spun.  See `plans/layout-fontsize-clamp.md`.
 - **A widget's box must be checked against the PANEL, not only against the budget.** The budget bounds an area, so
   a box inside it can still be placed past the edge: band width 220, gap 35, `offset` 10 gives a right edge of 485 on
   a 480 px panel. `VuWidget::_blit()` hands `setAddrWindow(offset, top, _cw, _ch)` to the driver with no edge test,
@@ -3641,14 +3662,77 @@ design record; this is the shape of it.
 - **`fullClock` and `seconds` are per-layout booleans** (`LayoutData`, first two of the TRANSFORMS
   group), replacing "the size is 52 or 70, or the model is an ILI9225" and "this size has a seconds
   font".  The ILI9225 model hack is gone.
+- **At the two smallest sizes `fullClock` degrades to the date alone** (`_compactClock()`, i.e.
+  `_superfont <= 1`).  Size 0 (no clock font) and 1 (15 px) have no divider column to put a divider in - its
+  gap is a pixel or two - nor an 8 px day-of-week row that reads beside the time, so `_printClock()` drops
+  both and keeps the date, on a row of its own below.  **The seconds are not implied either:** they live beside
+  the divider in the sizes that have one, so at 0 and 1 they are drawn only when the layout sets `seconds` -
+  the draw gate is `drawSeconds = _showSeconds || (_fullclock && !_compactClock())`, whose 2..4 half is the old
+  `_fullclock || _showSeconds`.  That is what makes the ink agree with the box: `_rowwidth` counts the seconds
+  only under `_showSeconds`, so drawing them regardless left a centred time off-centre with the seconds hanging
+  outside the box it was centred in.  It also removes a latent collision: with `fullClock` AND `seconds` on at
+  size 1 the DOW and the seconds share the column and their bands overlap.  Sizes 2..4 are untouched, and the
+  screensaver's clock follows the same rule (same widget, same print).
+- **`_rowgap` is one row's gap for the size** - `_space`, or a whole built-in character row at index 0, where
+  `_space` is 0.  It serves both the seconds' gap and the date's row, and it replaced `_space` in the three
+  places those rows are measured: identical for 1..4, and it is what fixed index 0, where the date landed ON
+  the time's row and the seconds were raised a row above it.  The compact box is `max(time row, date)` so a
+  right-aligned date cannot be pushed out of the framebuffer window, and at those sizes the two rows are aligned
+  INDEPENDENTLY: `_rowLeft(rowW)` places each of them inside the box, so a centred clock centres its time line
+  and its date line separately instead of centring the block as a whole.  `_rowLeft()` returns the box's own
+  left edge above these sizes, so nothing there changes, and `_rowwidth` is the time's own row - the time plus
+  the seconds when they follow it - measured in `_getTimeBounds()` beside the date's width.  The blinking colon
+  and the glow follow `_rowLeft()` as well, and they are the two that missed the inset longest: neither is part
+  of the time string, and the glow was drawn at the BOX's edge, which only stops being the digits' start once the
+  compact sizes make the box the wider of the two rows - so its cells sat away from the digits they fill, which
+  is what the TFT showed and a one-bit OLED never could (its `clockbg` equals `background`, so it has no glow).
+  `_dateString()` is the
+  one place the date string is built, called from `_getTimeBounds()` as well as the print, because the box is
+  sized for the wider row.
+  **The y convention is the thing to remember:** a clock font's `setCursor` y is its BASELINE with the ink
+  above it, the built-in cell's is the glyph TOP with the ink below - which is why the seconds' ink top is
+  `_top()` when there is no clock font, and why the built-in seconds must be sized `_cf.textPx` and not
+  `_superfont` (which is 0 there).  The framebuffer WINDOW follows the same split, and both halves have to be
+  read together: a clock font's ink is above its baseline, so the whole `_timeheight` must be inside the window
+  and `_begin()` places it at `_config.top - _timeheight`; the system font's ink is below its cursor, so at size
+  index 0 the window starts at `_config.top` itself, `_top()` is 0 inside it, and `_clockheight` is
+  `CHARHEIGHT * textPx` plus the date's row when `fullClock` is on - 8, or 16, where the clock-font formula gave
+  8 and 24.  Sized for a clock font instead, only the digits' FIRST row fell inside the window with `fullClock`
+  off - "a few pixels, all in the same row" - and the eight rows above the clock were dead space that `clear()`
+  and `freeBuffer()` were wiping.  Two side effects worth knowing: `clockHeight()` at index 0 is that 8 or 16
+  (its one reader is the screensaver's clock-move maths, which wants exactly the box's height), and the drawn
+  pixels did not move at all.
+  **And a framebuffer glyph never paints its background:** `psFrameBuffer::write()` overrides the library's and
+  renders through `_writeGlyph()`, which draws only the LIT pixels, so on a TFT nothing erases itself and every
+  text redraw relies on a `clear()` first.  The seconds are the one thing redrawn in place every second, which is
+  why their built-in branch needed the same `fillRect(sx, sy, _secwidth, CHARHEIGHT * fs, bgColor)` the
+  `secondsFont` branch already had - without it "35" left behind every pixel "36" did not cover and 0..9 smeared
+  into one another while the minutes, repainted after a clear, stayed crisp.  See
+  `plans/clock-small-size-date-only.md`.
+  **The NUMBER widget reads the same index** (`numConf.textsize`) and had refused 0 outright: `NumWidget::_draw()`
+  returned early on `_cf.index == 0`, so a layout asking for the system font drew NOTHING there while `setText()`
+  went on erasing the cells it would have used - and the three panels whose confs ask for 0 (the 128x32 OLED, the
+  284x76 and the 160x80) never showed the number at all.  That refusal is gone, and nothing else was needed: the
+  erase, the bounds (`_charWidth()` out of `textPx`, so 6 px per character) and the size (`_cf.textPx`) already
+  resolved the system font, with the ink BELOW `_config.top` - the mirror of the clock's index 0, where the ink is
+  above its cursor.  `NumWidget` draws to the panel directly rather than through a framebuffer, so it needs none
+  of the clock's window care.  See `plans/font-index-0-number.md`.
 - **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.  It is
   gated at draw time by the glow colour differing from the backdrop (`clockBgColor != bgColor`, and the
   seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
   is exactly the no-op the old `!DSP_OLED` guard gave, while a colour theme that sets them equal is skipped
   too.  On greyscale SSD1322 (`clockbg = GRAY_1` against a black background) the glow is now both offered and
-  drawn, where the `DSP_OLED` guard hid it.  The WebUI's Clock Glow row is offered on the same rule, via the
-  `group_clockglow` / `hide_group_clockglow` token in `GETACTIVE` (`netserver.cpp`), which the `theme`
-  command re-sends so the row follows a theme switch with the settings page open.
+  drawn, where the `DSP_OLED` guard hid it.  All three things the glow touches - the time's glow, the seconds'
+  glow, and the colon's OFF colour, which is deliberately drawn in the glow colour so the block stays unbroken
+  while the colon blinks - ask one predicate, `ClockWidget::_glowOn()`, which needs a clock FONT as well as the
+  stored setting: `init()` can only put the digit `'0'` in `_glow`/`_glowSec` at size index 0 (they are the width
+  templates `_timewidth`/`_secwidth` are read off, so they must not be blanked instead), and printing them would
+  paint a literal `00:00` behind the time.  Size 0 therefore has NO glow anywhere, and the WebUI's Clock Glow row
+  is offered on the same rule plus that font test, via the `group_clockglow` / `hide_group_clockglow` token in
+  `GETACTIVE` (`netserver.cpp`): `config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize
+  != 0` - an AND, because it is a "hide when", never a second reason to show.  The `theme` command re-sends the
+  token so the row follows a theme switch with the settings page open, and a `layout` switch re-sends it for the
+  same reason (the clock's size index lives in the layout, not in the theme).
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,

@@ -186,6 +186,11 @@ bool layoutParseDoc(const char* json, LayoutData* out, char* nameOut, size_t nam
       *screenOk = (strcmp(s, want) == 0);
     }
   }
+  // A document can carry a text size of 0 - the editor's font-size box used to accept one on any field, and a
+  // hand-written file still can.  Corrected HERE as well as on the way into activeLayout, with the SAME helper,
+  // so the stored slot and the copy the editor reads back agree with what the device will draw.  Everything
+  // that parses a document - a slot file, the editor's save, its live preview - passes through this one exit.
+  layoutSanitize(out);
   return true;
 }
 
@@ -363,6 +368,46 @@ bool layoutCopy(uint8_t id, void* dst) {
   if (src == nullptr || dst == nullptr) return false;   // an empty id: the caller keeps what it had
   memcpy(dst, src, sizeof(LayoutData));
   return true;
+}
+
+void layoutSanitize(LayoutData* data) {
+  if (data == nullptr) return;
+  for (uint8_t f = 0; f < CONF_FIELD_COUNT; f++) {
+    const ConfField& fd = _confFields[f];
+    // 0 is the system font on these two and is wanted: the 128x32 OLED, the 284x76 and the 160x80 set both
+    // clockConf and numConf to it, and a clamp here would turn those panels' clocks and numbers into 15 px
+    // clock fonts.
+    if (fd.flags & CONF_FONT_INDEX) continue;
+    const uint8_t cells = _confCellCounts[fd.type];
+    // Which cell is the font size, by NAME.  The cell lists own that order, so a second copy of "2" here would
+    // be exactly the kind of thing that drifts the day a type gains a cell.
+    uint8_t fsCell = cells;
+    for (uint8_t c = 0; c < cells; c++) {
+      if (strcmp(_confCells[fd.type][c].key, "fontsize") == 0) { fsCell = c; break; }
+    }
+    if (fsCell >= cells) continue;                    // this type has no font size cell at all
+    // The struct carries the cell but the code never reads it: a fill's is a literal 0 and the VU's is a
+    // presence marker.  Clamping one would not merely be pointless - presentOf() counts textsize as one of its
+    // presence bits, so writing a 1 into an empty fill would turn "absent" into "present".
+    if (fd.unused & CONF_CELL_BIT(fsCell)) continue;
+    WidgetConfig* wc = nullptr;
+    bool present = false;
+    switch (fd.type) {
+      case CT_WIDGET:  wc = (WidgetConfig *)((uint8_t *)data + fd.offset); present = presentOf(*wc); break;
+      case CT_SCROLL:  {
+        ScrollConfig* sc = (ScrollConfig *)((uint8_t *)data + fd.offset);
+        wc = &sc->widget; present = presentOf(*sc); break;
+      }
+      case CT_BITRATE: {
+        BitrateConfig* bc = (BitrateConfig *)((uint8_t *)data + fd.offset);
+        wc = &bc->widget; present = presentOf(*bc); break;
+      }
+      default: continue;                              // no other type has a readable font size
+    }
+    // The field has to be PRESENT first: an all-zero conf is how an omitted widget is spelled, and this is read
+    // before the clamp, so `present` is exactly "present, ignoring textsize" - which is the test this needs.
+    if (wc != nullptr && present && wc->textsize == 0) wc->textsize = 1;
+  }
 }
 
 bool vuResolveBox(LayoutData& data) {

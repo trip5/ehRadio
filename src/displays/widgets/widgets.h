@@ -271,6 +271,12 @@ class ClockWidget: public Widget {
     inline uint16_t clockWidth(){ return _clockwidth; }
     inline uint16_t clockHeight(){ return _clockheight; }
     inline uint16_t timeHeight(){ return _timeheight; }
+    // The largest size index that counts as COMPACT: 1 (the 15 px clock font) and 0 (no clock font - the
+    // built-in cell).  At these sizes fullClock drops the divider and the day of week, because there is no
+    // divider column to put them in, and the clock reads as two rows instead: the time with the seconds
+    // after it, and the date below.  See plans/clock-small-size-date-only.md.
+    static constexpr uint8_t CLOCK_COMPACT_MAX = 1;
+    bool _compactClock() const { return _superfont <= CLOCK_COMPACT_MAX; }
   private:
     Adafruit_GFX &getRealDsp();
   protected:
@@ -284,7 +290,9 @@ class ClockWidget: public Widget {
     // template, and the seconds' <g><g>.  Arrays, not pointers, because the character is a runtime
     // value.  The initialisers are the size-index-0 case — no clock font to ask, so the digit '0'
     // stands in, which every system font is guaranteed to have at CHARWIDTH; there the clock is
-    // drawn by the display font and the string is only ever measured, never printed.
+    // drawn by the display font and the string is only ever measured, never printed.  _glowOn()
+    // enforces that, and the characters must NOT be blanked for size 0 instead: they are the width
+    // templates _timewidth and _secwidth are read off.
     char _glow[6] = "00:00";
     char _glowSec[3] = "00";
     // The seconds block's width IN PIXELS, measured in _getTimeBounds() from the SECONDS font's own
@@ -296,7 +304,26 @@ class ClockWidget: public Widget {
     // The clock font resolved from this widget's own clockConf.textsize.
     ClockFontSel _cf {nullptr, 0, 1};
     uint16_t _clockleft, _clockwidth, _timewidth, _dotsleft, _linesleft;
+    // The clock's OWN row: the time, plus the seconds when they follow it on that row.  The compact sizes
+    // align the two rows against each other inside the box (see _rowLeft), so this width has to be known to
+    // the print as well as to _getTimeBounds(), which is where it is measured.
+    uint16_t _rowwidth = 0;
     uint8_t  _clockheight, _timeheight, _dateheight, _space;
+    // One row's worth of gap for this size, used for the seconds' gap and for the date's row.  Identical to
+    // _space for indices 1..4; at index 0, where _space is 0, it is a whole built-in character row - a clock
+    // font's ink sits above its cursor and the built-in cell's below it, so that is the honest gap there.
+    uint8_t  _rowgap = 0;
+    // The date line, built into _datebuf.  _getTimeBounds() builds it as well as the print, because at the
+    // compact sizes the date is usually the wider of the clock's two rows and the box is sized for it.
+    void _dateString();
+    // Where a row of width rowW starts.  At the compact sizes the two rows are aligned INDEPENDENTLY inside the
+    // box - the box is the wider of them - so a centred clock centres its time row and its date row separately
+    // rather than centring the block as a whole.  Above those sizes it is the box's own left edge, because
+    // there the box is one row and is placed as a whole.
+    uint16_t _rowLeft(uint16_t rowW);
+    // Whether this clock glows: the stored setting AND a clock font to glow with.  One predicate because three
+    // draws ask it - the time's glow, the seconds' glow and the colon's own off colour.
+    bool _glowOn();
     uint16_t _forceflag = 0;
     bool dots = true;
     // The layout's two clock transforms (LayoutData.fullClock / .seconds).  Neither is derived from

@@ -213,6 +213,10 @@ ScrollWidget::ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor
 }
 
 ScrollWidget::~ScrollWidget() {
+  // The display has ONE single-scroll slot (dsp.setScrollId()), and a scroll line refuses to move while that slot names another widget.
+  // A widget destroyed while it holds the slot would leave it pointing at freed memory, and then nothing would scroll.
+  // it is cleared here rather than at the teardown sites, so every path   that frees widgets is covered.
+  if (dsp.getScrollId() == (void*)this) dsp.setScrollId(NULL);
   if (_fb)     { delete _fb;     _fb = nullptr; }
   if (_sep)    { free(_sep);     _sep = nullptr; }
   if (_window) { free(_window);  _window = nullptr; }

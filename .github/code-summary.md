@@ -3499,6 +3499,21 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     step: 1px on the OLEDs and small TFTs, 2px on the 220x176 and every panel 240px and up, 4px on the 428x142,
     `apSettConf.widget.textsize > 0` is the guard if the entry is `{ }`, which zero-initialises it and would leave the
     boot line standing still — the fallback is `SCROLLTIME`.
+  - **One line scrolls at a time, and a DESTROYED line used to leave that slot dangling.** `dsp.setScrollId()` is a
+    single pointer for the whole panel: `ScrollWidget::_calcX()` takes it while a line is mid-scroll and releases it
+    on wrap, `setText()` releases it when the line owns it, and `_draw()` returns early while it names someone else.
+    `_showDialog()` and `_switchMode()` clear it too, because they swap the page. What was missing is destruction:
+    nothing cleared the slot when a `ScrollWidget` was deleted, and `Page::~Page()` deletes the widgets it holds — so
+    a page torn down while its line held the slot left the pointer aimed at freed memory, and then EVERY scroll line
+    on the panel sat still for the rest of the boot. The boot screens do exactly that: `_start()` removes the logo
+    page and `_apScreen()`/`_sdmanScreen()` each remove the page they replace. That is the reported "the AP screen's
+    two lines do not scroll until a reboot": the boot logo's own line is a `ScrollWidget` as well, its window is
+    `MAX_WIDTH`, and on a narrow panel the version string (or a scan-progress string) is wider than that, so it took
+    the slot — while on a wide TFT the same string fits, `_doscroll` stays false, and the slot is never taken. The
+    deciding test is string-versus-window, NOT the panel family: any panel whose boot line or `apTitleConf` overflows
+    its window can do it. Fixed in `~ScrollWidget()`, which releases the slot when it owns it, plus an explicit
+    `dsp.setScrollId(NULL)` at each of the three page swaps so the idiom stays visible where `_showDialog()` and
+    `_switchMode()` already spell it. See `plans/boot-scroll-id-dangle.md`.
   - `ProgressWidget` is the boot screen's animated dots line, with exactly one instantiation (`Display::_bootScreen()`),
     so its behaviour is the boot screen's. The line is `speaker + runway + boot glyph`, hard against both glyphs, and
     `ProgressConfig` is `{ frame interval ms, line character width, blob elements }` — every conf carries that header

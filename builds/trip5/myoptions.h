@@ -373,10 +373,9 @@
 // Other:
 //#define DEEP_SLEEP_DISABLE
 
-#define GITHUBURL "https://ehradiotest.donotbend.net" // used by the ESPFileUpdater in BrowserClient (and in URLs below)
-#define FILESURL GITHUBURL "/" // + FILE for SPIFFS files (this version)
-#define UPDATEURL GITHUBURL "/" // + FIRMWARE for the file
-#define CHECKUPDATEURL GITHUBURL "/version.txt" // automatically extracted from options.h during Github workflow
-#define VERSIONSTRING "ehRadio Version" // the file above should have a line that contains this followed by a version number
+#ifndef DSP_LOCALE
+  #define DSP_LOCALE "ru_RU"
+#endif
+
 
 #endif // myoptions_h

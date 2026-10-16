@@ -27,6 +27,9 @@
      of the editor rather than as a caption. */
   .info { font-size: 115%; opacity: .75; margin: 0 0 8px; }
   .hint { opacity: .75; font-size: 90%; }
+  /* The flashing note at the foot of each half - the card names' own size (.cname is 115% too), bold and italic
+     so it reads as a footnote rather than as one more row of controls. */
+  .footnote { font-size: 115%; font-weight: bold; font-style: italic; margin: 12px 0 2px; }
   /* One size for the whole table.  The cells used to be 92% while a form control kept the user agent's
      own size - and a control does not inherit font size - so the two columns could never match. */
   #grid { border-collapse: collapse; width: 100%; font-size: 115%; }
@@ -121,6 +124,8 @@
     </thead>
     <tbody id="body"></tbody>
   </table>
+
+  <div class="footnote">Exported single themes may be placed in the /data/data folder as theme1.json, theme2.json... theme10.json when flashing the file system.  Do not use the backup .json.</div>
   </section>
 
   <section id="laybox">
@@ -165,6 +170,8 @@
   <div id="lmsg" class="hint"></div>
 
   <div id="laycards"></div>
+
+  <div class="footnote">Exported single layouts may be placed in the /data/data folder as layout1.json, layout2.json... layout10.json when flashing the file system.  Do not use the backup .json.</div>
   </section>
 </div>
 

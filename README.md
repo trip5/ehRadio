@@ -118,6 +118,7 @@ Want to get even more advanced? There are bunches of notes and tools in the code
 ### `/data` Folder
 
 This is the folder that platformio should flash when uploading the filesystem. ehRadio uses LittleFS.
+This folder contains no files, only the 2 subfolders.
 
 #### `/data/www`
 
@@ -131,8 +132,10 @@ This folder contains files needed for operation. You can put your own files here
 None are mandatory.  All of these files should be exported directly from ehRadio.
 
 Examples of these files may be found in the `/builds/data` folder:
-  - `playlist.csv` contains a list of radio streams.
-  - `wifi.csv` is list of Wireless APs and passwords.
+  - `playlist.csv` contains a list of radio streams
+  - `wifi.csv` is list of Wireless APs and passwords
+  - `theme1.json`...`theme10.json` custom themes (must be single exported themes)
+  - `layout1.json`...`layout10.json` custom layouts (must be single exported layouts)
 
 ### Languages
 

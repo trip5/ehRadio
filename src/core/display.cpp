@@ -531,6 +531,7 @@ void Display::_buildPager() {
 }
 
 void Display::_apScreen() {
+  dsp.setScrollId(NULL);   // the page below may own the slot, and its widget is about to be deleted
   if (_boot) {
     _pager->removePage(_boot);
     _boot = nullptr;
@@ -569,6 +570,7 @@ void Display::_apScreen() {
 #ifdef USE_SD
 // The SD File Manager's screen: the address to open on one line, and how long the device will keep the mode open
 void Display::_sdmanScreen() {
+  dsp.setScrollId(NULL);   // the page below may own the slot, and its widget is about to be deleted
   if (_boot) {
     _pager->removePage(_boot);
     _boot = nullptr;
@@ -613,6 +615,7 @@ void Display::sdmanCountdown() {
 #endif
 
 void Display::_start() {
+  dsp.setScrollId(NULL);   // the boot page may own the slot, and its widget is about to be deleted
   if (_boot) {
     _pager->removePage(_boot);
     _boot = nullptr;

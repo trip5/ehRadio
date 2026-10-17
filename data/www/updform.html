@@ -10,7 +10,9 @@
           </div>
           <div class="row rowinput">
             <input id="binfile" type="file" accept=".bin,.hex" name="update" />
-            <input type="button" class="fb" style="margin-right: 0;" value="Update" onclick="doUpdate(this)" data-i18n="btn_update" />
+          </div>
+          <div class="row rowinput inputwrap center">
+            <input type="button" class="fb" value="Update" onclick="doUpdate(this)" data-i18n="btn_update">
           </div>
         </form>
         <input type="button" class="fb onlineupdatebutton hidden" id="check_online_update" value="Check for Online Update" onclick="checkOnlineUpdate(this)" data-i18n="btn_check_online"/>

@@ -526,13 +526,15 @@ void NetServer::processQueue() {
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
             if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
-            if (DSP_MODEL != DSP_DUMMY || DBGWUI)
-                                                                act += F("\"group_display\",");
+            if (DSP_MODEL != DSP_DUMMY || DBGWUI)               act += F("\"group_display\",");
+            #if defined(DSP_TFT) || DBGWUI
+                                                                act += F("\"group_tft\",");
+            #endif
             #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
                                                                 act += F("\"group_vu_ss\",");
-            if (presentOf(*vuConf_ptr) || DBGWUI)               act += F("\"group_vu\",");
+              if (presentOf(*vuConf_ptr) || DBGWUI)             act += F("\"group_vu\",");
                                                            else act += F("\"hide_group_vu\",");
-            if (config.store.screensaverVU || DBGWUI)           act += F("\"group_vu_ss_style\",");
+              if (config.store.screensaverVU || DBGWUI)         act += F("\"group_vu_ss_style\",");
                                                            else act += F("\"hide_group_vu_ss_style\",");
             #endif
             if (presentOf(*bufferbarConf_ptr) || DBGWUI)        act += F("\"group_buffer\",");
@@ -546,7 +548,8 @@ void NetServer::processQueue() {
             #if defined(DSP_TFT) || DBGWUI
               if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");
             #endif
-            if (activeLayout.fullClock || DBGWUI)               act += F("\"group_full_time\",");
+            if (((activeLayout.fullClock || activeLayout.seconds) && activeLayout.clockConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_full_time\",");
                                                            else act += F("\"hide_group_full_time\",");
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");

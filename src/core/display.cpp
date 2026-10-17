@@ -248,6 +248,11 @@ static uint32_t normalizeBufferbarValue(uint32_t rawValue, uint32_t maxValue) {
 static inline bool moveZeroed(const MoveConfig& m) { return m.x == 0 && m.y == 0 && m.width == 0; }
 static inline void applyMove(Widget* w, const MoveConfig& m) {
   if (!w || moveZeroed(m)) return;
+  // A move that names the position the conf ALREADY gives this widget is a no-op, not a repaint: the confs write
+  // their own numbers to say "this state leaves the line alone", and moving it to where it is costs an erase and
+  // a redraw over identical pixels - a visible tear on a panel that writes as slowly as this one.  See
+  // Widget::moveIsNoop().
+  if (w->moveIsNoop(m)) return;
   w->moveTo(m);
 }
 

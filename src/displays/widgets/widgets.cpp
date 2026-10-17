@@ -1081,8 +1081,16 @@ void ClockWidget::_printClock(bool force){
   uint16_t secondsBgColor = config.isScreensaver ? config.theme.secondsbgss : config.theme.secondsbg;
   uint16_t dowColor = config.isScreensaver ? config.theme.dowss : config.theme.dow;
   uint16_t dateColor = config.isScreensaver ? config.theme.datess : config.theme.date;
-  // _fb only exists on framebuffer (TFT) builds - guard it as getRealDsp() does
-  bool showFullClockOnScreensaver = !config.isScreensaver || (_fb && _fb->ready() && config.store.screensaverFullDateTime);
+  // _fb only exists on framebuffer (TFT) builds - guard it as getRealDsp() does.
+  // What the full clock's own column may draw HERE: the divider, the day and the date need the framebuffer - a
+  // one-bit panel's screensaver has no colours to draw them in - and at the two COMPACT sizes the screensaver
+  // shows the basic time, because fullClock there is the DATE on the MAIN screen, on a row of its own.
+  // `!config.isScreensaver` short-circuits first, so no part of this can reach the main screen.
+  bool showFullClockOnScreensaver = !config.isScreensaver
+                                    || (_fb && _fb->ready() && config.store.screensaverFullDateTime && !_compactClock());
+  // The seconds are the LAYOUT's feature, so on every panel they follow the screensaver's own setting.  They used
+  // to follow the full clock's permission as well, which is what asked for the framebuffer - so on an OLED,
+  // turning fullClock on took the seconds off the screensaver entirely (see the draw gate below).
   bool showSecondsOnScreensaver = !config.isScreensaver || config.store.screensaverFullDateTime;
   static bool wasScreensaver = false;
   if (wasScreensaver != config.isScreensaver) {
@@ -1127,6 +1135,8 @@ void ClockWidget::_printClock(bool force){
       // A compact clock has no divider column, so the divider and the day of week are dropped rather than
       // squeezed into it - there is a single pixel for the line and an 8 px row for the DOW beside a 15 px
       // time.  The date is the part worth keeping, and it takes the row below on its own.
+      // The size test STAYS here as well as in the flag: the flag's own one sits in the right-hand half of an
+      // `||` that the main screen short-circuits, so it only answers for the screensaver.
       if(showFullClockOnScreensaver && !_compactClock()){
         gfx.drawFastVLine(_linesleft, _top()-_timeheight, _timeheight, config.theme.div);
         gfx.drawFastHLine(_linesleft, _top()-(_timeheight)/2, CHARWIDTH * _superfont * 2 + _space, config.theme.div);
@@ -1164,8 +1174,14 @@ void ClockWidget::_printClock(bool force){
   // the ink all agree.  Drawing them while the box left them out is exactly what made the centred time
   // look off.  Above those sizes fullClock has always implied the seconds beside the divider, and it
   // still does.
+  //
+  // WHERE they may draw is their OWN question, though: `showSecondsOnScreensaver` is the user's setting on the
+  // screensaver and true everywhere else, whatever fullClock says.  The gate used to AND in the full clock's
+  // screensaver permission when `_fullclock` was set, and that permission is the framebuffer's - so on a panel
+  // without one, a layout with fullClock on showed no seconds on the screensaver at all, while the same layout
+  // without fullClock showed them.  A seconds column is the layout's feature, not the date column's.
   const bool drawSeconds = _showSeconds || (_fullclock && !_compactClock());
-  if (drawSeconds && (!_fullclock || showFullClockOnScreensaver) && (_fullclock || showSecondsOnScreensaver)) {
+  if (drawSeconds && showSecondsOnScreensaver) {
     // The seconds column.  With a seconds sibling in the style (10, 15, 21 or 28 px for size index
     // 1..4 - see secondsSizePx()) the digits are drawn with the CLOCK font, ink-top aligned with
     // where the built-in cell's ink has always begun; without a sibling, the built-in font at
@@ -1178,10 +1194,13 @@ void ClockWidget::_printClock(bool force){
     // fullClock - put the seconds one row-gap after the time, and only the divider sizes keep _linesleft.
     uint16_t sx = (_fullclock && !_compactClock()) ? (uint16_t)(_linesleft+_space+1)
                                                    : (uint16_t)(_rowLeft(_rowwidth)+_timewidth+_rowgap);
-    // The y is the ink top of the time's own row.  With no clock font (size index 0) that row BEGINS at the
-    // cursor instead of ending there, so the seconds follow the time rather than being raised a row above it.
-    uint16_t sy = (_cf.font == nullptr) ? _top()
-                 : (uint16_t)(_top()-_timeheight+(_fullclock ? 0 : _space));  // the ink top
+    // The y is the ink top of the time's own row, at every size and in BOTH fullClock states.  With no clock font
+    // (size index 0) that row BEGINS at the cursor instead of ending there, so the seconds follow the time rather
+    // than being raised a row above it.  There used to be a `+ _space` on the no-fullClock path - a legacy nudge
+    // that dropped the seconds below the digits' first row (2 px at size 1, and 5/7/10 at 2..4), so the same clock
+    // looked a row different depending on whether the layout also asked for the date.  The seconds font's own
+    // glyphs carry yOffset = -height exactly as the clock's do, so this y IS their ink top.
+    uint16_t sy = (_cf.font == nullptr) ? _top() : (uint16_t)(_top()-_timeheight);  // the ink top
     if (secFont) {
       // Clear first: a GFXfont paints only the lit pixels, so a narrower glyph ("1" after "0")
       // leaves the previous character's pixels behind.  Then the glow, which fills the cells the

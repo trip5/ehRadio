@@ -57,8 +57,27 @@ class Widget{
       _reset();
       _draw();
     }
+    // Would this MOVE change anything?  A conf spells "this state does not move this line" as the conf's OWN
+    // position, because an ALL-ZERO move means something else: it is how a state HIDES its line
+    // (_weatherHidden()'s yieldsToVU/yieldsNoVU, mirroring applyMove()'s moveZeroed() guard).  Repainting a move
+    // that changes nothing is a visible flicker - the erase and the redraw are two passes over the panel and the
+    // gap between them is a background-coloured tear across the line's span, which is the reported "line torn
+    // through the row" on every start and stop of the stream.  A width of 0 in a move means "keep the width", so
+    // only a move that carries one can change it.
+    bool moveIsNoop(const MoveConfig& mv) const {
+      return mv.x == _backMove.x && mv.y == _backMove.y
+             && (mv.width <= 0 || mv.width == _backMove.width);
+    }
+    // The same question about where the widget IS rather than where it is being sent: the way back has nothing to
+    // do once the line is already at the conf's position.
+    bool atBackPosition() const {
+      return _config.offset == _backMove.x && _config.top == _backMove.y
+             && (int16_t)_width == _backMove.width;
+    }
     void moveBack(){
       if(!_moved) return;
+      // Already home: nothing to restore, so nothing to erase and nothing to draw.
+      if(atBackPosition()) { _moved = false; return; }
       if(_active && !_locked) _clear();
       _config.offset = _backMove.x;
       _config.top = _backMove.y;
@@ -271,12 +290,7 @@ class ClockWidget: public Widget {
     inline uint16_t clockWidth(){ return _clockwidth; }
     inline uint16_t clockHeight(){ return _clockheight; }
     inline uint16_t timeHeight(){ return _timeheight; }
-    // The largest size index that counts as COMPACT: 1 (the 15 px clock font) and 0 (no clock font - the
-    // built-in cell).  At these sizes fullClock drops the divider and the day of week, because there is no
-    // divider column to put them in, and the clock reads as two rows instead: the time with the seconds
-    // after it, and the date below.  See plans/clock-small-size-date-only.md.
-    static constexpr uint8_t CLOCK_COMPACT_MAX = 1;
-    bool _compactClock() const { return _superfont <= CLOCK_COMPACT_MAX; }
+    bool _compactClock() const { return _superfont <= 1; }
   private:
     Adafruit_GFX &getRealDsp();
   protected:

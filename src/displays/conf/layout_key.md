@@ -316,6 +316,10 @@ the collapse index 0 used to have, where the date landed on the time's own row a
 row above it. **`fullClock` does not switch the seconds on at these two sizes:** the seconds block lives beside
 the divider wherever there is one, so at 0 and 1 it appears only when `seconds` is set as well. Sizes 2 to 4
 are unchanged — there `fullClock` still implies the seconds — and the day of week is what goes, not the date.
+The WebUI withholds **Clock Glow** at these two sizes — the glow needs a clock font's glow character — and
+**Screensaver: full date** only while the clock has no font at all (size 0). At size 1 that row IS offered as
+soon as the layout has `fullClock` or `seconds`, because the switch still governs the SECONDS on the screensaver
+there; what the screensaver never draws at 0 or 1 is the date.
 
 Three details of those two sizes are worth knowing when you lay one out:
 
@@ -335,6 +339,23 @@ character would fall back to the digit `0` and the "glow" would be a literal `00
 therefore draws no glow at all — the time's, the seconds' and the colon's own off colour alike — and the WebUI's
 Clock Glow row is not offered while the clock is that size. Where the glow does apply it starts where the digits
 start, so it follows the same per-row alignment as the time and the colon rather than the box's edge.
+
+### What a size index means for `top`
+
+`fontsize` is a size INDEX, not a pixel height, and the two ends of the ladder anchor differently. Get this wrong
+and a line lands half off the panel - or, at 0, does not appear at all:
+
+| index | the face | what `top` is | where the ink goes |
+|---|---|---|---|
+| 0 | the system font (the panel's own font setting) | the TOP of the digits | DOWN from `top`: one 6x8 cell, rows `top` .. `top + 7` |
+| 1..4 | the clock font's 15/35/52/70 px face | the BASELINE of the digits | UP from `top`, as far as that face is tall |
+
+So a `top` that suits one size does not suit the other: a clock or a number at 0 hangs DOWN from its `top`, while
+at 1..4 it stands ON it. That is what the three small panels' confs assume - the 284x76 puts `numConf` and
+`clockConf` at the same `top` (57) so the two system-font items share one row, and the 128x32's number at `top` 12
+would be drawn off the panel if a 15 px cell stood on it. `fullClock` shows the same split: with a clock font the
+date row is BELOW `top` while the time's ink is above it, so `top` is an anchor between the two rows; at index 0
+the time hangs from `top` and the date follows one row-gap below it.
 
 ### `FONTSHIFT` / `CLOCKSHIFT`
 
@@ -544,6 +565,13 @@ the weather) when the meter is off, write **`clockMove` or `weatherMoveVU`** as 
 That is a real behaviour, not "unused". It is why an empty `MoveConfig` is worth reading twice — and why
 an empty `weatherMove` is the *opposite*: it is read only while the meter is off, so its zeros mean "no
 move" and it leaves the line where the conf put it rather than hiding it.
+
+**A MOVE that names the widget's own position is also "no move"**, and it is the spelling to use when a state must
+take the line somewhere *else* in another state but leave it alone in this one — an all-zero move would hide it
+instead. It is a true no-op: nothing is erased and nothing is redrawn. It used to do both, and the gap between
+those two passes was a background-coloured line torn across the widget's span (the whole span, not just the text,
+because a scrolling line records its span as the rectangle to erase) — which is what the reporter saw on every
+start and stop of the stream, in the one state where the move and the conf position happen to agree.
 
 ---
 

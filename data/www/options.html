@@ -215,7 +215,7 @@
               <div class="checkbox ssoption" id="scrfull" data-command="screensaverfull"><div class="knob"></div></div>
             </div>
             <div class="inputwrap center">
-              <span class="inputtitle" data-i18n="lbl_screensaver_text">Info on Screensaver</span>
+              <span class="inputtitle" data-i18n="lbl_info_text_screensaver">Information Text</span>
               <div class="checkbox ssoption" id="scrtext" data-command="screensavertext"><div class="knob"></div></div>
             </div>
             <div class="inputwrap center group_vu_ss hidden">
@@ -591,7 +591,14 @@
           </div>
         </div>
 
-        <div class="flex-row center hidden" id="dangerzone">
+        <div class="flex-row center dangerzone hidden">
+          <div class="fb tool local group_display hidden" data-command="editor">
+            <div class="group_tft hidden" data-i18n="btn_theme_editor">Theme Editor</div>
+            <div class="group_tft hidden">&</div>
+            <div data-i18n="btn_layout_editor">Layout Editor</div>
+          </div>
+        </div>
+        <div class="flex-row center dangerzone hidden">
           <div class="inputwrap center">
             <div class="fb tool local" data-command="confirm-reboot" title="Reboot ESP" data-i18n="btn_reboot">Reboot</div>
           </div>

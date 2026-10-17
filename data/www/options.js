@@ -582,6 +582,11 @@ function hideDangerConfirm() {
   });
 }
 
+// Rows behind the three unlock switches are found by class, so one added to the Danger Zone joins the group
+function setDangerZoneVisible(visible) {
+  classEach('dangerzone', el => el.classList.toggle('hidden', !visible));
+}
+
 function checkDangerZone() {
   const sw1 = getId('dangerzone_sw1');
   const sw2 = getId('dangerzone_sw2');
@@ -590,16 +595,13 @@ function checkDangerZone() {
   const allChecked = sw1.classList.contains('checked') && 
                      sw2.classList.contains('checked') && 
                      sw3.classList.contains('checked');
-  const dangerzone = getId('dangerzone');
   const txt = getId('dangerzone_txt');
   if(allChecked) {
-    if(dangerzone) {
-      dangerzone.classList.remove('hidden');
-      scrollToBottom();
-    }
+    setDangerZoneVisible(true);
+    scrollToBottom();
     if(txt) txt.textContent = t('lbl_dz_careful', 'Be Careful!');
   } else {
-    if(dangerzone) dangerzone.classList.add('hidden');
+    setDangerZoneVisible(false);
     if(txt) txt.textContent = t('lbl_dz_unlock', 'Turn on all switches to unlock');
   }
 }
@@ -620,7 +622,6 @@ function initDangerZone() {
   });
   const txt = getId('dangerzone_txt');
   if(txt) txt.textContent = t('lbl_dz_unlock', 'Turn on all switches to unlock');
-  const dangerzone = getId('dangerzone');
-  if(dangerzone) dangerzone.classList.add('hidden');
+  setDangerZoneVisible(false);
   hideDangerConfirm();
 }

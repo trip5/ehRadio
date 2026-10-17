@@ -1172,9 +1172,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   writes what a save would have written, so feeding it back through Save restores the slot. `POST /xtheme`
   also takes an optional **`use=0`**, which writes and installs the slot *without* selecting it; that is what
   the page's bulk import uses, because ten sequential saves would otherwise leave the device sitting on the
-  last theme imported. The routes sit outside the WebUI's `group_*` conventions on purpose: the page is
-  unlisted and only it consumes them. The two exports exist because the slot files are the only copy of a
-  custom theme, and a LittleFS reflash takes all ten with it.
+  last theme imported. The routes sit outside the WebUI's `group_*` conventions on purpose, and only the page
+  consumes them: the options page's Danger Zone links to `/editor.html`, but it calls none of these. The two
+  exports exist because the slot files are the only copy of a custom theme, and a LittleFS reflash takes all ten
+  with it.
 - **The layout editor's API follows it, behind `#ifndef DUMMYDISPLAY`.** `GET /layout-elements.json` (the
   groups plus one object per `LayoutData` field — its key, label, type, group, flags and its own cells),
   `GET /layoutall.json` (every id, `""` for an empty slot), `GET /layoutactive.json` (the layout in use plus the
@@ -1257,6 +1258,13 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - OTA note:
   - OTA start/end/error callbacks use `FUNCTIONLOG`.
   - OTA progress now uses `FUNCTIONLOG` (line-oriented output, no raw `\r` streaming path).
+- **`GETACTIVE` carries `group_tft` on the TFT class** (`#if defined(DSP_TFT) || DBGWUI`, the guard the theme routes
+  themselves use, because `DSP_TFT` is exactly the build where a theme can be edited). The options page's editor
+  button carries it on the two label divs that make its wording, so the button reads "Theme Editor & Layout Editor"
+  where it is emitted and "Layout Editor" alone on a mono build. The token is emitted inside the
+  `network.status == CONNECTED` block like every other display group, so in SoftAP the editor link is not offered.
+  **The name is a deliberate reuse:** `group_tft` was deleted in the font-overhaul round, where it meant "not the
+  dummy display" and could never be false on a real build - see [`plans/font-overhaul.md`](../plans/font-overhaul.md).
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
@@ -3108,6 +3116,19 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   and playing, `weatherMove` while playing with it off. `applyMove()`'s `moveZeroed` guard STAYS - it is what keeps
   the hidden widget from also being dragged to (0, 0) and drawn there before the lock erases it. That change touches
   exactly one shipped cell: `displayTFT480x320conf.h`'s "Big Text" entry, which is `{ 0, 0, 0 }`.
+- **A MOVE that changes nothing no longer repaints.** Because an all-zero move means HIDE (the bullet above), a
+  conf spells "this state leaves the line alone" as the widget's OWN position - `displayOLED256x64conf.h` writes
+  `weatherMove = { TFT_BORDER, 64-13, 0 }`, which is exactly what `weatherConf` already gives the line.  Moving a
+  widget to where it is costs an erase and a redraw of identical pixels, and the gap between those two panel
+  passes is a background-coloured tear across the widget's span - the whole span, not just the text, because a
+  scrolling line records its span (`_spanPainted()`) as the rectangle `_clear()` erases.  That was the reported
+  "line torn through the weather's row" on every start and stop of the stream, and the start never showed it
+  because the line is still hidden then, so `if(_active && !_locked) _clear()` skips the erase - the same code,
+  one state apart.  The guard is `Widget::moveIsNoop(MoveConfig)` for a move being applied (consulted by
+  `Display::applyMove()`, after its `moveZeroed()` test) and `Widget::atBackPosition()` for the way back, which
+  retires `_moved` and returns without erasing or drawing.  `moveTo()` itself is deliberately unguarded: the
+  dialog's own `_updValue->moveTo(...)` must still be able to paint a widget that has never been drawn.  See
+  `plans/move-noop-flicker.md`.
 - **The buffer bar's `outlined` frame is visible now.** `SliderWidget`'s fifth argument is the frame colour and
   defaults to 0 (black); the volume bar passes `theme.volbarout` but the buffer bar passed nothing, so its frame was
   black on black. It now passes `theme.buffer`, at both the constructor and the `init()` sites.
@@ -3153,8 +3174,16 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `paintHint(f, c.inputs[cell.key])`, so the *cell* parameter received an input element and `inp` was undefined —
   a `TypeError` on every keystroke, thrown inside the handler, which is what killed the debounce and the live
   preview for the layout half. Both call sites now pass `(field, cell, input)`.
-- **`editor.html` — the theme editor, the layout editor, and the only unlisted page.** It is reached by typing the URL; nothing
-  links to it, and it deliberately does not follow the WebUI's `group_*` conventions or load `theme.css`
+- **`editor.html` — the theme editor and the layout editor, reached by typing the URL or from the options page's
+  Danger Zone button** (`data-command="editor"`, which opens `/editor.html` in a new tab rather than replacing the
+  settings page - the one navigation in that switch that does not move the current document). Its label is split by
+  capability, the way the switch itself is: "Theme Editor & Layout Editor" where the build reports `group_tft` (the
+  theme routes' own guard, `DSP_TFT`), "Layout Editor" alone where it does not. The button sits in a
+  `hidden dangerzone` row that only the three unlock switches reveal - `checkDangerZone()` walks that class, not an
+  id - and the button itself carries `hidden group_display`, so the `act` handler unhides it only on a build with a
+  display. The two gates therefore live on two elements and neither can undo the other, which is what the nesting
+  is for: a build with no display compiles none of the editor's routes and the page would hide both of its own
+  halves there. It deliberately does not follow the WebUI's `group_*` conventions or load `theme.css`
   (its colour fields must show the theme's values, not the WebUI's palette). Its script is inline, per the
   rule below. Two rows: "Load theme" (the source) and "Custom Theme" (the target, with Save, Delete, Export,
   Export All and Import beside it — every one of them acts on the target or the slot list, so they belong on
@@ -3332,7 +3361,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - dynamic page loading (`player`, `settings`, `update`, `ir`)
   - shared page bootstrap helpers for logo/version/i18n application
   - safe lazy fallback for script2-exposed functions (`ensureFunctionLoaded`)
-  - control dispatch from DOM (`data-command`)
+  - control dispatch from DOM (`data-command`): the press resolves against the NEAREST holder, walking up from the
+    innermost `div`/`span`/`li`, so a command wrapper may carry a label div of its own and still fire
   - playlist editor/import/export logic and curated integration
   - online update UI progress handling
   - shared ready-aware redirect helper (`redirectWhenReady`) used by update and reboot flows
@@ -3371,6 +3401,11 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `data/www/options.js`
 - Settings page behavior.
+- **The Danger Zone's unlock rows are found by class, not by id.** `checkDangerZone()` and `initDangerZone()` call
+  `setDangerZoneVisible()`, which walks `.dangerzone` with `classEach()`, so a row that belongs behind the three
+  switches joins the group by carrying the class and no second element has to be taught about it. `dangerzone_txt`
+  and `dangerzone_sw1..3` keep their ids (a label and the switches themselves), as do the `dz_reboot`, `dz_format`
+  and `dz_reset` confirm rows, which are single targets.
 - Responsibilities:
   - timezone JSON loading and dropdown population
   - locale list loading and locale switch logic
@@ -3672,7 +3707,24 @@ design record; this is the shape of it.
   only under `_showSeconds`, so drawing them regardless left a centred time off-centre with the seconds hanging
   outside the box it was centred in.  It also removes a latent collision: with `fullClock` AND `seconds` on at
   size 1 the DOW and the seconds share the column and their bands overlap.  Sizes 2..4 are untouched, and the
-  screensaver's clock follows the same rule (same widget, same print).
+  screensaver's clock follows the same rule (same widget, same print).  Note this is the SCREENSAVER's full date,
+  not `fullClock` itself - the widget keeps the date on the main screen at 0 and 1, on its own row.
+  **The WebUI's two clock rows are gated on the SIZE INDEX the clock actually has**, in `GETACTIVE`
+  (`netserver.cpp`): the glow row needs a theme whose `clockbg` differs from the background *and* a clock with a
+  font at all (`clockConf.textsize != 0`), while the SCREENSAVER'S FULL DATE row (`group_full_time`) is offered
+  when `(fullClock || seconds)` and the clock has a font.  The `seconds` half matters: at size 1 the switch still
+  governs the seconds on the screensaver (only the date is not drawn at 0 or 1), so withholding the row there
+  would hide a switch that does something.  Size 0 is the one with nothing to offer - no clock font, so no glow
+  character and no screensaver full date either.  The boundary itself is a plain literal in
+  `ClockWidget::_compactClock()` (`_superfont <= 1`), deliberately not a shared macro.
+  **And the screensaver's two parts are gated apart:** the
+  seconds follow `showSecondsOnScreensaver` alone - the user's own setting - while the divider, the day and the
+  date need BOTH the framebuffer and a size above the compact ones.  They used to share one flag, so the seconds'
+  gate ANDed in the full clock's permission whenever `fullClock` was set, and that permission asks for the
+  framebuffer: on an OLED a layout with `fullClock` showed no seconds on the screensaver at all while the same
+  layout without it showed them, and on a TFT the two clauses happened to collapse to the setting, which hid the
+  coupling.  The compact sizes also never draw the date on the screensaver now (the flag carries
+  `!_compactClock()`), which cannot reach the main screen because `!config.isScreensaver` short-circuits first.
 - **`_rowgap` is one row's gap for the size** - `_space`, or a whole built-in character row at index 0, where
   `_space` is 0.  It serves both the seconds' gap and the date's row, and it replaced `_space` in the three
   places those rows are measured: identical for 1..4, and it is what fixed index 0, where the date landed ON
@@ -3692,7 +3744,10 @@ design record; this is the shape of it.
   **The y convention is the thing to remember:** a clock font's `setCursor` y is its BASELINE with the ink
   above it, the built-in cell's is the glyph TOP with the ink below - which is why the seconds' ink top is
   `_top()` when there is no clock font, and why the built-in seconds must be sized `_cf.textPx` and not
-  `_superfont` (which is 0 there).  The framebuffer WINDOW follows the same split, and both halves have to be
+  `_superfont` (which is 0 there).  At every clock-font size the seconds' ink top is `_top()-_timeheight` in BOTH
+  fullClock states: a legacy `+ _space` on the no-fullClock path used to drop them below the digits' first row
+  (2 px at size 1, 5/7/10 at 2..4), so the same clock looked a row different depending on whether the layout also
+  asked for the date.  The framebuffer WINDOW follows the same split, and both halves have to be
   read together: a clock font's ink is above its baseline, so the whole `_timeheight` must be inside the window
   and `_begin()` places it at `_config.top - _timeheight`; the system font's ink is below its cursor, so at size
   index 0 the window starts at `_config.top` itself, `_top()` is 0 inside it, and `_clockheight` is

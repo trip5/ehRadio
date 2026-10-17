@@ -45,8 +45,6 @@ class DspCore: public yoDisplay {
         #if (DSP_HEIGHT>40)
           drawBitmap((width()  - LOGO_WIDTH ) / 2, top, logo, LOGO_WIDTH, LOGO_HEIGHT, 1);
         #else
-          // Plain literal: transliteration now happens at render time in
-          // preText(), so the old utf8To() pre-pass is gone.
           setTextSize(1); setCursor((width() - 6*CHARWIDTH) / 2, 0); setTextColor(TFT_FG, TFT_BG); print("ehRadio");
         #endif
         display();

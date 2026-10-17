@@ -3679,9 +3679,18 @@ design record; this is the shape of it.
   **Every system font must stay on the 6x8 metric class** (`xAdvance == 6`, `yAdvance == 8`) — layout
   comes from `CHARWIDTH`/`CHARHEIGHT`, not from the font — and that is validated at boot.
 - **Clock fonts** — one folder per STYLE, `src/displays/clockfonts/<Style>/`, holding
-  `{8,15,21,28,35,52,70}.png`.  `py makefont.py <Style>` converts the whole folder into one
-  `clockfonts/<Style>.h` and **aborts, naming every missing size, if the set is not complete**.  The
-  generated header defines the seven `GFXfont`s, the two glow strings and a `ClockFontStyle`; the
+  `{10,15,21,28,35,52,70}.png` plus optional `<size>glow.png` / `<size>glow_char.png`.  `py makefont.py
+  <Style>` converts the whole folder into one `clockfonts/<Style>.h` and **aborts, naming every missing
+  size, if the set is not complete**.  Every glyph is packed at its FULL CELL (digit/colon cell width x
+  image height), so all eleven share one ink grid — there is no trim-to-ink mode.  The glow glyph is the
+  union of the lit pixels across the digits, injected at `/` (hard-coded, no switch).  Per size an
+  ordinary run resolves it from the files alone, in this order: `<size>glow.png`, an alternative
+  drawing of the same ten digits whose union is used; `<size>glow_char.png`, one digit cell used as
+  drawn; finally the union computed from `<size>.png`.  `--glow-out [SIZE]` writes the union a build
+  would use — from `<size>glow.png` when present, otherwise from `<size>.png`, never reading the file it
+  is writing — as `<Style>/<size>glow_char.png` (white on black, exactly the digit cell), all seven
+  sizes or just SIZE, **prompting before overwriting** and **without writing the .h**.  The
+  generated header defines the seven `GFXfont`s, that glow character and a `ClockFontStyle`; the
   three styles are declared in `dspfont.h` as `_clockFontStyles[]` and defined in
   `clockfonts/clockfonts.cpp`, which is the only TU that includes them.  `clockFontStyle()` is the
   accessor, driven by `config.store.clockFontId`.

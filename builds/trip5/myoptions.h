@@ -373,4 +373,6 @@
 // Other:
 //#define DEEP_SLEEP_DISABLE
 
+#define TRIP5_NIXIETUBE_TEST
+
 #endif // myoptions_h

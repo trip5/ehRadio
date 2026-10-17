@@ -1,5 +1,5 @@
 =================================================================================
-CURRENT STRUCTURE (added 2026-10-06, when the font system went runtime
+CURRENT STRUCTURE (added 2026-10-06, when the font system went runtime)
 
 Three STYLES, one folder each, all compiled in and chosen at runtime:
 
@@ -107,10 +107,31 @@ Chunky6_10_px: Hand-drawn...
         width: ... = 84 pixels
 
 
-That glow-char switch makes the "glow" character (the residual "LED" behind the character).
-No extra glyph is needed for that... the script will extrapolate the special character.
-If no glow character is needed or desired, 
-The DS_DIGI characters are 7-segment characters so they could just use the "8" character.
+The glow character (the residual "LED" behind the digits) is ALWAYS "/" now - makefont.py hard-codes
+it, the widget builds its <g><g>:<g><g> from it, and there is no option to pick another slot.
+No extra drawn glyph is needed: the script builds the character as the UNION of the lit pixels across
+digits 0-9 (the colon is not part of it) and injects it into that slot.
+
+The union is now editable.  `py makefont.py <Style> --glow-out` writes it out as one image per size,
+`<Style>/10glow_char.png` ... `<Style>/70glow_char.png` (white on black, on that size's digit cell,
+e.g. 8x10) and does NOT write the .h.  `--glow-out 70` does that one size only, and an existing image
+is only replaced after a y at its prompt - end of input counts as no, so nothing is ever destroyed
+silently.  The union it writes is the one a build would use, so if `<size>glow.png` is present the
+union comes from that strip; the only file it never reads is `<size>glow_char.png`, which is what it
+is writing.  Edit those images, then run the tool normally.
+
+A run resolves each size's glow from the files alone, in this order (there is no flag for any of it,
+and the choice is per size, so a style can use all three at once):
+
+  1. `<size>glow.png` - an alternative drawing of the SAME ten digits on the same canvas as
+     `<size>.png`; the union is taken from IT, so an exaggerated or reshaped glow can be drawn
+     without touching the font's own artwork.
+  2. `<size>glow_char.png` - the finished glow glyph, one cell, used exactly as drawn.
+  3. neither - the union is computed from `<size>.png` itself.
+
+A glow file of the wrong size, or a blank one, is a hard error naming it.  (The old --glow-char and
+--tight-bounds switches are gone: every glyph is packed at its full cell, which is what keeps one ink
+grid per size.)
 
 There is some risk that these slightly wider fonts may not fully fit on all displays...
 

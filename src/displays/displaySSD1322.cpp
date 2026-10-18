@@ -15,23 +15,23 @@ void DspCore::initDisplay() {
 #else
   // Ordered to match theme_t in core/config.h
   config.theme.background  = TFT_BG;
-  config.theme.meta        = GRAY_9;
+  config.theme.meta        = GRAY_B;
   config.theme.metabg      = TFT_BG;
   config.theme.title1      = GRAY_B;
-  config.theme.title2      = GRAY_3;
+  config.theme.title2      = GRAY_5;
   config.theme.digit       = TFT_FG;
-  config.theme.div         = GRAY_9;
-  config.theme.line        = GRAY_9;
-  config.theme.weather     = GRAY_2;
+  config.theme.div         = GRAY_7;
+  config.theme.line        = GRAY_7;
+  config.theme.weather     = GRAY_3;
   config.theme.vuaxis      = GRAY_3;
-  config.theme.vupeak      = GRAY_2;
-  config.theme.vumax       = GRAY_2;
-  config.theme.vumin       = GRAY_B;
+  config.theme.vupeak      = TFT_FG;
+  config.theme.vumax       = GRAY_3;
+  config.theme.vumin       = GRAY_7;
   config.theme.clock       = TFT_FG;
   config.theme.clockbg     = GRAY_1;
   config.theme.seconds     = GRAY_9;
   config.theme.secondsbg   = GRAY_1;   // mirrors clockbg, as oledcolorfix.h does
-  config.theme.dow         = GRAY_7;
+  config.theme.dow         = GRAY_5;
   config.theme.date        = GRAY_7;
   config.theme.clockss     = TFT_FG;
   config.theme.clockbgss   = GRAY_1;
@@ -41,9 +41,9 @@ void DspCore::initDisplay() {
   config.theme.datess      = GRAY_7;
   config.theme.textss      = TFT_FG;
   config.theme.buffer      = TFT_FG;
-  config.theme.ip          = GRAY_2;
+  config.theme.ip          = GRAY_3;
   config.theme.vol         = TFT_FG;
-  config.theme.rssi        = GRAY_5;
+  config.theme.rssi        = GRAY_3;
   config.theme.battery     = TFT_FG;
   config.theme.bitrate     = TFT_FG;
   config.theme.volbarout   = GRAY_9;

@@ -44,7 +44,10 @@
      it is the column that changes and not the page - so it is only a pointer and a hint on hover. */
   #elemhead { cursor: pointer; }
   #elemhead:hover { text-decoration: underline dotted; }
-  #tname { width: 22em; }
+  #tname, #lname { width: 22em; max-width: 100%; margin-top: 0; background: #fff; color: #000;
+                   border: 1px solid #888; border-radius: 3px; }
+  #tname:focus, #lname:focus { outline: 2px solid #4a90d9; outline-offset: -1px; }
+  #tname::placeholder, #lname::placeholder { color: #888; opacity: 1; }
   #msg, #lmsg { min-height: 1.4em; margin: 2px 0 10px; }
   #msg.good, #lmsg.good { color: rgb(0, 240, 0); }
   #msg.bad, #lmsg.bad { color: rgb(255, 0, 0); }

@@ -114,7 +114,9 @@ class TextWidget: public Widget {
     // Paints the CURRENT text again, whether or not it has changed. setText() deliberately does nothing when the
     // string is the one already up, which is right for a value that only moves on events and wrong for a line
     // something else may paint over: the SD manager's countdown blank was issued once and never repeated.
-    void repaint();
+    // Virtual because a ScrollWidget must not go through _paint(): its erase is unclipped and as wide as the whole
+    // string, which for a scrolling line reaches past its span.
+    virtual void repaint();
   protected:
     char *_text = nullptr;
     char *_oldtext = nullptr;
@@ -161,6 +163,7 @@ class ScrollWidget: public TextWidget {
     void loop();
     void setText(const char* txt) override;
     void setText(const char* txt, const char *format) override;
+    void repaint() override;      // its own _draw(), not TextWidget's unclipped erase
   private:
     char *_sep = nullptr;
     char *_window = nullptr;

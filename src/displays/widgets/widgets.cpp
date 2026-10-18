@@ -402,6 +402,14 @@ void ScrollWidget::setText(const char* txt, const char *format){
   setText(buf);
 }
 
+// A scrolling line repaints through its own _draw(), which erases its span while it scrolls and its own text
+// rectangle otherwise, and clips every print.  TextWidget::_paint() cannot serve it: its erase is unclipped and
+// _textwidth here is the WHOLE string, so it uncovers the row - through a neighbour - where _draw() will never
+// print.  _active and _locked are _draw()'s own gates.
+void ScrollWidget::repaint() {
+  _draw();
+}
+
 void ScrollWidget::loop() {
   if(_locked) return;
   _refreshMark();
@@ -420,9 +428,11 @@ void ScrollWidget::_clear(){
       // display() happens in _draw() after text is rendered — not here
     #endif
   } else {
-    // No window on this path: erase the union of the last and the current text rectangle, never the room.
+    // No window on this path: erase the union of the last and the current rectangle, never the room.  A SCROLLING
+    // line owns its span, though, and its _textwidth is the WHOLE string - erasing that uncovers the row past the
+    // span, where _draw() never prints.
     const uint16_t left = _realLeft();
-    uint16_t from = left, to = (uint16_t)(left + _textwidth);
+    uint16_t from = left, to = (uint16_t)(left + (_doscroll ? _width : _textwidth));
     if (_textPainted) {
       from = min(_oldleft, from);
       to   = max((uint16_t)(_oldleft + _oldtextwidth), to);
@@ -1285,7 +1295,7 @@ void ClockWidget::_printClock(bool force){
     if(clockInTitle) {
       gfx.setTextColor(dots ? config.theme.meta:config.theme.metabg, config.theme.metabg);
     }else{
-      gfx.setTextColor(dots ? clockColor:bgColor, bgColor);
+      gfx.setTextColor(dots ? clockColor : (_glowOn()?clockBgColor:bgColor), bgColor);
     }
   #endif
   dots=!dots;

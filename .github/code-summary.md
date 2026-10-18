@@ -3787,7 +3787,10 @@ design record; this is the shape of it.
   seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
   is exactly the no-op the old `!DSP_OLED` guard gave, while a colour theme that sets them equal is skipped
   too.  On greyscale SSD1322 (`clockbg = GRAY_1` against a black background) the glow is now both offered and
-  drawn, where the `DSP_OLED` guard hid it.  All three things the CLOCK's glow touches - the time's glow, the
+  drawn, where the `DSP_OLED` guard hid it, and that panel's colon takes the TFT branch's rule as well: its OFF
+  phase is drawn in `clockbg`, so the blink cannot punch a background-coloured colon out of the glow block (on a
+  one-bit palette the same expression answers the background, because `_glowOn()` holds the theme test).  All
+  three things the CLOCK's glow touches - the time's glow, the
   seconds' glow, and the colon's OFF colour, which is deliberately drawn in the glow colour so the block stays
   unbroken while the colon blinks - ask one predicate, `ClockWidget::_glowOn()`, which needs a clock FONT as well as the
   stored setting: `init()` can only put the digit `'0'` in `_glow`/`_glowSec` at size index 0 (they are the width
@@ -4165,6 +4168,13 @@ palettes live with their own drivers.
   `hideWeatherIfChanged()` returns early for a line that is already visible, and `ScrollWidget::setText()` does
   nothing while the string is unchanged. `_layoutChange()` still erases on a page that is already drawn (the
   play/stop transition), so it calls `_weather->repaint()` for exactly that case.
+  **`repaint()` is virtual, and a `ScrollWidget` overrides it to call its own `_draw()`.**  `TextWidget::repaint()`
+  reaches `_paint()`, whose erase is unclipped and as wide as `_textwidth` — which on a scroll is the WHOLE string,
+  not the span — so a repaint of the weather uncovered the row from the end of its 50 px span out to the full
+  string's width, straight through a divider painted beside it.  `_draw()` erases only the span while scrolling and
+  only its own text rectangle otherwise, and clips every print, so the uncovered pixels are always the ones it
+  repaints.  The other `repaint()` caller, the SD manager's countdown, is a plain `TextWidget` where the wide erase
+  is exactly right.
 - **The clock's window is offset by `_config.top - _timeheight`, and any trace of it must say so.** `_left()`/`_top()`
   return `0`/`_timeheight` once the canvas is ready, so they are **buffer** coordinates: a clock with `top = 218` and
   a 70 px cell has its window at y = 148, not at the panel top. Two wrong diagnoses came out of a log that printed

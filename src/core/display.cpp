@@ -713,7 +713,7 @@ void Display::_showDialog(const char *title) {
 // header on the meta line.  false is the volume overlay - the number is drawn over the live player page, where the
 // row tidy-up below is what keeps it legible.  A negative value blanks the widget, which is how the card-change
 // screen starts before its counter exists (SDFILEINDEX fills it in later). */
-void Display::_showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage) {
+void Display::_showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage, uint32_t fieldmax) {
   // The shared rows first, in both variants: several layouts put the number on a row the weather, IP, battery or
   // RSSI line normally uses, and those widgets draw themselves on request rather than through the page pass.
   if (*shareWeatherIP_ptr && weatherLive() && _weather) {
@@ -729,6 +729,8 @@ void Display::_showNumbers(const char* header, int32_t value, const char* fmt, b
     if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
     else _footerIp();
   }
+  // The field the glow reserves: the widest value this screen can show, not the one it happens to be showing.
+  _nums->setFieldMax(fieldmax);
   if (value < 0) _nums->setText("");
   else _nums->setText(value, fmt);
 }
@@ -832,15 +834,17 @@ void Display::_switchMode(displayMode_e newmode) {
     lockIfChanged(_clock, _clockHidden());
   }
   if (newmode == VOL) {
-    _showNumbers(l10n(L10N_LBL_VOLUME), config.store.volume, numtxtFmt, editorOpt(config.store.volumepage));
+    _showNumbers(l10n(L10N_LBL_VOLUME), config.store.volume, numtxtFmt, editorOpt(config.store.volumepage), VOLUME_SCALE);
   }
   if (newmode == LOST)      _showDialog(l10n(L10N_LBL_LOST));
   if (newmode == UPDATING)  { _showDialog(l10n(L10N_LBL_UPDATE)); _updFirstCall = true; }
   if (newmode == VALIDATING) { _showDialog(l10n(L10N_LBL_VALIDATING)); _updFirstCall = true; }
   if (newmode == SLEEPING)  _showDialog(l10n(L10N_LBL_SLEEPING));
-  if (newmode == SDCHANGE)  _showNumbers(l10n(L10N_LBL_WAITFORSD), -1, "%d", true);  // no count yet: SDFILEINDEX fills it in
+  // no count yet: SDFILEINDEX fills it in, and countStation is the last known total - the pre-count or the
+  // previous index - so the counter's field is as wide as the card needs for most of the walk.
+  if (newmode == SDCHANGE)  _showNumbers(l10n(L10N_LBL_WAITFORSD), -1, "%d", true, config.store.countStation);
   if (newmode == INFO || newmode == SETTINGS || newmode == TIMEZONE || newmode == WIFI) _showDialog("");
-  if (newmode == NUMBERS)   _showNumbers("", -1, "%d", true);   // the header and the number arrive per digit
+  if (newmode == NUMBERS)   _showNumbers("", -1, "%d", true, config.store.countStation);   // the header and the number arrive per digit
   if (newmode == STATIONS) {
     _pager->setPage(pages[PG_PLAYLIST]);
     _plcurrent->setText("");
@@ -893,7 +897,7 @@ void Display::_drawPlaylist() {
 
 void Display::_drawNextStationNum(uint16_t num) {
   _setReturnTicker(30);
-  _showNumbers(utility.stationByNum(num), (int32_t)num, "%d", true);
+  _showNumbers(utility.stationByNum(num), (int32_t)num, "%d", true, config.store.countStation);
 }
 
 void Display::putRequest(displayRequestType_e type, int payload) {
@@ -1580,6 +1584,7 @@ void Display::_volume() {
   _updateVolume();
   if (_mode==VOL) {
     _setReturnTicker(3);
+    _nums->setFieldMax(VOLUME_SCALE);
     _nums->setText(config.store.volume, numtxtFmt);
   }
 }

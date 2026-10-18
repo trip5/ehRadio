@@ -128,15 +128,12 @@ class Display {
     void _setLayoutPointers();
     void _syncLineRule(FillWidget*& w, const FillConfig* conf, bool under);
     void _applyMetaInvert();
-    // A staged mode is the editor's live preview: the same re-init, but the current page is refilled where
-    // it stands instead of the device being sent to the player page, so nothing else changes.
     void _applyState(applyMode_e mode = APPLY_STORED);
     void _showDialog(const char *title);
-    void _showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage);
+    void _showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage, uint32_t fieldmax = 0);
     void _setReturnTicker(uint8_t time_s);
     bool _ownScreen() const;
     bool _drawsOverOwnScreen(displayRequestType_e type) const;
-    // Widget visibility = runtime state AND active layout, decided in one place.
     bool _clockHidden();
     bool _weatherHidden();
     void _switchMode(displayMode_e newmode);

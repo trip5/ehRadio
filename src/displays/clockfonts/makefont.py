@@ -51,23 +51,25 @@ THE GLOW IMAGE.  The glow glyph is the union of the lit pixels across the ten di
 "LED" shapes that sit behind the time.  --glow-out writes that union to <Style>/<size>glow_char.png,
 one file per size, white on black on the size's own digit cell (digit width x image height) — and
 writes NOTHING else; the .h is not generated in that mode, so the images can be tuned before the font
-is rebuilt.  It resolves the union the same way a build does, so when <size>glow.png is present the
-union is taken from that strip; the only thing it never reads is <size>glow_char.png, which is what
-it is writing.  A bare --glow-out does all seven sizes and '--glow-out 70' does that one, and an
-existing image is only overwritten after a y at its prompt (end of input counts as no), because this
-tool never destroys a drawing silently.
+is rebuilt.  It never reads <size>glow_char.png, which is the file it is writing: the union comes from
+<size>glow.png when that strip is present and from <size>.png otherwise.  A bare --glow-out does all
+seven sizes and '--glow-out 70' does that one, and an existing image is only overwritten after a y at
+its prompt (end of input counts as no), because this tool never destroys a drawing silently.
 
 An ordinary run then resolves each size's glow in this order.  The files are the entire switch - there
 is no flag for any of it:
 
-  1. <size>glow.png — an alternative drawing of the SAME ten digits on the same canvas as
+  1. <size>glow_char.png — the finished glow glyph, one digit cell, used exactly as drawn.
+  2. <size>glow.png — an alternative drawing of the SAME ten digits on the same canvas as
      <size>.png.  The union is taken from IT, which is how a deliberately exaggerated or reshaped
      glow gets drawn without touching the font's own artwork.
-  2. <size>glow_char.png — the finished glow glyph, one digit cell, used exactly as drawn.
   3. neither — the union is computed from <size>.png itself.
 
 Every step is decided per size, so one style can use all three at once.  A file of the wrong size, or
 a blank one, is a hard error naming it, exactly like a mis-sized digit PNG.
+
+Note that step 1 masks step 2: while a <size>glow_char.png exists, edits to that size's glow strip
+change nothing until the glyph is regenerated with --glow-out or the file is deleted.
 
 The old one-PNG/one-size tool (Trip5/png_to_gfxfont.py) is folded into this one: same glyph
 conversion, but it takes the whole style so the set can never be incomplete and the symbol
@@ -104,9 +106,9 @@ THRESHOLD = 32  # luminance above this = foreground (white on black)
 GLOW_CHAR = "/"
 GLYPH_FIRST, GLYPH_LAST = 0x20, 0x3A  # the range the glyph table covers
 
-# The two glow files an ordinary run looks for, listed in PRECEDENCE order.  <size>glow.png is an
-# alternative drawing of the same ten digits, so the union is taken from it; <size>glow_char.png is
-# the finished glow glyph and is used as it is.  --glow-out writes the second one.
+# The two glow files an ordinary run looks for, listed in PRECEDENCE order.  <size>glow_char.png is
+# the finished glow glyph and is used as it is; <size>glow.png is an alternative drawing of the same
+# ten digits, whose union is used instead.  --glow-out writes the first one.
 GLOW_STRIP_SUFFIX = "glow"
 GLOW_CHAR_SUFFIX = "glow_char"
 
@@ -204,10 +206,10 @@ def find_named(style_dir, name):
 def find_glow_input(style_dir, size):
     """Return (path, kind) for this size's glow source, or (None, None).
 
-    The order below IS the precedence: a glow strip outranks a finished glow glyph, which outranks
+    The order below IS the precedence: a finished glow glyph outranks a glow strip, which outranks
     the union computed from <size>.png.  The files are the whole switch - there is no flag.
     """
-    for suffix, kind in ((GLOW_STRIP_SUFFIX, "strip"), (GLOW_CHAR_SUFFIX, "char")):
+    for suffix, kind in ((GLOW_CHAR_SUFFIX, "char"), (GLOW_STRIP_SUFFIX, "strip")):
         path = find_named(style_dir, f"{size}{suffix}.png")
         if path:
             return path, kind
@@ -337,16 +339,16 @@ def convert(png_path, prefix, threshold, log, glow_path, glow_kind, expect_h):
         offsets.append(len(flat_bmp))
         flat_bmp.extend(g["data"])
 
-    # --- The glow glyph: a glow strip, else a finished glow glyph, else the digit union --
+    # --- The glow glyph: a finished glyph, else a glow strip, else the digit union --
     # find_glow_input() has already decided which of the three this size gets, so all that is left
     # here is reading that source.  There is no fourth way to reach the union.
     glow_code = ord(GLOW_CHAR)
-    if glow_kind == "strip":
-        mask = read_glow_strip_mask(glow_path, dw, H, threshold)
-        log(f"    glow input: {os.path.basename(glow_path)} -> {dw}x{H} digit-union")
-    elif glow_kind == "char":
+    if glow_kind == "char":
         mask = read_glow_char_mask(glow_path, dw, H, threshold)
         log(f"    glow input: {os.path.basename(glow_path)} -> {dw}x{H}")
+    elif glow_kind == "strip":
+        mask = read_glow_strip_mask(glow_path, dw, H, threshold)
+        log(f"    glow input: {os.path.basename(glow_path)} -> {dw}x{H} digit-union")
     else:
         mask = digit_union_mask(pixels, dw, H, threshold)
         if not mask_has_ink(mask):
@@ -495,11 +497,12 @@ def main():
         print(msg)
 
     # --- --glow-out: write the glow glyphs and stop --------------------------
-    # The union is resolved exactly as a build resolves it, so what is written here is what the NEXT
-    # build would use: <size>glow.png when that strip is present (it wins in a build, so it has to win
-    # here or the file would be born out of date), <size>.png otherwise.  <size>glow_char.png is the
-    # one thing never read - it is the target.  Every size read is validated as the .h build does it,
-    # the .h is deliberately NOT written, and nothing existing is clobbered without a y at its prompt.
+    # The union comes from <size>glow.png when that strip is present, otherwise from <size>.png.
+    # <size>glow_char.png is the one thing never read - it is the target - and because a build takes
+    # it first, what is written here is what the next build uses.  It is also how a strip's changes
+    # reach the font once a glyph exists, the glyph being what masks the strip.  Every size read is
+    # validated as the .h build does it, the .h is deliberately NOT written, and nothing existing is
+    # clobbered without a y at its prompt.
     if args.glow_out is not None:
         written, skipped = 0, 0
         try:

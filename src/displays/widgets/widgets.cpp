@@ -722,27 +722,69 @@ void NumWidget::setText(int val, const char *format){
   setText(buf);
 }
 
+void NumWidget::setFieldMax(uint32_t maxval) {
+  if (maxval == _fieldmax) return;
+  _fieldmax = maxval;
+  // The field changed, not the digits: make the next setText() repaint even when the value is the same.
+  if (_oldtext) _oldtext[0] = '\0';
+}
+
+// The clock's three glow tests, unchanged: a clock font to take the glow glyph from, the stored setting, and a
+// backdrop that differs from the glow colour.  A one-bit palette sets clockbg == background, so no such panel
+// can glow and needs no panel macro here.
+bool NumWidget::_glowOn(){
+  return _cf.font != nullptr && editorOpt(config.store.clockglow)
+         && config.theme.clockbg != config.theme.background;
+}
+
 void NumWidget::_getBounds() {
-  _textwidth= _textWidth(_cf, _text);
+  _digitwidth = _textWidth(_cf, _text);
+  // The field is the cells the widest value needs.  _textwidth becomes the field's width, so _realLeft() places
+  // the reserved box and the ones column never moves as the value grows; without a glow it stays the digits' width.
+  uint8_t cells = 1;
+  for (uint32_t v = _fieldmax; v > 9; v /= 10) cells++;
+  const uint8_t shown = (uint8_t)strlen(_text);   // "%d" only: one byte per digit
+  if (shown > cells) cells = shown;
+  uint8_t g = 0;
+  if (_glowOn() && _text[0]) {
+    const char ch = clockFontStyle().glowChar[0];
+    if (cells > sizeof(_glowField) - 1) cells = sizeof(_glowField) - 1;
+    for (; g < cells; g++) _glowField[g] = ch;
+    _textwidth = (uint16_t)(cells * ::_charWidth(_cf, ch));   // the free helper: _charWidth is also a TextWidget member
+  } else {
+    _textwidth = _digitwidth;
+  }
+  _glowField[g] = '\0';
+  if (_textwidth < _digitwidth) _textwidth = _digitwidth;
 }
 
 void NumWidget::_draw() {
-  // Size index 0 is the SYSTEM font, and it is a valid answer here.  The guard used to refuse it outright ("the
-  // number/volume page has always needed one: TIME_SIZE < 2"), which is why a 0 in numConf drew NOTHING at all
-  // while setText() went on erasing the cells - and the three small panels whose confs ask for 0 (the 128x32
-  // OLED, the 284x76 and the 160x80, all with a clockConf at 0 beside it) never showed the number.
-  // Nothing else was needed to support it: the ink sits BELOW the cursor at _config.top - setText()'s erase
-  // already reads it that way, `_textheight * CHARHEIGHT` from that same top, the mirror of the clock whose
-  // glyphs sit above their baseline - the bounds are 6 px per character out of _charWidth(), and the size is
-  // _cf.textPx.  This widget draws to the panel directly, so it needs none of the clock's framebuffer care.
+  // Size index 0 draws with the SYSTEM font and its ink sits BELOW _config.top; a clock font's sits ABOVE it.
+  // This widget draws to the panel directly, so it needs none of the clock's framebuffer care.
   if(!_active) return;
-  dsp.setTextSize(_cf.font==nullptr?_cf.textPx:1);
-  dsp.setFont(_cf.font);
-  dsp.setTextColor(_fgcolor, _bgcolor);
-  dsp.setCursor(_realLeft(), _config.top);
-  dsp.print(_text);
+  const uint16_t x = _realLeft();
+  if (_glowOn() && _text[0]) {
+    // Glow cells first, then the digits over the right-hand ones.  Both prints use the ONE-argument
+    // setTextColor(), which is transparent: an opaque print paints each glyph's background and would erase
+    // the glow's unlit segments - the very thing the effect is.
+    dsp.fillRect(x, _config.top - _textheight, _textwidth, (uint16_t)(_textHeight(_cf) + 1), _bgcolor);
+    dsp.setTextSize(1);
+    dsp.setFont(_cf.font);
+    dsp.setTextColor(config.theme.clockbg);
+    dsp.setCursor(x, _config.top);
+    dsp.print(_glowField);
+    dsp.setTextColor(_fgcolor);
+    dsp.setCursor(x + (_textwidth - _digitwidth), _config.top);
+    dsp.print(_text);
+  } else {
+    dsp.setTextSize(_cf.font==nullptr?_cf.textPx:1);
+    dsp.setFont(_cf.font);
+    dsp.setTextColor(_fgcolor, _bgcolor);
+    dsp.setCursor(x, _config.top);
+    dsp.print(_text);
+  }
   // Recorded here as well as in setText(), because a page switch reaches this through setActive() alone.
-  _oldleft = _realLeft(); _oldtextwidth = _textwidth; _textPainted = true;
+  _oldleft = x; _oldtextwidth = _textwidth; _textPainted = true;
   strlcpy(_oldtext, _text, _buffsize);
   dsp.setFont();
 }

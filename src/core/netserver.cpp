@@ -541,7 +541,8 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            if ((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0) || DBGWUI)
+            if ((config.theme.clockbg != config.theme.background
+                 && (activeLayout.clockConf.textsize != 0 || activeLayout.numConf.textsize != 0)) || DBGWUI)
                                                                 act += F("\"group_clockglow\",");
                                                            else act += F("\"hide_group_clockglow\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");

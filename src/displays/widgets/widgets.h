@@ -230,8 +230,17 @@ class NumWidget: public TextWidget {
     void init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     void setText(const char* txt) override;
     void setText(int val, const char *format) override;
+    // The widest value this field will show.  With the glow on, that many digit cells are reserved, so a
+    // one-digit value keeps its column instead of jumping when it becomes two.  The source owns the figure:
+    // VOLUME_SCALE for the volume, the playlist total for a station/track number, 0 for "no field".
+    void setFieldMax(uint32_t maxval);
   protected:
     ClockFontSel _cf {nullptr, 0, 1};
+    uint32_t _fieldmax = 0;
+    // _textwidth is the FIELD (what is placed and erased), _digitwidth is what is printed inside it.
+    uint16_t _digitwidth = 0;
+    char _glowField[6] = "";   // one glow cell per reserved digit + NUL; a uint16_t total is at most 5
+    bool _glowOn();
     void _getBounds();
     void _draw();
 };

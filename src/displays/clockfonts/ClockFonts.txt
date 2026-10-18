@@ -116,22 +116,23 @@ The union is now editable.  `py makefont.py <Style> --glow-out` writes it out as
 `<Style>/10glow_char.png` ... `<Style>/70glow_char.png` (white on black, on that size's digit cell,
 e.g. 8x10) and does NOT write the .h.  `--glow-out 70` does that one size only, and an existing image
 is only replaced after a y at its prompt - end of input counts as no, so nothing is ever destroyed
-silently.  The union it writes is the one a build would use, so if `<size>glow.png` is present the
-union comes from that strip; the only file it never reads is `<size>glow_char.png`, which is what it
-is writing.  Edit those images, then run the tool normally.
+silently.  The union it writes comes from `<size>glow.png` when that strip is present, otherwise from
+`<size>.png`; the file it never reads is `<size>glow_char.png`, which is what it is writing.  Edit
+those images, then run the tool normally.
 
 A run resolves each size's glow from the files alone, in this order (there is no flag for any of it,
 and the choice is per size, so a style can use all three at once):
 
-  1. `<size>glow.png` - an alternative drawing of the SAME ten digits on the same canvas as
+  1. `<size>glow_char.png` - the finished glow glyph, one cell, used exactly as drawn.
+  2. `<size>glow.png` - an alternative drawing of the SAME ten digits on the same canvas as
      `<size>.png`; the union is taken from IT, so an exaggerated or reshaped glow can be drawn
      without touching the font's own artwork.
-  2. `<size>glow_char.png` - the finished glow glyph, one cell, used exactly as drawn.
   3. neither - the union is computed from `<size>.png` itself.
 
-A glow file of the wrong size, or a blank one, is a hard error naming it.  (The old --glow-char and
---tight-bounds switches are gone: every glyph is packed at its full cell, which is what keeps one ink
-grid per size.)
+Because 1 masks 2, an existing `<size>glow_char.png` hides that size's glow strip: edits to the strip
+do nothing until the glyph is regenerated with --glow-out or the glyph file is deleted.  A glow file of
+the wrong size, or a blank one, is a hard error naming it.  (The old --glow-char and --tight-bounds
+switches are gone: every glyph is packed at its full cell, which is what keeps one ink grid per size.)
 
 There is some risk that these slightly wider fonts may not fully fit on all displays...
 

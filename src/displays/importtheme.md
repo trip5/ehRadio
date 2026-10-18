@@ -89,6 +89,11 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
 | `COLOR_PL_CURRENT_BG` | `.plcurrentbg` |
 | `COLOR_PLAYLIST_0..4` | `.playlist[0..4]` |
 
+The two clock families are **not** clock-only. `.clockbg` / `COLOR_CLOCK_BG` is the glow colour behind both the
+clock and the big number widget (`numConf`), and `.digit` / `COLOR_DIGITS` is the colour the number's own digits
+are drawn in. A theme that glows is a theme where `clockbg` differs from the background; on a one-bit palette they
+are equal and nothing glows.
+
 Two legacy defines are ignored: `COLOR_STATION_FILL` (the meta band is drawn with `.metabg`) and
 `COLOR_PL_CURRENT_FILL` (the playlist highlight is drawn with `.plcurrentbg`). Likewise any JSON key the
 script does not recognise is skipped.

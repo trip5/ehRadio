@@ -260,6 +260,9 @@ void Config::initSDPlaylist(bool force) {
         uint32_t currentCount = sdman.countAudioFiles();
         FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
                     storedCount, magic, currentCount);
+        // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's glow field is
+        // sized from, until the re-index below replaces it with the count the new index actually holds.
+        store.countStation = (uint16_t)currentCount;
         if (magic != 0x1867) {
           FUNCTIONLOG("SD", "Magic mismatch (should be 1867). Re-indexing.");
           doIndex = true;

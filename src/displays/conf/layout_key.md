@@ -283,6 +283,9 @@ the two boxes plainly overlap in the vertical band.
   derived from `DSP_HEIGHT`; it is the layout's own value now, so a layout can size its clock and its
   number page independently. The value each shipped layout carries is what the old `DSP_HEIGHT` rule
   produced for that panel, so nothing moved.
+  The SIZE is all a layout picks of the face: the Clock Font option (`clockFontId`, one runtime
+  choice for the whole device) draws both the clock and the number, so `numConf` at size 2 and
+  `clockConf` at size 3 are the same design at two sizes. Clock Glow applies to both as well.
 - **`MAX_WIDTH`** is the usable width inside the border margin, and **`TFT_BORDER`** is that margin —
   the left/right inset in pixels. It was `TFT_FRAMEWDT`, a name that read as a width for a value that
   is not one; round 8 renamed it, and carried `conf_tool.py --import` with it, so a community conf
@@ -430,10 +433,13 @@ Two consequences worth knowing when you place `numConf`:
   win the row — but the row is also **not** free afterwards: the player page puts it back when the
   number screen closes, so a layout that overlaps `numConf` with the weather line will show the
   weather again a moment after the volume disappears.
-- The clock is *not* covered by the digits — `numConf` draws only its own glyph cells, with no
-  background fill. A layout that overlaps the clock with the digits will therefore show the clock
-  around them; the three number screens hide the clock only where the screen has no ticks of its
-  own to keep them in step (the volume page, the number entry and the SD index screen all do).
+- The clock is *not* covered by the digits — `numConf` draws only its own cells, with no background
+  fill. A layout that overlaps the clock with the digits will therefore show the clock around them;
+  the three number screens hide the clock only where the screen has no ticks of its own to keep them
+  in step (the volume page, the number entry and the SD index screen all do). With Clock Glow ON there
+  *is* a fill: the widget reserves the cells the widest value of that screen can need — `VOLUME_SCALE`
+  for the volume, the playlist total for a station/track number — and clears them, so a one-digit
+  number owns its whole field and erases that much of an overlapping row.
 
 ### What you cannot leave out
 

@@ -3684,12 +3684,13 @@ design record; this is the shape of it.
   size, if the set is not complete**.  Every glyph is packed at its FULL CELL (digit/colon cell width x
   image height), so all eleven share one ink grid — there is no trim-to-ink mode.  The glow glyph is the
   union of the lit pixels across the digits, injected at `/` (hard-coded, no switch).  Per size an
-  ordinary run resolves it from the files alone, in this order: `<size>glow.png`, an alternative
-  drawing of the same ten digits whose union is used; `<size>glow_char.png`, one digit cell used as
-  drawn; finally the union computed from `<size>.png`.  `--glow-out [SIZE]` writes the union a build
-  would use — from `<size>glow.png` when present, otherwise from `<size>.png`, never reading the file it
-  is writing — as `<Style>/<size>glow_char.png` (white on black, exactly the digit cell), all seven
-  sizes or just SIZE, **prompting before overwriting** and **without writing the .h**.  The
+  ordinary run resolves it from the files alone, in this order: `<size>glow_char.png`, one digit cell
+  used as drawn; `<size>glow.png`, an alternative drawing of the same ten digits whose union is used;
+  finally the union computed from `<size>.png`.  The glyph therefore masks the strip — an existing
+  `<size>glow_char.png` makes its size's glow strip inert until regenerated or deleted.  `--glow-out
+  [SIZE]` writes that union — from `<size>glow.png` when present, otherwise from `<size>.png`, never
+  reading the file it is writing — as `<Style>/<size>glow_char.png` (white on black, exactly the digit
+  cell), all seven sizes or just SIZE, **prompting before overwriting** and **without writing the .h**.  The
   generated header defines the seven `GFXfont`s, that glow character and a `ClockFontStyle`; the
   three styles are declared in `dspfont.h` as `_clockFontStyles[]` and defined in
   `clockfonts/clockfonts.cpp`, which is the only TU that includes them.  `clockFontStyle()` is the
@@ -3786,9 +3787,9 @@ design record; this is the shape of it.
   seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
   is exactly the no-op the old `!DSP_OLED` guard gave, while a colour theme that sets them equal is skipped
   too.  On greyscale SSD1322 (`clockbg = GRAY_1` against a black background) the glow is now both offered and
-  drawn, where the `DSP_OLED` guard hid it.  All three things the glow touches - the time's glow, the seconds'
-  glow, and the colon's OFF colour, which is deliberately drawn in the glow colour so the block stays unbroken
-  while the colon blinks - ask one predicate, `ClockWidget::_glowOn()`, which needs a clock FONT as well as the
+  drawn, where the `DSP_OLED` guard hid it.  All three things the CLOCK's glow touches - the time's glow, the
+  seconds' glow, and the colon's OFF colour, which is deliberately drawn in the glow colour so the block stays
+  unbroken while the colon blinks - ask one predicate, `ClockWidget::_glowOn()`, which needs a clock FONT as well as the
   stored setting: `init()` can only put the digit `'0'` in `_glow`/`_glowSec` at size index 0 (they are the width
   templates `_timewidth`/`_secwidth` are read off, so they must not be blanked instead), and printing them would
   paint a literal `00:00` behind the time.  Size 0 therefore has NO glow anywhere, and the WebUI's Clock Glow row
@@ -3797,6 +3798,21 @@ design record; this is the shape of it.
   != 0` - an AND, because it is a "hide when", never a second reason to show.  The `theme` command re-sends the
   token so the row follows a theme switch with the settings page open, and a `layout` switch re-sends it for the
   same reason (the clock's size index lives in the layout, not in the theme).
+  **The NUMBER widget glows too** (`NumWidget`, `numConf`), on that same stored setting and the same three tests -
+  `NumWidget::_glowOn()` is the number's copy, needing a clock font, the setting and `clockbg != background`.  The
+  glow colour is `theme.clockbg` for both widgets; the digits keep `theme.digit`, and a layout sizes the clock and
+  the number independently while the glow is one switch, so `GETACTIVE` offers the row when EITHER
+  `clockConf.textsize` or `numConf.textsize` is non-zero.  A number cannot reserve cells out of nothing, so the
+  widget is told the WIDEST value its screen can show (`setFieldMax()`): `VOLUME_SCALE` for the volume,
+  `config.store.countStation` for a station/track number and for the SDCHANGE scan counter.  It reserves
+  `max(digits(fieldmax), digits(value))` digit cells - at least one, never a hardcoded two, because any total can
+  itself be a single digit - and prints the value right-aligned inside them, so the ones column does not move from
+  `9` to `10`.  `_textwidth` is that FIELD (what `_realLeft()` places and `setText()` erases) and `_digitwidth` is
+  what is printed.  Both the glow and the digits are printed with the ONE-argument `setTextColor()`, which is
+  transparent: `dsp` on a TFT is the driver, not the framebuffer, so an opaque print would paint each glyph's
+  background over the glow.  The scan screen's total is `countStation`, which `initSDPlaylist()` now keeps from the
+  `countAudioFiles()` walk that decides whether to re-index (exact whenever that walk ran) and which is otherwise
+  the previous index's count; a fresh card has no total, so its field follows the count.
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,

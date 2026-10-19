@@ -413,6 +413,9 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef PLAYER_FORCE_MONO
   #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono (also add for mono I2S decoders for the VU)
 #endif
+#ifndef SS_INFO_TEXT
+  #define SS_INFO_TEXT false
+#endif
 
 /* --- VOLUME SCALE --- */
 #ifndef VOLUME_SCALE // Default 42 doubles upstream library's scale of 21; 50-100 gives extremely fine control
@@ -421,7 +424,6 @@ or examine the examples in builds/trip5 and make your own!
 #if VOLUME_SCALE < 21 || VOLUME_SCALE > 255
   #error VOLUME_SCALE must be between 21 and 255
 #endif
-
 
 /* --- CHECK DECODER OPTIONS --- */
 #if I2S_DOUT!=255 && VS1053_CS!=255
@@ -966,6 +968,13 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef VU_PEAK_THICKNESS_MILLI
   #define VU_PEAK_THICKNESS_MILLI 11 // marker thickness = length * 11/1000, rounded up (never below 1 px)
 #endif
+// The next two macros are used together (and only apply to TFT displays)
+#ifndef VU_AXIS_THICKNESS_UP_WIDGET
+  #define VU_AXIS_THICKNESS_UP_WIDGET 48 // if the height of a widget exceeds these pixels AND...
+#endif
+#ifndef VU_AXIS_THICKNESS_UP_DISPLAY
+  #define VU_AXIS_THICKNESS_UP_DISPLAY 240 // the height AND width of a display exceeds this, make the axis 2 pixels thick (only on TFT)
+#endif
 #ifndef VU_DUTY_FACTOR
   #define VU_DUTY_FACTOR 3 // redraw interval = max(VU_REFRESH_MS, draw time * this): 3 means a 1/3 duty
 #endif
@@ -1350,6 +1359,8 @@ or examine the examples in builds/trip5 and make your own!
 #define CHUNKY6_PX      1  // Default (spacing pixels) - great on color screens
 #define CHUNKY6PX       1  // An alias for above...
 #define CHUNKY6         2  // Really heavy looking - great on mono OLED screens
+#define NIXIE_TUBE      3  // 
+#define NIXIE_CLOCK     4  // 
 
 #ifndef CLOCKFONT
   #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
@@ -1427,8 +1438,11 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SS_FULL_DATETIME
   #define SS_FULL_DATETIME false
 #endif
-#ifndef SS_TEXT
-  #define SS_TEXT false
+#ifndef SS_SMALLER_CLOCK
+  #define SS_SMALLER_CLOCK false
+#endif
+#ifndef SS_INFO_TEXT
+  #define SS_INFO_TEXT false
 #endif
 #ifndef SS_VU
   #define SS_VU false

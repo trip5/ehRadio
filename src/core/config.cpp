@@ -492,7 +492,8 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.screensaverPlayingBlank, (bool)SS_PLAYING_BLANK);
     saveValue(&store.screensaverPlayingTimeout, (uint16_t)SS_PLAYING_TIME);
     saveValue(&store.screensaverFullDateTime, (bool)SS_FULL_DATETIME);
-    saveValue(&store.screensaverText, (bool)SS_TEXT);
+    saveValue(&store.screensaverText, (bool)SS_INFO_TEXT);
+    saveValue(&store.clocksmaller, (bool)SS_SMALLER_CLOCK);
     saveValue(&store.screensaverVU, (bool)SS_VU);
     saveValue(&store.screensaverVUStyle, (uint8_t)SS_VU_STYLE);
     saveValue(&store.screensaverVUpeak, (bool)SS_VUPEAK);
@@ -1064,6 +1065,7 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(screensaverPlayingTimeout, "scrnsvrplto"),
   CONFIG_KEY_ENTRY(screensaverFullDateTime, "scrnsvrfull"),
   CONFIG_KEY_ENTRY(screensaverText, "scrnsvrtext"),
+  CONFIG_KEY_ENTRY(clocksmaller, "sssmaller"),
   CONFIG_KEY_ENTRY(screensaverVU, "scrnsvrvu"),
   CONFIG_KEY_ENTRY(screensaverVUStyle, "scrnsvrvustyle"),
   CONFIG_KEY_ENTRY(screensaverVUpeak, "scrnsvrvupeak"),

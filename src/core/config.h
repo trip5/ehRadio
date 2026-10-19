@@ -161,7 +161,8 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      screensaverPlayingBlank = SS_PLAYING_BLANK;
   uint16_t  screensaverPlayingTimeout = SS_PLAYING_TIME;
   bool      screensaverFullDateTime = SS_FULL_DATETIME;
-  bool      screensaverText = SS_TEXT;
+  bool      screensaverText = SS_INFO_TEXT;
+  bool      clocksmaller = SS_SMALLER_CLOCK;
   bool      screensaverVU = SS_VU;
   uint8_t   screensaverVUStyle = SS_VU_STYLE;
   bool      screensaverVUpeak = SS_VUPEAK;

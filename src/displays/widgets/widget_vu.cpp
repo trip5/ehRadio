@@ -493,13 +493,21 @@ void VuWidget::_drawBars(bool led){
 // get the same picture, and the side-by-side channel arrangement is a bar-family concern only (the bar painters keep
 // their own mapping in _drawBand()).
 
-// Thickness of a reference line and of a trace: 1 px on a compact area, 2 px once there is room. Sized by the area's
-// HEIGHT - the axis the thickness is perpendicular to - and NOT by the length of the axis the line runs along (the
-// axis-length form made the two OLED layouts disagree on the same panel: both areas are 15 px tall, but Big VU's
-// level axis is 126 px against Default's 44). The peak markers keep the axis-length rule, which is right for them.
-// 48 px is where a second pixel stops being a large fraction of the height.
+// Thickness of a reference line and of a trace: 1 px on a compact panel or a short box, 2 px only when
+// BOTH the box and the panel can afford it. The box test is the area's HEIGHT (_ch) - the axis the
+// thickness is perpendicular to - and NOT the level-axis length (the axis-length form made the two OLED
+// layouts disagree on the same panel: both are 15 px tall, but Big VU's axis is 126 px against Default's
+// 44). The panel test is the display resolution, a proxy for pixel density, so every layout on the same
+// panel agrees. The peak markers keep the axis-length rule, which is right for them.
+// 2 px requires _ch >= VU_AXIS_THICKNESS_UP_WIDGET (default 48) AND both display dimensions >
+// VU_AXIS_THICKNESS_UP_DISPLAY (default 240); TFT only, OLED stays at 1 px.
 uint16_t VuWidget::_stroke() const {
-  return (_ch >= 48) ? 2 : 1;
+  #if defined(DSP_TFT)
+    if (DSP_WIDTH > VU_AXIS_THICKNESS_UP_DISPLAY && DSP_HEIGHT > VU_AXIS_THICKNESS_UP_DISPLAY && _ch >= VU_AXIS_THICKNESS_UP_WIDGET) return 2;
+    else return 1;
+  #else
+    return 1;
+  #endif
 }
 
 // The meter's calibration as a display gain: 65536 / vuThreshold in 8.8 fixed point, so 256 is unity.

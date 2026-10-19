@@ -226,6 +226,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "screensaverplayingblank"))   { config.saveValue(&config.store.screensaverPlayingBlank, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
   if (cmdIs(command, "screensaverplayingtimeout")) { config.saveValue(&config.store.screensaverPlayingTimeout, static_cast<uint16_t>(constrain(atoi(value), 1, 1080))); screensaverHelper(); return true; }
   if (cmdIs(command, "screensaverfull"))           { config.saveValue(&config.store.screensaverFullDateTime, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
+  if (cmdIs(command, "screensaversmaller"))        { config.saveValue(&config.store.clocksmaller, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
   if (cmdIs(command, "screensavertext"))           { config.saveValue(&config.store.screensaverText, static_cast<bool>(atoi(value))); screensaverHelper(); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "screensavervu"))             { config.saveValue(&config.store.screensaverVU, static_cast<bool>(atoi(value))); screensaverHelper(); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "screensavervustyle"))        { config.saveValue(&config.store.screensaverVUStyle, static_cast<uint8_t>(constrain(atoi(value), 0, VU_STYLE_COUNT - 1))); screensaverHelper(); netserver.requestOnChange(GETACTIVE, 0); return true; }

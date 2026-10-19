@@ -100,6 +100,7 @@
   "lbl_select_tz": "시간대 선택",
   "lbl_show_weather": "날씨 표시",
   "lbl_size": "크기",
+  "lbl_smaller_time_screensaver": "더 작은 시계",
   "lbl_smart_start": "스마트 시작",
   "lbl_sort": "정렬",
   "lbl_spiffs": "LittleFS",

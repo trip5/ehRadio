@@ -100,6 +100,7 @@
   "lbl_select_tz": "タイムゾーンを選択",
   "lbl_show_weather": "天気を表示",
   "lbl_size": "サイズ",
+  "lbl_smaller_time_screensaver": "小さい時計",
   "lbl_smart_start": "スマートスタート",
   "lbl_sort": "並べ替え",
   "lbl_spiffs": "LittleFS",

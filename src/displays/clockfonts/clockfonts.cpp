@@ -14,6 +14,6 @@
 #include "LEDClock.h"
 #include "Chunky6px.h"
 #include "Chunky6.h"
-#ifdef TRIP5_NIXIETUBE_TEST
-  #include "NixieTube.h"
-#endif
+#include "NixieTube.h"
+#include "NixieClock.h"
+

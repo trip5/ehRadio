@@ -3701,6 +3701,26 @@ design record; this is the shape of it.
   produced for its panel.  `numConf.textsize` is the same index for the number page, and the two are
   independent — the widgets resolve their own `ClockFontSel`, which is why there is no global clock
   font pointer any more.
+- **The one exception is the screensaver's Smaller Clock option** (`config.store.clocksmaller`,
+  `SS_SMALLER_CLOCK`): while `config.isScreensaver` is true, `ClockWidget::init()` resolves the conf's
+  index **one rung lower** through `_clockConfSize()` in `widgets.cpp`, and `0` is the floor — a layout that
+  already asks for the built-in font keeps it.  It is applied at the ONE place a size is resolved because
+  `_cf` is what every measurement of the clock derives from (`_superfont`, `_timeheight`, `_timewidth`,
+  `_space`, `_rowgap`, `_clockheight`, `_clockwidth`, the PSRAM framebuffer window); a draw-time `if` would
+  print a smaller font into a box measured for the larger one.  `ClockWidget::refreshSize(conf)` rebuilds
+  only when the resolved index differs, and takes the conf as an **argument**, never `_config`: `moveTo()`
+  writes `_config.offset/top`, so re-initing from `_config` would take the moved position as the widget's
+  own.  `Display` calls it in exactly two places — `_enterScreensaver()` before `_screensaverWidgets()`
+  (`config.isScreensaver` is already true on every route in, including `SSREBUILD` from the WebUI), and
+  `_switchMode()`'s PLAYER branch **after** `config.isScreensaver = false` (`_begin()` picks the
+  framebuffer window's background from that flag) and **before** `setPage(PG_PLAYER)`, which is what paints
+  the clock at its own size again.  Leaving the screensaver for VOL or SDMAN deliberately does NOT refresh:
+  the page on the panel is still the screensaver's, and `_begin()` would build a theme-background window
+  over a black one.  Two visible consequences of the rungs being indices rather than heights: `1 -> 0`
+  drops a 15 px clock font to the built-in 6x8 cell, and `2 -> 1` crosses `_compactClock()`, so the divider
+  column and the screensaver's date column go with it.  The WebUI row (`scrsmall`) is gated by
+  `group_smaller` / `hide_group_smaller` on `activeLayout.clockConf.textsize != 0` — at index 0 the option
+  does nothing.
 - **The seconds** are drawn with that style's `8/15/21/28` sibling at the same ink top the built-in
   cell used, falling back to the built-in font when the style has no sibling at that index.  Their
   glow uses `theme.secondsbg` / `theme.secondsbgss`.

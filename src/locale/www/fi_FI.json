@@ -100,6 +100,7 @@
   "lbl_select_tz": "Valitse aikavyöhyke",
   "lbl_show_weather": "näytä sää",
   "lbl_size": "Koko",
+  "lbl_smaller_time_screensaver": "Pienempi kello",
   "lbl_smart_start": "Älykäs käynnistys",
   "lbl_sort": "Lajittele",
   "lbl_spiffs": "LittleFS",

@@ -100,6 +100,7 @@
   "lbl_select_tz": "Sélectionner le fuseau horaire",
   "lbl_show_weather": "afficher la météo",
   "lbl_size": "Taille",
+  "lbl_smaller_time_screensaver": "Une horloge plus petite",
   "lbl_smart_start": "Démarrage intelligent",
   "lbl_sort": "Trier",
   "lbl_spiffs": "LittleFS",

@@ -775,6 +775,9 @@ void Display::_switchMode(displayMode_e newmode) {
     }
     numOfNextStation = 0;
     config.isScreensaver = false;
+    // Away from the screensaver the clock's own rung comes back.  Rebuilt here because the page switch below is what
+    // paints the player page, and _layoutChange() further down re-derives its position and lock from scratch.
+    if (_clock && clockInLayout()) _clock->refreshSize(*clockConf_ptr);
     _pager->setPage(pages[PG_PLAYER]);
     // The text goes AFTER the page switch, never before it: setPage() fills the whole panel on its way in,
     // and a scroll widget repaints only from setText() or its own scroll tick - so a line painted first is
@@ -863,6 +866,9 @@ void Display::_switchMode(displayMode_e newmode) {
 // change can rebuild the picture without a mode change: that path drops a request for the mode the device is
 // already in, and drops any request at all while the network is transient, and a rebuild needs neither.
 void Display::_enterScreensaver(displayMode_e mode) {
+  // The clock's size index is resolved in its init(), and the screensaver's Smaller Clock option changes it, so the
+  // clock is rebuilt before anything here paints it.  config.isScreensaver is already true on every route in.
+  if (_clock && clockInLayout()) _clock->refreshSize(*clockConf_ptr);
   _screensaverWidgets();        // the widgets are built BEFORE the page switch, so the first pass draws
   _pager->setPage(pages[PG_SCREENSAVER], true);   // the picture the prefs describe, not last time's frame
   if (mode == SCREENBLANK) {

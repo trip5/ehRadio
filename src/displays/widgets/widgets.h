@@ -294,6 +294,10 @@ class ClockWidget: public Widget {
     using Widget::init;
     ~ClockWidget();
     void init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor);
+    // Rebuild for the size the current screen state gives this clock (see _clockConfSize() in widgets.cpp), doing
+    // nothing when that is the size it is already drawn at.  The Display calls it entering and leaving the
+    // screensaver: the Smaller Clock option is not a layout change, and init() is the only place a size is resolved.
+    void refreshSize(WidgetConfig conf);
     void draw();
     void forceDraw() { _draw(); }
     uint8_t textsize(){ return _config.textsize; }

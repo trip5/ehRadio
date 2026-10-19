@@ -93,9 +93,9 @@ inline const GFXfont *displayFont() { return _systemFonts[activeSystemFontId]; }
 extern const ClockFontStyle LEDClockStyle;
 extern const ClockFontStyle Chunky6pxStyle;
 extern const ClockFontStyle Chunky6Style;
-#ifdef TRIP5_NIXIETUBE_TEST
-  extern const ClockFontStyle NixieTubeStyle;
-#endif
+extern const ClockFontStyle NixieTubeStyle;
+extern const ClockFontStyle NixieClockStyle;
+
 #if CLOCKFONT > CHUNKY6
   #warning "CLOCKFONT value not recognized, defaulting to CHUNKY6"
   #undef CLOCKFONT
@@ -109,9 +109,8 @@ const ClockFontStyle* const _clockFontStyles[] = {
   &LEDClockStyle,
   &Chunky6pxStyle,
   &Chunky6Style,
-  #ifdef TRIP5_NIXIETUBE_TEST
-    &NixieTubeStyle,
-  #endif
+  &NixieTubeStyle,
+  &NixieClockStyle,
 };
 #define _clockFontCount (sizeof(_clockFontStyles) / sizeof(_clockFontStyles[0]))
 

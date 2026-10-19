@@ -655,6 +655,16 @@ static ClockFontSel _resolveClockFont(uint8_t sizeIndex){
   return sel;
 }
 
+// The size index a clock conf really means RIGHT NOW: the layout's own, one rung lower while the screensaver's
+// Smaller Clock option is on.  Index 0 is the built-in font and the floor - there is nothing below it - so a layout
+// that already asks for 0 is left alone.  Read in ClockWidget::init() rather than by the painters: the index is what
+// every measurement of the clock derives from, and a font swapped under measurements taken for another is a clock
+// printed into the wrong box.
+static uint8_t _clockConfSize(uint8_t confsize){
+  if (confsize > 0 && config.isScreensaver && config.store.clocksmaller) return (uint8_t)(confsize - 1);
+  return confsize;
+}
+
 inline GFXglyph *pgm_read_glyph_ptr(const GFXfont *gfxFont, uint8_t c) {
   return gfxFont->glyph + c;
 }
@@ -926,8 +936,10 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
   Widget::init(wconf, fgcolor, bgcolor);
   // clockConf.textsize is this clock's size index.  CLOCK_SIZE (the panel default dspfont.h derives
   // from DSP_HEIGHT) is only what the layout tooling fills a new layout with, so a conf that says
-  // nothing still gets the size that panel has always had.
-  _cf = _resolveClockFont(wconf.textsize);
+  // nothing still gets the size that panel has always had.  _clockConfSize() is where the screensaver's
+  // Smaller Clock option takes its rung off - everything below is derived from the answer, so nothing
+  // else has to know about the option.
+  _cf = _resolveClockFont(_clockConfSize(wconf.textsize));
   // The two shapes this clock draws with, built from the active style's ONE glow character.  A clock
   // glyph's advance is what the union glyph carries - makefont.py injects it at the digit width - so
   // <g><g>:<g><g> measures the clock exactly as "00:00" would, which is why it doubles as the width
@@ -981,6 +993,16 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
     else     _fb = new psFrameBuffer(dsp.width(), dsp.height());
     _begin();
   #endif
+}
+
+// Rebuild the clock for the size the current screen state gives it, and do nothing when that is the size it is
+// already drawn at.  The Display calls this on the way into the screensaver and on the way back out, because the
+// option is not a layout change and init() is the only place a size is resolved.  The conf is an ARGUMENT, never
+// _config: moveTo()/moveBack() write _config.offset/top, so re-initing from it would take the moved position as the
+// widget's own and lose the layout's for the rest of the session.
+void ClockWidget::refreshSize(WidgetConfig conf){
+  if (_cf.index == _clockConfSize(conf.textsize)) return;
+  init(conf, _fgcolor, _bgcolor);
 }
 
 void ClockWidget::_begin(){

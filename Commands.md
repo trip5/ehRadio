@@ -103,6 +103,7 @@ panel are different pictures, so nothing keeps them in step.
 | `screensaverplayingblank` | Enable/disable playing screensaver blanking behavior. |
 | `screensaverplayingtimeout` | Set playing screensaver timeout in minutes (1..1080). |
 | `screensaverfull` | Enable/disable full time on the screensaver. |
+| `screensaversmaller` | Draw the screensaver clock one size rung below the layout's own, never below index 0 (the built-in font). |
 | `screensavertext` | Show/hide the screensaver's info line: station name, 2 title lines, and weather (if enabled). |
 | `screensavervu` | Draw the VU full screen as the screensaver instead of the moving clock. |
 | `screensavervustyle` | Select the style that full-screen meter draws (numeric, 0-based, clamped to the known range, same as `vustyle`). |

@@ -554,6 +554,11 @@ void NetServer::processQueue() {
             if (((activeLayout.fullClock || activeLayout.seconds) && activeLayout.clockConf.textsize != 0) || DBGWUI)
                                                                 act += F("\"group_full_time\",");
                                                            else act += F("\"hide_group_full_time\",");
+            #if (!defined(DEEP_SLEEP_DISABLE) || DBGWUI)
+              if (config.store.screensaverEnabled || config.store.screensaverPlayingEnabled || DBGWUI)
+                                                                act += F("\"group_deepsleep\",");
+                                                           else act += F("\"hide_group_deepsleep\",");
+            #endif
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");
             if (presentOf(*weatherConf_ptr) || DBGWUI)          act += F("\"group_weather\",");
@@ -596,24 +601,12 @@ void NetServer::processQueue() {
                                   config.store.irtlp,
                                   VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"scrtext\":%d,\"scrsmall\":%d,\"scrvu\":%d,\"scrstyle\":%d,\"scrpeak\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d,\"plpaged\":%d,\"allcaps\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d,\"plpaged\":%d,\"allcaps\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
                                   config.store.dspon,
                                   config.store.brightness,
-                                  config.store.screensaverEnabled,
-                                  config.store.screensaverBlank,
-                                  config.store.screensaverTimeout,
-                                  config.store.screensaverPlayingEnabled,
-                                  config.store.screensaverPlayingBlank,
-                                  config.store.screensaverPlayingTimeout,
-                                  config.store.screensaverFullDateTime,
-                                  config.store.screensaverText,
-                                  config.store.clocksmaller,
-                                  config.store.screensaverVU,
-                                  config.store.screensaverVUStyle,
-                                  config.store.screensaverVUpeak,
                                   config.store.bufferbar,
                                   config.store.vumeter,
                                   config.store.vupeak,
@@ -631,6 +624,22 @@ void NetServer::processQueue() {
                                   config.store.clockglow,
                                   config.store.playlistPages,
                                   config.store.pretextALLCAPS);
+                                  break;
+      case GETSCREENSAVER: snprintf(wsbuf, sizeof(wsbuf), "{\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"scrtext\":%d,\"scrsmall\":%d,\"scrvu\":%d,\"scrstyle\":%d,\"scrpeak\":%d,\"scrtimer\":%d,\"scrtimeout\":%d}",
+                                  config.store.screensaverEnabled,
+                                  config.store.screensaverBlank,
+                                  config.store.screensaverTimeout,
+                                  config.store.screensaverPlayingEnabled,
+                                  config.store.screensaverPlayingBlank,
+                                  config.store.screensaverPlayingTimeout,
+                                  config.store.screensaverFullDateTime,
+                                  config.store.screensaverText,
+                                  config.store.screensaverClockSmaller,
+                                  config.store.screensaverVU,
+                                  config.store.screensaverVUStyle,
+                                  config.store.screensaverVUpeak,
+                                  config.store.sleeptimer,
+                                  config.store.sleepSsTimeout);
                                   break;
       case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,

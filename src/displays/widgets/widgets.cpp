@@ -661,7 +661,7 @@ static ClockFontSel _resolveClockFont(uint8_t sizeIndex){
 // every measurement of the clock derives from, and a font swapped under measurements taken for another is a clock
 // printed into the wrong box.
 static uint8_t _clockConfSize(uint8_t confsize){
-  if (confsize > 0 && config.isScreensaver && config.store.clocksmaller) return (uint8_t)(confsize - 1);
+  if (confsize > 0 && config.isScreensaver && config.store.screensaverClockSmaller) return (uint8_t)(confsize - 1);
   return confsize;
 }
 

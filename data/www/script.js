@@ -1410,6 +1410,7 @@ function continueLoading(mode){
           }
           websocket.send('getsystem=1');
           websocket.send('getscreen=1');
+          websocket.send('getscreensaver=1');
           websocket.send('getlocale=1');
           websocket.send('getweather=1');
           websocket.send('getmqtt=1');

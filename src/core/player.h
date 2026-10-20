@@ -40,6 +40,7 @@ class Player: public Audio {
     void stopInfo();
     void setError(const char *e);
     void setReady();
+    void noteFatalStream();  // a permanent host error (404/410): stop and refuse to re-arm the retry ladder
     void initHeaders(const char *file);
     void loop();
     bool queueResolvedUrl(const char* url);
@@ -63,6 +64,7 @@ class Player: public Audio {
   private:
     uint32_t    _resumeFilePos = 0;
     plStatus_e  _status = STOPPED;
+    bool        _fatalStream = false;  // 404/410 seen: the arm gate must not start the ladder
     uint16_t    _playingStationId = 0;
     char        _plError[PLERR_LN];
     uint8_t     _muteVol = 30;  // last active raw audio volume, restored by mute()

@@ -94,7 +94,6 @@ extern const ClockFontStyle LEDClockStyle;
 extern const ClockFontStyle Chunky6pxStyle;
 extern const ClockFontStyle Chunky6Style;
 extern const ClockFontStyle NixieTubeStyle;
-extern const ClockFontStyle NixieClockStyle;
 
 #if CLOCKFONT > CHUNKY6
   #warning "CLOCKFONT value not recognized, defaulting to CHUNKY6"
@@ -110,7 +109,6 @@ const ClockFontStyle* const _clockFontStyles[] = {
   &Chunky6pxStyle,
   &Chunky6Style,
   &NixieTubeStyle,
-  &NixieClockStyle,
 };
 #define _clockFontCount (sizeof(_clockFontStyles) / sizeof(_clockFontStyles[0]))
 

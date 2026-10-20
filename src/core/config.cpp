@@ -485,6 +485,13 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     store.dspon = true;  // runtime state only: the display is always on at boot/reset, never restored from NVS
     store.brightness = (uint8_t)SCREEN_BRIGHTNESS; setBrightness(false);
     backlightControls.restart();
+    // One screen update
+    display.applyFonts((uint8_t)DISPLAYFONT, (uint8_t)CLOCKFONT);
+    netserver.requestOnChange(GETACTIVE, 0);
+    netserver.requestOnChange(GETSCREEN, clientId);
+    return;
+  }
+  if (strcmp(val, "screensaver") == 0) {
     saveValue(&store.screensaverEnabled, (bool)SS_NOTPLAYING);
     saveValue(&store.screensaverBlank, (bool)SS_NOTPLAYING_BLANK);
     saveValue(&store.screensaverTimeout, (uint16_t)SS_NOTPLAYING_TIME);
@@ -493,14 +500,19 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.screensaverPlayingTimeout, (uint16_t)SS_PLAYING_TIME);
     saveValue(&store.screensaverFullDateTime, (bool)SS_FULL_DATETIME);
     saveValue(&store.screensaverText, (bool)SS_INFO_TEXT);
-    saveValue(&store.clocksmaller, (bool)SS_SMALLER_CLOCK);
+    saveValue(&store.screensaverClockSmaller, (bool)SS_SMALLER_CLOCK);
     saveValue(&store.screensaverVU, (bool)SS_VU);
     saveValue(&store.screensaverVUStyle, (uint8_t)SS_VU_STYLE);
     saveValue(&store.screensaverVUpeak, (bool)SS_VUPEAK);
-    // One screen update
-    display.applyFonts((uint8_t)DISPLAYFONT, (uint8_t)CLOCKFONT);
+    saveValue(&store.sleeptimer, (bool)SS_SLEEPTIMER);
+    saveValue(&store.sleepSsTimeout, (uint16_t)SS_SLEEPTIME);
+    sleepTicks = 0;
+    if (isScreensaver) {
+      const bool blank = player.isRunning() ? store.screensaverPlayingBlank : store.screensaverBlank;
+      display.putRequest(SSREBUILD, blank ? SCREENBLANK : SCREENSAVER);
+    }
     netserver.requestOnChange(GETACTIVE, 0);
-    netserver.requestOnChange(GETSCREEN, clientId);
+    netserver.requestOnChange(GETSCREENSAVER, clientId);
     return;
   }
   if (strcmp(val, "locale") == 0) {
@@ -573,6 +585,7 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     defaultSettings("system", clientId);
     defaultSettings("mqtt", clientId);
     defaultSettings("battery", clientId);
+    defaultSettings("screensaver", clientId);
     defaultSettings("screen", clientId); // at the end to make sure screen doesn't break...
     return;
   }
@@ -1057,6 +1070,10 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(playlistPages, "plpaged"),
   CONFIG_KEY_ENTRY(pretextALLCAPS, "allcaps"),
   CONFIG_KEY_ENTRY(brightness, "bright"),
+  CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
+  CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
+  CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
+  // Screensaver
   CONFIG_KEY_ENTRY(screensaverEnabled, "scrnsvren"),
   CONFIG_KEY_ENTRY(screensaverBlank, "scrnsvrbl"),
   CONFIG_KEY_ENTRY(screensaverTimeout, "scrnsvrto"),
@@ -1065,13 +1082,12 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(screensaverPlayingTimeout, "scrnsvrplto"),
   CONFIG_KEY_ENTRY(screensaverFullDateTime, "scrnsvrfull"),
   CONFIG_KEY_ENTRY(screensaverText, "scrnsvrtext"),
-  CONFIG_KEY_ENTRY(clocksmaller, "sssmaller"),
+  CONFIG_KEY_ENTRY(screensaverClockSmaller, "sssmaller"),
   CONFIG_KEY_ENTRY(screensaverVU, "scrnsvrvu"),
   CONFIG_KEY_ENTRY(screensaverVUStyle, "scrnsvrvustyle"),
   CONFIG_KEY_ENTRY(screensaverVUpeak, "scrnsvrvupeak"),
-  CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
-  CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
-  CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
+  CONFIG_KEY_ENTRY(sleeptimer, "sleeptimer"),
+  CONFIG_KEY_ENTRY(sleepSsTimeout, "sleepsstimeout"),
   // Locale
   CONFIG_KEY_ENTRY(locale_webui, "localewebui"),
   CONFIG_KEY_ENTRY(locale_display, "localedsp"),

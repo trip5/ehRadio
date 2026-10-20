@@ -499,6 +499,12 @@ wait_for_online:
   #ifdef CORE_MONITOR
     FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
   #endif
+  // Hold the state until the stack has settled: SVC_DONE is what releases the WebUI and starts the
+  // boot-stable countdown, so the settle window has to finish before either can begin.
+  if (STARTUP_ASYNC_SERVICES_DELAY > 0) {
+    FUNCTIONLOG("Services", "Startup Async Services settling for %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(STARTUP_ASYNC_SERVICES_DELAY * 1000UL));
+  }
   // Last act of the services, and it is what lets Startup::loop() prove the boot.  Order matters: the
   // timestamp first, then the state, so the countdown can never read DONE with a stale timestamp.
   startup._servicesDoneMs = millis();

@@ -510,13 +510,20 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   web files missing means no services are coming, so nothing else would ever start the server. `begin()` creates a
   fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the trigger sends `NEWIP`
   so the footer IP appears with the server rather than at boot.
+- **`SVC_DONE` is set `STARTUP_ASYNC_SERVICES_DELAY` seconds after the last download, inside the task.** The state
+  that releases the WebUI has to mean the stack is idle, not merely unoccupied, so the task holds it through a settle
+  delay and only then stamps `_servicesDoneMs`, clears `_servicesBusy` and sets the state. The WebUI bring-up and the
+  `BOOT_STABLE_TIME` countdown therefore move together, and `_servicesBusy` covers the settle as well as the downloads,
+  which is what keeps the MQTT apply and the VU startup throttle held off for the whole window. `0` compiles both the
+  wait and its log line away.
 - **Boot stability is a state, not a timer.** `Startup::_services` is `SVC_NONE` / `SVC_WILL_RUN` / `SVC_DONE`, and
   `setup()` has already settled which one applies by the time `loop()` can run, because `startupServices()` has exactly
   one call site — [`main.cpp:142`](src/main.cpp:142), inside `setup()`. `loop()` then has three exits: `SVC_NONE` proves
   the boot over `BOOT_STABLE_TIME` from power-on (nothing risky will run, but an early crash must still trip Safe Mode
   on the next boot); `SVC_WILL_RUN` **while the card is still in use** proves it after `STARTUP_ASYNC_SERVICES_DELAY +
   BOOT_STABLE_TIME`, with the reason `startup services were suspended`; and `SVC_DONE` marks it stable
-  `BOOT_STABLE_TIME` after the downloads finish. Two of those count from power-on, each safe for its own reason:
+  `BOOT_STABLE_TIME` after the settle that follows the downloads. Two of those count from power-on, each safe for its
+  own reason:
   `SVC_NONE` because no risky work is scheduled at all, and the parked case because the services delay is waited out
   first, so a task that was only slow to start has started by then.
 - **The three boot outcomes, and why the state can always be settled before `loop()`:** *SD offline*
@@ -651,12 +658,14 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - version-file parsing for online-update detection
   - startup background update scheduling (`startupServicesAsync`) — spawned as a FreeRTOS task on `NETWORK_CORE` at low
     priority:
-    - waits `STARTUP_SERVICES_DELAY` seconds before any work, letting audio buffer fill first
+    - waits `STARTUP_ASYNC_SERVICES_DELAY` seconds before any work, letting audio buffer fill first
     - verifies WebUI locale JSON file; downloads if missing
     - checks for new firmware version via `new_ver.txt`; triggers OTA if `autoupdate` is enabled
     - downloads default `playlist.csv` from `PLAYLIST_DEFAULT_URL` if file is missing
     - updates `timezones.json.gz` and `rb_srvrs.json` from online sources
     - cleans stale search results older than 24 hours
+    - holds `SVC_DONE` and `servicesBusy()` for `STARTUP_ASYNC_SERVICES_DELAY` seconds after the last download, so the
+      WebUI bring-up and the boot-stable countdown both wait for the stack to settle
     - deletes the `ESPFileUpdater` param and self-terminates via `vTaskDelete(NULL)`
   - `deassertCsPins()` — called from `main.cpp` `setup()` before any device init. Sets all known SPI CS pins
     (`VS1053_CS`, `SD_CS`, `TFT_CS`, `TS_CS`) to `OUTPUT` + `HIGH` to prevent floating CS from causing bus contention
@@ -690,6 +699,10 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - AP fallback with DNS captive portal
   - Improv provisioning flow
   - WiFi reconnect/disconnect handlers
+  - ehDP discovery responder (`ehdp.loop()` from the 1 s tick), gated on `netserver.isListening()`: the reply
+    advertises UI port 80, so it must not answer while the WebUI is held back or not yet up. Keying on the server
+    rather than on the services state is also what keeps discovery working in the SD-parked boot, where the task
+    stays in `SVC_WILL_RUN` for the session but the WebUI is started immediately
   - periodic ticker logic for:
     - time sync interval
     - weather sync interval
@@ -844,8 +857,19 @@ else clears that flag except a fresh Wi-Fi reconnect event - so a silent failure
 reboot. `ticks()` (the 1 s `Ticker` heartbeat, `ctimer.attach(1, ticks)`) self-heals the same way: if
 `lostPlaying` is set, no task is servicing it, `!beginReconnect` and the link is up, it re-spawns, rate limited
 by `STREAM_RETRY_RESPAWN_MS` (`network.cpp`), and escalates to a link reset once the re-spawns themselves keep
-failing. The `wifiReconnectionTask` spawn is checked and logged too, but has no equivalent fallback: the AP is
-otherwise only re-found on the next disconnect event.
+failing. The `wifiReconnectionTask` spawn has the same shape: `WiFiLostConnection` and the self-heal in `ticks()`
+both go through `spawnWifiReconnect()`, a failed create is visible in the log, and the self-heal retries it every
+`WIFI_RECONN_RESPAWN_MS` (5 s) and escalates to `recoveryReboot()` after `WIFI_RECONN_SPAWN_FAIL_MAX` (2)
+failures. That matters because `forceLinkReset()` drops the link while the old stream task's 8 KB stack is still
+held, so the first create can fail on a fragmented heap with `beginReconnect` already true - and that path had no
+other way back, since the AP is only re-found on the next disconnect event.
+
+**A failed user play enters the same ladder.** `Player::_play()` and `playUrl()` call
+`MyNetwork::noteConnectFailure()` when `connecttohost()` fails; it probes first and, only on WEDGED, sets
+`lostPlaying` and takes rung 1 with `forceLinkReset()` - `GOT_IP` then restarts the ladder, which spends 2/3 and
+3/3 before `recoveryReboot()`. The station that failed is saved as the resume target first, so recovery plays the
+station the user chose rather than the previous one. A played-stream ladder probes once per attempt; this entry
+does the same, one probe per failed press.
 
 **Why the VS1053 build depended on this ladder more than the I2S build.** Both libraries retry a dead stream
 themselves every 5 s (`streamDetection()` -> `connecttohost(m_lastHost)`), but only the VS1053 failure branch
@@ -1249,6 +1273,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - uses `cmd.exec(...)` from commandhandler
   - emits JSON consumed by `data/www/script.js`
   - `GETSCREEN` now also carries `invtitle`, `layout`, `theme` **and `vustyle`** fields for WebUI dropdown state
+  - `GETSCREENSAVER` is the Screensaver category's own payload - it carries `scre`..`scrpeak` plus `scrtimer`
+    and `scrtimeout`. `GETSCREEN` keeps only the Screen values, and `script.js` requests both on page load.
+    `getscreensaver` is blocked for HTTP/MQTT/Telnet like the other getters and is in the playlist-validator
+    passthrough whitelist.
   - Virtual endpoints `/themes.json` and `/layouts.json` serve dropdown data from PROGMEM arrays; `/visuals.json` is the
     first *runtime* one (built per request, not from PROGMEM), and the WebUI loads it through `loadVisuals()` +
     `populateNamedDropdown('vustyle', data)`
@@ -1274,8 +1302,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   Screensaver checkbox, which needs no VU box in the layout), `group_vu_ss_style` only while `screensaverVU`
   is on (the style picker *and* the meter's own peaks/axis switch, which share the group because both belong
   to the screensaver's meter), and withdraws `group_full_time` while it is on; `group_vu` keeps its own
-  meaning, "the active layout has a VU box". `GETSCREEN` carries `scrtext`, `scrvu`, `scrstyle` and
-  `scrpeak`.
+  meaning, "the active layout has a VU box". `GETSCREENSAVER` carries `scrtext`, `scrvu`, `scrstyle`,
+  `scrpeak`, `scrtimer` and `scrtimeout`; the Screen values stay in `GETSCREEN`.
 - `screensavervupeak` is deliberately not `vupeaks`: `screensaverVUpeak` is a store of its own, and the
   widget reads it through `VuWidget::_vupeak()` whenever the instance is the pinned one - the same split
   `_style()` makes for `screensaverVUStyle` against `vustyle`. It owns the peak markers and every axis or
@@ -1293,6 +1321,23 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   governing one off the screensaver should not be up at all - and that exit is the route that resets
   `screensaverTicks`/`screensaverPlayingTicks`. The cost is the panel clear a rebuild goes through, one full
   blit of black before the rebuilt picture; that clear is what owns the whole panel when a box shrinks.
+- The Screensaver settings are their own reset category: `defaultSettings("screensaver")` holds every
+  `screensaver*` default plus the two deep-sleep settings, while `defaultSettings("screen")` keeps only the
+  Screen ones. Both branches end with `GETACTIVE` for the layout-driven groups (`group_full_time`,
+  `group_smaller`, `group_vu_ss_style`), which depend on Screensaver values too. The value payloads are
+  separate - `GETSCREEN` for Screen and `GETSCREENSAVER` for Screensaver - so the all-reset order no longer
+  decides which defaults the WebUI sees. The Screensaver branch queues an `SSREBUILD` while the device is
+  asleep so the reset is visible at once.
+- **`sleeptimer` / `sleepSsTimeout`: deep sleep after the screensaver.** `sleeptimerenable` and `sleeptimeout`
+  (1..1080 minutes) are the only screensaver commands that do not call `screensaverHelper()`, because the
+  picture does not change. `network.cpp`'s `ticks()` owns the countdown: `config.sleepTicks` increments once
+  per second only while `config.isScreensaver` and `store.sleeptimer` are true, is zeroed whenever the device
+  is not asleep, and calls `utility.doSleepW()` once it passes `sleepSsTimeout * 60`. The whole block is
+  inside `#ifndef DEEP_SLEEP_DISABLE`, and `GETACTIVE` offers the rows through `group_deepsleep` only in builds
+  where `doSleepW()` can act. This is a third member of the `screensaverTicks` companions, not a reuse of
+  `screensaverTimeout`: those counters stop once the mode is `SCREENSAVER`/`SCREENBLANK`.
+- **Both `sleeptimer` commands restart the countdown** (`config.sleepTicks = 0`), so enabling the feature on a
+  device that has been asleep for an hour waits the configured time instead of firing immediately.
 - Central command router for WS, URL params, MQTT, and telnet fallback paths.
 - Main responsibilities:
   - map `key=value` commands into config/player/display/network actions
@@ -1840,7 +1885,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
       `burl`)
   - playlist CSV parsing and station lookup/load helpers
   - WiFi credential parse/save/import helpers
-  - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`)
+  - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`); `doSleepW()` is also reached from `ticks()`'s
+    screensaver sleep timer (`sleeptimer` / `sleepSsTimeout`, minutes)
   - standby helpers `stopStandby()`, `startStandby()` and `toggleStandby()` (shared by the `stopstandby`, `startstandby`
     and `togglestandby` commands and the IR power button); `startStandby()` also calls `network.cancelStreamRetry()`
   - LittleFS file-maintenance helpers shared with startup and WebUI update paths:
@@ -3701,7 +3747,7 @@ design record; this is the shape of it.
   produced for its panel.  `numConf.textsize` is the same index for the number page, and the two are
   independent — the widgets resolve their own `ClockFontSel`, which is why there is no global clock
   font pointer any more.
-- **The one exception is the screensaver's Smaller Clock option** (`config.store.clocksmaller`,
+- **The one exception is the screensaver's Smaller Clock option** (`config.store.screensaverClockSmaller`,
   `SS_SMALLER_CLOCK`): while `config.isScreensaver` is true, `ClockWidget::init()` resolves the conf's
   index **one rung lower** through `_clockConfSize()` in `widgets.cpp`, and `0` is the floor — a layout that
   already asks for the built-in font keeps it.  It is applied at the ONE place a size is resolved because

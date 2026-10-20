@@ -841,12 +841,13 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 // How many seconds to wait after boot completed to Start the Async Services (other services are starting and too soon can crash netserver stack).  The less-important services started here (can take a full minute to complete if server connection issues):
 // verifies/downloads locale JSON file, checks for new version (triggers autoupdate), downloads PLAYLIST_DEFAULT_URL (if set), updates timezones.json.gz and rb_srvrs.json, cleans up stale search results
-// 3 s rather than 10: the delay lets the audio buffer fill before anything competes for WiFi, and the WebUI is held back until the services are done (see Startup::loop())
+// The delay lets the audio buffer fill before anything competes for WiFi, and the WebUI is held back until the services are done (see Startup::loop())
+// This delay is also added after the services complete to allow settle time
 #ifndef STARTUP_ASYNC_SERVICES_DELAY
   #define STARTUP_ASYNC_SERVICES_DELAY 3
 #endif
- // How many seconds to wait after boot completed (including smart start and Async Services) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
-  #ifndef BOOT_STABLE_TIME
+// How many seconds to wait after boot completed (including smart start and Async Services) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
+#ifndef BOOT_STABLE_TIME
   #define BOOT_STABLE_TIME 10
 #endif
 // How many times to retry a failed stream connection before giving up
@@ -884,6 +885,8 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 // The following tree is duplicated in options.h AND options_overrides.h so if changes are needed, change both files
+// I2S-based radios use the CPU for decoding so best to allocate an entire core for decoding
+// VS1053 handles decoding so it's better to allow the display task its own core
 #ifndef NETWORK_CORE
   #if VS1053_CS!=255
     #define NETWORK_CORE 0
@@ -1329,6 +1332,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef EHDP
   #define EHDP true
 #endif
+
+/* --- Screen --- */
 #ifndef SCREEN_FLIP
   #define SCREEN_FLIP false
 #endif
@@ -1359,8 +1364,7 @@ or examine the examples in builds/trip5 and make your own!
 #define CHUNKY6_PX      1  // Default (spacing pixels) - great on color screens
 #define CHUNKY6PX       1  // An alias for above...
 #define CHUNKY6         2  // Really heavy looking - great on mono OLED screens
-#define NIXIE_TUBE      3  // 
-#define NIXIE_CLOCK     4  // 
+#define NIXIE_TUBE      3  // Curvy Nixie-tube numbers
 
 #ifndef CLOCKFONT
   #if DSP_MODEL==DSP_SH1106 || DSP_MODEL==DSP_SH1107 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1327
@@ -1409,6 +1413,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SCREEN_BRIGHTNESS
   #define SCREEN_BRIGHTNESS 100
 #endif
+
+/* --- Screensaver --- */
 #ifndef SS_NOTPLAYING
   #define SS_NOTPLAYING false
 #endif
@@ -1453,6 +1459,18 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SS_VUPEAK
   #define SS_VUPEAK SHOW_VU_PEAK // numeric 0-index
 #endif
+#ifndef SS_SLEEPTIMER
+  #define SS_SLEEPTIMER false
+#endif
+#if defined(SS_SLEEPTIME) && (SS_SLEEPTIME < 1 || SS_SLEEPTIME > 1080)
+  #warning "define warning in myoptions.h: SS_SLEEPTIME is out of range (1-1080), reverting to default 30"
+  #undef SS_SLEEPTIME
+#endif
+#ifndef SS_SLEEPTIME
+  #define SS_SLEEPTIME 30
+#endif
+
+/* --- Screen Dimming --- */
 #ifndef DIMMING_ENABLED
     #define DIMMING_ENABLED false
 #endif  
@@ -1475,6 +1493,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef DIMMING_BRIGHTNESS
   #define DIMMING_BRIGHTNESS 50
 #endif
+
+/* --- Controls --- */
 #ifndef TOUCH_FLIP
   #define TOUCH_FLIP false
 #endif
@@ -1498,6 +1518,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef IR_TOLERANCE
   #define IR_TOLERANCE 35
 #endif
+
+/* --- Locale --- */
 // The Display Locale is changeable!  (Check locale/dsplocales.json for full list)
 #ifndef DSP_LOCALE
   #define DSP_LOCALE "en_US"
@@ -1532,6 +1554,8 @@ or examine the examples in builds/trip5 and make your own!
 #if TIME_SYNC_INTERVAL < 1 || TIME_SYNC_INTERVAL > 24
   #error define error: TIME_SYNC_INTERVAL must be a number from 1 to 24 (hours)
 #endif
+
+/* --- Weather --- */
 #ifndef WEATHER_API
   #define WEATHER_API "OM1"
 #endif
@@ -1587,6 +1611,8 @@ static_assert(
   __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "m/s") == 0,
   "define error: WEATHER_WIND_SPEED_UNITS must be \"kmh\", \"mph\", \"kn\", or \"m/s\""
 );
+
+/* --- MQTT --- */
 #ifndef MQTT_ENABLE
   #define MQTT_ENABLE false
 #endif

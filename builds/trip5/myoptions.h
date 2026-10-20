@@ -364,15 +364,11 @@
 //#define CLOCKFONT LEDCLOCK
 
 // Transform:
-// PRETEXT_ALLCAPS is a runtime option now (config.store.pretextALLCAPS, WebUI "All Caps"), and it drives the WebUI's
-// own casing too; WWW_CASETRANSFORM is gone and defining it here does nothing.
 //#define PRETEXT_FOLDACCENT
 //#define PRETEXT_FOLDCYRILLIC
 //#define EVERYDAY_IS_CANADA_DAY
 
 // Other:
 //#define DEEP_SLEEP_DISABLE
-
-#define TRIP5_NIXIETUBE_TEST
 
 #endif // myoptions_h

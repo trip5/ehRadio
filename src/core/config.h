@@ -154,6 +154,8 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      dimmingEnabled = DIMMING_ENABLED;
   uint16_t  dimmingTimeout = DIMMING_TIMEOUT;
   uint8_t   dimmingBrightness = DIMMING_BRIGHTNESS;
+
+  // Screensaver
   bool      screensaverEnabled = SS_NOTPLAYING;
   bool      screensaverBlank = SS_NOTPLAYING_BLANK;
   uint16_t  screensaverTimeout = SS_NOTPLAYING_TIME;
@@ -162,10 +164,12 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   uint16_t  screensaverPlayingTimeout = SS_PLAYING_TIME;
   bool      screensaverFullDateTime = SS_FULL_DATETIME;
   bool      screensaverText = SS_INFO_TEXT;
-  bool      clocksmaller = SS_SMALLER_CLOCK;
+  bool      screensaverClockSmaller = SS_SMALLER_CLOCK;
   bool      screensaverVU = SS_VU;
   uint8_t   screensaverVUStyle = SS_VU_STYLE;
   bool      screensaverVUpeak = SS_VUPEAK;
+  bool      sleeptimer = SS_SLEEPTIMER;
+  uint16_t  sleepSsTimeout = SS_SLEEPTIME;
 
   // Locale
   char      locale_webui[6] = WEBUI_LOCALE;
@@ -292,6 +296,7 @@ class Config {
     volatile uint16_t vuThreshold = 0;
     volatile uint16_t screensaverTicks = 0;
     volatile uint16_t screensaverPlayingTicks = 0;
+    volatile uint16_t sleepTicks = 0;   // seconds the screensaver has been up, for the sleep timer
     volatile bool     isScreensaver = false;
     volatile bool     displayIsInverted = false;
     volatile int      newConfigMode = 0;

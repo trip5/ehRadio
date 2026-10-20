@@ -137,6 +137,17 @@ void Player::setError(const char *e) {
   }
 }
 
+// The host answered 404/410: the URL is gone, so the ladder would only replay a guaranteed failure.
+// Cancel any running ladder and let the arm gate stop instead of re-arming.
+void Player::noteFatalStream() {
+  _fatalStream = true;
+  network.lostPlaying = false;  // a dead URL is not a resume IOU; also stops ticks() re-spawning the ladder
+  network.cancelStreamRetry();
+  char errbuf[STATION_FIELD_LENGTH];
+  snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
+  setError(errbuf);
+}
+
 void Player::_stop(bool alreadyStopped) {
   log_i("%s called", __func__);
   if (config.getMode()==PM_SDCARD && !alreadyStopped) config.sdResumePos = player.getFilePos();
@@ -237,8 +248,8 @@ void Player::loop() {
   }
 
   if (!playlistValidator.active() && !isRunning() && _status==PLAYING) {
-    // Stream died unexpectedly - trigger reconnection if WiFi is still up
-    if (config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
+    // Stream died unexpectedly - trigger reconnection if WiFi is still up and this is not a dead URL
+    if (!_fatalStream && config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
       FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
       network.lostPlaying = true;
       // Launch retry task if not already running.  spawnStreamRetry() checks the create result, so a spawn that
@@ -302,6 +313,7 @@ void Player::_play(uint16_t stationId) {
   #endif
   if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
   setError("");
+  _fatalStream = false;  // a new station clears a previous permanent-error stop
   setDefaults();
   audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
@@ -383,6 +395,9 @@ void Player::_play(uint16_t stationId) {
     snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
     player.setError(errbuf);
     _stop(true);
+    if (config.getMode() == PM_WEB && !network.lostPlaying) {
+      network.noteConnectFailure(config.station.url);
+    }
   };
 }
 
@@ -394,6 +409,7 @@ void Player::browseUrl() {
 
 void Player::playUrl(const char* url) {
   setError("");
+  _fatalStream = false;
   remoteStationName = true;
   audioHandlers.resetMetadata();
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
@@ -421,6 +437,9 @@ void Player::playUrl(const char* url) {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);
     _stop(true);
+    if (!network.lostPlaying) {
+      network.noteConnectFailure(url);
+    }
   }
 }
 

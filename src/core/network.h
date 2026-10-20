@@ -36,6 +36,7 @@ class MyNetwork {
     bool buildWeatherString();
     void ehDPinit();
     void cancelStreamRetry();
+    void noteConnectFailure(const char* url);  // a failed user play: probe the stack and enter the ladder on WEDGED
   private:
     Ticker rtimer;
     void captureCurrentAp();

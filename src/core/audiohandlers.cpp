@@ -124,6 +124,17 @@ static bool handleAccountError(const char* info) {
   return false;
 }
 
+// Both audio libraries pass the raw HTTP status line ("HTTP/1.1 404 File Not Found") through
+// audio_showstreamtitle on any status above 310.  Returns the code, or 0 if this is not a status line.
+static int httpStatusCode(const char* info) {
+  if (!info || strncmp(info, "HTTP/", 5) != 0 || strlen(info) < 12) return 0;
+  const char* p = info + 9;
+  if (!isdigit(static_cast<unsigned char>(p[0])) ||
+      !isdigit(static_cast<unsigned char>(p[1])) ||
+      !isdigit(static_cast<unsigned char>(p[2]))) return 0;
+  return (p[0] - '0') * 100 + (p[1] - '0') * 10 + (p[2] - '0');
+}
+
 } // namespace
 
 AudioHandlers audioHandlers;
@@ -239,6 +250,8 @@ void AudioHandlers::handleShowStation(const char* info) {
 void AudioHandlers::handleShowStreamTitle(const char* info) {
   if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   if (handleAccountError(info)) return;  // error handled, don't display raw HTTP response as title
+  const int status = httpStatusCode(info);
+  if (status == 404 || status == 410) { player.noteFatalStream(); return; }
   #ifdef DEBUG_TITLES
     config.setTitle(DEBUG_TITLES);
     return;

@@ -38,6 +38,8 @@ static constexpr uint32_t WIFI_RETRY_SCALE             = 2;      // second attem
 static constexpr uint32_t WIFI_FAST_ATTEMPTS           = 4;      // ~2 s: directed reconnect to a known BSSID before a scan
 static constexpr uint32_t STREAM_RETRY_SLOW_S          = 60;     // s between retries once the fast budget is spent
 static constexpr uint32_t STREAM_RETRY_RESPAWN_MS      = 5000;   // ms a resume may stay owed before ticks() starts a task
+static constexpr uint32_t WIFI_RECONN_RESPAWN_MS       = 5000;   // ms between retries of a failed wifiReconn spawn
+static constexpr uint8_t  WIFI_RECONN_SPAWN_FAIL_MAX   = 2;      // failed retries before a recovery restart
 static constexpr uint8_t  STREAM_RESET_MAX             = 3;      // link resets allowed in one outage before restart
 static constexpr uint8_t  RECOVERY_REBOOT_MAX          = 2;      // consecutive recovery restarts before patient retries
 static constexpr uint32_t RECOVERY_HEALTHY_MS          = 600000; // ms of playback that clears the restart count
@@ -53,6 +55,7 @@ MyNetwork network;
 
 TaskHandle_t syncTaskHandle;
 TaskHandle_t streamRetryTaskHandle = NULL;
+static TaskHandle_t wifiReconnTaskHandle = NULL;
 static uint8_t streamResetsUsed = 0;
 
 // Recovery restarts, counted in RTC memory: it survives esp_restart(), which is the whole point, and a power
@@ -141,6 +144,26 @@ bool spawnStreamRetry() {
   return ok == pdPASS;
 }
 
+// The only place the Wi-Fi reconnect task is created: the disconnect event and the self-heal in ticks() both
+// come through here, so two callers cannot win the race and leave a stray task with the handle already cleared.
+static bool spawnWifiReconnect() {
+  static portMUX_TYPE spawnMux = portMUX_INITIALIZER_UNLOCKED;
+  static volatile bool spawnPending = false;
+  portENTER_CRITICAL(&spawnMux);
+  const bool taken = (wifiReconnTaskHandle != NULL) || spawnPending;
+  if (!taken) spawnPending = true;
+  portEXIT_CRITICAL(&spawnMux);
+  if (taken) return false;   // already running, or a create is in flight
+
+  const BaseType_t ok = xTaskCreatePinnedToCore(wifiReconnectionTask, "wifiReconn", NETWORK_TASK_STACK_BYTES, NULL, NET_TASK_PRIORITY, &wifiReconnTaskHandle, NETWORK_CORE);
+
+  portENTER_CRITICAL(&spawnMux);
+  spawnPending = false;
+  if (ok != pdPASS) wifiReconnTaskHandle = NULL;   // leave it NULL so the self-heal can try again
+  portEXIT_CRITICAL(&spawnMux);
+  return ok == pdPASS;
+}
+
 // The one place network.timeinfo is made current, and the only place ticks() queues CLOCK.  timeinfo is a pure cache
 // of the most reliable clock available, refreshed every tick and never advanced by hand - the authority order is:
 //   1. the system clock, once SNTP has set it.  It is disciplined and keeps running across a WiFi outage too, so it is
@@ -192,6 +215,25 @@ void ticks() {
       }
     }
   }
+  // Self-heal the Wi-Fi reconnect task the same way.  forceLinkReset() drops the link while the old stream
+  // task's stack is still held, so the create in WiFiLostConnection() can fail; beginReconnect then stays true
+  // with the radio off.  Retrying here gives that stack time to be freed; a heap that never clears restarts.
+  if (network.beginReconnect && network.status != SOFT_AP && !network.offlineMode &&
+      WiFi.status() != WL_CONNECTED && wifiReconnTaskHandle == NULL) {
+    static uint32_t lastWifiRespawnMs = 0;
+    static uint8_t wifiSpawnFailures = 0;
+    if (lastWifiRespawnMs == 0 || (millis() - lastWifiRespawnMs) >= WIFI_RECONN_RESPAWN_MS) {
+      lastWifiRespawnMs = millis() ? millis() : 1;
+      if (spawnWifiReconnect()) {
+        if (wifiSpawnFailures) FUNCTIONLOG("Network", "wifi reconnect task running again after %u failed start(s)", (unsigned)wifiSpawnFailures);
+        wifiSpawnFailures = 0;
+      } else if (++wifiSpawnFailures >= WIFI_RECONN_SPAWN_FAIL_MAX) {
+        if (wifiSpawnFailures == WIFI_RECONN_SPAWN_FAIL_MAX) FUNCTIONLOG("Network", "wifi reconnect task will not start - escalating to a recovery restart");
+        recoveryReboot("wifi reconnect task could not be spawned");
+        wifiSpawnFailures = 0;
+      }
+    }
+  }
   // An outage that ends earns the escalation back.  Without this the restarts would be spent for the life of
   // the boot and a wedge a week later would have no rung left; an outage that never ends keeps its count.
   {
@@ -214,7 +256,7 @@ void ticks() {
   weatherSyncTicks++;
   divrssi = !divrssi;
   if (network.status == CONNECTED) {
-    if (config.store.ehdp) ehdp.loop();
+    if (config.store.ehdp && netserver.isListening()) ehdp.loop();
     if (network.forceTimeSync || network.forceWeather) {
       xTaskCreatePinnedToCore(doSync, "doSync", NETWORK_TASK_STACK_BYTES, NULL, LOW_TASK_PRIORITY, &syncTaskHandle, NETWORK_CORE);
     }
@@ -256,6 +298,17 @@ void ticks() {
       }
     }
   }
+  #ifndef DEEP_SLEEP_DISABLE
+    // Deep sleep after the screensaver: this countdown starts when the screensaver does
+    if (config.isScreensaver) {
+      if (config.store.sleeptimer) {
+        if (config.sleepTicks < 0xFFFF) config.sleepTicks++;
+        if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60) utility.doSleepW();
+      }
+    } else {
+      config.sleepTicks = 0;
+    }
+  #endif
   refreshClock();
   if (player.isRunning() && config.getMode()==PM_SDCARD) {
     if (network.status == SDOFFLINE) player.getAudioCurrentTime();  // bypass netserver (not running in offline mode)
@@ -355,6 +408,18 @@ static netVerdict_e probeNetworkStack() {
       gwIp ? "FAIL" : "unknown", (unsigned long)gwMs, netOk ? "ok" : "FAIL", (unsigned long)netMs);
 
   return netOk ? NET_STACK_OK : NET_STACK_WEDGED;
+}
+
+// A user-initiated play whose connect failed: the failure may be the wedge (the driver says connected while
+// nothing can connect) rather than a dead station.  Only WEDGED acts, and it enters the ladder at rung 1 - the
+// reset drops the link, GOT_IP restarts retryStreamConnection(), and that spends 2/3 and 3/3 as usual.
+void MyNetwork::noteConnectFailure(const char* url) {
+  if (network.lostPlaying || network.beginReconnect || network.offlineMode) return;  // the ladder or the link owns it
+  if (WiFi.status() != WL_CONNECTED) return;                                        // no link to test
+  if (probeNetworkStack() != NET_STACK_WEDGED) return;                              // host refused; leave it alone
+  if (url && url[0] != '\0') config.saveLastStationUrl(url);  // resume the station that failed, not the previous one
+  network.lostPlaying = true;            // owe the resume to the station that just failed
+  forceLinkReset("play connect failed");
 }
 
 void retryStreamConnection(void * pvParameters) {
@@ -474,9 +539,8 @@ void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
     startup.deferBootStable("wifi lost");
     // Spawn background task to run the full scan-best + sequential fallback strategy
     // instead of just retrying the same AP via WiFi.reconnect()
-    if (xTaskCreatePinnedToCore(wifiReconnectionTask, "wifiReconn", NETWORK_TASK_STACK_BYTES, NULL, NET_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
-      // No stream-ladder style retry exists for this one: the AP is only re-found on the next disconnect event,
-      // so a failed create has to be visible rather than silent.
+    if (!spawnWifiReconnect()) {
+      // Visible here; ticks() retries the create and escalates if the heap never allows it.
       ERRORLOG("wifiReconn task could not be created (%u bytes, free heap %u)", (unsigned)NETWORK_TASK_STACK_BYTES, (unsigned)ESP.getFreeHeap());
     }
   }
@@ -796,12 +860,14 @@ void wifiReconnectionTask(void * pvParameters) {
     FUNCTIONLOG("Network", "WiFi.reconnect: no known networks available, retrying in %u s", (unsigned)waitS);
     for (uint16_t i = 0; i < waitS; i++) {
       if (!network.beginReconnect || network.status == SOFT_AP) {
+        wifiReconnTaskHandle = NULL;
         vTaskDelete(NULL);
         return;
       }
       delay(1000);
     }
   }
+  wifiReconnTaskHandle = NULL;
   vTaskDelete(NULL);
 }
 

@@ -62,7 +62,7 @@ EXAMPLES:
     py www_tool.py ru_RU --extract
 
     # The same, appended to a sheet beside this script (a display check can follow it into the same file)
-    py www_tool.py ru_RU --extract RU_check.txt
+    py www_tool.py ru_RU --extract checknewkeys.txt
 
     # Redo one key everywhere, after its text in the page changed
     py www_tool.py * --translate --fast --clean --sort --key msg_sd_manager_closed

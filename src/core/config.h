@@ -321,6 +321,7 @@ class Config {
       uint8_t irAction(uint8_t button);
     #endif
     void defaultSettings(const char *val, uint8_t clientId);
+    void resetScreensaverTimers(uint16_t value);
     void processDeferredSaves();
     uint8_t setVolume(uint8_t val);
     void setTone(int8_t bass, int8_t middle, int8_t treble);

@@ -1466,8 +1466,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SS_SLEEPTIMER
   #define SS_SLEEPTIMER false
 #endif
-#if defined(SS_SLEEPTIME) && (SS_SLEEPTIME < 1 || SS_SLEEPTIME > 1080)
-  #warning "define warning in myoptions.h: SS_SLEEPTIME is out of range (1-1080), reverting to default 30"
+#if defined(SS_SLEEPTIME) && (SS_SLEEPTIME < 5 || SS_SLEEPTIME > 1080)
+  #warning "define warning in myoptions.h: SS_SLEEPTIME is out of range (5-1080), reverting to default 30"
   #undef SS_SLEEPTIME
 #endif
 #ifndef SS_SLEEPTIME

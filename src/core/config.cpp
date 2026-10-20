@@ -750,6 +750,13 @@ uint8_t Config::irAction(uint8_t button) {
 }
 #endif // IR_PIN!=255
 
+// The screensaver and sleep countdowns always restart together
+void Config::resetScreensaverTimers(uint16_t value) {
+  screensaverTicks = value;
+  screensaverPlayingTicks = value;
+  sleepTicks = value;
+}
+
 void Config::processDeferredSaves() {
   for (uint8_t i = 0; i < DEFERRED_SAVE_SLOTS; ++i) {
     if (_deferredSaves[i].entry != nullptr && (int32_t)(millis() - _deferredSaves[i].dueMs) >= 0) {

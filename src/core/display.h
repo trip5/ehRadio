@@ -145,6 +145,7 @@ class Display {
     uint16_t _ssTextTop();
     void _screensaverLine();
     void _screensaverWidgets();
+    void _screensaverClockTarget(MoveConfig& mv);
     void _enterScreensaver(displayMode_e mode);
     void _buildJsonCache();
     void _buildThemeListJson();

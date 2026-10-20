@@ -236,7 +236,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "screensavervustyle"))        { config.saveValue(&config.store.screensaverVUStyle, static_cast<uint8_t>(constrain(atoi(value), 0, VU_STYLE_COUNT - 1))); screensaverHelper(); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "screensavervupeak"))         { config.saveValue(&config.store.screensaverVUpeak, static_cast<bool>(atoi(value))); screensaverHelper(); return true; }
   if (cmdIs(command, "sleeptimerenable"))          { config.saveValue(&config.store.sleeptimer, static_cast<bool>(atoi(value))); config.sleepTicks = 0; return true; }
-  if (cmdIs(command, "sleeptimeout"))              { config.saveValue(&config.store.sleepSsTimeout, static_cast<uint16_t>(constrain(atoi(value), 1, 1080))); config.sleepTicks = 0; return true; }
+  if (cmdIs(command, "sleeptimeout"))              { config.saveValue(&config.store.sleepSsTimeout, static_cast<uint16_t>(constrain(atoi(value), 5, 1080))); config.sleepTicks = 0; return true; }
 
   /* Options: Locale */
   if (cmdIs(command, "locale_webui")) { config.saveValue(config.store.locale_webui, value); return true; }

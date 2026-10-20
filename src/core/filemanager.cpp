@@ -1376,10 +1376,10 @@ uint32_t FileManager::uploadIdleMs() const {
 
 void FileManager::touch() {
   _lastActivity = millis();
-  // The manager stops the player, so any API call also resets the screensaver countdown the display watches -
-  // the mode is the user being here. Only SDMAN can take the screen while the mode is open, which is the other half.
-  config.screensaverTicks = 0;
-  config.screensaverPlayingTicks = 0;
+  // The manager stops the player, so any API call also resets the screensaver and sleep countdowns the display
+  // watches - the mode is the user being here. Only SDMAN can take the screen while the mode is open, which is
+  // the other half.
+  config.resetScreensaverTimers(0);
 }
 
 void FileManager::markCardChanged() {

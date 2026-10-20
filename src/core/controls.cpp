@@ -276,9 +276,8 @@ void Controls::irLoop() {
             if (network.status != CONNECTED && network.status!=SDOFFLINE && !localAction) return;
             if (!localAction && display.mode()==LOST) return;
             if (screenSaverExit()) delay(200); // give it time to exit before doing the action
-            // Reset screensaver timers on any IR press so the screensaver can't fire mid-adjustment
-            config.screensaverTicks = 0;
-            config.screensaverPlayingTicks = 0;
+            // Reset the screensaver and sleep timers on any IR press so neither can fire mid-adjustment
+            config.resetScreensaverTimers(0);
             switch (irAct) {
               case IRACT_POWER: {
                   irBlink();
@@ -418,8 +417,7 @@ bool Controls::screenSaverExit() {
     return false;
   }
   display.resetQueue();
-  config.screensaverTicks = 0;
-  config.screensaverPlayingTicks = 0;
+  config.resetScreensaverTimers(0);
   display.putRequest(NEWMODE, PLAYER);
   return true;
 }

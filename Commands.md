@@ -117,8 +117,8 @@ different pictures, so nothing keeps them in step.
 | `screensavervu` | Draw the VU full screen as the screensaver instead of the moving clock. |
 | `screensavervustyle` | Select the style that full-screen meter draws (numeric, 0-based, clamped to the known range, same as `vustyle`). |
 | `screensavervupeak` | Show/hide the peak markers and the axis or reference lines on that full-screen meter (independent of `vupeaks`). |
-| `sleeptimerenable` | Enable/disable deep sleep after the screensaver. Saved, and the sleep countdown restarts. |
-| `sleeptimeout` | Set how long the screensaver stays up before deep sleep, in minutes (1..1080). Saved, and the sleep countdown restarts. Only acts on builds without `DEEP_SLEEP_DISABLE`. |
+| `sleeptimerenable` | Enable/disable the deep-sleep timer. Saved, and the sleep countdown restarts. |
+| `sleeptimeout` | Set the deep-sleep timeout in minutes (5..1080), counted from the same idle point as the screensaver timeout. Not available if `DEEP_SLEEP_DISABLE` is in `myoptions.h` or no wake pins are configured. |
 
 ## Options: Locale
 

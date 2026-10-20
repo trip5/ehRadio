@@ -10,6 +10,9 @@
 #include <ImprovWiFiLibrary.h>
 #include "config.h"
 #include "display.h"
+#ifdef USE_SD
+  #include "filemanager.h"
+#endif
 #include "logging.h"
 #include "mqtt.h"
 #include "netserver.h"
@@ -276,9 +279,14 @@ void ticks() {
     }
   }
   bool connectingStream = display.mode()==PLAYER && !player.isRunning() && strcmp_P(config.station.title, l10n(L10N_MSG_CONNECT)) == 0;
-  if (connectingStream) {
-    config.screensaverTicks = 0;
-    config.screensaverPlayingTicks = 0;
+  #ifdef USE_SD
+    const bool fileManagerActive = filemanager.active();
+  #else
+    const bool fileManagerActive = false;
+  #endif
+  // The SD File Manager holds the screen and has its own idle timeout; hold the countdowns while it is open
+  if (fileManagerActive || connectingStream) {
+    config.resetScreensaverTimers(0);
   } else {
     if (config.store.screensaverEnabled && display.mode()==PLAYER && !player.isRunning()) {
       config.screensaverTicks++;
@@ -300,18 +308,14 @@ void ticks() {
         }
       }
     }
-  }
-  #ifndef DEEP_SLEEP_DISABLE
-    // Deep sleep after the screensaver: this countdown starts when the screensaver does
-    if (config.isScreensaver) {
-      if (config.store.sleeptimer) {
+    #ifndef DEEP_SLEEP_DISABLE
+      // Sleep timer: runs beside the screensaver thresholds, not after them, and needs no screensaver
+      if (config.store.sleeptimer && (display.mode()==PLAYER || config.isScreensaver)) {
         if (config.sleepTicks < 0xFFFF) config.sleepTicks++;
-        if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60) utility.doSleepW();
+        if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY) utility.doSleepW();
       }
-    } else {
-      config.sleepTicks = 0;
-    }
-  #endif
+    #endif
+  }
   refreshClock();
   if (player.isRunning() && config.getMode()==PM_SDCARD) {
     if (network.status == SDOFFLINE) player.getAudioCurrentTime();  // bypass netserver (not running in offline mode)

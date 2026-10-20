@@ -648,7 +648,7 @@ void Display::_start() {
     config.setTitle(l10n(L10N_MSG_READY));
   #endif
   
-  if (_bufferbar)  _bufferbar->lock(!bufferbarInLayout() || !editorOpt(config.store.bufferbar));
+  if (_bufferbar)  lockIfChanged(_bufferbar, !bufferbarInLayout() || !editorOpt(config.store.bufferbar));
   
   hideWeatherIfChanged(_weather, _weatherHidden());
   if (_weather && weatherLive() && network.status != SDOFFLINE) network.buildWeatherString();
@@ -659,7 +659,9 @@ void Display::_start() {
     if (_clock->locked()) _clock->clear();
   }
 
-  if (_vuwidget) _vuwidget->lock();
+  // A direct lock() here re-cleared the meter's box on every boot path that had already locked it in
+  // _applyState(); lockIfChanged() is the one owner of "only a state change may erase".
+  if (_vuwidget) lockIfChanged(_vuwidget, true);
   if (_rssi) { if (network.status == SDOFFLINE) _setRSSI(0); else _setRSSI(WiFi.RSSI()); }
   // shareBattRSSI toggles _active to pick between RSSI and battery - a re-show site, hence the predicate.
   if (*shareBattRSSI_ptr && _battery && _rssi) {
@@ -717,7 +719,8 @@ void Display::_showNumbers(const char* header, int32_t value, const char* fmt, b
   // The shared rows first, in both variants: several layouts put the number on a row the weather, IP, battery or
   // RSSI line normally uses, and those widgets draw themselves on request rather than through the page pass.
   if (*shareWeatherIP_ptr && weatherLive() && _weather) {
-    _weather->lock(true);   // pause weather updates while the number is up, so it cannot overwrite the IP line
+    // pause weather updates while the number is up, so it cannot overwrite the IP line
+    lockIfChanged(_weather, true);
     _weather->setText("");
   }
   if (*shareBattRSSI_ptr && _battery && _rssi) {
@@ -761,23 +764,31 @@ void Display::_switchMode(displayMode_e newmode) {
         _sdmanCountText = nullptr;
       }
     #endif
-    if (player.isRunning()){
+    // Leaving the screensaver settles the clock BEFORE the player page is painted.  The clock is the last
+    // widget _buildPager() adds, so an erase issued after setPage() lands on the freshly drawn page - the
+    // reported "chunk out of the top bar".  Two things have to happen first: the clock has to come back
+    // from the screensaver's random spot, and its feature lock has to be applied, because a yield-to-VU
+    // hide is an erase.  The screensaver page is still up for both, and setPage() clears it on the way out.
+    const bool fromScreensaver = config.isScreensaver;
+    config.isScreensaver = false;
+    // Away from the screensaver the clock's own rung comes back.  Rebuilt before the move, because init()
+    // resets the widget to its conf position and a MOVE applied before it would be lost.
+    if (_clock && clockInLayout()) _clock->refreshSize(*clockConf_ptr);
+    if (fromScreensaver && _clock) _clock->moveBack();
+    if (player.isRunning()) {
       if (vuLive() && _vuwidget) {
         applyMove(_clock, *clockMove_ptr);
         applyMove(_weather, *weatherMoveVU_ptr);
       } else {
-        _clock->moveBack();  // restore from screensaver position
+        if (!fromScreensaver) _clock->moveBack();
         applyMove(_weather, *weatherMove_ptr);
       }
     } else {
-      _clock->moveBack();
+      if (_clock) _clock->moveBack();
       if (_weather) _weather->moveBack();
     }
+    if (_clock) lockIfChanged(_clock, _clockHidden());
     numOfNextStation = 0;
-    config.isScreensaver = false;
-    // Away from the screensaver the clock's own rung comes back.  Rebuilt here because the page switch below is what
-    // paints the player page, and _layoutChange() further down re-derives its position and lock from scratch.
-    if (_clock && clockInLayout()) _clock->refreshSize(*clockConf_ptr);
     _pager->setPage(pages[PG_PLAYER]);
     // The text goes AFTER the page switch, never before it: setPage() fills the whole panel on its way in,
     // and a scroll widget repaints only from setText() or its own scroll tick - so a line painted first is
@@ -801,7 +812,7 @@ void Display::_switchMode(displayMode_e newmode) {
       }
     // force weather repaint on return to PLAYER; larger displays repaint naturally
     if (*shareWeatherIP_ptr && weatherLive() && _weather) {
-      _weather->lock(_weatherHidden());
+      lockIfChanged(_weather, _weatherHidden());
       // Force a clean repaint of the shared weather/IP row after overlays like VOL/SCREENSAVER.
       _weather->setText("");
       if (network.weatherBuf) _weather->setText(network.weatherBuf);
@@ -823,8 +834,7 @@ void Display::_switchMode(displayMode_e newmode) {
     config.isScreensaver = true;
     _enterScreensaver(newmode);
   } else {
-    config.screensaverTicks=SCREENSAVERSTARTUPDELAY;
-    config.screensaverPlayingTicks=SCREENSAVERSTARTUPDELAY;
+    config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
     config.isScreensaver = false;
     // This branch is EVERY mode change to something that is not the screensaver, so it is both how the clock is
     // handed back to the player page after the screensaver and - before this - how an ordinary mode change
@@ -870,6 +880,18 @@ void Display::_enterScreensaver(displayMode_e mode) {
   // clock is rebuilt before anything here paints it.  config.isScreensaver is already true on every route in.
   if (_clock && clockInLayout()) _clock->refreshSize(*clockConf_ptr);
   _screensaverWidgets();        // the widgets are built BEFORE the page switch, so the first pass draws
+                                // the picture the prefs describe, not last time's frame
+  // Place the clock inside the walk area before the page paints.  The layout's position is not on the
+  // walk's map - it can sit inside the info line's strip - and the first timed step waits for
+  // tm_sec % SCREENSAVERMOVE == 0, so without this the clock could overlap the strip for that whole
+  // interval.  moveToQuiet() leaves the panel alone: the page activation below draws the clock at its
+  // new spot, in the widget order that keeps it under the info line and the meter.  With _ssMeterUp the
+  // meter owns the panel and the clock is locked, so there is nothing to place.
+  if (_clock && !_ssMeterUp) {
+    MoveConfig mv;
+    _screensaverClockTarget(mv);
+    _clock->moveToQuiet(mv);
+  }
   _pager->setPage(pages[PG_SCREENSAVER], true);   // the picture the prefs describe, not last time's frame
   if (mode == SCREENBLANK) {
     _clock->clear();
@@ -1157,13 +1179,17 @@ void Display::loop() {
           _applyBitrate();
           break;
         case SHOWBUFFERBAR: if (_bufferbar)  {
-            _bufferbar->lock(!bufferbarInLayout() || !editorOpt(config.store.bufferbar));
+            lockIfChanged(_bufferbar, !bufferbarInLayout() || !editorOpt(config.store.bufferbar));
             _bufferbar->setValue(normalizeBufferbarValue(player.inBufferFilled(), _bufferbarMax));
           }
           break;
         case SHOWVUMETER: {
           if (_vuwidget) {
-            _vuwidget->lock(!vuDraws());
+            // An unchanged lock state must not erase.  While stopped vuDraws() is false in BOTH toggle
+            // directions, so a plain lock(true) re-cleared the meter's box over the clock - the reported
+            // bite - and nothing repainted the clock because it had never been hidden.  lockIfChanged()
+            // is the one owner of the rule (see its definition); _layoutChange() handles the repaint.
+            lockIfChanged(_vuwidget, !vuDraws());
             _layoutChange(player.isRunning());
           }
           break;
@@ -1483,7 +1509,7 @@ void Display::_screensaverWidgets() {
     _screensaverLine();
   } else if (_sstext) {
     _sstext->setText("");
-    _sstext->lock(true);        // ScrollWidget::_clear() erases the window it owns
+    lockIfChanged(_sstext, true);   // ScrollWidget::_clear() erases the window it owns
   }
 
   // --- the meter, or the clock ---
@@ -1518,7 +1544,27 @@ void Display::_screensaverWidgets() {
     return;
   }
   _ssMeterUp = true;
-  if (_clock) _clock->lock(true);
+  lockIfChanged(_clock, true);
+}
+
+// The random spot the screensaver's clock walks to.  One definition for the timed step and for the
+// placement on entry, so the two cannot disagree about the info line's strip: the floor is the content
+// area (_ssContentH()), which is the panel minus that strip when the line is on, and the whole panel
+// when it is off.
+void Display::_screensaverClockTarget(MoveConfig& mv) {
+  int32_t clockH = _clock->clockHeight();
+  int32_t minTop = max((int32_t)TFT_BORDER, (int32_t)_clock->timeHeight());
+  // The floor is the content area rather than the panel: the info line's strip is not the clock's to
+  // cross, which is the whole reason the two bounds are derived from the same number.
+  int32_t maxTop = (int32_t)_ssContentH() - clockH - TFT_BORDER;
+  uint16_t ft = (maxTop > minTop) ? static_cast<uint16_t>(random(minTop, maxTop + 1)) : static_cast<uint16_t>(minTop);
+
+  int32_t minLeft = TFT_BORDER;
+  int32_t maxLeft = dsp.width() - _clock->clockWidth() - TFT_BORDER;
+  int32_t left = (maxLeft > minLeft) ? random(minLeft, maxLeft + 1) : minLeft;
+  if (clockConf_ptr->align == WA_CENTER) left -= (dsp.width() - _clock->clockWidth()) / 2;
+  if (left < 0) left = 0;
+  mv = {static_cast<uint16_t>(left), ft, 0};
 }
 
 void Display::_time(bool redraw) {
@@ -1535,21 +1581,9 @@ void Display::_time(bool redraw) {
   // the clock screensaver walked.  With the meter genuinely up the clock is locked, so its walk would be
   // wasted work even so.
   if (config.isScreensaver && !_ssMeterUp && network.timeinfo.tm_sec % SCREENSAVERMOVE == 0) {
-    int32_t clockH = _clock->clockHeight();
-    int32_t minTop = max((int32_t)TFT_BORDER, (int32_t)_clock->timeHeight());
-    // The floor is the content area rather than the panel: the info line's strip is not the clock's to
-    // cross, which is the whole reason the two bounds are derived from the same number.
-    int32_t maxTop = (int32_t)_ssContentH() - clockH - TFT_BORDER;
-    uint16_t ft = (maxTop > minTop) ? static_cast<uint16_t>(random(minTop, maxTop + 1)) : static_cast<uint16_t>(minTop);
-
-    int32_t minLeft = TFT_BORDER;
-    int32_t maxLeft = dsp.width() - _clock->clockWidth() - TFT_BORDER;
-    int32_t left = (maxLeft > minLeft) ? random(minLeft, maxLeft + 1) : minLeft;
-    if (clockConf_ptr->align == WA_CENTER) left -= (dsp.width() - _clock->clockWidth()) / 2;
-    if (left < 0) left = 0;
-    uint16_t lt = static_cast<uint16_t>(left);
-    //_clock->moveTo({clockConf_ptr->offset, ft, 0});
-    _clock->moveTo({lt, ft, 0});
+    MoveConfig mv;
+    _screensaverClockTarget(mv);
+    _clock->moveTo(mv);
   }
   if (redraw) _clock->forceDraw(); else _clock->draw();
 }
@@ -1835,10 +1869,10 @@ void Display::_applyState(applyMode_e mode) {
   _applyMetaInvert();
   _reinitWidgets();
   // Re-apply every feature lock: _reinitWidgets() may just have shown a widget the layout brought back.
-  if (_vuwidget)  _vuwidget->lock(!vuDraws());
+  if (_vuwidget)  lockIfChanged(_vuwidget, !vuDraws());
   // Mirrors SHOWWEATHER exactly, including the shared-row suppression, so a switch cannot drop it mid-overlay.
   hideWeatherIfChanged(_weather, _weatherHidden());
-  if (_bufferbar) _bufferbar->lock(!bufferbarInLayout() || !editorOpt(config.store.bufferbar));
+  if (_bufferbar) lockIfChanged(_bufferbar, !bufferbarInLayout() || !editorOpt(config.store.bufferbar));
   // The clock's lock came with _reinitWidgets(), the only place it can be applied early enough for the hide's
   // erase to be painted over by the weather and the VU that follow it.  lockIfChanged() is still here as a guard
   // for the case where something re-showed the clock behind _reinitWidgets()' back.  The unconditional clear()

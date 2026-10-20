@@ -319,8 +319,7 @@ void Player::_play(uint16_t stationId) {
   config.setDspOn(1);
   config.vuThreshold = 0;
   //display.putRequest(PSTOP);
-  config.screensaverTicks=SCREENSAVERSTARTUPDELAY;
-  config.screensaverPlayingTicks=SCREENSAVERSTARTUPDELAY;
+  config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
   if (config.getMode()!=PM_SDCARD) {
     display.putRequest(PSTOP);
   }

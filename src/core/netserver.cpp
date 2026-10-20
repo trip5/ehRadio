@@ -570,9 +570,7 @@ void NetServer::processQueue() {
                                                                 act += F("\"group_full_time\",");
                                                            else act += F("\"hide_group_full_time\",");
             #if (!defined(DEEP_SLEEP_DISABLE) || DBGWUI)
-              if (config.store.screensaverEnabled || config.store.screensaverPlayingEnabled || DBGWUI)
                                                                 act += F("\"group_deepsleep\",");
-                                                           else act += F("\"hide_group_deepsleep\",");
             #endif
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
                                                                 act += F("\"group_locale\",");

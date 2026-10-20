@@ -49,6 +49,13 @@ class Widget{
       // conf that still carries one must stay inert rather than jump to (0, 0).  Never make width
       // unsigned: a stale -1 would become a 65535 px span at the assignment below.
       if(mv.width<0) return;
+      // Already there: nothing to erase and nothing to draw.  applyMove() compares a MOVE against the
+      // conf position, not against where the widget IS, so a path that applies the same MOVE twice (the
+      // screensaver exit does, before and after the page switch) would otherwise re-clear over the page
+      // that was just painted.  A width of 0 means "keep the width", so only a MOVE carrying one can
+      // change it.
+      if(mv.x == _config.offset && mv.y == _config.top
+         && (mv.width == 0 || mv.width == _width)) return;
       _moved = true;
       if(_active && !_locked) _clear();
       _config.offset = mv.x;
@@ -56,6 +63,18 @@ class Widget{
       if(mv.width>0) _width = mv.width;
       _reset();
       _draw();
+    }
+    // The geometry half of moveTo() with none of the panel work.  The screensaver uses it to place the
+    // clock inside its walk area BEFORE the page is painted: the page's own activation then draws it in
+    // the widget order that puts the info line and the meter over it, instead of moveTo() painting the
+    // clock once on the outgoing page and again before its neighbours.
+    void moveToQuiet(MoveConfig mv){
+      if(mv.width<0) return;
+      _moved = true;
+      _config.offset = mv.x;
+      _config.top = mv.y;
+      if(mv.width>0) _width = mv.width;
+      _reset();
     }
     // Would this MOVE change anything?  A conf spells "this state does not move this line" as the conf's OWN
     // position, because an ALL-ZERO move means something else: it is how a state HIDES its line

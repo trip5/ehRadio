@@ -45,6 +45,7 @@ class MyNetwork {
 };
 
 void ticks();
+bool heapCanAffordTls(size_t bytes = 40960);
 bool spawnStreamRetry();
 void retryStreamConnection(void * pvParameters);
 void wifiReconnectionTask(void * pvParameters);

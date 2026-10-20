@@ -57,54 +57,70 @@ void Startup::markBootStable(const char* reason) {
 void Startup::deferBootStable(const char* reason) {
   if (!_bootStablePending) return;  // already proven, or this boot never had to prove itself
   _bootStartMs = millis();
-  _servicesDoneMs = millis();
+  // Restart the proof from now if the WebUI is up; if it is not, clear the stamp so it starts when it comes up.
+  _webUpMs = netserver.isListening() ? millis() : 0;
   FUNCTIONLOG("Boot.stable", "countdown restarted: %s", reason ? reason : "network instability");
 }
 
+// Set before the bring-up task exists and cleared by it, so loop() cannot start a second one.  A bool, not a
+// state machine: begin() sets `listening` before it returns, and isListening() stays the one source of truth.
+static volatile bool webBringUpActive = false;
+static constexpr uint32_t WEB_BRINGUP_STACK_BYTES = WEB_BRINGUP_TASK_STACK_SIZE * 1024;
+
 void Startup::loop() {
-  if (!netserver.isListening() && network.status == CONNECTED &&
+  if (!netserver.isListening() && !webBringUpActive && network.status == CONNECTED &&
       (_services != SVC_WILL_RUN || cardInUse())) {
-    BOOTLOG("Startup Async Services are finished - starting the WebUI...");
-    netserver.begin();
-    netserver.startLoopTask();
-    display.putRequest(NEWIP, 0);   // the footer IP is the indicator that the WebUI is up
-    BOOTLOG("WebUI Ready! Go to http://%s/ to configure", WiFi.localIP().toString().c_str());
-    BOOTLOG("-------------------------------------------------------");
+    // Two different reasons reach this line, so it says which: in SD mode the card is what holds the services
+    // back, and they only run if the device is switched to web radio.
+    if (cardInUse()) BOOTLOG("Starting the WebUI - Startup Async Services will run when in web mode...");
+    else            BOOTLOG("Startup Async Services are finished - starting the WebUI...");
+    webBringUpActive = true;
+    if (xTaskCreatePinnedToCore(webBringUpTask, "webBringUp", WEB_BRINGUP_STACK_BYTES, NULL,
+                                LOW_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
+      // No task: bring it up here rather than have no WebUI at all.  This is exactly the stall the task exists to
+      // avoid, so it is reported rather than silent.
+      ERRORLOG("webBringUp task could not be created (%u bytes, free heap %u) - starting the WebUI on the main loop",
+               (unsigned)WEB_BRINGUP_STACK_BYTES, (unsigned)ESP.getFreeHeap());
+      bringUpWebServer();
+    }
   }
   if (!_bootStablePending) return;
   if (_bootStartMs == 0) {
     _bootStartMs = millis();  // First loop() call — setup() (including smartstart) is done
     return;
   }
-  // A boot is proven stable only once the startup services have run they are the riskiest thing in the boot:
-  // three TLS downloads (version check, timezones database, radio-browser list) against the internal heap
-  if (_services == SVC_NONE) {
-    if (millis() - _bootStartMs > (BOOT_STABLE_TIME * 1000UL)) {
-      char reason[64];
-      snprintf(reason, sizeof(reason), "%u s from power-on, no startup services this boot", (unsigned)BOOT_STABLE_TIME);
-      markBootStable(reason);
-      _bootStablePending = false;
-    }
-    return;
+  // The WebUI coming up IS the last risky step of a boot - begin() allocates the request queue, the listener, the
+  // PSRAM cache and (on its first connection) the AsyncTCP task - and the first page load is the largest allocation
+  // burst in the session.  So the boot proves itself by the server being up and STAYING up, and nothing here needs
+  // to know whether the startup services ever ran: in SD mode they are parked for the whole session, and a boot
+  // that only parked them is exactly as safe as one that never had them.
+  if (_webUpMs == 0) {
+    if (!netserver.isListening()) return;   // nothing to prove yet
+    _webUpMs = millis();
   }
-  // The services can stay suspended for the whole boot (SD mode parks them), and a boot that only parked them is as
-  // safe as one that never had them: the downloads are the risk and they never ran. Without this, SD mode could never
-  // survive a restart - the next boot came up in safe mode, which forces web mode.
-  if (_services == SVC_WILL_RUN && cardInUse() &&
-      (millis() - _bootStartMs) > ((STARTUP_ASYNC_SERVICES_DELAY + BOOT_STABLE_TIME) * 1000UL)) {
-    // BOOT_STABLE_TIME, as in the other reasons here: the configured wait, not the elapsed time.
+  if ((millis() - _webUpMs) > (BOOT_STABLE_TIME * 1000UL)) {
     char reason[64];
-    snprintf(reason, sizeof(reason), "%u s after the startup services were suspended", (unsigned)BOOT_STABLE_TIME);
-    markBootStable(reason);
-    _bootStablePending = false;
-    return;
-  }
-  if (_services == SVC_DONE && (millis() - _servicesDoneMs) > (BOOT_STABLE_TIME * 1000UL)) {
-    char reason[64];
-    snprintf(reason, sizeof(reason), "%u s after the startup services finished", (unsigned)BOOT_STABLE_TIME);
+    snprintf(reason, sizeof(reason), "%u s after the WebUI came up", (unsigned)BOOT_STABLE_TIME);
     markBootStable(reason);
     _bootStablePending = false;
   }
+}
+
+// The WebUI bring-up, deliberately off the main loop.  netserver.begin() reads every www file into the PSRAM
+// cache and blocked the loop for 1763 ms when it ran there - long enough to starve the audio refill and lose the
+// stream. Nothing in it needs to be synchronous with the loop.
+void Startup::bringUpWebServer() {
+  netserver.begin();
+  netserver.startLoopTask();
+  display.putRequest(NEWIP, 0);   // the footer IP is the indicator that the WebUI is up
+  webBringUpActive = false;
+  BOOTLOG("WebUI Ready! Go to http://%s/ to configure", WiFi.localIP().toString().c_str());
+  BOOTLOG("-------------------------------------------------------");
+}
+
+void Startup::webBringUpTask(void* param) {
+  startup.bringUpWebServer();
+  vTaskDelete(NULL);
 }
 
 namespace {
@@ -464,22 +480,12 @@ static bool cardInUse() {
 }
 
 void Startup::startupServicesAsync(void* param) {
-  // Wait until the card is free - SD playback or an open manager both count. The goto restarts the whole
-  // wait if the card becomes busy again during the countdown.
-wait_for_online:
-  if (cardInUse()) FUNCTIONLOG("Services", "Startup Async Services will not begin while in SD Mode or the SD Manager", STARTUP_ASYNC_SERVICES_DELAY);
+  if (cardInUse()) FUNCTIONLOG("Services", "Startup Async Services will not begin while in SD Mode or the SD Manager");
   while (cardInUse()) {
     vTaskDelay(pdMS_TO_TICKS(2000));
   }
 
-  // Let the audio buffer fill before HTTP tasks compete for WiFi; re-checked each second.
-  FUNCTIONLOG("Services", "Startup Async Services will begin in %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
-  for (int i = 0; i < STARTUP_ASYNC_SERVICES_DELAY; i++) {
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    if (cardInUse()) goto wait_for_online;
-  }
-
-  FUNCTIONLOG("Services", "Startup Async Services starting", STARTUP_ASYNC_SERVICES_DELAY);
+  FUNCTIONLOG("Services", "Startup Async Services starting");
   // From here to the end of the task the display chokes its redraw rate, because these three downloads
   // hold a TLS session each on the network core and the audio stream is usually up by the second one.
   startup._servicesBusy = true;
@@ -493,21 +499,14 @@ wait_for_online:
   #endif
   utility.updateFile(param, "/www/timezones.json.gz", TIMEZONES_JSON_URL, TIMEZONES_JSON_CHECKTIME, "Timezones database file");
   #ifdef CORE_MONITOR
-    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
+    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
   #endif
   utility.updateFile(param, "/www/rb_srvrs.json", RADIO_BROWSER_SERVERS_URL, RB_SERVERS_CHECKTIME, "Radio Browser servers list");
   #ifdef CORE_MONITOR
-    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
+    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
   #endif
-  // Hold the state until the stack has settled: SVC_DONE is what releases the WebUI and starts the
-  // boot-stable countdown, so the settle window has to finish before either can begin.
-  if (STARTUP_ASYNC_SERVICES_DELAY > 0) {
-    FUNCTIONLOG("Services", "Startup Async Services settling for %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
-    vTaskDelay(pdMS_TO_TICKS(STARTUP_ASYNC_SERVICES_DELAY * 1000UL));
-  }
-  // Last act of the services, and it is what lets Startup::loop() prove the boot.  Order matters: the
-  // timestamp first, then the state, so the countdown can never read DONE with a stale timestamp.
-  startup._servicesDoneMs = millis();
+  // Last act of the services: SVC_DONE releases the WebUI (see Startup::loop()'s trigger).  It no longer starts
+  // the boot-stable countdown - that is the WebUI's job now.
   startup._servicesBusy = false;
   startup._services = Startup::SVC_DONE;
   delete (ESPFileUpdater*)param;
@@ -531,6 +530,7 @@ void Startup::startupServices() {
     updater->setMaxSize(1024);
     updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
     _services = SVC_WILL_RUN;
-    xTaskCreatePinnedToCore(Startup::startupServicesAsync, "startupServicesAsync", 8192, updater, LOW_TASK_PRIORITY, NULL, NETWORK_CORE);
+    xTaskCreatePinnedToCore(Startup::startupServicesAsync, "startupServicesAsync",
+                            (STARTUP_TASK_STACK_SIZE * 1024), updater, LOW_TASK_PRIORITY, NULL, NETWORK_CORE);
   #endif
 }

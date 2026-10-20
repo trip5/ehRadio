@@ -348,7 +348,7 @@
 
 /* --- Debug? --- */
 //#define ALL_DEBUG_LOGS
-//#define CORE_MONITOR
+#define CORE_MONITOR
 //#define BOOTLOG_TIME
 
 /* --- Display --- */

@@ -6,6 +6,7 @@
 #include <ESPFileUpdater.h>
 #include <ESPmDNS.h>
 #include <esp_attr.h>
+#include <esp_heap_caps.h>
 #include <ImprovWiFiLibrary.h>
 #include "config.h"
 #include "display.h"
@@ -29,6 +30,8 @@
 static inline bool weatherWanted() { return editorOpt(config.store.showweather); }
 static inline bool weatherDetail(bool stored) { return editorOpt(stored); }
 
+// Bytes: ESP-IDF counts the stack depth in bytes (StackType_t is uint8_t), so KB * 1024 is exactly what
+// xTaskCreate wants and the name is honest.
 #define NETWORK_TASK_STACK_BYTES (NETWORK_TASK_STACK_SIZE * 1024)
 
 static constexpr uint32_t WIFI_SETTLE_MS               = 1000;   // ms after the stack starts before connecting
@@ -355,6 +358,13 @@ static uint32_t streamRetryWaitMs(uint16_t attempt) {
   if (attempt <= 4) return 12000;
   if (attempt < 40) return 15000;     // steady cadence through the fast budget
   return (uint32_t)STREAM_RETRY_SLOW_S * 1000UL;   // then the slow, indefinite tail
+}
+
+// Can a TLS session be paid for right now?  mbedTLS wants ~34-36 KB in ONE block (16 KB in + 16 KB out +
+// context, the figure ESPFileUpdater's own ESPFILEUPDATER_MIN_HEAP_FOR_SSL is built on), and a fragmented heap can
+// have 24 KB free with nothing bigger than 2 KB in it. Total free bytes cannot answer this question.
+bool heapCanAffordTls(size_t bytes) {
+  return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= bytes;
 }
 
 // Probe verdicts: only WEDGED resets the link, everything else means leave it alone

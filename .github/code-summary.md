@@ -252,8 +252,19 @@ Grouped (not one-by-one deep explained) areas:
   library must agree with us about. `es3c28p` compiles the framework's `esp32-hal-*.c` files through it, which proves it
   stays C-safe.
 - **Contents**: the `myoptions.h` include (first, so user values beat every default here), the `VS1053_CS 255` default
-  (the core rule needs it; `myoptions.h` defines it only for VS1053 builds), the `NETWORK_CORE` derivation, and the three
-  `CONFIG_ASYNC_TCP_*` overrides.
+  (the core rule needs it; `myoptions.h` defines it only for VS1053 builds), the `NETWORK_CORE` derivation, and four
+  `CONFIG_ASYNC_TCP_*` overrides (queue size, running core, WDT, priority) **plus `CONFIG_ASYNC_TCP_STACK_SIZE 8192`**.
+- **`CONFIG_ASYNC_TCP_STACK_SIZE` is in WORDS, not bytes** - `AsyncTCP.cpp` passes it straight to `xTaskCreate`, so
+  the library default `8192 * 2` is 16 384 words = **64 KB**, of which a `[Core.HWM]` reading showed ~15 KB in use.
+  8192 words (32 KB) keeps more than twice that peak and hands 32 KB of internal heap back to the WebUI, which is the
+  resource its first page load runs out of. Going lower (4096 = 16 KB) needs an SD-upload HWM reading first, because
+  the file manager's upload and OTA handlers also run on that task. The same words/bytes confusion runs through our
+  own stack macros (`NETWORK_TASK_STACK_WORDS`, `WEB_BRINGUP_STACK_WORDS`): a `_BYTES` name here is wrong and has
+  already misled one reader.
+- **⚠ Editing this header does not rebuild the libraries.** A plain `pio run` after a change here reuses a stale
+  `AsyncTCP.cpp.o`, so the new value silently does not take effect (observed: only the project's own TUs recompiled).
+  After any change here, `pio run -e <env> -t clean` first, and confirm the log shows
+  `Compiling .pio/build/<env>/libXXX/AsyncTCP/AsyncTCP.cpp.o`.
 - **The `NETWORK_CORE` derivation is written to be evaluated twice**, with no marker macro: this header is compiled
   first, so `options.h` then meets the same lines with `NETWORK_CORE` already set. The `#ifndef NETWORK_CORE` guard is
   what makes the second evaluation a no-op. Keep the two copies identical.
@@ -346,12 +357,17 @@ depending on the selected PlatformIO environment and macro definitions.
      - `netserver.setBootReady(true)` only after setup work is actually complete
      - **`netserver.begin()` deliberately does NOT happen here.** The WebUI is held back until the startup
        services are out of the way, because `begin()` is where the request queue, the listener, mDNS *and* the
-       PSRAM WebUI file cache (~120 KB with .gz files; up to ~400 KB if only plain files) are allocated, and a WebUI
-       connection landing while a service makes
-       its own TLS connection is what overwhelms the network stack. `Startup::loop()` starts it (see that
-       section); the footer IP is the indicator, because `Display::_footerIp()` draws nothing until
-       `netserver.isListening()`. The AP and SDOFFLINE paths still start it here — the captive portal is the only
-       way in on a first boot, and offline mode runs no services at all.
+       PSRAM WebUI file cache (~120 KB with .gz files; up to ~400 KB if only plain files) are allocated.
+       `Startup::loop()` starts it (see that section); the footer IP is the indicator, because
+       `Display::_footerIp()` draws nothing until `netserver.isListening()`. The AP and SDOFFLINE paths still start
+       it here — the captive portal is the only way in on a first boot, and offline mode runs no services at all.
+     - **The start runs on its own task, not on the loop** (`Startup::bringUpWebServer()`, spawned as
+       `webBringUpTask` at `WEB_BRINGUP_TASK_STACK_SIZE` on `NETWORK_CORE`): `begin()` reads every www file into the
+       PSRAM cache and measured **1763 ms** of main-loop stall (`Main loop stalled 1805ms, worst stage
+       startup 1763ms`), long enough to starve the audio refill and cost the stream. A failed create falls back to
+       running it inline (reported, never silent), and the file-local `webBringUpActive` stops `loop()` starting a
+       second one. `begin()` still sets `listening` before it returns, so `isListening()` remains the single
+       source of truth for the footer, the ehDP gate and every other reader.
 - `loop()`:
   - AP mode: Improv + captive DNS
   - normal: telnet loop
@@ -485,7 +501,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - **A safe-mode boot pays a deliberate 1 s before anything else.** `setup()` holds `if (!config.store.bootStableMarker)
   delay(1000)` and then dumps the config (`bootInfo`, ~196 ms at 115200), so the early stage measures ~1586 ms in safe
   mode against ~590 ms settled - the NVS path itself costs ~412 ms and needs no optimisation. `bootStableMarker` is only
-  set ~10 s after the startup services finish, so rebooting the device within ~20 s of a boot puts the next one into
+  set `BOOT_STABLE_TIME` after the WebUI comes up, so rebooting the device before that puts the next one into
   safe mode with that delay (worth knowing when timing boots).
 - SD-specific behavior:
   - `_initHW()` configures `SD_CARD_DETECT_PIN` as `INPUT_PULLUP` when available
@@ -502,52 +518,59 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 ## `src/core/startup.h` / `startup.cpp`
 - Boot-only orchestration module following the standard core `class + global instance` pattern (`Startup startup;`).
 - **`loop()` is also where the WebUI starts, and the three service states are what decides it.** The condition is
-  `!netserver.isListening() && network.status == CONNECTED && (_services != SVC_WILL_RUN || cardInUse())`, at the
-  very top of `loop()` — above its `_bootStablePending` early return, which is why it cannot live at the end of
-  `setup()`. All three parts are load-bearing. Waiting only for `SVC_DONE` would leave **SD mode with no WebUI**:
-  `SVC_WILL_RUN` means the task was *created*, and it parks in `while (cardInUse())`, which is exactly when the
-  WebUI is needed to switch back to web radio. `SVC_NONE` is the opposite trap — no WiFi, no `UPDATEURL` or the
-  web files missing means no services are coming, so nothing else would ever start the server. `begin()` creates a
-  fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the trigger sends `NEWIP`
-  so the footer IP appears with the server rather than at boot.
-- **`SVC_DONE` is set `STARTUP_ASYNC_SERVICES_DELAY` seconds after the last download, inside the task.** The state
-  that releases the WebUI has to mean the stack is idle, not merely unoccupied, so the task holds it through a settle
-  delay and only then stamps `_servicesDoneMs`, clears `_servicesBusy` and sets the state. The WebUI bring-up and the
-  `BOOT_STABLE_TIME` countdown therefore move together, and `_servicesBusy` covers the settle as well as the downloads,
-  which is what keeps the MQTT apply and the VU startup throttle held off for the whole window. `0` compiles both the
-  wait and its log line away.
-- **Boot stability is a state, not a timer.** `Startup::_services` is `SVC_NONE` / `SVC_WILL_RUN` / `SVC_DONE`, and
-  `setup()` has already settled which one applies by the time `loop()` can run, because `startupServices()` has exactly
-  one call site — [`main.cpp:142`](src/main.cpp:142), inside `setup()`. `loop()` then has three exits: `SVC_NONE` proves
-  the boot over `BOOT_STABLE_TIME` from power-on (nothing risky will run, but an early crash must still trip Safe Mode
-  on the next boot); `SVC_WILL_RUN` **while the card is still in use** proves it after `STARTUP_ASYNC_SERVICES_DELAY +
-  BOOT_STABLE_TIME`, with the reason `startup services were suspended`; and `SVC_DONE` marks it stable
-  `BOOT_STABLE_TIME` after the settle that follows the downloads. Two of those count from power-on, each safe for its
-  own reason:
-  `SVC_NONE` because no risky work is scheduled at all, and the parked case because the services delay is waited out
-  first, so a task that was only slow to start has started by then.
-- **The three boot outcomes, and why the state can always be settled before `loop()`:** *SD offline*
-  (`network.offlineMode || config.store.SDoffline`) never calls `checkSafeMode()`, so `_bootStablePending` stays false
-  and the marker is not touched at all — that is the long-standing workaround and it is deliberate. *No WiFi / soft AP*
-  returns early from `setup()` before the services call, leaving `SVC_NONE`, and the boot then proves itself over
-  `BOOT_STABLE_TIME` from power-on. *Connected* records `SVC_WILL_RUN` before the task is created, and the task sets
-  `SVC_DONE`, so a download that finishes quickly cannot be missed.
-- **SD playback suspends the services, and the boot is still proven.** The task parks in `while (cardInUse())` until the
-  card is free, and `loop()` marks the boot stable once `STARTUP_ASYNC_SERVICES_DELAY + BOOT_STABLE_TIME` has passed
-  with the task still parked — `Boot stable after ~20000 ms - 10 s after the startup services were suspended`. The first
-  version waited indefinitely for the park to end, and its consequence was the opposite of what it looked like: a device
-  that booted into SD playback never proved its boot, so the next boot came up in Safe Mode once, and safe mode forces
-  web mode — meaning **SD mode could not survive a restart at all**, and smartstart for SD was effectively ignored every
-  time. Nothing risky runs in a parked boot, which is what justifies the mark; the delay is waited out so that a task
-  merely slow to start is not mistaken for a parked one.
+  `!netserver.isListening() && !webBringUpActive && network.status == CONNECTED && (_services != SVC_WILL_RUN ||
+  cardInUse())`, at the very top of `loop()` — above its `_bootStablePending` early return, which is why it cannot
+  live at the end of `setup()`. All three service parts are load-bearing. Waiting only for `SVC_DONE` would leave
+  **SD mode with no WebUI**: `SVC_WILL_RUN` means the task was *created*, and it parks in `while (cardInUse())`,
+  which is exactly when the WebUI is needed to switch back to web radio. `SVC_NONE` is the opposite trap — no WiFi,
+  no `UPDATEURL` or the web files missing means no services are coming, so nothing else would ever start the server.
+  `begin()` creates a fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the
+  trigger sends `NEWIP` so the footer IP appears with the server rather than at boot.
+- **The trigger only spawns the task; `bringUpWebServer()` does the work.** `begin()` + `startLoopTask()` + the
+  `NEWIP` request run on `webBringUpTask` (one-shot, `WEB_BRINGUP_TASK_STACK_SIZE`, `NETWORK_CORE`), because on the
+  loop they cost 1763 ms of stall and the audio refill goes with them. `webBringUpActive` covers the gap between
+  spawning and `listening` becoming true, and is cleared by the task; if the create fails the work runs inline and
+  says so, because a WebUI that starts late beats one that never starts.
+- **`SVC_DONE` is set the moment the last download returns**, clearing `_servicesBusy` with it. There is no settle
+  delay any more (`STARTUP_ASYNC_SERVICES_DELAY` is gone): it only postponed the WebUI behind the downloads, and the
+  window it was protecting is covered by the boot-stable proof below. `_servicesBusy` still brackets exactly the
+  downloads, which is what keeps the MQTT apply and the VU startup throttle held off for that window.
+- **Boot stability is proved by the WebUI coming up, not by the services finishing (2026-10-20).** The marker is set
+  `BOOT_STABLE_TIME` after `netserver.isListening()` is first seen true — one stamp (`_webUpMs`) plus one comparison,
+  and the reason reads `10 s after the WebUI came up`. This replaced three exits keyed on `_services`
+  (`SVC_NONE` from power-on, `SVC_WILL_RUN` while parked, `SVC_DONE` after the settle) for a reason the logs made
+  plain: the marker could be set *before* `netserver.begin()` had even finished, so it proved a boot whose riskiest
+  step — the bring-up and the first page load, which is the largest allocation burst in the session — had not run.
+  The services are no longer consulted at all, which is also what makes **SD mode survive a restart**: in SD mode they
+  stay parked for the whole session, and the WebUI comes up immediately, so the boot proves itself the same way.
+- **What still holds `_services`:** the enum stays because `servicesPending()` gates the radio-browser click (the
+  services hold) and `servicesBusy()` throttles the VU and the MQTT apply. Only the boot-stable decision stopped
+  reading it.
+- **The stamp covers every path with one line**: the deferred bring-up sets `listening` inside `begin()`, while the
+  AP/soft-AP and SD-offline paths call `netserver.begin()` from `setup()`; `loop()` stamps `_webUpMs` the first time
+  it sees the server listening, so all three converge without a per-path branch. `deferBootStable()` (called by
+  `network.cpp` on a stream loss, a Wi-Fi loss or a reconnect inside the boot window) restarts the countdown from now
+  if the server is up, and clears the stamp if it is not, so the proof restarts when the WebUI does.
+- **SD offline still never calls `checkSafeMode()`** (`network.offlineMode || config.store.SDoffline`), so
+  `_bootStablePending` stays false and the marker is not touched — the long-standing workaround, still deliberate.
+- **The earlier design history is worth keeping:** the first version waited indefinitely for the SD park to end, so a
+  device that booted into SD playback never proved its boot and the next boot came up in Safe Mode once — and safe
+  mode forces web mode, meaning **SD mode could not survive a restart at all**. Keying the proof on the WebUI removes
+  that whole class of problem, because the WebUI comes up in SD mode too.
 - **Two earlier designs were replaced:** one fell back to the power-on count when `_servicesDoneMs == 0`, marking the
   boot stable exactly as the services started; another kept a `BOOT_STABLE_BACKSTOP_MULT` timer that could call a boot
   stable while the risky window was still open. Both are gone.
-- The startup services are a known high-risk path: three concurrent TLS sessions against ~75 KB of internal heap, which
-  has been observed to exhaust it and crash the boot. See `.github/code-issues.md` section 7.
+- **The startup services were the suspected risk; a core-monitor log says otherwise.** The three downloads are
+  sequential, and each handshake costs ~21 KB transiently and hands it back: 143520 free before them, 122544 during
+  the first handshake, 131712 after it, 140844 after the settle. What collapses the stack is the WebUI's first page
+  load, which took that same boot from 140844 free to **9 KB free with a 2 KB largest block** — the state in which no
+  handshake, no 8 KB task stack and no response String can be allocated, and the stream cannot be re-read. That is
+  why the bring-up now runs off the main loop and the radio-browser click yields to it.
+  (This note used to cite `.github/code-issues.md` section 7; that section does not exist - the issue file stops at 4.)
 - Two accessors publish that state: `servicesBusy()` is true only inside the task body (the VU limiter and `mqtt.cpp`
   want exactly that), while `servicesPending()` is `SVC_WILL_RUN` and so also covers the park and the countdown. The
-  wider one is what to hold another job back with - `netserver.cpp` holds its radio-browser click on it.
+  wider one is what to hold another job back with - `netserver.cpp` holds its radio-browser click on it, then holds
+  it again for the WebUI's quiet window and drops it outright when `heapCanAffordTls()` finds no contiguous block.
 - Owns startup-time helpers that were previously mixed into `config.cpp`:
   - boot-time version marker and required LittleFS/WebUI file verification (`checkLittleFSandVer()`) — the verification
     itself lives in `Utility::verifyLittleFS()`, see the LittleFS notes below
@@ -658,14 +681,14 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - version-file parsing for online-update detection
   - startup background update scheduling (`startupServicesAsync`) — spawned as a FreeRTOS task on `NETWORK_CORE` at low
     priority:
-    - waits `STARTUP_ASYNC_SERVICES_DELAY` seconds before any work, letting audio buffer fill first
+    - starts immediately once the card is free (there is no pre-delay any more - see `BOOT_STABLE_TIME`'s note in `options.h`)
     - verifies WebUI locale JSON file; downloads if missing
     - checks for new firmware version via `new_ver.txt`; triggers OTA if `autoupdate` is enabled
     - downloads default `playlist.csv` from `PLAYLIST_DEFAULT_URL` if file is missing
     - updates `timezones.json.gz` and `rb_srvrs.json` from online sources
     - cleans stale search results older than 24 hours
-    - holds `SVC_DONE` and `servicesBusy()` for `STARTUP_ASYNC_SERVICES_DELAY` seconds after the last download, so the
-      WebUI bring-up and the boot-stable countdown both wait for the stack to settle
+    - sets `SVC_DONE` and clears `servicesBusy()` as soon as the last download returns; `SVC_DONE` is what releases
+      the WebUI, and the boot-stable countdown no longer depends on any of it
     - deletes the `ESPFileUpdater` param and self-terminates via `vTaskDelete(NULL)`
   - `deassertCsPins()` — called from `main.cpp` `setup()` before any device init. Sets all known SPI CS pins
     (`VS1053_CS`, `SD_CS`, `TFT_CS`, `TS_CS`) to `OUTPUT` + `HIGH` to prevent floating CS from causing bus contention
@@ -818,8 +841,9 @@ nothing is playing, so an assignment wrote `false` and the Wi-Fi returned to a s
 
 **The ladder has a floor and a ceiling, and the reset is reached from two places** through one helper,
 `forceLinkReset()`. The floor is a ladder that cannot be created at all: the create needs
-`NETWORK_TASK_STACK_BYTES` (8 KB on the S3 - `NETWORK_TASK_STACK_SIZE` 4 KB × `STACK_MULTIPLIER` 2) of
-contiguous heap, and the heap is lowest exactly when the stack is wedged, so the one rung that matters was
+`NETWORK_TASK_STACK_WORDS` (32 KB - see the stack section: the old "8 KB" was 4x smaller than the real
+allocation, because 8192 was passed to `xTaskCreate` as words) of contiguous heap, and the heap is lowest exactly
+when the stack is wedged, so the one rung that matters was
 unavailable when it was needed. A failed create used to be logged once (with the message swallowed, see the
 note in the guide) and forgotten, every 5 s forever, which is the incident that prompted this: the log showed
 `stream retry task is gone with a resume still owed` alternating with a bare `[ERROR] Network` for minutes
@@ -843,6 +867,14 @@ stack with an exhausted socket pool also fails fast, so the first two attempts o
 "the host refused". The probe costs a gateway connect (~30 ms) or a bare-IP connect (≤700 ms), nothing beside
 an attempt, and only WEDGED is acted on: a station that is merely offline still gets the patient 15 s then 60 s
 tail forever, unchanged, because a reset would fix nothing there and costs a scan, a reassociation and DHCP.
+
+**A silent timeout and an exhausted pool are different wedges, and the durations tell them apart.** The boot log of
+the collapsed case reads `gateway FAIL 1607ms` (4 ports x 400 ms) and `internet TCP FAIL 702ms` (the full bound) -
+silent timeouts, i.e. a stack that cannot allocate or transmit, not one out of connection slots (which fails
+instantly and would have needed a bigger `CONFIG_LWIP_MAX_ACTIVE_TCP`, impossible without a pioarduino
+`custom_sdkconfig`). The heap was the answer there: `heapCanAffordTls(bytes)` (`network.cpp`) is the test that can
+see it - one **contiguous** block, the figure a handshake actually needs, which `ESP.getFreeHeap()` and the
+`MIN_MALLOC` threshold cannot express.
 With the probe always asked, a stack that never answers is identified on the **first** attempt, so the reset
 lands about 8 s after the stream is lost instead of about 18 s. The gateway leg tries a fixed port list
 (`kGatewayProbePorts`, `network.cpp`: 80, 53, 443, 8080) and stops at the first that answers, because a router's
@@ -894,7 +926,14 @@ does not. `WIFI_SETTLE_MS` applies only when `WiFi.mode()` reports a change, and
 **Instruments, all unconditional.** `MAIN_LOOP_STALL_MS` names the worst stage of a slow `loop()` (this is what
 identified `player+saves`), `NVS_SLOW_WRITE_MS` logs a slow NVS commit, `[Heap]` gives internal free **and the
 largest contiguous block** (what a TLS handshake needs), recovery logs under `Network`, and `Telnet::loop()`
-must never block. Every cadence and threshold above is a macro in `options.h`, **except the connect bound**:
+must never block. Three diagnostics exist for the WebUI's own cost, all under `CORE_MONITOR`:
+`netserver.begin N ms` (one line, the deferred start's total) with `Netserver |   begin phase: X at N ms` marks
+inside it (queue / routes / psram cache / webserver.begin / mdns / ota) for finding which phase owns the time;
+`[Core.HWM] [async_tcp] stack HWM: N bytes` on every websocket connect, plus one on the final chunk of both upload
+paths (`handleUpload()`, and `filemanager.cpp`'s `onUploadChunk()`), which is the reading
+`CONFIG_ASYNC_TCP_STACK_SIZE` is set against. **That macro is in words, not bytes** - `8192 * 2` is a 64 KB stack,
+of which the log shows ~14 KB used. Every cadence and threshold above is a macro in `options.h`, **except the
+connect bound**:
 `m_connectTimeout_ms` / `_ssl` in `src/libraries/I2S_Audio/Audio.h` (1200 ms), separate from
 `CONNECT_HTTP_HTTPS_TIMEOUT`, which doubles as the socket READ timeouts and must stay patient for slow streams.
 
@@ -1259,10 +1298,19 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - radio-browser click reporting holds the queued click while the startup services are pending instead of letting the
     heap check drop it. `processRadioBrowserClick()` leaves `clickDelayActive` set and re-tests every pass, capped at
     `RADIO_BROWSER_SEND_CLICK_DELAY + rbClickServicesWaitMs` (60 s, the same protection `Mqtt::servicesWaitLimitMs`
-    gives its re-apply). The services run on this very core and hold the DRAM, so a spawn inside that window was
-    refused as `low heap, refusing rb click task spawn` on every boot that played a radio-browser station. The click is
-    still dropped outright while the card is off limits (`PM_SDCARD`, or the SD File Manager) - the older
-    `Abandoning click` rule, extended to the manager.
+    gives its re-apply). The click is still dropped outright while the card is off limits (`PM_SDCARD`, or the SD File
+    Manager) - the older `Abandoning click` rule, extended to the manager.
+  - **the gate is the contiguous block, and nothing else.** The services were never the peak: the first page load took
+    one boot from 140844 free to 9 KB free / 2 KB largest, and this task's 8 KB stack plus a TLS handshake were being
+    started straight into it. So the spawn is dropped - not held - when `heapCanAffordTls(rbClickTlsMinBlock)`
+    (40 KB contiguous, the `ESPFILEUPDATER_MIN_HEAP_FOR_SSL` figure) says the handshake cannot fit; the log carries
+    both numbers. The old `ESP.getFreeHeap() <= MIN_MALLOC` test (24 KB of *total* free) could not answer a
+    contiguity question, which is what let the lookup start against a fragmenting heap.
+  - **There is deliberately no time window.** A 30 s "WebUI quiet" hold existed briefly and was removed: it was
+    purely wall-clock from `NetServer::begin()` (never a dependency on a browser, despite how the log line read), it
+    expired too late to protect a page load opened at 30.5 s and too early for one opened at 29 s, and it delayed a
+    played-station statistic by half a minute on a device nobody visits. The block check is the real protection and
+    it costs nothing when the heap is healthy.
   - the RSSI payload carries the raw dBm (`rssi`, kept for the bars' tooltip) and the bar count (`rssibars`, from
     `rssiLevel()`), so the WebUI holds no scale of its own
   - `GETBATTERY` sends `volt: NmV, percentage: N%`. While `widgetsEditorEnabled` is on it synthesises that same
@@ -2949,9 +2997,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   already used for its DRAM/decoding reasons, since the manager is rewriting the card and a download starting on the
   network core is the last thing it wants. All five exist so the manager is the only thing touching the card while it
   is open. The park is released by itself when the manager closes, Done button or idle timeout alike, within one
-  2-second poll, and while it is held `Startup::loop()` marks the boot stable after
-  `STARTUP_ASYNC_SERVICES_DELAY + BOOT_STABLE_TIME` with the reason `startup services were suspended` — the same
-  rule that now covers SD playback, see the startup section.
+  2-second poll. Holding it no longer has any bearing on the boot-stable proof: that counts from the WebUI coming
+  up (`_webUpMs`), which happens whether the services are parked or not - see the startup section.
 - The encoder guards drain rather than only returning: `encoderChanged()` is a delta-since-last-call, so skipping it for
   a whole session delivers every detent turned meanwhile as one `int8_t` delta on the first loop after the mode closes,
   i.e. a volume slam or a phantom station step. The long-press-stop guard also clears `lpId`, because `Controls::loop()`
@@ -4315,24 +4362,47 @@ The health of the force-include channel is observable: the Done-button panic in 
 1) has not recurred since the override landed, although that is a single observation - correlation, not a proven
 mechanism. The unpinned `async_tcp` task floating onto core 1 during a mode switch is the plausible link.
 
-### Board Stack Multiplier (`STACK_MULTIPLIER`)
+### Stack sizes: real KB, and they are BYTES to xTaskCreate (2026-10-20)
 
-A board-aware multiplier scales all five user-configurable FreeRTOS task stacks automatically:
+**In ESP-IDF `StackType_t` is `uint8_t`, so `xTaskCreate`'s stack depth counts BYTES and
+`uxTaskGetStackHighWaterMark()` answers in BYTES.** `KB * 1024` at each call site was therefore correct all along.
 
-| Board | `STACK_MULTIPLIER` | Effect |
-|---|---|---|
-| ESP32-S3 | 2 | All base stack sizes doubled |
-| ESP32 | 1 | Base sizes unchanged |
+That is worth recording because a 2026-10-20 refactor got it exactly backwards: it assumed words, so it multiplied
+every KB value by 4 *and* divided by `sizeof(StackType_t)` (which is 1, so the division was a no-op). Every stack
+grew 4x, ~90 KB of internal heap disappeared at boot (134820 -> 45064), and the WebUI could no longer serve its
+assets - `nsQueue overflow, dropped req=...` with `[Heap] 44KB free, 10KB largest block`. The tell was in the build
+log's own arithmetic: `webBringUp task could not be created (32768 words, ...)` printed `32 * 1024 / sizeof(StackType_t)`
+as 32768, which is only possible if that sizeof is 1.
 
-- Defined automatically after the board guard in `src/core/options.h`. Override in `myoptions.h` with `#define
-  STACK_MULTIPLIER 1` or `2` if needed.
-- Only values `1` and `2` are accepted — a compile-time `#error` fires otherwise.
-- Per-task manual overrides (e.g. `#define DSP_TASK_STACK_SIZE 6`) bypass the multiplier; a `#elif` range guard
-  validates the manually-set value.
-- The multiplier applies **only** to the five configurable task stacks. Fixed-stack tasks (HTTPS workers, OTA) are
-  unaffected.
-- `SEARCHRESULTS_BUFFER` (32 KB, a constant in `netserver.cpp`) and `CONFIG_ASYNC_TCP_QUEUE_SIZE` (per-board, in
-  `options_overrides.h`) are set explicitly rather than scaled by `STACK_MULTIPLIER`, since they scale differently.
+The contract now:
+
+- `*_TASK_STACK_SIZE` macros are **kilobytes**, each call site passes `KB * 1024` **bytes**, and nothing divides
+  by `sizeof(StackType_t)`.
+- **`STACK_MULTIPLIER` is gone**, with its 2x folded into the defaults, so the numbers below are the sizes that
+  have actually been running in the field (yoRadio's originals were half these).
+- The monitor and every `[Core.HWM]` line print `uxTaskGetStackHighWaterMark()` raw, which is bytes - no `* 4`
+  anywhere (the old `startup.cpp` and async prints had one, understating their headroom by 4x).
+
+  | Task | macro | bytes |
+  |---|---|---|
+  | `loopTask` | `LOOP_TASK_STACK_SIZE` = 16 | 16 KB |
+  | `DspTask` | `DSP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `netserverLoopTask` | `NETSERVER_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `doSync` / `retryStreamConnection` / `wifiReconnectionTask` | `NETWORK_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `startupServicesAsync` | `STARTUP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `webBringUpTask` | `WEB_BRINGUP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `async_tcp` | `CONFIG_ASYNC_TCP_STACK_SIZE` = 8192 (bytes) | 8 KB, halved from the library's 16384 |
+
+  Measured headroom, from boots that were healthy: `[async_tcp]` 4.6 KB free of 8 KB; `[startupServices]` ~5 KB
+  free of 8 KB (its raw HWM 4952 before the `*4` was removed). Those are tight-looking but they are what has been
+  running; a future pass can now read them correctly and shrink deliberately, one task at a time.
+
+- **`the High Water Mark is in words too.** `uxTaskGetStackHighWaterMark()` returns words; `main.cpp`'s monitor line
+  used to print them labelled "free bytes", understating every task's headroom by 4x - which is how the oversized
+  stacks looked safe. It now multiplies by `sizeof(StackType_t)`, so `Main/Display/Netserver` in the monitor are
+  bytes and are directly comparable with the `[Core.HWM]` lines.
+- `MIN_MALLOC` is pinned at 24112 (it used to be `12056 * STACK_MULTIPLIER`) so the guard's behaviour did not move.
+- `config.cpp`'s boot log prints these KB values, which are now truthful.
 
 ### Core 0 — Audio
 
@@ -4375,26 +4445,28 @@ A board-aware multiplier scales all five user-configurable FreeRTOS task stacks 
 ### FreeRTOS Task Reference
 
 Stack sizes and priorities are controlled by macros in `src/core/options.h` (`/* Tweaks for Core Processes */`). Higher
-priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used. Per-task
-local conversion macros (`_BYTES`) are defined at the top of each `.cpp` file (except `SET_LOOP_TASK_STACK_SIZE` which
-is an `Arduino.h` macro). Stack defaults scale with `STACK_MULTIPLIER` — values shown as ESP32 (1x) / S3 (2x).
+priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used.
+**Every stack figure below is KB of real bytes**, converted at its call site with `STACK_KB_TO_WORDS()`; the fixed
+ones that are still raw literals are marked as **words** (x4), which is where the old 4x overshoot lived.
+`STACK_MULTIPLIER` no longer exists - see the section above for why.
 
-| Task | File | Stack macro (default ESP32 / S3) | Priority macro (default) | Notes |
+| Task | File | Stack | Priority macro (default) | Notes |
 |---|---|---|---|---|
-| `loopTask` | main.cpp | `LOOP_TASK_STACK_SIZE` KB (8 / 16) | 1 (framework) | Arduino loop(); `SET_LOOP_TASK_STACK_SIZE()` applies at boot |
-| `DspTask` | display.cpp | `DSP_TASK_STACK_SIZE` KB (4 / 8) | `DSP_TASK_PRIORITY` (2) | — |
-| `netserverLoopTask` | netserver.cpp | `NETSERVER_TASK_STACK_SIZE` KB (4 / 8) | `NETSERVER_TASK_PRIORITY` (2) | — |
-| `doSync` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `LOW_TASK_PRIORITY` (1) | Time/weather sync |
-| `searchWiFi` ×2 | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | — |
-| `retryStreamConnection` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Post-disconnect reconnect |
-| `retryStreamConnection` | player.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Stream drop reconnect; was hardcoded to Core 0 (bug) |
-| `vTaskFetchCuratedIndex/Playlist` | commandhandler.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `vTaskSearchRadioBrowser` | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `playbackTask` (lambda) | netserver.cpp | 4096 http / 8192 https | `PLAYBACK_TASK_PRIORITY` (3) | Dynamic stack based on URL scheme |
-| `rbClickTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `checkForOnlineUpdateTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `startOnlineUpdateTask` (lambda) | netserver.cpp | 16384 fixed | `NET_TASK_PRIORITY` (3) | OTA — stack hardcoded |
-| `startupServicesAsync` | startup.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `loopTask` | main.cpp | `LOOP_TASK_STACK_SIZE` (64 KB) | 1 (framework) | Arduino loop(); `SET_LOOP_TASK_STACK_SIZE()` applies at boot |
+| `DspTask` | display.cpp | `DSP_TASK_STACK_SIZE` (32 KB) | `DSP_TASK_PRIORITY` (2) | unshrinkable until the HWM readings are trusted again |
+| `netserverLoopTask` | netserver.cpp | `NETSERVER_TASK_STACK_SIZE` (32 KB) | `NETSERVER_TASK_PRIORITY` (2) | ditto |
+| `webBringUpTask` | startup.cpp | `WEB_BRINGUP_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | `netserver.begin()` + `startLoopTask()` + `NEWIP` |
+| `doSync` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | Time/weather sync - **TLS**, so unmeasured and unchanged |
+| `searchWiFi` ×2 | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | — |
+| `retryStreamConnection` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | Post-disconnect reconnect |
+| `wifiReconnectionTask` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | Spawned by the disconnect event and the `ticks()` self-heal |
+| `vTaskFetchCuratedIndex/Playlist` | commandhandler.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `vTaskSearchRadioBrowser` | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `playbackTask` (lambda) | netserver.cpp | 4096 http / 8192 https **words** (16/32 KB) | `PLAYBACK_TASK_PRIORITY` (3) | Dynamic stack based on URL scheme |
+| `rbClickTask` (lambda) | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `checkForOnlineUpdateTask` (lambda) | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `startOnlineUpdateTask` (lambda) | netserver.cpp | 16384 **words** (64 KB) | `NET_TASK_PRIORITY` (3) | OTA — still a raw literal |
+| `startupServicesAsync` | startup.cpp | `STARTUP_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS downloads |
 | MQTT client task (library-owned) | PsychicMqttClient | 6144 (library default) | `NET_TASK_PRIORITY` (3) | Plain TCP; `Mqtt::loop()` runs on `netserverLoopTask`, not here. Apply is held while the startup downloads are running |
 
 ### CORE_MONITOR debug feature (opt-in)
@@ -4463,7 +4535,7 @@ This section calls out hardware implementations that diverge from the common cod
 - **The I2S audio task's stack lives in the library header, not in `options.h`**: `AUDIO_STACK_SIZE` in
   `I2S_Audio/Audio.h` is a plain `static const size_t` (3500 words since it was raised from 3300 for a station that
   overflowed it - `MPEG-2.5, Layer I` on `echoesofbluemars.org`, panic shape `Stack canary watchpoint triggered
-  (PeriodicTask)` on core 0). It is not scaled by `STACK_MULTIPLIER` and cannot be tuned from `myoptions.h`; the
+  (PeriodicTask)` on core 0). It is not read from `options.h` and cannot be tuned from `myoptions.h`; the
   header has to be edited. The full write-up is in `src/libraries/i2s-frankenstein-surgery-notes.md`, Addendum 2 -
   including why it was *not* the task watchdog and *not* the AsyncTCP priority or core. The VS1053 library keeps its
   own `AUDIO_STACK_SIZE` (`audioVS1053Ex.h`); it was raised to the same 3500 for parity, which is alignment rather

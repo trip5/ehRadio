@@ -877,6 +877,15 @@ static void discardResume() {
 }
 
 static void onUploadChunk(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  #ifdef CORE_MONITOR
+    if (final) {
+      // Read on the final chunk, before the tail: the high-water mark already includes every chunk written to the
+      // card, and reading it here cannot be lost to one of the early returns below.  SD writes on the AsyncTCP
+      // task are the worst case for that task's stack, so this is the number CONFIG_ASYNC_TCP_STACK_SIZE is set
+      // against.
+      FUNCTIONLOG("Core.HWM", "[%s] stack HWM after SD upload: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+    }
+  #endif
   // Re-tested per chunk, not just at the start: the mode can end (timeout, card removal) mid-file. The
   // reason is reported by the request handler at the end.
   if (!filemanager.active()) {

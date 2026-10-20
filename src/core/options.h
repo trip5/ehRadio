@@ -839,14 +839,17 @@ or examine the examples in builds/trip5 and make your own!
 #if WIFI_ATTEMPTS < 4
   #error define error: WIFI_ATTEMPTS must be at least 4
 #endif
-// How many seconds to wait after boot completed to Start the Async Services (other services are starting and too soon can crash netserver stack).  The less-important services started here (can take a full minute to complete if server connection issues):
-// verifies/downloads locale JSON file, checks for new version (triggers autoupdate), downloads PLAYLIST_DEFAULT_URL (if set), updates timezones.json.gz and rb_srvrs.json, cleans up stale search results
-// The delay lets the audio buffer fill before anything competes for WiFi, and the WebUI is held back until the services are done (see Startup::loop())
-// This delay is also added after the services complete to allow settle time
-#ifndef STARTUP_ASYNC_SERVICES_DELAY
-  #define STARTUP_ASYNC_SERVICES_DELAY 3
-#endif
-// How many seconds to wait after boot completed (including smart start and Async Services) to consider successful, if rebooted during that time, will enter safe mode (disables smart start, autoupdate, boots to web not SD)
+// (There is no STARTUP_ASYNC_SERVICES_DELAY any more.  It delayed the three startup downloads - version check,
+// timezones, radio-browser servers - before they began, and again after they finished as a "settle".  Both were
+// removed once the WebUI was moved onto its own task: the delay only postponed the WebUI behind the downloads, and
+// the settle was protecting a window that the boot-stable proof below now covers properly.)
+// How many seconds the WebUI must STAY UP before the boot counts as successful.  A reboot inside that window puts
+// the next boot into safe mode (disables smart start, autoupdate, boots to web not SD).
+// The WebUI coming up is the last risky step of a boot - netserver.begin() allocates the request queue, the
+// listener, mDNS and the PSRAM cache, and the first page load is the largest allocation burst in the session - so
+// that is what the marker is proved against.  The startup services are deliberately NOT part of the decision: in SD
+// mode they stay parked for the whole session, and a boot that only parked them is as safe as one that never had
+// them (that is what lets SD mode survive a restart without landing in safe mode).
 #ifndef BOOT_STABLE_TIME
   #define BOOT_STABLE_TIME 10
 #endif
@@ -896,40 +899,41 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 /* --- TWEAKS FOR CORE PROCESSES --- */
-/* Stack sizes are in KB; conversion to bytes is done locally in each .cpp file via a _BYTES macro */
-/* Override in myoptions.h only if needed: #define STACK_MULTIPLIER 1 to disable scaling and use yoRadio defaults */
-#ifndef STACK_MULTIPLIER
-  #define STACK_MULTIPLIER 2 // ESP32-S3: double stack sizes (most SRAM available)
-#endif
-#if STACK_MULTIPLIER != 1 && STACK_MULTIPLIER != 2
-  #error define error: STACK_MULTIPLIER must be 1 or 2
-#endif
-/* Arduino loop() task (main.cpp) — SET_LOOP_TASK_STACK_SIZE() uses this directly in bytes */
+/* Stack sizes are in KB; each call site passes KB * 1024 to xTaskCreate. */
+/* These numbers have been well-tested as of 2026.10.20 */
 #ifndef LOOP_TASK_STACK_SIZE
-  #define LOOP_TASK_STACK_SIZE (8 * STACK_MULTIPLIER) // KB; 8 (yoRadio) or 16
-#elif LOOP_TASK_STACK_SIZE < 4 || LOOP_TASK_STACK_SIZE > 64
-  #error define error: LOOP_TASK_STACK_SIZE must be between 4 and 64 (value in KB)
+  #define LOOP_TASK_STACK_SIZE 16 // KB
+#elif LOOP_TASK_STACK_SIZE < 8 || LOOP_TASK_STACK_SIZE > 64
+  #error define error: LOOP_TASK_STACK_SIZE must be between 8 and 64 (value in KB)
 #endif
 /* DspTask (display.cpp): render loop task */
 #ifndef DSP_TASK_STACK_SIZE
-  #define DSP_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
-#elif DSP_TASK_STACK_SIZE < 2 || DSP_TASK_STACK_SIZE > 32
-  #error define error: DSP_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #define DSP_TASK_STACK_SIZE 8 // KB
+#elif DSP_TASK_STACK_SIZE < 4 || DSP_TASK_STACK_SIZE > 32
+  #error define error: DSP_TASK_STACK_SIZE must be between 4 and 32 (value in KB)
 #endif
 /* netserverLoopTask (netserver.cpp): runs netserver.loop() on its own pinned task */
 #ifndef NETSERVER_TASK_STACK_SIZE
-  #define NETSERVER_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
-#elif NETSERVER_TASK_STACK_SIZE < 2 || NETSERVER_TASK_STACK_SIZE > 32
-  #error define error: NETSERVER_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #define NETSERVER_TASK_STACK_SIZE 8 // KB
+#elif NETSERVER_TASK_STACK_SIZE < 4 || NETSERVER_TASK_STACK_SIZE > 32
+  #error define error: NETSERVER_TASK_STACK_SIZE must be between 4 and 32 (value in KB)
 #endif
-/* Network utility tasks (network.cpp, player.cpp): doSync, searchWiFi, retryStreamConnection */
+/* Network utility tasks (network.cpp): doSync, retryStreamConnection, wifiReconnectionTask.  Unmeasured, and doSync runs a TLS handshake. */
 #ifndef NETWORK_TASK_STACK_SIZE
-  #define NETWORK_TASK_STACK_SIZE (4 * STACK_MULTIPLIER) // KB; 4 (yoRadio) or 8
-#elif NETWORK_TASK_STACK_SIZE < 2 || NETWORK_TASK_STACK_SIZE > 32
-  #error define error: NETWORK_TASK_STACK_SIZE must be between 2 and 32 (value in KB)
+  #define NETWORK_TASK_STACK_SIZE 8 // KB
+#elif NETWORK_TASK_STACK_SIZE < 4 || NETWORK_TASK_STACK_SIZE > 32
+  #error define error: NETWORK_TASK_STACK_SIZE must be between 4 and 32 (value in KB)
 #endif
-/* Minimum allocation bytes; min free heap before spawning a background task (search, curated, playback, rb_click) */
-#define MIN_MALLOC (12056 * STACK_MULTIPLIER)
+/* Startup services task (startup.cpp): the three TLS downloads.   */
+#ifndef STARTUP_TASK_STACK_SIZE
+  #define STARTUP_TASK_STACK_SIZE 8 // KB
+#endif
+/* WebUI bring-up task (startup.cpp): route registration plus the LittleFS read into the PSRAM cache. */
+#ifndef WEB_BRINGUP_TASK_STACK_SIZE
+  #define WEB_BRINGUP_TASK_STACK_SIZE 8 // KB
+#endif
+/* Minimum free heap before spawning a background task (search, curated, playback, rb_click). */
+#define MIN_MALLOC 24112
 /* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
 /* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
 #ifndef DSP_TASK_PRIORITY

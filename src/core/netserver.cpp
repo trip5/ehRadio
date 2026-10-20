@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <ESPFileUpdater.h>
 #include <ESPmDNS.h>
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <LittleFS.h>
@@ -130,7 +131,7 @@ void StaticFileCache::loadAll() {
         loadOne(Config::wwwFiles[i], count);
         if (entries[count].data || entries[count].gzData) count++;
     }
-    SERIALLOGX("Loaded %d files into PSRAM cache\t", count);
+    FUNCTIONLOG("Netserver", "Loaded %d files into PSRAM cache", count);
 }
 
 size_t StaticFileCache::totalBytes() const {
@@ -364,9 +365,18 @@ void NetServer::restartMdns() {
 
 bool NetServer::begin(bool quiet) {
   if (network.status==SDOFFLINE) return true;
-  if (!quiet) BOOTLOGX("netserver.begin\t");
+  // One complete line at the end, with how long it took
+  const uint32_t beganMs = millis();
+  #ifdef NETSERVER_DEBUG
+    auto phase = [beganMs](const char* what) {
+      FUNCTIONLOG("Netserver", "  begin phase: %s at %lu ms", what, (unsigned long)(millis() - beganMs));
+    };
+  #else
+    auto phase = [](const char*) {};
+  #endif
   nsQueue = xQueueCreate(64, sizeof(nsRequestParams_t));
   if (nsQueue==NULL) { ERRORLOG("NETSERVER: nsQueue alloc failed? Rebooting."); delay(10); ESP.restart(); }
+  phase("queue");
 
   webserver.on("/", HTTP_ANY, handleIndex);
   webserver.on("/ready", HTTP_GET, handleReady);
@@ -396,7 +406,9 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/ncsi.txt", HTTP_GET, captiveRedirect);                     // Windows
   webserver.on("/connecttest.txt", HTTP_GET, captiveRedirect);              // Windows
 
+  phase("routes");
   if (psramFound()) fileCache.loadAll();
+  phase("psram cache");
   webserver.onNotFound(handleNotFound);
   webserver.onFileUpload(handleUpload);
   #ifdef CORS_DEBUG
@@ -404,8 +416,10 @@ bool NetServer::begin(bool quiet) {
     DefaultHeaders::Instance().addHeader(F("Access-Control-Allow-Headers"), F("content-type"));
   #endif
   webserver.begin();
+  phase("webserver.begin");
   if (strlen(config.store.mdnsname)>0)
     MDNS.begin(config.store.mdnsname);
+  phase("mdns");
 
   websocket.onEvent(onWsEvent);
   webserver.addHandler(&websocket);
@@ -447,7 +461,8 @@ bool NetServer::begin(bool quiet) {
   #endif //#if USE_OTA
 
   listening = true;
-  if (!quiet) SERIALLOG("done");
+  phase("ota + websocket");
+  if (!quiet) BOOTLOG("netserver.begin %lu ms", (unsigned long)(millis() - beganMs));
   return true;
 }
 
@@ -872,6 +887,15 @@ void NetServer::resetQueue() {
 
 int freeSpace;
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  #ifdef CORE_MONITOR
+    if (final) {
+      // Read on the final chunk, not on a page load: the high-water mark is cumulative, so by now it includes
+      // every chunk written, and this path (/upload, /update, /webboard) is the heaviest thing the AsyncTCP task
+      // does.  This is the figure CONFIG_ASYNC_TCP_STACK_SIZE should be set against - a websocket connect is the
+      // lightest.
+      FUNCTIONLOG("Core.HWM", "[%s] stack HWM after upload: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+    }
+  #endif
   if (request->url()=="/upload") {
     if (!index) {
       freeSpace = (float)LittleFS.totalBytes()/100*68-LittleFS.usedBytes();
@@ -948,6 +972,14 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   switch (type) {
     case WS_EVT_CONNECT:
         FUNCTIONLOG("Websocket", "client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
+        #ifdef CORE_MONITOR
+          // This callback runs on the AsyncTCP event task, so this is THAT task's headroom - the number the
+          // CONFIG_ASYNC_TCP_STACK_SIZE decision needs (its default is 8192 * 2 = 16 KB, the largest single
+          // allocation the WebUI bring-up makes).  It lives here rather than in handleIndex() because that line
+          // never appeared in a boot where the page demonstrably loaded; a websocket connect is a path the log
+          // proves is reached.  The reading that matters most is still the one taken during an SD upload.
+          FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        #endif
         // Send current battery status to the newly connected client immediately
         netserver.requestOnChange(GETBATTERY, client->id());
         // And the file manager's state: a page that opened while the manager was already up is told so instead of
@@ -1302,6 +1334,11 @@ void launchPlaybackTask(const String& url, const String& name) {
   // in case they never finish, so a stuck state cannot wedge the feature - the same rule Mqtt::servicesWaitLimitMs has.
   static constexpr uint32_t rbClickServicesWaitMs = 60000;
   static bool rbClickHoldLogged = false;
+  // What a TLS lookup actually needs: one contiguous block for the handshake on top of this task's 8 KB stack -
+  // the same figure ESPFileUpdater's ESPFILEUPDATER_MIN_HEAP_FOR_SSL is built on.  This is the whole gate: there is
+  // no time window, because a wall-clock wait neither knew when a page load was coming nor let a device nobody visits
+  // report its click promptly.  Nothing here waits for a browser.
+  static constexpr uint32_t rbClickTlsMinBlock = 40960;
   // Helper: Make HTTPS request and extract a specific JSON key's value
   // Returns extracted value or empty string on failure
   String streamJsonExtract(const String& url, const char* key) {
@@ -1458,7 +1495,7 @@ void processRadioBrowserClick() {
       FUNCTIONLOG("RB Click", "Abandoning click");
       return;
     }
-    // Hold the click if Heap check fails and let the delay timer run, so the click survives the wait
+    // Hold the click while the services run, and let the delay timer run, so the click survives the wait
     if (startup.servicesPending() &&
         (millis() - clickDelayStart) < (RADIO_BROWSER_SEND_CLICK_DELAY*1000 + rbClickServicesWaitMs)) {
       if (!rbClickHoldLogged) {
@@ -1468,8 +1505,11 @@ void processRadioBrowserClick() {
       return; // still held
     }
     clickDelayActive = false;
-    if (ESP.getFreeHeap() <= MIN_MALLOC) {
-      FUNCTIONLOG("Heap", "low heap (%u), refusing rb click task spawn", ESP.getFreeHeap());
+    if (!heapCanAffordTls(rbClickTlsMinBlock)) {
+      // Dropped, not held: a statistic is not worth waiting on a fragmented heap
+      FUNCTIONLOG("RB Click", "dropping click - no %u-byte contiguous block (free %u, largest %u)",
+                  (unsigned)rbClickTlsMinBlock, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
       return;
     }
     // Copy URL to pass to task (task will delete it)

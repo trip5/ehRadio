@@ -20,12 +20,14 @@ public:
   bool servicesPending() const { return _services == SVC_WILL_RUN; }
   bool safeMode() const { return _safeMode; }
   const char* icon() const;
+  void bringUpWebServer();                     // the WebUI start, on its own task - never on the main loop
 
 private:
   void markBootStable(const char* reason);
   void getRequiredFiles();
   void checkNewVersionFile();
   static void startupServicesAsync(void* param);
+  static void webBringUpTask(void* param);
 
   uint32_t _bootStartMs = 0;
   // Whether the startup services run this boot, decided by setup() before loop() can run - there is one call site, in main.cpp, and it is inside setup().
@@ -35,7 +37,7 @@ private:
     SVC_DONE       // finished
   };
   volatile svcState_e _services = SVC_NONE;
-  volatile uint32_t _servicesDoneMs = 0;
+  volatile uint32_t _webUpMs = 0;
   volatile bool _servicesBusy = false;
   bool _bootStablePending = false;
   /* Declared last on purpose: it lands in the struct's existing tail padding, so sizeof(Startup) does not grow. */

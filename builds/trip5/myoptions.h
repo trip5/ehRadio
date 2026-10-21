@@ -348,7 +348,7 @@
 
 /* --- Debug? --- */
 //#define ALL_DEBUG_LOGS
-#define CORE_MONITOR
+//#define CORE_MONITOR
 //#define BOOTLOG_TIME
 
 /* --- Display --- */
@@ -362,13 +362,10 @@
 //#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
 //#define CLOCKFONT LEDCLOCK
-
-// Transform:
-//#define PRETEXT_FOLDACCENT
-//#define PRETEXT_FOLDCYRILLIC
-//#define EVERYDAY_IS_CANADA_DAY
+//#define NIXIE_TUBE
 
 // Other:
+//#define EVERYDAY_IS_CANADA_DAY
 //#define DEEP_SLEEP_DISABLE
 
 #endif // myoptions_h

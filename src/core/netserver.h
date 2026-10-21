@@ -137,7 +137,6 @@ const char index_html[] PROGMEM = R"(
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="icon" type="image/png" href="icon.png">
-  <link rel="stylesheet" id="themeCSS" href="theme.css" type="text/css" />
   <link rel="stylesheet" id="styleCSS" href="style.css" type="text/css" />
   <script type="text/javascript" src="/variables.js"></script>
   <script type="text/javascript" src="/locale.js"></script>

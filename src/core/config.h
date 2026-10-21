@@ -149,7 +149,7 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   uint8_t   systemFontId = DISPLAYFONT;
   uint8_t   clockFontId = CLOCKFONT;
   bool      clockglow = CLOCKGLOW;
-  bool      pretextALLCAPS = PRETEXT_ALLCAPS;  // was the PRETEXT_ALLCAPS macro; also drives the WebUI casing
+  bool      pretextALLCAPS = PRETEXT_ALLCAPS;  // was the PRETEXT_ALLCAPS macro
   uint8_t   brightness = SCREEN_BRIGHTNESS;
   bool      dimmingEnabled = DIMMING_ENABLED;
   uint16_t  dimmingTimeout = DIMMING_TIMEOUT;

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <Adafruit_GFX.h>       // GFXfont, GFXglyph, pgm_read_*
-#include "../../core/options.h" // PRETEXT_ALLCAPS / PRETEXT_FOLDACCENT / PRETEXT_FOLDCYRILLIC
+#include "../../core/options.h" // PRETEXT_ALLCAPS
 
 // ---------------------------------------------------------------------------
 // preText() - the single funnel for every codepoint the display renders.
@@ -17,10 +17,9 @@
 // computed from the string as stored): one input codepoint yields EXACTLY one
 // output codepoint, and never 0.
 //
-// PRETEXT_ALLCAPS uppercases before resolution.  PRETEXT_FOLDACCENT and
-// PRETEXT_FOLDCYRILLIC now mean "force a fold even where the glyph exists" (an
-// intentionally ASCII-only display); the fallback happens unconditionally and
-// needs neither macro.
+// PRETEXT_ALLCAPS uppercases before resolution.  The fold chain below runs
+// unconditionally: it is the fallback that lets one table serve fonts of
+// different coverage.
 // ---------------------------------------------------------------------------
 // cp is 32-bit because the UTF-8 decoder produces four-byte sequences; a
 // supplementary codepoint truncated to 16 bits would silently become a

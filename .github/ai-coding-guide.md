@@ -156,6 +156,7 @@
 - **UI**: Widgets in `src/displays/widgets/`, drivers in `src/displays/`.
 - **Plugins**: The former yoRadio plugin hook system has been removed. Add new behavior in the owning core module instead of reviving plugin-style hooks.
 - **Web UI**: Most files in `data/www` are served with headers in `src/core/netserver.h`. `search.html` and `curated.html` are not.
+- **WebUI palette**: every colour is a custom property in the `:root` block at the top of `data/www/style.css`. A theme's palette is one `:root[data-theme="N"]` block there (`N` = the theme's id in `themes.h`), never a second stylesheet: `/variables.js` publishes that id as `data-theme` on `<html>`, and an id with no block keeps the default palette. Properties are named by role (`--accent-text`, `--icons-outline`, `--control-bg`, ...), so never paint text with an icon role or a surface with a text role - that is what the splits are for. `--page-bg` is the fixed window surround and is never themed; `--background` is the app column, so a light theme cannot flood the browser window. The built-in blocks come from `themes.h` via `src/displays/webuitheme.py` (anchor theme 0, `--anchor`); run it instead of hand-copying a display theme. A block title containing `PERFECT` is hand-owned: the tool never adds, compares, lists or overwrites it, so remove the word only when it should become editable again.
 
 ## Functionality
 - **Hardware**: The firmware is built according to the hardware that is connected to it and users who will use it.  These are defined by files listed in Config Cascade.

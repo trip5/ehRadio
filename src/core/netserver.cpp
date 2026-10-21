@@ -1811,7 +1811,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
     return;
   }
   if (request->url() == "/variables.js") {
-    char varjsbuf[WEBSOCKET_BUFFER];
+    char varjsbuf[640];
     char escapedRadioVersion[32];
     utility.escapeQuotes(RADIOVERSION, escapedRadioVersion, sizeof(escapedRadioVersion));
     char escapedGithubUrl[128];
@@ -1824,7 +1824,8 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var newVerAvailable=%s;\n"
       "var updateUrl='%s';\n"
       "var currentLocale='%s';\n"
-      "var casetransform=%s;\n",
+      "var webuiThemeId=%u;\n"
+      "document.documentElement.setAttribute('data-theme',webuiThemeId);\n",
       escapedRadioVersion,
       (network.status == CONNECTED && config.wwwFilesExist) ? "webboard" : "",
       (network.status == CONNECTED) ? "player" : "ap",
@@ -1836,7 +1837,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       (netserver.newVersionAvailable) ? "true" : "false",
       escapedGithubUrl,
       config.store.locale_webui,
-      editorOpt(config.store.pretextALLCAPS) ? "true" : "false"
+      (unsigned)config.store.themeId
    );
     AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", varjsbuf);
     response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");

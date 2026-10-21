@@ -1706,6 +1706,26 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - Name truncation at 31 chars for `_themeNames[][32]`.
 - `--dry-run` writes to `.new.h`.
 
+## `src/displays/webuitheme.py`
+- Imports the display themes in `themes.h` into the `data/www/style.css` theme blocks. `:root` is the
+  master design and is never written.
+- The master is the WebUI rendering of an **anchor** display theme (`--anchor`, default 0; the
+  `mode=... anchor=N` marker records it). Every role is a `feature()` of the panel - `background` ->
+  background, `metabg` -> control-bg, `title1` -> accent-text / icons-outline / main-text-2,
+  `title2` -> main-text-1 / list-names, `line` -> panel-border, `clock` -> icons-highlight (darkened)
+  and logo, `metabg` -> logo-text - and `transfer()` re-anchors it from the master through HSL: hue
+  and saturation follow the display, lightness keeps the master's offset, and a neutral feature hands
+  the decision to the other side. Border, shadow and switch roles are derived afterwards, text is
+  pushed to `READ_TEXT` / `READ_ACCENT`, and the anchor's block is empty by construction.
+- A block title containing the whole word `PERFECT` is locked: it is never added, renamed, compared,
+  listed or overwritten, only counted. Removing the word makes it editable again, and the tool never
+  writes it.
+- No arguments: add missing blocks in id order, then reconcile renamed ones (whole-body replace only
+  on confirmation). `--update`: per-theme element diff on a menu of real ids, blank exits.
+  `--dry-run` prints and writes nothing. A mode or anchor mismatch is warned about before updating.
+- Never writes `:root`, never deletes or reorders a block, ignores ids with no display theme and
+  ignores `--page-bg` (the fixed window surround).
+
 ## `src/core/controls.h` / `controls.cpp`
 - `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`,
   `setIRTolerance()`, `flipTS()`, `controlsEvent()`.
@@ -2600,7 +2620,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     the row after it out of step. (3) The listing spinner is now the page's own spinner scaled to a list row rather
     than a size of its own, so there is one spinner treatment in the UI, not two.  SCALING IT DOWN REQUIRES DECLARING
     ITS PADDING, and that was a follow-up field bug: the manager's loader is spans INSIDE a `.pleitem`, so it inherits
-    `.pleitem span`'s `padding: 0 8px` and `--odd-bg-color` box, and with the universal `box-sizing: border-box` an
+    `.pleitem span`'s `padding: 0 8px` and `--control-bg` box, and with the universal `box-sizing: border-box` an
     18px box cannot hold 16px of padding plus a 6px ring - the browser widens the border-box to about 22px while the
     height stays 18px, so the ring renders as an ELLIPSE (round at the player's 40px, oval here, from identical rules).
     The manager's markup is the difference: player.html's loader is a DIV outside any `.pleitem` (`script.js`), the
@@ -3192,8 +3212,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   chooses at draw time; `currentTop()` is one function with both shapes and the page carries both playlist widgets.
   `preText()` tests the flag per codepoint, and the pretext cache key **folds the flag in** - it is keyed on the
   caller's codepoint, taken BEFORE the transform, so without that a toggle would keep serving the capped entry.
-  `WWW_CASETRANSFORM` is gone: `variables.js` emits `casetransform` from `config.store.pretextALLCAPS`, which
-  `locale.js`'s `applyCaseTransform()` already reads, so the WebUI's casing follows the option too.
+  The WebUI never case-transforms: the All Caps option (`config.store.pretextALLCAPS`) reaches only `preText()`,
+  and the stylesheet carries no `text-transform` driven by it.
 - **The numeric signal form is a percentage, not dBm.** `Display::_setRSSI()` passes `rssiPercent(rssi)` to
   `_rssi->setText(value, rssiFmt)`: 2% per dB from -100 (0%) up to -50 (100%), saturating at 100% above that, which is
   the same coarse scale the five-step bar form already uses. The wording stays the conf's `rssiFmt`, so a conf shows
@@ -3282,8 +3302,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   id - and the button itself carries `hidden group_display`, so the `act` handler unhides it only on a build with a
   display. The two gates therefore live on two elements and neither can undo the other, which is what the nesting
   is for: a build with no display compiles none of the editor's routes and the page would hide both of its own
-  halves there. It deliberately does not follow the WebUI's `group_*` conventions or load `theme.css`
-  (its colour fields must show the theme's values, not the WebUI's palette). Its script is inline, per the
+  halves there. It deliberately does not follow the WebUI's `group_*` conventions; it loads `style.css` and
+  `variables.js` like any other page, but its colour fields show the theme's own values, never the palette's.
+  Its script is inline, per the
   rule below. Two rows: "Load theme" (the source) and "Custom Theme" (the target, with Save, Delete, Export,
   Export All and Import beside it — every one of them acts on the target or the slot list, so they belong on
   its row). "Load theme" lists every id,
@@ -3569,7 +3590,33 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - Applies key-based translations to DOM and fallback behavior.
 
 ## `data/www/style.css`
-- Primary stylesheet.
+- Primary stylesheet, and the WebUI's only palette: the `:root` block at the top declares every colour
+  variable (this was `data/www/theme.css`, folded in), followed by one `:root[data-theme="N"]` block per
+  Display Theme that changes the palette.
+- A theme finished by hand carries `PERFECT` in its block title; `webuitheme.py` then never touches
+  it again. Themes 0 (the anchor design) and 1 (the restored yoRadio Gold) are locked that way.
+- Variables are named by **role**, never by the colour they happen to hold, so a theme can move one role
+  without dragging the others along. Surfaces: `--page-bg` (the browser window around the app column,
+  never themed), `--background` (the app column and the panels inside it), `--control-bg` (inputs,
+  buttons, tracks, thumbs) and `--list-bars` (zebra rows only). Text: `--main-text-1` (body and dim UI),
+  `--main-text-2`
+  (bright: meta, info, IR key legends), `--accent-text` (links, headings, station names, button labels,
+  input text), `--list-names`, `--list-urls`, `--switch-text` (the On/Off word in a knob) and
+  `--highlight-text` (text and icons on an `--icons-highlight` surface). Icons: `--icons-outline` (outlines,
+  strokes, filled accents) and `--icons-highlight` (hover/active/selected fill). Panels:
+  `--panel-gradient` / `--panel-border`, which also paint the IR remote. Unchanged: `--input-border`,
+  `--logo`, `--logo-text`, `--logo-shadow`, `--playlist-hover`.
+- `data-theme` is the theme's id in `themes.h` (`0` = ehRadio Blue & Red, `1` = ёRadio Gold, `2` = Graphite,
+  ...), written onto `<html>` by `/variables.js` before the first paint. A theme with no block - any custom
+  slot, or a built-in never mapped - inherits `:root` whole, so the default palette is the fallback by
+  construction. Adding colours for another theme is one block here and nothing else.
+- The theme paints the app column only: `#content`, `#searchcontent`/`#curatedcontent`, `#editorwrap`
+  and the SD manager's `#pleditor`. `html`, `body` and `#progress` use the fixed `--page-bg`, so a light
+  or saturated theme never floods the browser window.
+- A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
+  GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
+- The built-in blocks are generated by `src/displays/webuitheme.py` and carry a `mode=` marker; hand
+  edits are expected, and `--update` shows them as diffs before replacing a block.
 - `#info` is a one-line flex row by construction: `nowrap`, no per-item minimum widths, and `#bitinfo` the only item
   that
   flexes (centred, ellipsising). The old `min-width: 110px` per item plus `flex-wrap: wrap` is what used to push an item
@@ -3579,9 +3626,6 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - The playlist editor input carries the **same ladder as `#playlist li span.text`** (20px base, 16px at ≤375, 25px at
   600-899, 30px at 900-1200), so a name reads the same in the list and in the editor. It is not tied to the SD manager's
   `.sdname` any more; the editor's own spans and the playlist's count column already agreed at 14/12/18/21.
-
-## `data/www/theme.css`
-- Theme override variables/colors.
 
 ## `data/www/locales.json`
 - Locale-code to display-name mapping for selector.
@@ -3985,8 +4029,6 @@ behaviors:
 - **Unrenderable codepoints are memoised** in a 128-slot direct-mapped cache keyed on the codepoint *and the font
   pointer*, so a font change invalidates it for free. `preTextInvalidateCache()` is for a font whose data changes in
   place.
-- **Forced fold:** `PRETEXT_FOLDACCENT` / `PRETEXT_FOLDCYRILLIC` no longer enable the fallback (it is unconditional);
-  they now force the fold even where the glyph exists. `PRETEXT_ALLCAPS` is unchanged in intent.
 - **Cursor advance** in the two glyph branches is now defensive only (font swapped mid-frame); the old post-`preText`
   fallback and its `_writeGlyph()` recursion are gone, so `preText()` is the single place that decides what is drawn.
 - **`psframebuffer.h`** mirrors the same `_writeGlyph` logic for PSRAM-framebuffer TFT displays — any change to one must

@@ -326,6 +326,8 @@ function onMessage(event) {
         if (volSlider) { volSlider.max = data.maxVol; fillSlider(volSlider); }
       }
       Object.keys(data).forEach(key=>{
+        // The Settings page is the only place that asks for GETSCREEN, so its reply also carries the stored theme id: apply it here
+        if (key === 'themeId') document.documentElement.setAttribute('data-theme', data[key]);
         setupElement(key, data[key]);
       });
     }
@@ -371,7 +373,7 @@ function fillSlider(sl){
   const slaveid = sl.dataset.slaveid;
   const value = (sl.value-sl.min)/(sl.max-sl.min)*100;
   if(slaveid) getId(slaveid).innerText=sl.value;
-  sl.style.background = 'linear-gradient(to right, var(--accent-dark) 0%,  var(--accent-dark) ' + value + '%, var(--odd-bg-color) ' + value + '%, var(--odd-bg-color) 100%)';
+  sl.style.background = 'linear-gradient(to right, var(--icons-highlight) 0%,  var(--icons-highlight) ' + value + '%, var(--control-bg) ' + value + '%, var(--control-bg) 100%)';
 }
 function setupElement(id,value){
   // handle bitrate/codec specially

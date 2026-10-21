@@ -27,8 +27,8 @@
 //   mapping that changed the codepoint count, or that returned 0, would
 //   desynchronise measurement from drawing.  (The original foldAccent()
 //   returned 0 for every codepoint outside Latin-1 / Latin Extended-A, which
-//   destroyed Greek, Cyrillic, 0x1E9E and the bullet outright whenever
-//   PRETEXT_FOLDACCENT was enabled.)
+//   destroyed Greek, Cyrillic, 0x1E9E and the bullet outright whenever it was
+//   enabled.)
 // preTextString() below is the one place a codepoint may disappear, and only
 // for invisible modifiers - see its comment for why that is safe there.
 // ==========================================================================
@@ -207,12 +207,6 @@ uint16_t preText(uint32_t cp, const GFXfont *font) {
   const uint32_t asked = cp | (caps ? 0x80000000u : 0u);  // cache key: the caller's codepoint, plus the caps flag
 
   if (caps) cp = allCaps(cp);
-  #if defined(PRETEXT_FOLDACCENT) || defined(PRETEXT_FOLDCYRILLIC)
-    // Kept as a deliberate "force fold": take a step even where the glyph
-    // exists, for an intentionally ASCII-only display.
-    uint16_t forced = preTextFoldStep(cp);
-    if (forced != cp) cp = forced;
-  #endif
 
   if (glyphAvailable(cp, font)) { cmCountPreTextHit(); return (uint16_t)cp; }   // kept (the cheap path)
 

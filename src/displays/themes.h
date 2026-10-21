@@ -63,7 +63,6 @@ const char _themeNames[][64] PROGMEM = {
     "Monochrome (András Daradici)",
     "UltraPerfect (András Daradici)",
     "vip-cxema.org",
-    "ehRadio Blue & Red (Trip5) - New",
 };
 
 // Theme element keys and their labels - used by the WebUI editor

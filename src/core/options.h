@@ -221,12 +221,6 @@ or examine the examples in builds/trip5 and make your own!
 // #define SCROLLDELAY 5000 // delay time (ms) for widgets: meta, title1, title2 / playlist mode scroll divides by 5
 // #define SCROLLTIME 20 // time (ms) per pixel-column movement (a column of font pixels, not display pixels)
 
-/* Pre-processed Text: Need all latin accents removed from your display? */
-// These are leftovers and may not be useful anymore...
-// #define PRETEXT_FOLDACCENT
-// #define PRETEXT_FOLDCYRILLIC
-
-
 /* ============================== SPI BUSES AND PINS ============================== */
 
 /* To allow multiple devices to use the same/different SPI buses, we name them */

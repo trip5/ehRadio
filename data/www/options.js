@@ -145,6 +145,7 @@ function populateNamedDropdown(elemId, data) {
       const cmd = cmdMap[elemId] || elemId;
       websocket.send(`${cmd}=${sel.value}`);
       sel.dataset.prev = sel.value;
+      if (elemId === 'themeId') document.documentElement.setAttribute('data-theme', sel.value);
     }
   });
 }

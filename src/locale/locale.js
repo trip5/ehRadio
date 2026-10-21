@@ -46,13 +46,4 @@ function applyI18n(root) {
   // Update knob on/off labels via CSS variables (must be quoted for content property)
   document.documentElement.style.setProperty('--knob-off', '"' + t('lbl_off', 'Off') + '"');
   document.documentElement.style.setProperty('--knob-on', '"' + t('lbl_on', 'On') + '"');
-  applyCaseTransform();
-}
-
-// Apply text-transform casing based on server-injected 'casetransform' flag (from variables.js)
-function applyCaseTransform() {
-  if (typeof casetransform !== 'undefined' && casetransform) {
-    document.documentElement.style.setProperty('--tt-uppercase', 'uppercase');
-    document.documentElement.style.setProperty('--tt-lowercase', 'lowercase');
-  }
 }

@@ -29,9 +29,10 @@
 
 
 const char* const Config::wwwFiles[] = {"options.js", "script.js", "script2.js",
-                                        "logo.svg", "icon.png", "style.css", "theme.css", "rb_srvrs.json", "timezones.json",
-                                        "curated.html", "irrecord.html", "options.html", "sdmanager.html", "search.html", "updform.html",
-                                        "editor.html", "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
+                                        "logo.svg", "icon.png", "style.css", "rb_srvrs.json", "timezones.json",
+                                        "curated.html", "editor.html", "irrecord.html", "options.html",
+                                        "sdmanager.html", "search.html", "updform.html",
+                                        "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
 const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 
 const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, THEME_SLOT_FILES, LAYOUT_SLOT_FILES};

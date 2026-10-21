@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Theme and Layout Editor</title>
 <link rel="stylesheet" href="style.css">
+<script src="variables.js"></script>
 <script src="conf.js"></script>
 <style>
-  /* Only the rules this page needs.  theme.css is deliberately left out: the colour fields must show
-     the theme's own values, not the WebUI's palette, and nothing here is trying to look dressed up. */
+  /* Only the rules this page needs.  The palette is style.css's, driven by variables.js like every
+     other page; the colour fields still show the theme's own values, never the palette's. */
   #editorwrap { max-width: 900px; margin: 0 auto; padding: 10px; }
   /* Twice the body size: the two halves of the page are what the eye has to find first. */
   #editorwrap h3 { margin: 4px 0 10px; font-size: 2em; }

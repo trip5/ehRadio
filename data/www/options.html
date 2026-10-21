@@ -84,7 +84,8 @@
               </select>
             </div>
             <div class="inputwrap group_theme hidden">
-              <span class="inputtitle" data-i18n="lbl_display_theme">Display Theme</span>
+              <span class="inputtitle group_display_theme hidden" data-i18n="lbl_display_theme">Display Theme</span>
+              <span class="inputtitle group_webui_theme hidden" data-i18n="lbl_webui_theme">WebUI Theme</span>
               <select type="text" id="themeId" name="themeId">
                 <option value="">Themes Load Here</option>
               </select>
@@ -311,7 +312,7 @@
             </div>
           </div>
           <div class="flex-row last">
-            <div class="fb hl local" data-command="applylocale" data-i18n="btn_apply_changes">Apply Changes</div>
+            <div class="fb hold local" data-command="applylocale" data-i18n="btn_apply_changes">Apply Changes</div>
           </div>
         </section>
 
@@ -413,7 +414,7 @@
             </div>
           </div>
           <div class="flex-row last">
-            <div class="fb hl local" data-command="applyweather" data-i18n="btn_apply_changes">Apply Changes</div>
+            <div class="fb hold local" data-command="applyweather" data-i18n="btn_apply_changes">Apply Changes</div>
           </div>
         </section>
 
@@ -442,14 +443,14 @@
               <span class="inputtitle" data-i18n="lbl_ehdp_name">ehDP Name</span>
               <input type="text" id="ehdpname" class="text" name="ehdpname" value="" maxlength="24" />
             </div>
-            <div class="fb hl local" data-command="ehdpsave" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
+            <div class="fb hold local" data-command="ehdpsave" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
           </div>
           <div class="flex-row" id="mdnsnamerow">
             <div class="inputwrap pad">
               <span class="inputtitle" data-i18n="lbl_mdns_name_no_local">mDNS Name (do not add '.local')</span>
               <input type="text" id="mdns" class="text" name="mdnsname" value="" maxlength="24" />
             </div>
-            <div class="fb hl local" data-command="restartmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
+            <div class="fb hold local" data-command="restartmdns" style=" margin-top: 24px; height: 37px;" data-i18n="btn_save">Save</div>
           </div>
           <div class="row-title"><span data-i18n="ttl_update">Update</span></div>
           <div class="flex-row">
@@ -520,7 +521,7 @@
           <div class="flex-row last">
             <input id="file-upload" type="file" accept=".txt, .csv" hidden/>
             <div class="fb local group_system hidden" data-command="wifiexport" data-i18n="btn_export">Export</div>
-            <div class="fb hl local" data-command="wifiupload" data-i18n="btn_save_reboot">Save & Reboot</div>
+            <div class="fb local" data-command="wifiupload" data-i18n="btn_save_reboot">Save & Reboot</div>
           </div>
         </section>
 
@@ -565,7 +566,7 @@
               </div>
             </div>
             <div class="flex-row last">
-              <div class="fb hl local" data-command="applymqtt" data-i18n="btn_apply_changes">Apply Changes</div>
+              <div class="fb hold local" data-command="applymqtt" data-i18n="btn_apply_changes">Apply Changes</div>
             </div>
           </div>
         </section>
@@ -585,7 +586,7 @@
               <span class="inputtitle" data-i18n="lbl_calibrate">Calibrate (Measured mV)</span>
               <input type="number" id="battref" class="text" name="battref" value="" min="2500" max="4500" placeholder="Multimeter reading" data-i18n="lbl_battref" />
             </div>
-            <div class="fb hl local" data-command="savebattref" style="margin-top: 24px; height: 37px;" data-i18n="btn_calibrate">Calibrate</div>
+            <div class="fb hold local" data-command="savebattref" style="margin-top: 24px; height: 37px;" data-i18n="btn_calibrate">Calibrate</div>
           </div>
           <div class="flex-row center" style="padding-bottom: 0;">
             <div style="font-size:12px;color:var(--main-text-1);max-width:520px;text-align:center;">

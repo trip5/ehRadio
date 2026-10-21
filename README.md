@@ -361,7 +361,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.10.19 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), Playlist Validator, both screen fonts changeable while running, SDMMC, Boot speed improved, major work on layouts and VU (all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI, IR code overhauled (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed  |
+| 2026.10.21 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), Playlist Validator, both screen fonts changeable while running, SDMMC, Boot speed improved, major work on layouts and VU (all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI, IR code overhauled (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed  |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

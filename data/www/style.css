@@ -23,9 +23,8 @@
   --playlist-hover:     #323232;
 }
 /* Per-theme overrides, keyed by the Display Theme id: the order of _themes[] in src/displays/themes.h */
-/* webuitheme.py mode=normal anchor=0 - colours imported from src/displays/themes.h;
-   hand edits welcome, add PERFECT to lock a theme, --update compares this mode */
-/* To lock a theme from being overwritten by the tool, add PERFECT to the title. */
+/* Theme starters can be imported using the tool in /src/displays: webuitheme.py mode=normal anchor=0 */
+/* Hand edits must be made after (use the browser's dev tools), then add PERFECT to lock a theme */
 
 :root[data-theme="0"] { /* ehRadio Blue & Red (Trip5) PERFECT */
 }
@@ -341,7 +340,9 @@ input[type=range] {
       text-align: center; min-width: 100px; margin-left: 8px; margin-right: 8px; color: var(--accent-text); background: var(--control-bg);
       touch-action: manipulation; }
 @media (hover: hover) and (pointer: fine) { /* mouse only */ .fb:hover { background: var(--icons-highlight); color: var(--highlight-text); text-decoration: none; } }
-.fb.hl { background: var(--icons-highlight); color: var(--highlight-text); text-decoration: none; }
+/* A touch screen has no hover, so a button that changes something stays lit for a moment after the press
+   (script.js adds and removes the class).  Deliberately outside the hover query: the effect must work there. */
+.fb.pressed { background: var(--icons-highlight); color: var(--highlight-text); text-decoration: none; }
 .fb.done { margin-left: calc(50%); transform: translateX(-50%); margin-top: 20px; margin-bottom: 10px; max-width: 140px; }
 #playlist {
   position: relative; scroll-behavior: smooth; scrollbar-color: var(--icons-highlight) var(--background); overflow: auto; overflow-y: auto; border: solid 1px var(--icons-outline); flex: 1 1 auto; height: 0px; width: 100%;

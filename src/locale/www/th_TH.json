@@ -128,6 +128,7 @@
   "lbl_weather_api": "ผู้ให้บริการข้อมูลสภาพอากาศ",
   "lbl_webui_layout": "การจัดวางหน้าจอ",
   "lbl_webui_locale": "ภาษา WebUI",
+  "lbl_webui_theme": "ธีม WebUI",
   "lbl_while_not_playing": "ขณะไม่เล่น",
   "lbl_while_playing": "ขณะเล่น",
   "lbl_wifi_scan": "สแกนหา Wi-Fi ที่ดีที่สุดเมื่อบูต",

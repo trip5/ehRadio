@@ -163,7 +163,16 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "invertdisplay")) { config.saveValueButWait(&config.store.invertdisplay, static_cast<bool>(atoi(value)), 5000); return true; } //display.invert();
   if (cmdIs(command, "inverttitle"))   { config.saveValueButWait(&config.store.inverttitle, static_cast<bool>(atoi(value)), 5000); display.applyTheme(config.store.themeId); return true; }
   if (cmdIs(command, "layout"))        { uint8_t id = constrain(atoi(value), 0, display.getLayoutCount() - 1); config.saveValueButWait(&config.store.layoutId, id, 5000); display.applyLayout(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
-  if (cmdIs(command, "theme"))         { uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1); config.saveValueButWait(&config.store.themeId, id, 5000); display.applyTheme(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
+  if (cmdIs(command, "theme")) {
+    uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1);
+    config.saveValueButWait(&config.store.themeId, id, 5000);
+    // OLED has no display theme: the id only selects the WebUI palette, so leave the panel alone.
+    #if defined(DSP_TFT) || DBGWUI
+      display.applyTheme(id);
+    #endif
+    netserver.requestOnChange(GETACTIVE, 0);
+    return true;
+  }
   if (cmdIs(command, "sysfont"))       { uint8_t id = constrain(atoi(value), 0, display.getSystemFontCount() - 1); config.saveValueButWait(&config.store.systemFontId, id, 5000); display.applySystemFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "clockfont"))     { uint8_t id = constrain(atoi(value), 0, display.getClockFontCount() - 1); config.saveValueButWait(&config.store.clockFontId, id, 5000); display.applyClockFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }

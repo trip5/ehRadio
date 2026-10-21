@@ -128,6 +128,7 @@
   "lbl_weather_api": "Fournisseur météo",
   "lbl_webui_layout": "Mise en page de l'affichage",
   "lbl_webui_locale": "Paramètres régionaux WebUI",
+  "lbl_webui_theme": "Thème de l'interface utilisateur Web",
   "lbl_while_not_playing": "Quand non en lecture",
   "lbl_while_playing": "En lecture",
   "lbl_wifi_scan": "Scanner le meilleur Wi-Fi au démarrage",

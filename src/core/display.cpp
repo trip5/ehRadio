@@ -2020,6 +2020,11 @@ void Display::_buildThemeListJson() {
   String json = "{";
   bool first = true;
   for (uint8_t i = 0; i < themeCount(); i++) {
+    #if !defined(DSP_TFT) && !defined(DBGWUI)
+      // Custom slots are display themes.  On a panel with no display palette they would only be
+      // names with no WebUI counterpart, so the dropdown carries the built-ins alone.
+      if (i >= THEME_BUILTIN_COUNT) break;
+    #endif
     if (!themeFilled(i)) continue;
     if (!first) json += ',';
     first = false;

@@ -1097,7 +1097,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     `metaBGConfInv` layout. On OLED: color swap only. Uses conditional rendering at widget init time — no theme
     mutation.
   - `getThemeListJson()` / `getLayoutListJson()` — serve dropdown data to WebUI from PROGMEM `_themeNames[]` /
-    `_layoutNames[]`.
+    `_layoutNames[]`. On a non-TFT build (`!DSP_TFT && !DBGWUI`) the theme list stops at `THEME_BUILTIN_COUNT`:
+    custom slots are display themes with no WebUI palette, so the "WebUI Theme" dropdown offers the built-ins only.
   - `#ifndef HIDE_*` compile guards removed from `_reinitWidgets()` and `_buildPager()` — all widget init now uses
     runtime null-checks.
   - `_buildPager()` no longer calls `_reinitWidgets()` — state application is handled by `_applyState()`.
@@ -3492,6 +3493,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - online update UI progress handling
   - shared ready-aware redirect helper (`redirectWhenReady`) used by update and reboot flows
   - mode switching (`changeMode`) and its guard state (`setModeSwitching`)
+- **A press that changes something stays lit for a moment.** The `data-command` handler adds `.pressed` to any button
+  carrying `hold` and removes it after `HOLD_MS` (2 s), restarting the timer on a repeated press; `style.css` gives
+  `.pressed` exactly the hover colours, so a touch screen - which never fires `:hover` - sees the press too.
 - **A mode switch blanks the page and locks it, and the page never has to guess when it is over.** `changeMode(el)`
   flips the two mode icons, calls `setModeSwitching(true)` and only then sends `newmode=`, so the icon, the blanked
   list, the loader and the lock all happen in the same tick as the press; `setModeSwitching(true)` puts the `plloader`
@@ -3517,6 +3521,13 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - reboot and update redirect calls now explicitly apply a 1-second post-ready grace in JavaScript before navigation.
   - manual upload completion now uses a 60 second fallback, while OTA still uses 180 seconds; both can redirect early as
     soon as `/ready` reports true.
+  - WiFi "Save & Reboot" (`submitWiFi`) uploads `wifi.csv`, which the device imports before calling `ESP.restart()`, so
+    it hands the wait to `rebootSystem(...)`. The old fixed 10-second `setTimeout` guessed when the board would be back
+    and could fire while it was still down; the poll redirects the moment `/ready` answers.
+  - the reboot ceiling is 60 s and lives in `rebootSystem`'s default, so call sites pass no number. It is a ceiling only:
+    the redirect fires the moment `/ready` has been seen down and then up, and 60 s is what stops a 45 s boot from
+    navigating to a page the device is not serving yet. Uploads keep their own budgets - 60 s manual, 180 s OTA - and
+    the mDNS rename keeps 8 s because it is not a reboot.
   - mDNS rename (`restartmdns`) calls `MDNS.end()` + `MDNS.begin()` at runtime via `NetServer::restartMdns()` — no
     reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host
     with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without
@@ -3542,8 +3553,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - `afterSetupElement` hook restores current `themeId`/`layoutId` from WebSocket data
   - apply handlers for locale/weather/mqtt/wifi
   - reboot/reset/format status screen with per-action behavior:
-    - reboot/reset use ready-aware return-to-root with shorter fallback (15s)
-    - format LittleFS shows reboot status but skips automatic reload
+    - `reboot` uses ready-aware return-to-root (`rebootSystem`, 60 s ceiling, redirect as soon as `/ready` answers)
+    - `format` LittleFS shows reboot status but skips automatic reload
+    - `reset` (settings reset) does not restart the device, so it only shows the status line and reloads after 2 s
+    - `rebootSystem` keeps its `setTimeout` fallback for a page where `redirectWhenReady` is somehow absent
 
 ## `data/www/player.html`
 - Player page structure (playlist, controls, sliders, status elements).
@@ -3600,6 +3613,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   Display Theme that changes the palette.
 - A theme finished by hand carries `PERFECT` in its block title; `webuitheme.py` then never touches
   it again. Themes 0 (the anchor design) and 1 (the restored yoRadio Gold) are locked that way.
+- On a non-TFT build there is no display palette, so the same setting is labelled "WebUI Theme"
+  (`group_webui_theme`) and the `theme` command saves `themeId` without calling
+  `display.applyTheme()` - on OLED that would only repaint the panel.
 - Variables are named by **role**, never by the colour they happen to hold, so a theme can move one role
   without dragging the others along. Surfaces: `--page-bg` (the browser window around the app column,
   never themed), `--background` (the app column and the panels inside it), `--control-bg` (inputs,
@@ -3620,6 +3636,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   or saturated theme never floods the browser window.
 - A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
   GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
+- `.fb` is the flat button: `--control-bg` / `--accent-text` at rest, `--icons-highlight` / `--highlight-text` on
+  hover (mouse only) and while it carries `.pressed`, which `script.js` adds for two seconds after a press so a touch
+  screen gets the same feedback. There is no permanently highlighted variant - the old `.fb.hl` is gone, and the
+  buttons that used it (Apply Changes, Save, Calibrate, the update page's Cancel) are ordinary `.fb` buttons now.
 - The built-in blocks are generated by `src/displays/webuitheme.py` and carry a `mode=` marker; hand
   edits are expected, and `--update` shows them as diffs before replacing a block.
 - `#info` is a one-line flex row by construction: `nowrap`, no per-item minimum widths, and `#bitinfo` the only item

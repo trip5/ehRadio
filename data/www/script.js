@@ -1318,10 +1318,9 @@ function submitWiFi(){
     xhr.open("POST",`http://${hostname}/upload`,true);
     xhr.send(formData);
     fileuploadinput.value = '';
-    getId("settingscontent").innerHTML='<h2>'+t('msg_settings_saved', 'Settings saved. Rebooting...')+'</h2>';
-    getId("settingsdone").classList.add("hidden");
-    getId("navigation").classList.add("hidden");
-    setTimeout(function(){ window.location.href=`http://${hostname}/`; }, 10000);
+    // The device imports the file and restarts, so poll /ready like every other reboot rather than guessing a
+    // fixed delay: the page comes back the moment the startup services are up, and never sooner.
+    rebootSystem(t('msg_settings_saved', 'Settings saved. Rebooting...'));
   }
 }
 function playItem(target){
@@ -1369,6 +1368,14 @@ function playPreview(root) {
   if(streamUrl=='') { console.error("No stream URL available."); return; }
   
   sendStationAction(stationName, streamUrl, false);
+}
+/* A touch screen never fires :hover, so a button carrying .hold keeps its hover colours for a moment after the
+   press - long enough to be seen, short enough not to become a permanent highlight.  A second press restarts it. */
+const HOLD_MS = 2000;
+function holdPressed(el){
+  el.classList.add('pressed');
+  clearTimeout(el.holdTimer);
+  el.holdTimer = setTimeout(function(){ el.classList.remove('pressed'); }, HOLD_MS);
 }
 function continueLoading(mode){
   if(typeof mode === 'undefined' || loaded) return;
@@ -1481,6 +1488,7 @@ function continueLoading(mode){
       if (holder) { target = holder; command = holder.dataset.command; }
     }
     if (command){
+      if (target.classList.contains('hold')) holdPressed(target);
       if(target.classList.contains("local")){
         switch(command){
           case "toggle": toggleTarget(target, target.dataset.target); break;
@@ -1515,7 +1523,7 @@ function continueLoading(mode){
           case "confirm-reboot": showDangerConfirm('dz_reboot'); break;
           case "confirm-format": showDangerConfirm('dz_format'); break;
           case "confirm-reset": showDangerConfirm('dz_reset'); break;
-          case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...'), 30, true); break;
+          case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...')); break;
           case "format": websocket.send("format=1"); rebootSystem(t('msg_format_reboot', 'Format LittleFS. Rebooting...'), 0, false); break;
           case "reset":  websocket.send("reset=1"); getId("settingscontent").innerHTML=`<h2>${t('msg_reset', 'Settings reset.')}</h2>`; setTimeout(() => location.reload(), 2000); break;
           case "shuffle": toggleShuffle(); break;

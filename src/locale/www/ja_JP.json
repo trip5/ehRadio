@@ -128,6 +128,7 @@
   "lbl_weather_api": "天気プロバイダー",
   "lbl_webui_layout": "表示レイアウト",
   "lbl_webui_locale": "WebUI言語",
+  "lbl_webui_theme": "WebUIのテーマ",
   "lbl_while_not_playing": "非再生時",
   "lbl_while_playing": "再生中",
   "lbl_wifi_scan": "起動時に最適なWi-Fiをスキャン",

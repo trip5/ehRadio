@@ -564,7 +564,9 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_smaller\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
             #if defined(DSP_TFT) || DBGWUI
-              if (display.getThemeCount() > 1|| DBGWUI)         act += F("\"group_theme\",");
+              if (display.getThemeCount() > 1 || DBGWUI)        act += F("\"group_theme\",\"group_display_theme\",");
+            #else
+                                                                act += F("\"group_theme\",\"group_webui_theme\",");
             #endif
             if (((activeLayout.fullClock || activeLayout.seconds) && activeLayout.clockConf.textsize != 0) || DBGWUI)
                                                                 act += F("\"group_full_time\",");

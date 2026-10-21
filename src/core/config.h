@@ -344,6 +344,10 @@ class Config {
       else saveValue(&store.lastSdStation, newstation);
     }
     uint8_t getMode() { return store.play_mode; }
+    bool vuSourceWanted() const {
+      const bool ss = isScreensaver;
+      return (store.vumeter && !ss) || (ss && store.screensaverVU);
+    }
     FS* SDPLFS() { return _SDplaylistFS; }
     void syncSDFS();  // update _SDplaylistFS after external play_mode changes (e.g. button hold)
     bool isRTCFound() { return _rtcFound; };

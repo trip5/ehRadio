@@ -372,3 +372,32 @@ so calling it more often would add exposure to a pre-existing out-of-range read 
 
 **Files changed**: `src/libraries/I2S_Audio/Audio.cpp` — `parsePlaylist_M3U8()` and the m3u8 branch of
 `Audio::loop()`.
+
+---
+
+## Post-Graft Patch Fixes (2026-10-21)
+
+### The screensaver's VU read zero when the player VU was off
+
+**Symptom**: with `config.store.vumeter` false, the screensaver's own meter looked wrong - the bar family sat
+full, the waveform and Lissajous showed only the graticule, and the spectrum styles showed a fixed shape.
+
+**Root cause**: the audio source, not the widget, was gated on the player page's preference.
+`computeVUlevel()` returned before filling `vuLeft`/`vuRight` or publishing the capture window,
+`get_VUlevel()` returned 0, and `getWaveform()` / `getSpectrum()` returned false. The screensaver's
+`screensaverVU` option only controls whether the widget is created; it never opened the source.
+
+**Fix**: `Config::vuSourceWanted()` (in `core/config.h`) is now the one gate, and the library's four
+checks call it:
+
+```cpp
+const bool ss = isScreensaver;                       // volatile: read once
+return (store.vumeter && !ss) || (ss && store.screensaverVU);
+```
+
+While asleep the player page's setting is ignored - only the screensaver meter's own option decides -
+and while awake the player page's setting is the answer. The source therefore stops when nothing is
+showing a meter, which keeps the CPU saving the old guard was for.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`,
+`getWaveform()`, `getSpectrum()`; `src/core/config.h` - `Config::vuSourceWanted()`.

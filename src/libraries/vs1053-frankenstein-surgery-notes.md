@@ -664,6 +664,24 @@ self-healing.
 
 ---
 
+## Post-Graft Patch Fixes (2026-10-21)
+
+### The screensaver's VU read zero when the player VU was off
+
+**Symptom**: with `config.store.vumeter` false, the screensaver's meter sat full and did not track the audio.
+
+**Root cause**: `computeVUlevel()` and `get_VUlevel()` were gated on the player page's `vumeter` option. The
+screensaver's `screensaverVU` option only controls whether the widget is created; it never opened the source, so
+`get_VUlevel()` returned 0.
+
+**Fix**: both guards now call `Config::vuSourceWanted()` - see the I2S note for the rule. While asleep the player
+page's setting is ignored and `screensaverVU` decides; while awake `vumeter` decides.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`;
+`src/core/config.h` - `Config::vuSourceWanted()`.
+
+---
+
 ## Open Items
 
 1. **Mutex guards on connect functions** (Step 9 deferred): `connecttohost()` and `connecttoFS()` should be wrapped with `mutex_playAudioData` to prevent race conditions. Same pattern Maleksm used.

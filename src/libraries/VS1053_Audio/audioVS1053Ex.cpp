@@ -2699,7 +2699,7 @@ static uint8_t vuDbToAmp(uint8_t db) {
 
 void Audio::computeVUlevel() {
   if(!VS_PATCH_ENABLE) return;
-  if(!_vuInitalized || !config.store.vumeter) return;
+  if(!_vuInitalized || !config.vuSourceWanted()) return;
 
   /* Read ceiling.  This is only ever called from get_VUlevel(), i.e. from the display task, so
      without a gate the VU sample rate would be whatever the panel refresh happens to be - which is
@@ -2756,7 +2756,7 @@ void Audio::computeVUlevel() {
 
 uint16_t Audio::get_VUlevel(uint16_t dimension){
   if(!VS_PATCH_ENABLE) return 0;
-  if(!_vuInitalized || !config.store.vumeter) return 0;
+  if(!_vuInitalized || !config.vuSourceWanted()) return 0;
   computeVUlevel();
   /* vuLeft/vuRight are amplitudes, so this is the same map the I2S path uses.  The reference is
      clamped to 1 because config.vuThreshold is zeroed on stop and on title change while map()

@@ -5300,7 +5300,7 @@ void Audio::setI2SCommFMT_LSB(bool commFMT) {
 }
 //****************************************************************************************
 void Audio::computeVUlevel(int16_t sample[2]) {
-  if(!config.store.vumeter) return;						// guard
+  if(!config.vuSourceWanted()) return;						// guard
     static uint8_t sampleArray[2][4][8] = {0};
     static uint8_t cnt0 = 0, cnt1 = 0, cnt2 = 0, cnt3 = 0, cnt4 = 0;
     static bool    f_vu = false;
@@ -5374,7 +5374,7 @@ void Audio::computeVUlevel(int16_t sample[2]) {
 }
 //****************************************************************************************
 uint16_t Audio::get_VUlevel(uint16_t dimension){
-  if(!config.store.vumeter || config.vuThreshold==0) return 0;
+  if(!config.vuSourceWanted() || config.vuThreshold==0) return 0;
   uint8_t L = map(vuLeft, config.vuThreshold, 0, 0, dimension);
   uint8_t R = map(vuRight, config.vuThreshold, 0, 0, dimension);
   return (L << 8) | R;
@@ -5409,7 +5409,7 @@ void Audio::_capturePublish() {
 /* Interleaved L/R, oldest first and newest last, which is the order both sample styles want. */
 bool Audio::getWaveform(int16_t *out, uint16_t n) {
   if (!out || !n || n > VU_CAPTURE_SAMPLES) return false;
-  if (!config.store.vumeter) return false;
+  if (!config.vuSourceWanted()) return false;
   const uint32_t seq = _capSeq;
   if (!seq || (seq & 1)) return false;                  // never published, or a publish is in flight
   const uint16_t first = VU_CAPTURE_SAMPLES - n;        // the newest n samples sit at the end
@@ -5478,7 +5478,7 @@ static void vuFft(float *d, int n, const float *tw) {
 bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
   const int N = VU_CAPTURE_SAMPLES;
   if (!bands || !n || n > VU_SPECTRUM_MAX_CHANNELS) return false;
-  if (!config.store.vumeter) return false;
+  if (!config.vuSourceWanted()) return false;
   const uint32_t seq = _capSeq;
   if (!seq || (seq & 1)) return false;                  // never published, or a publish is in flight
 

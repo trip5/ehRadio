@@ -448,6 +448,11 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   must always be on after power-on, so a standby/blank `false` must never be restored from NVS; persisting it would
   present as a "bricked" (blank) device to a normal user. It is still reported to the WebUI through `GETSCREEN` and
   drives the MQTT off-state token, but those read the live runtime value only.
+- `Config::vuSourceWanted()` is the one gate the audio libraries use to decide whether to compute VU/sample data:
+  `(store.vumeter && !isScreensaver) || (isScreensaver && store.screensaverVU)`. While awake the player page's
+  setting decides; while asleep only the screensaver meter's own option does. The split exists because the
+  screensaver meter is independent of the player page's, and gating the source on `store.vumeter` alone made the
+  screensaver meter read zero. `isScreensaver` is volatile, so the helper reads it once.
 - Legacy compatibility parameters (`commit`, `force`, and string `size_t N`) were removed.
 - String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short
   source strings.

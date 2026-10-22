@@ -6,6 +6,7 @@
 #include "config.h"
 #include "controls.h"
 #include "display.h"
+#include "../displays/dspcore.h"
 #include "logging.h"
 #include "mqtt.h"
 #include "netserver.h"
@@ -166,8 +167,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "theme")) {
     uint8_t id = constrain(atoi(value), 0, display.getThemeCount() - 1);
     config.saveValueButWait(&config.store.themeId, id, 5000);
-    // OLED has no display theme: the id only selects the WebUI palette, so leave the panel alone.
-    #if defined(DSP_TFT) || DBGWUI
+    #if defined(DSP_TFT)
       display.applyTheme(id);
     #endif
     netserver.requestOnChange(GETACTIVE, 0);

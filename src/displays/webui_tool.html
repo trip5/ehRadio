@@ -1,0 +1,1348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ehRadio WebUI theme builder</title>
+
+<!-- The real stylesheet, by relative path: this file lives two levels below data/www. -->
+<link rel="stylesheet" href="../../data/www/style.css">
+
+<style>
+/* ==========================================================================================
+   THE TOOL'S OWN CHROME IS HARD-CODED, DELIBERATELY.
+   The help column, the table, the output block and the sample captions are the instrument, not
+   the subject: a theme with dark text on a light page (theme 6) made the editor unreadable, so
+   none of them reads a palette variable. The preview samples on the right and the swatches
+   themselves still come from data/www/style.css - that is the whole point of the page.
+
+   The real pages are one screen tall and scroll their own boxes; here the same markup is
+   stacked in one long document, so a few heights are relaxed at the bottom of this block.
+   ========================================================================================== */
+:root {
+  --tool-bg:     #1b1b1d;
+  --tool-panel:  #26262a;
+  --tool-fg:     #e6e6e6;
+  --tool-strong: #ffffff;
+  --tool-dim:    #a8a8a8;
+  --tool-line:   #4a4a4e;
+  --tool-code:   #d8d8d8;
+  --tool-accent: #ffb347;
+}
+body { height: auto; padding: 0; }
+
+.sampler-help { padding: 0; font-size: 18px; line-height: 1.55; color: var(--tool-fg); user-select: text; }
+.sampler-help h1 { margin: 0 0 6px 0; padding: 0; font-size: 28px; text-align: left; color: var(--tool-strong); }
+.sampler-help p { margin: 6px 0; }
+.sampler-help ol { list-style: decimal; margin: 4px 0 10px 22px; padding: 0; }
+.sampler-help li { margin: 4px 0; }
+.sampler-help code { font-family: Consolas, "Courier New", monospace; font-size: 15px; color: var(--tool-code); }
+.sampler-help a { color: var(--tool-accent); }
+.sampler-help b { color: var(--tool-strong); }
+.sampler-help .fineprint { margin-top: 12px; padding-top: 8px; font-size: 16px;
+                           border-top: 1px dashed var(--tool-line); }
+
+.sampler-help h2 { margin: 20px 0 6px 0; padding: 0; font-size: 20px; text-align: left; color: var(--tool-strong); }
+.roles { width: 100%; border-collapse: collapse; margin: 6px 0 10px 0; font-size: 18px; }
+.roles th, .roles td { padding: 4px 8px; text-align: left; vertical-align: top;
+                       border-bottom: 1px solid var(--tool-line); }
+/* A family head is a boxed sub-heading, so the groups read as groups. */
+.roles tr.fam td { padding: 10px 4px 6px 4px; color: var(--tool-strong); background: var(--tool-panel);
+                   border-top: 1px solid var(--tool-line); border-bottom: 1px solid var(--tool-line); }
+.roles tr.fam td:first-child { border-left: 1px solid var(--tool-line); border-radius: 6px 0 0 6px;
+                               padding-left: 8px; }
+.roles tr.fam td:last-child { border-right: 1px solid var(--tool-line); border-radius: 0 6px 6px 0;
+                              padding-right: 8px; }
+.roles tr.fam code { color: var(--tool-strong); font-weight: bold; }
+.roles th { color: var(--tool-strong); font-weight: bold; }
+.roles td:first-child { white-space: nowrap; }
+.roles code { font-family: Consolas, "Courier New", monospace; font-size: 16px; color: var(--tool-code); }
+.roles td.sw { width: 30px; }
+
+/* LAYOUT - the help column on the left, the sample pages on the right in two columns.
+   Every sample is its own app column (pagewrap); the page-bg shows between them, as it does on the device.
+
+   THE FRAME AROUND A SAMPLE IS THE TOOL'S, SO IT IS HARDCODED - AND A SAMPLE MUST BE A DIV, NOT A SECTION ELEMENT.
+   `style.css` has a bare `section {}` rule (the settings card: a `--panel-border` ring, card padding and
+   `background-image: linear-gradient(--panel-background, --panel-gradient)`). A frame marked up as a `section`
+   therefore inherited the theme's settings-card wash and looked as if the whole WebUI were gradiented. It is not:
+   `section` exists only on options.html's cards and editor.html's two boxes, and the Settings sample below still
+   contains a real one, so the wash is previewed where it genuinely appears. The ring here is a fixed dark grey
+   and the surround is #000, which is what `--page-bg` always holds, so no palette variable can repaint a frame. */
+.layout { display: grid; grid-template-columns: minmax(420px, 560px) minmax(0, 1fr); gap: 20px;
+          max-width: 1900px; margin: 0 auto; padding: 20px 18px 40px 18px; align-items: start; }
+.helpcol { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; padding: 0 16px 20px 0;
+           background: var(--tool-bg); color: var(--tool-fg); }
+.samples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.sample { display: flex; flex-direction: column; min-width: 0; padding: 10px; background: #000; border-radius: 12px; }
+.sample.wide { grid-column: 1 / -1; }
+.caption { padding: 0 0 6px 2px; font-size: 13px; font-weight: bold; letter-spacing: .06em;
+           color: var(--tool-dim); }
+.pagewrap { width: 100%; padding: 12px 14px 18px 14px; background: var(--panel-background);
+            border: 1px solid #323232; border-radius: 8px; }
+.sample.wide .pagewrap { max-width: 960px; margin: 0 auto; }
+.narrow { max-width: 580px; margin: 0 auto; }
+
+/* Two page columns need ~2 x 470 px beside the help column, so they fold to one below ~1580 px. */
+@media (max-width: 1580px) {
+  .samples { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 980px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .helpcol { position: static; max-height: none; overflow: visible; padding-right: 0; }
+}
+
+.stage { position: relative; height: 140px; margin: 8px 0 12px 0; overflow: hidden;
+         border: 1px solid #323232; border-radius: 8px; }
+
+/* FLOW RELAXATIONS - the only rules that touch the real elements, and none of them is a colour.
+   A one-screen page lays these boxes out at 100% or 0 height; in a long document they must grow. */
+#playerwrap, #equalizerwrap, #pleditor, #pleditorcontent, #playlist,
+#settingswrap, #searchcontent, #curatedcontent { height: auto; }
+#equalizerwrap { flex: 0 0 auto; }
+#playlist { max-height: 340px; }                 /* still a scroller, just not a one-screen one */
+#pleditorwrap { position: static; }              /* the editor is an overlay on the device; here it flows */
+#pleditorcontent { flex: 0 0 auto; max-height: 340px; }
+#settingswrap { overflow: visible; }
+/* The equaliser popup (#equalizerbg on the device) is an absolute overlay there, so it cannot be reused as-is:
+   an id rule would win over any class and it would cover the player again.  Here it is a sample of its own
+   beside the Player, framed on the page background, so --eq-label-text, the sliders and the OK button all have
+   something real to paint. */
+#samplereq { width: 340px; max-width: 100%; flex: 0 0 auto; padding: 10px 12px 14px 12px;
+             border: 1px solid #323232; border-radius: 10px; background: var(--panel-background); }
+#samplereq #equalizer { padding: 4px 8px; box-shadow: none; }
+#sample-eq .pagewrap { display: flex; justify-content: center; align-items: flex-start; }
+
+/* ============================ TOOL: the table is the editor ============================
+   The circles carry no colour of their own; the script paints them from the live palette, and
+   everything around them stays on the tool's own greys. */
+.roles td.sw { white-space: nowrap; }
+.roles button.circle { width: 20px; height: 20px; padding: 0; vertical-align: middle; cursor: pointer;
+                       border: 1px solid var(--tool-line); border-radius: 50%; }
+.roles button.circle.head { width: 26px; height: 26px; border: 4px double var(--tool-accent); }
+.roles button.circle.set { box-shadow: 0 0 0 3px var(--tool-strong); }
+.roles button.circle.split { box-shadow: 0 0 0 3px var(--tool-accent); }
+.roles a.rolelink { color: inherit; text-decoration: none; cursor: pointer; border-bottom: 1px dotted currentColor; }
+.roles a.rolelink:hover { color: var(--tool-accent); }
+.roles tr.splitrow a.rolelink { color: var(--tool-strong); }
+.roles tr.splitrow a.rolelink::after { content: " \2022 split"; font-size: 13px; color: var(--tool-accent); }
+.roles button.rejoin { display: none; margin-left: 6px; padding: 0 4px; font-family: inherit; font-size: 14px;
+                       line-height: 18px; color: var(--tool-strong); background: var(--tool-panel);
+                       border: 1px solid var(--tool-line); border-radius: 5px; cursor: pointer; }
+.roles button.rejoin:hover { border-color: var(--tool-accent); }
+.roles tr.setrow button.rejoin { display: inline-block; }
+.jump-hit { outline: 3px solid var(--tool-accent); outline-offset: 3px; }
+/* The block under the table */
+.outp { border-top: 1px dashed var(--tool-line); margin-top: 16px; padding-top: 10px; }
+.outp .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.outp label { font-size: 16px; color: var(--tool-dim); }
+.outp select, .outp input[type=number] { font-family: Times, "Times New Roman", serif; font-size: 16px;
+                                         color: var(--tool-fg); background: var(--tool-panel);
+                                         border: 2px solid var(--tool-line); border-radius: 6px;
+                                         padding: 3px 6px; width: 5em; }
+.outp button { font-family: Times, "Times New Roman", serif; font-size: 16px;
+               color: var(--tool-strong); background: var(--tool-panel);
+               border: 2px solid var(--tool-line); border-radius: 6px;
+               padding: 3px 10px; cursor: pointer; }
+.outp button:hover { border-color: var(--tool-accent); }
+.outp button:active { background: var(--tool-accent); color: #1b1b1d; }
+.outp select { max-width: 100%; }
+#loadnote { font-size: 14px; color: var(--tool-dim); }
+#toolout { width: 100%; box-sizing: border-box; min-height: 170px; margin: 4px 0; resize: vertical;
+           font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.45;
+           color: var(--tool-code); background: var(--tool-panel);
+           border: 1px solid var(--tool-line); border-radius: 6px; padding: 8px; }
+#outnote { font-size: 14px; color: var(--tool-dim); }
+/* The one shared colour input. It is parked at the circle that was clicked, so the popup opens beside it. */
+#picker { position: fixed; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
+</style>
+</head>
+
+<body>
+
+<div class="layout"><header class="sampler-help helpcol">
+  <h1>ehRadio WebUI theme builder</h1>
+
+  <p><b>Why this file exists.</b> Every colour the WebUI uses is a CSS variable declared in
+  <code>data/www/style.css</code>, and most of them are used on several pages. Editing one in DevTools on a real
+  page loses the change as soon as you go to another page, because that page reloads the stylesheet. This page
+  paints a sample of every kind of coloured thing and puts the whole palette beside it, so one edit can be judged
+  everywhere at once - and it is a <b>theme builder</b>: pick the colours here, copy the block out.</p>
+
+  <p><b>How to use it.</b></p>
+  <ol>
+    <li>Open this file in a browser - double-clicking is enough, no server is needed, because the stylesheet is
+      linked by relative path.</li>
+    <li><b>Click a colour circle</b> in the table to open the colour picker. Every sample repaints while you drag;
+      <b>OK keeps the colour and Cancel puts it back</b>. The circle on a <b>family head</b> - the boxed row -
+      moves that whole family at once and locks it.</li>
+    <li><b>Click a variable name</b> to jump to the first element on the right that uses that colour. A head jumps
+      to a member of its family, so it lands where the colour really shows.</li>
+    <li><b>Split a single member</b> by picking a colour on it after its family was set: it stops following the
+      head and the row is marked <i>split</i>. The &#8635; beside its circle puts it back in the family; the one
+      beside a <b>family head</b>'s circle resets that whole family, head and splits together.</li>
+    <li><b>Start from an existing theme</b> by typing its id under the table and pressing Load. The id is applied
+      exactly as the device applies it, so you get whatever <code>style.css</code> holds for that slot - no names
+      are kept here, and every slot the file may gain later works without touching this page. An id with no block
+      comes back as <code>:root</code>, and the note tells you how many colours differed.</li>
+    <li><b>Copy the block</b> and paste it into <code>data/www/style.css</code>, replacing <code>X</code> with the
+      theme's id and the name in the comment. Then run
+      <code>py src/displays/webuitheme.py --deflate</code> so it is folded back to its shortest form.</li>
+  </ol>
+
+  <p><b>About the colours you see.</b> The circles write inline custom properties onto
+  <code>&#60;html&#62;</code>, which beat the <code>:root</code> block by order, so the preview changes while every
+  rule, hover and layout still comes from <code>style.css</code> - nothing is duplicated there. This column, the
+  table and the block below are painted with fixed greys of their own, so no theme can make the tool unreadable
+  while you work on it. The block in the output holds only what you changed: a head line appears while two or more
+  members still follow it, a member that was split off gets its own line, and a family whose members were all set
+  one by one loses its head line altogether. <b>Reset all to :root</b> removes every inline value, so the preview
+  is the <code>:root</code> palette again - the base every theme block is written against.</p>
+
+  <p class="fineprint"><b>About the logo.</b> The logo in the <i>Player</i> sample is the real
+  <code>data/www/logo.svg</code>, inlined into this document. That is deliberate and it is also what the device does:
+  <code>loadLogoThen()</code> fetches the file and assigns it to <code>#logo</code>, because the SVG paints itself
+  with <code>var(--logo)</code>, <code>var(--logo-shadow)</code> and <code>var(--logo-text)</code> - and an
+  <code>&#60;img src="logo.svg"&#62;</code> is a document of its own, so it cannot see this page's variables. The
+  inline copy is a snapshot: if the artwork changes, paste the new file over the logo block again.
+  <b>About the layout.</b> The real pages are exactly one screen tall and scroll their own boxes. The markup here is
+  the same, but a handful of heights at the top of this file are relaxed so each sample grows naturally inside its
+  column - those rules are layout only, and the colours still come from the stylesheet alone. Narrow windows fold
+  the samples to one column, then the help column moves to the top. <b>The dark grey ring around a sample, and the
+  black behind it, are the tool's and hardcoded</b> - black is what <code>--page-bg</code> always holds, so the
+  surround reads as the browser window around a page. The one wash you can see, inside a card in the
+  <i>Settings</i> sample, is the WebUI's own: <code>section</code> is the settings card, and it exists on no other
+  page.
+  <b>About the IR remote.</b> The remote graphic in the <i>IR recorder</i> sample is painted with fixed colours
+  rather than variables: it is hardware, it looks the same in every theme, and editing the palette changes nothing
+  there. The recording rows beside it do follow the palette - an unselected row is a flat button at rest and the
+  selected row is that same button pressed - so the button roles appear in both states side by side.</p>
+
+  <h2>Every variable, by family</h2>
+  <p>The palette is nine families plus a few colours that stand alone. A family head - the bold name above each
+  group - holds the one colour, and every member under it points straight at that head, so moving a family is one
+  edit and a theme splits a member by declaring that member. A head is never painted by a rule: it exists only in
+  <code>:root</code>, which is why the heads are bold and carry no swatch of their own. The swatch beside a member
+  is that member painted with itself; the description says where you will see it.</p>
+  <p>A theme block may set a head instead of listing its members: <code>--outlines: #e3d25f</code> inside a
+  <code>:root[data-theme="1"]</code> block moves all seven outline roles at once. That is how a derived theme
+  stays short - and <code>webuitheme.py --deflate</code> folds any block back into that form, leaving only the
+  members that deliberately differ.</p>
+  <p>63 declarations in all: <b>9 family heads</b> and <b>54 roles</b>, of which 51 may be themed and three are
+  fixed (<code>--page-bg</code>, <code>--list-bars</code>, <code>--playlist-hover</code>).</p>
+
+  <table class="roles" id="roles">
+    <thead>
+      <tr><th>Variable</th><th>Colour</th><th>Where you see it, and what it does</th></tr>
+    </thead>
+    <tbody>
+      <tr class="fam"><td><b>On their own</b></td><td class="sw"></td><td>Colours with no family: a rule paints each one directly, so each has its own arrow.</td></tr>
+      <tr data-role="input-border"><td><a class="rolelink" data-name="input-border" href="#"><code>--input-border</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-border" style="background: var(--input-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields and dropdowns</code> &mdash; The outline of a text field or dropdown.</td></tr>
+      <tr data-role="list-bars"><td><a class="rolelink" data-name="list-bars" href="#"><code>--list-bars</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-bars" style="background: var(--list-bars)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>odd playlist rows, odd search rows</code> &mdash; The zebra stripe behind every other row. Fixed: never themed.</td></tr>
+      <tr data-role="list-names"><td><a class="rolelink" data-name="list-names" href="#"><code>--list-names</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-names" style="background: var(--list-names)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor name field, station names</code> &mdash; The name column of the playlist editor.</td></tr>
+      <tr data-role="logo"><td><a class="rolelink" data-name="logo" href="#"><code>--logo</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo" style="background: var(--logo)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#eh and its gradient</code> &mdash; The "eh" of the logo.</td></tr>
+      <tr data-role="logo-shadow"><td><a class="rolelink" data-name="logo-shadow" href="#"><code>--logo-shadow</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo-shadow" style="background: var(--logo-shadow)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>logo gradient start</code> &mdash; The darker end of the logo gradient.</td></tr>
+      <tr data-role="logo-text"><td><a class="rolelink" data-name="logo-text" href="#"><code>--logo-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo-text" style="background: var(--logo-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#radio</code> &mdash; The "radio" wordmark.</td></tr>
+      <tr data-role="page-bg"><td><a class="rolelink" data-name="page-bg" href="#"><code>--page-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="page-bg" style="background: var(--page-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>html, body, #progress</code> &mdash; The browser window around the app column. Fixed: never themed.</td></tr>
+      <tr data-role="panel-gradient"><td><a class="rolelink" data-name="panel-gradient" href="#"><code>--panel-gradient</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-gradient" style="background: var(--panel-gradient)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards</code> &mdash; The subtle wash at the bottom of a settings card.</td></tr>
+      <tr data-role="playlist-hover"><td><a class="rolelink" data-name="playlist-hover" href="#"><code>--playlist-hover</code></a></td><td class="sw"><button type="button" class="circle" data-name="playlist-hover" style="background: var(--playlist-hover)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist row hover</code> &mdash; A playlist row under the mouse. Fixed: never themed.</td></tr>
+      <tr class="fam" data-head="surfaces"><td><a class="rolelink" data-name="surfaces" href="#"><code>--surfaces</code></a></td><td class="sw"><button type="button" class="circle head" data-name="surfaces" style="background: var(--surfaces)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The dark surfaces the app is drawn on.</td></tr>
+      <tr data-role="panel-background"><td><a class="rolelink" data-name="panel-background" href="#"><code>--panel-background</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-background" style="background: var(--panel-background)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>app column, panels, even list rows</code> &mdash; The backdrop of every page: the column behind the player, the settings cards, the list rows.</td></tr>
+      <tr data-role="scrollbar-track"><td><a class="rolelink" data-name="scrollbar-track" href="#"><code>--scrollbar-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="scrollbar-track" style="background: var(--scrollbar-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>the five scrollables</code> &mdash; The groove behind a scrollbar thumb.</td></tr>
+      <tr data-role="switch-track"><td><a class="rolelink" data-name="switch-track" href="#"><code>--switch-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-track" style="background: var(--switch-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; A switch in its off state.</td></tr>
+      <tr class="fam" data-head="edges"><td><a class="rolelink" data-name="edges" href="#"><code>--edges</code></a></td><td class="sw"><button type="button" class="circle head" data-name="edges" style="background: var(--edges)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The card outline and the scrollbar thumb.</td></tr>
+      <tr data-role="panel-border"><td><a class="rolelink" data-name="panel-border" href="#"><code>--panel-border</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-border" style="background: var(--panel-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards, scrollbars, recorder badge</code> &mdash; The edges of a settings card and its reset button, of a scrollbar thumb, and of the badge beside the recorder title.</td></tr>
+      <tr data-role="scrollbar-thumb"><td><a class="rolelink" data-name="scrollbar-thumb" href="#"><code>--scrollbar-thumb</code></a></td><td class="sw"><button type="button" class="circle" data-name="scrollbar-thumb" style="background: var(--scrollbar-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, settings, search, curated</code> &mdash; The draggable part of a scrollbar.</td></tr>
+      <tr class="fam" data-head="fills"><td><a class="rolelink" data-name="fills" href="#"><code>--fills</code></a></td><td class="sw"><button type="button" class="circle head" data-name="fills" style="background: var(--fills)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Every fill that is not a highlight: controls, inputs, dropdowns, meter grooves.</td></tr>
+      <tr data-role="button-fill"><td><a class="rolelink" data-name="button-fill" href="#"><code>--button-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-fill" style="background: var(--button-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, unselected IR recorder row</code> &mdash; The body of a flat button.</td></tr>
+      <tr data-role="control-bg"><td><a class="rolelink" data-name="control-bg" href="#"><code>--control-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="control-bg" style="background: var(--control-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>checkmark, SD icon button</code> &mdash; A generic control surface for widgets that are neither a button nor an input.</td></tr>
+      <tr data-role="editor-grid"><td><a class="rolelink" data-name="editor-grid" href="#"><code>--editor-grid</code></a></td><td class="sw"><button type="button" class="circle" data-name="editor-grid" style="background: var(--editor-grid)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells, SD size divider</code> &mdash; The thin grid between the playlist editor's cells.</td></tr>
+      <tr data-role="input-fill"><td><a class="rolelink" data-name="input-fill" href="#"><code>--input-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-fill" style="background: var(--input-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; The inside of a text field.</td></tr>
+      <tr data-role="meter-track"><td><a class="rolelink" data-name="meter-track" href="#"><code>--meter-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-track" style="background: var(--meter-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The empty part of a meter.</td></tr>
+      <tr data-role="select-fill"><td><a class="rolelink" data-name="select-fill" href="#"><code>--select-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="select-fill" style="background: var(--select-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The inside of a dropdown.</td></tr>
+      <tr class="fam" data-head="outlines"><td><a class="rolelink" data-name="outlines" href="#"><code>--outlines</code></a></td><td class="sw"><button type="button" class="circle head" data-name="outlines" style="background: var(--outlines)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The metal: rings, knobs and icon strokes.</td></tr>
+      <tr data-role="button-outline"><td><a class="rolelink" data-name="button-outline" href="#"><code>--button-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-outline" style="background: var(--button-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The ring around a flat button, in both of its states.</td></tr>
+      <tr data-role="icons-outline"><td><a class="rolelink" data-name="icons-outline" href="#"><code>--icons-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="icons-outline" style="background: var(--icons-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb ring, small glyphs</code> &mdash; Icon strokes and the ring around round icon buttons.</td></tr>
+      <tr data-role="list-outline"><td><a class="rolelink" data-name="list-outline" href="#"><code>--list-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-outline" style="background: var(--list-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, search and curated wraps</code> &mdash; The box around a scrolling list.</td></tr>
+      <tr data-role="meter-outline"><td><a class="rolelink" data-name="meter-outline" href="#"><code>--meter-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-outline" style="background: var(--meter-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The ring around a meter.</td></tr>
+      <tr data-role="spinner-ring"><td><a class="rolelink" data-name="spinner-ring" href="#"><code>--spinner-ring</code></a></td><td class="sw"><button type="button" class="circle" data-name="spinner-ring" style="background: var(--spinner-ring)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#loader, .plloader</code> &mdash; The spinning ring while something loads.</td></tr>
+      <tr data-role="switch-thumb"><td><a class="rolelink" data-name="switch-thumb" href="#"><code>--switch-thumb</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-thumb" style="background: var(--switch-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, checkmark</code> &mdash; The moving part of a switch, and the ring and dot of the file-input checkmark.</td></tr>
+      <tr data-role="warning-outline"><td><a class="rolelink" data-name="warning-outline" href="#"><code>--warning-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="warning-outline" style="background: var(--warning-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleditorwarning</code> &mdash; The ring around "Save to keep changes!".</td></tr>
+      <tr class="fam" data-head="highlights"><td><a class="rolelink" data-name="highlights" href="#"><code>--highlights</code></a></td><td class="sw"><button type="button" class="circle head" data-name="highlights" style="background: var(--highlights)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>What a hovered, pressed or selected control turns into.</td></tr>
+      <tr data-role="button-active-fill"><td><a class="rolelink" data-name="button-active-fill" href="#"><code>--button-active-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-active-fill" style="background: var(--button-active-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; What a flat button turns while it is hovered, or holds for two seconds after a press.</td></tr>
+      <tr data-role="highlight-fill"><td><a class="rolelink" data-name="highlight-fill" href="#"><code>--highlight-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="highlight-fill" style="background: var(--highlight-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active</code> &mdash; The fill behind a hovered or selected icon button; the other highlight roles are the same colour by default.</td></tr>
+      <tr data-role="list-active-bg"><td><a class="rolelink" data-name="list-active-bg" href="#"><code>--list-active-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-active-bg" style="background: var(--list-active-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row, editor play glyph hover</code> &mdash; The row that is playing.</td></tr>
+      <tr data-role="meter-fill"><td><a class="rolelink" data-name="meter-fill" href="#"><code>--meter-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-fill" style="background: var(--meter-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The filled part of a slider or progress bar.</td></tr>
+      <tr data-role="switch-track-on"><td><a class="rolelink" data-name="switch-track-on" href="#"><code>--switch-track-on</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-track-on" style="background: var(--switch-track-on)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; A switch in its on state.</td></tr>
+      <tr class="fam" data-head="actives"><td><a class="rolelink" data-name="actives" href="#"><code>--actives</code></a></td><td class="sw"><button type="button" class="circle head" data-name="actives" style="background: var(--actives)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The ink on anything lit: a button label, an icon glyph, the playing row, a switch that is on.</td></tr>
+      <tr data-role="button-active-text"><td><a class="rolelink" data-name="button-active-text" href="#"><code>--button-active-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-active-text" style="background: var(--button-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; The label on that fill.</td></tr>
+      <tr data-role="icon-active-glyph"><td><a class="rolelink" data-name="icon-active-glyph" href="#"><code>--icon-active-glyph</code></a></td><td class="sw"><button type="button" class="circle" data-name="icon-active-glyph" style="background: var(--icon-active-glyph)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active, .pleplay hover, SD manager icon buttons</code> &mdash; The glyph on an icon button that is lit by a highlight fill.</td></tr>
+      <tr data-role="list-active-text"><td><a class="rolelink" data-name="list-active-text" href="#"><code>--list-active-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-active-text" style="background: var(--list-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row</code> &mdash; The station name in the playing row.</td></tr>
+      <tr data-role="switch-text"><td><a class="rolelink" data-name="switch-text" href="#"><code>--switch-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-text" style="background: var(--switch-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; The word "On" inside a switch.</td></tr>
+      <tr class="fam" data-head="labels"><td><a class="rolelink" data-name="labels" href="#"><code>--labels</code></a></td><td class="sw"><button type="button" class="circle head" data-name="labels" style="background: var(--labels)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Labels and headings: text at full strength.</td></tr>
+      <tr data-role="button-text"><td><a class="rolelink" data-name="button-text" href="#"><code>--button-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-text" style="background: var(--button-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The button label at rest, and the row's clear cross.</td></tr>
+      <tr data-role="heading-text"><td><a class="rolelink" data-name="heading-text" href="#"><code>--heading-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="heading-text" style="background: var(--heading-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>h2, .sectiontitle, page titles</code> &mdash; Page and section titles.</td></tr>
+      <tr data-role="input-text"><td><a class="rolelink" data-name="input-text" href="#"><code>--input-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-text" style="background: var(--input-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; Text typed into a field.</td></tr>
+      <tr data-role="link-text"><td><a class="rolelink" data-name="link-text" href="#"><code>--link-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="link-text" style="background: var(--link-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>links, nav hover</code> &mdash; Link text.</td></tr>
+      <tr data-role="select-text"><td><a class="rolelink" data-name="select-text" href="#"><code>--select-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="select-text" style="background: var(--select-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The wording in a dropdown.</td></tr>
+      <tr data-role="station-name"><td><a class="rolelink" data-name="station-name" href="#"><code>--station-name</code></a></td><td class="sw"><button type="button" class="circle" data-name="station-name" style="background: var(--station-name)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#nameset, td.name</code> &mdash; The playing station's name, and station names in results.</td></tr>
+      <tr class="fam" data-head="infotexts"><td><a class="rolelink" data-name="infotexts" href="#"><code>--infotexts</code></a></td><td class="sw"><button type="button" class="circle head" data-name="infotexts" style="background: var(--infotexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Info and secondary text: the bright tier.</td></tr>
+      <tr data-role="eq-label-text"><td><a class="rolelink" data-name="eq-label-text" href="#"><code>--eq-label-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="eq-label-text" style="background: var(--eq-label-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>equalizer band labels</code> &mdash; The Hz labels in the equaliser popup.</td></tr>
+      <tr data-role="info-text"><td><a class="rolelink" data-name="info-text" href="#"><code>--info-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="info-text" style="background: var(--info-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#info, RSSI bars</code> &mdash; The player's info line: bitrate, signal, volume and battery together, as one style.</td></tr>
+      <tr data-role="list-urls"><td><a class="rolelink" data-name="list-urls" href="#"><code>--list-urls</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-urls" style="background: var(--list-urls)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor URL cells</code> &mdash; Stream URLs in the playlist editor.</td></tr>
+      <tr data-role="small-text"><td><a class="rolelink" data-name="small-text" href="#"><code>--small-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="small-text" style="background: var(--small-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#copy footer</code> &mdash; The "powered by" line under every page.</td></tr>
+      <tr data-role="meta-text"><td><a class="rolelink" data-name="meta-text" href="#"><code>--meta-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="meta-text" style="background: var(--meta-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#meta</code> &mdash; The stream format line under the station name.</td></tr>
+      <tr class="fam" data-head="maintexts"><td><a class="rolelink" data-name="maintexts" href="#"><code>--maintexts</code></a></td><td class="sw"><button type="button" class="circle head" data-name="maintexts" style="background: var(--maintexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Main text: the quiet tier.</td></tr>
+      <tr data-role="caption-text"><td><a class="rolelink" data-name="caption-text" href="#"><code>--caption-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="caption-text" style="background: var(--caption-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#irrecordcaption, #previewinfo, battery hint</code> &mdash; The small explanatory lines.</td></tr>
+      <tr data-role="editor-cell-text"><td><a class="rolelink" data-name="editor-cell-text" href="#"><code>--editor-cell-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="editor-cell-text" style="background: var(--editor-cell-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells and play glyph</code> &mdash; The index and volume numbers in the playlist editor.</td></tr>
+      <tr data-role="link-quiet"><td><a class="rolelink" data-name="link-quiet" href="#"><code>--link-quiet</code></a></td><td class="sw"><button type="button" class="circle" data-name="link-quiet" style="background: var(--link-quiet)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>nav tabs, quick search cells, advanced-search link</code> &mdash; Dim clickable text; it turns --link-text on hover.</td></tr>
+      <tr data-role="main-text"><td><a class="rolelink" data-name="main-text" href="#"><code>--main-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="main-text" style="background: var(--main-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>body, playlist row hover</code> &mdash; The default text colour that everything inherits.</td></tr>
+      <tr data-role="section-title-text"><td><a class="rolelink" data-name="section-title-text" href="#"><code>--section-title-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="section-title-text" style="background: var(--section-title-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>section .title, .row-title span</code> &mdash; The card name, and the group heading inside a card.</td></tr>
+      <tr data-role="switch-off-text"><td><a class="rolelink" data-name="switch-off-text" href="#"><code>--switch-off-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-off-text" style="background: var(--switch-off-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; The word "Off" inside a switch.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Your block</h2>
+  <p>Paste this into <code>data/www/style.css</code>, replace <code>X</code> with the theme id and the comment with
+  the theme name, then let <code>webuitheme.py --deflate</code> tidy it up.</p>
+  <div class="outp">
+    <div class="row">
+      <label for="themeId">Load theme id:</label>
+      <input id="themeId" type="number" min="0" max="99" step="1" value="0">
+      <button type="button" id="loadBtn">Load</button>
+      <span id="loadnote"></span>
+    </div>
+    <textarea id="toolout" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button type="button" id="copyBtn">Copy to Clipboard</button>
+      <button type="button" id="resetBtn">Reset all to :root</button>
+      <span id="outnote"></span>
+    </div>
+  </div>
+  <input type="color" id="picker" tabindex="-1" aria-hidden="true">
+</header>
+
+<main class="samples">
+
+<!-- ==================================== PLAYER ========================================== -->
+<div class="sample" id="sample-player"><div class="caption">Player</div><div class="pagewrap">
+
+<div id="playerwrap" class="classchange playing">
+
+  <div id="logow">
+    <div class="gb nb local" id="toggleplaylist">
+      <svg viewBox="0 0 24 24" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" id="plsvg">
+        <path d="M3 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+        <path d="M13 17a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+        <path d="M9 17v-13h10v13"></path>
+        <path d="M9 8h10"></path>
+      </svg>
+    </div>
+    <div id="logo"><svg version="1.0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 94 61">
+<defs>
+<linearGradient id="logo-gradient" gradientTransform="rotate(90)">
+  <stop offset="0%" stop-color="var(--logo-shadow)" />
+  <stop offset="100%" stop-color="var(--logo)" />
+</linearGradient>
+</defs>
+<path id="eh" d="M1522 1885c-11-23-24-59-28-80-4-22-13-49-19-60-7-11-16-31-20-45s-13-31-19-39c-6-7-18-41-26-75-12-50-18-61-35-59-38 3-110 34-126 55-9 11-19 17-22 12-9-15 11-111 28-138 14-21 15-29 5-41s-10-21-1-42c7-14 14-71 17-125 4-90 3-98-14-98-10 0-38 18-62 40s-48 40-53 40-17 10-28 23l-19 22-21-27c-25-34-43-27-79 31-13 22-35 42-48 46-13 3-41 17-63 30-21 14-43 25-48 25s-14 7-21 15-23 15-37 15c-13 0-37 10-53 22s-32 19-34 17c-3-3 8-31 25-64 23-46 30-72 29-115-1-30 2-65 5-77 5-16 1-24-15-33-17-9-19-14-10-25 14-17 24-54 56-206 5-20 0-29-21-43l-27-18 33-35c19-19 46-41 62-49 15-8 27-23 27-32 0-26 53-74 73-67 15 7 57-26 57-44 0-25-34-41-89-41-31 0-62-5-69-12-12-12-21-14-119-16-29-1-53-6-53-12 0-16 94-59 148-66 37-5 52-11 55-25 3-11 12-19 20-19 9 0 17-10 19-23 3-21 6-22 106-20 105 3 121-4 90-36-11-10-3-12 42-7 30 3 75 8 100 10 25 3 90 10 144 15 55 6 102 9 104 6 7-7-26-244-44-310-10-39-11-62-5-68 22-22 65 143 77 296 7 88 21 106 71 86 25-10 154-28 208-29 11 0 41-8 67-17 53-19 65-15 48 16-14 28 11 39 53 23 20-8 36-8 48-1 13 6 25 6 38-1 32-17 61-12 61 10 0 10 6 23 13 27 8 4 16 16 20 26 5 12 17 17 47 17 22 0 57 9 77 20 21 11 43 20 50 20 18 0 27 21 13 30-7 5-37 11-66 15-29 3-58 13-65 21-9 11-24 13-60 8-67-9-99 1-99 29 0 30 18 47 50 47 25 0 63 30 71 57 2 7 31 34 63 60 33 26 61 54 64 60 2 7-8 18-22 24-35 16-40 36-16 66 11 14 20 38 20 54 0 15 5 31 10 34 6 3 10 15 10 26 0 10 5 28 12 39 10 15 9 22-4 37-27 30-14 136 22 194 17 25 30 53 30 62 0 21-28 22-54 2-11-8-26-15-33-15-8 0-56-21-108-46-63-30-104-58-125-82l-30-37-18 24-19 23-44-28c-24-16-46-31-49-35-15-18-70-41-84-36-21 8-21 49 0 89 10 19 14 42 10 60-3 17 1 45 9 65 12 27 12 39 4 50-9 10-8 18 5 31 9 10 16 33 16 50s5 43 12 57c17 37 2 42-32 10-16-16-33-26-36-22-4 3-16 0-28-8-11-8-32-15-47-15-25 0-27 3-33 61-4 34-14 68-22 76s-14 22-14 31c0 20-39 136-68 202l-19 45zm128-704v-180l48 21c67 30 179 31 219 2 43-32 52-73 52-241l1-153h-102l6 108c8 121-3 199-31 220-23 17-103 12-155-11l-38-16V630h-100v730h100zm-357-142c47-13 106-63 123-106 8-18 14-53 14-78v-45h-322l7-27c19-80 124-116 227-79 37 13 37 13 47-17 6-16 11-31 11-33 0-1-23-10-51-19-37-13-72-16-124-13-84 6-123 24-169 81-26 33-31 48-34 107-5 76 7 123 41 160 64 71 141 94 230 69m-113-71c-27-14-70-73-70-94 0-11 25-14 115-14h115v25c0 14-12 39-27 55-32 36-93 49-133 28" transform="matrix(.03037 0 0 -.03037 1.423 58.656)"/>
+<path id="radio" d="M65.013 38.891c-.638.403-1.075 2.048-.772 3.021.167.504.503.672 1.376.672.94 0 1.208-.168 1.477-.873.47-1.242.403-1.746-.336-2.484s-.94-.772-1.745-.336m-16.517 1.108c-.772.57-.57 1.712.302 1.846 2.283.336 2.182.202 2.182 3.089 0 1.477-.134 2.685-.268 2.685-.168 0-.57-.302-.907-.671-2.45-2.72-8.56-.94-10.641 3.122-1.444 2.887-.101 7.654 2.719 9.534 1.88 1.275 5.438.906 7.687-.772l1.075-.84v2.048h2.182c2.115 0 2.182-.033 2.182-.873 0-.57-.202-.94-.672-1.04-.94-.235-1.074-1.343-1.309-10.44l-.201-7.957-1.847-.1c-1.175-.068-2.08.067-2.484.369m0 8.594c2.149 1.309 2.854 5.37 1.276 7.52-.974 1.342-3.256 2.383-4.7 2.114-2.72-.537-4.666-3.625-3.86-6.244.436-1.477 1.812-3.29 2.853-3.692 1.242-.504 3.357-.37 4.431.302m-37.162-2.854c-1.343.47-2.954 1.545-3.692 2.417-.437.537-.47.47-.638-.738l-.168-1.31-2.619-.1c-2.148-.067-2.618 0-2.82.436-.1.302.068.806.37 1.108.436.47.705.47 1.544.168l1.007-.37v1.713c0 .973.1 3.457.235 5.505l.202 3.794-1.813-.101c-1.578-.067-1.813 0-1.914.604-.168 1.444.302 1.578 4.666 1.544 2.283-.033 4.835-.167 5.64-.302 1.679-.268 2.417-1.074 1.746-1.88-.37-.436-1.142-.537-3.592-.537H6.366l.201-3.458c.202-3.793.403-4.129 3.257-5.64 1.309-.704 2.282-.704 5.136-.134.873.202 1.074.135 1.275-.47.336-1.107-.1-1.947-1.242-2.35-1.342-.47-2.148-.436-3.659.101m71.034 0c-1.98.605-3.122 1.477-4.028 3.022-1.544 2.652-1.51 6.076.067 8.526.705 1.075 1.376 1.578 2.954 2.216 2.854 1.175 3.693 1.276 5.707.873s4.465-2.317 5.438-4.163c.773-1.443.638-5.203-.235-6.882-1.644-3.222-6.009-4.8-9.903-3.592m5.54 2.619c2.584 1.779 3.323 4.431 2.014 7.15-.94 1.947-2.619 2.82-5.405 2.854-2.82 0-4.297-1.377-4.8-4.566-.37-2.182 1.107-5.069 2.987-5.841 1.41-.604 4.062-.37 5.203.403m-65.528-2.25c-1.444.806-1.679 2.518-.336 2.518.302 0 1.544-.302 2.686-.671 1.175-.37 2.417-.671 2.786-.671.873 0 2.585 1.644 2.82 2.719l.201.872-3.558.034c-3.894.034-5.002.403-6.311 2.149-.873 1.174-.94 4.162-.101 5.438 1.343 2.048 5.472 2.417 8.493.738.84-.503 1.578-.872 1.645-.872.034 0 .134.335.202.738.1.705.268.772 2.282.772 1.847 0 2.182-.1 2.283-.638.168-.805-.47-1.208-2.048-1.208h-1.275l.167-1.444c.806-6.411.538-8.66-1.174-10.104-.974-.806-1.243-.873-4.432-.873-2.35.034-3.726.168-4.33.504m7.587 6.982c.436.302.57.772.47 1.746-.101 1.242-.235 1.41-2.115 2.45-1.578.84-2.283 1.075-3.29.94-3.39-.403-3.995-3.96-.907-5.203 1.242-.47 5.137-.436 5.842.067m30.548-6.647c-.302.772.168 1.175 1.31 1.175.604 0 1.678.1 2.383.235l1.31.202-.236 4.062c-.335 5.874-.1 5.471-3.39 5.74-2.753.235-3.424.57-2.887 1.444.167.268 2.383.436 7.083.47 6.445.1 6.882.067 6.982-.538.202-1.04-.335-1.242-2.484-.839-1.074.168-2.215.403-2.517.504-.47.134-.571-.504-.773-5.304-.134-3.022-.335-5.976-.436-6.58l-.168-1.074h-2.988c-2.316 0-3.054.1-3.189.503"/>
+</svg></div>
+    <div class="gb nb local" id="settingsbtn">
+      <svg viewBox="0 0 24 24" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"></path>
+        <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+      </svg>
+    </div>
+  </div><!--logow-->
+
+  <div>
+    <div id="nameset" class="text">Radio Paradise</div>
+    <div id="meta" class="text">320k AAC &#183; 44.1 kHz &#183; stereo</div>
+  </div>
+
+  <div id="playernav">
+    <div class="cmdbutton gb" id="prevbutton">
+      <svg viewBox="0 0 24 24" class="stroke">
+        <path d="M20 5v14l-12 -7z"></path>
+        <path d="M4 5l0 14"></path>
+      </svg>
+    </div>
+    <div class="cmdbutton gb" id="playbutton">
+      <svg viewBox="0 0 24 24" class="stroke" id="modeplaying">
+        <path d="M6 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"></path>
+        <path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"></path>
+      </svg>
+      <svg viewBox="0 0 24 24" class="stroke" id="modestopped">
+        <path d="M7 4v16l13 -8z"></path>
+      </svg>
+    </div>
+    <div class="cmdbutton gb" id="nextbutton">
+      <svg viewBox="0 0 24 24" class="stroke">
+        <path d="M4 5v14l12 -7z"></path>
+        <path d="M20 5l0 14"></path>
+      </svg>
+    </div>
+    <div class="gb local active" id="shuffle">
+      <svg viewBox="0 0 24 24" class="fill snfknob">
+        <path id="a" d="m4 17c-0.55228 0-1-0.44772-1-1s0.44772-1 1-1h2l3-3-3-3h-2c-0.55 0-1-0.44755-1-0.99877 0-0.55123 0.45-1.0012 1-1.0012h3l4 4 4-4h2v-2l4 3.0012-4 2.9988v-2h-1l-3 3 3 3h1v-2l4 3-4 3v-2h-2l-4-4-4 4z" fill-rule="evenodd"/>
+      </svg>
+    </div>
+    <div class="cmdbutton gb modeweb" id="volupbutton">
+      <svg viewBox="0 0 24 24" class="stroke">
+        <path d="M15 8a5 5 0 0 1 0 8"></path>
+        <path d="M17.7 5a9 9 0 0 1 0 14"></path>
+        <path d="M6 15h-2a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1h2l3.5 -4.5a.8 .8 0 0 1 1.5 .5v14a.8 .8 0 0 1 -1.5 .5l-3.5 -4.5"></path>
+      </svg>
+    </div>
+    <div class="modeitem gb" id="modeweb">
+      <svg viewBox="0 0 24 24" class="fill">
+        <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
+      </svg>
+    </div>
+    <div class="gb local" id="eqalbutton">
+      <svg viewBox="0 0 24 24" class="stroke">
+        <path d="M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+        <path d="M6 4v4"></path>
+        <path d="M6 12v8"></path>
+        <path d="M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+        <path d="M12 4v10"></path>
+        <path d="M12 18v2"></path>
+        <path d="M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+        <path d="M18 4v1"></path>
+        <path d="M18 9v11"></path>
+      </svg>
+    </div>
+  </div>
+
+  <div id="equalizerwrap">
+    <div id="volslider">
+      <input type="range" id="volume" min="0" max="255" value="168"
+             style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 66%, var(--meter-track) 66%, var(--meter-track) 100%)">
+    </div>
+
+    <div id="info">
+      <div class="infoitem"><span>Volume</span>: <span id="volinfo">168</span></div>
+      <div class="infoitem" id="bitinfo">320k AAC</div>
+      <div class="infoitem" id="batteryinfo"><span>Battery</span>: <span id="battery" class="text">87%</span></div>
+      <div class="infoitem" id="rsiinfo">
+        <span id="rssibars">
+          <svg viewBox="0 0 12 12" role="img">
+            <title id="rssititle">RSSI: -63dBm</title>
+            <path d="M0,9h2.4v3H0V9z"/>
+            <path d="M3.2,6h2.4v6H3.2V6z"/>
+            <path d="M6.4,3h2.4v9H6.4V3z"/>
+            <path class="off" d="M9.6,12V0h2.4v12H9.6z"/>
+          </svg>
+        </span>
+      </div>
+    </div>
+
+    <ul id="playlist">
+      <li class="play"><span class="text">Radio Paradise</span><span class="count">1</span></li>
+      <li class="play"><span class="text">FIP</span><span class="count">2</span></li>
+      <li class="play"><span class="text">KEXP 90.3 FM</span><span class="count">3</span></li>
+      <li class="play active"><span class="text">BBC Radio 6 Music</span><span class="count">4</span></li>
+      <li class="play"><span class="text">SomaFM Groove Salad</span><span class="count">5</span></li>
+      <li class="play"><span class="text">A very long station name that wraps onto a second line, so the stripes and the count column can be seen doing their job</span><span class="count">6</span></li>
+      <li class="play"><span class="text">NTS Radio 1</span><span class="count">7</span></li>
+      <li class="play"><span class="text">Radio Swiss Jazz</span><span class="count">8</span></li>
+      <li class="play"><span class="text">WFMU</span><span class="count">9</span></li>
+      <li class="play"><span class="text">Radio Caroline</span><span class="count">10</span></li>
+    </ul>
+  </div><!--equalizerwrap-->
+
+  <div id="copy">powered by <a target="_blank" href="https://trip5.github.io/ehRadio/">ehRadio</a> |
+    <span id="version">v0.9.999</span></div>
+</div><!--playerwrap--></div></div>
+
+<!-- ================================ EQUALISER POPUP ==================================== -->
+<!-- The popup the player page overlays on that page, shown flat.  It takes the free grid cell to the right of
+     the Player, so it previews --eq-label-text and the slider colours without hiding anything. -->
+<div class="sample" id="sample-eq"><div class="caption">Equaliser popup (the player page overlay)</div><div class="pagewrap">
+
+<div id="samplereq">
+  <ul id="equalizer">
+    <li><span>Balance</span><span class="eqinfo">0</span><input type="range" id="balance" min="-16" max="16" value="0"
+        style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 50%, var(--meter-track) 50%, var(--meter-track) 100%)" /></li>
+    <li><span>Treble</span><span class="eqinfo">4</span><input type="range" id="treble" min="-16" max="16" value="4"
+        style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 62.5%, var(--meter-track) 62.5%, var(--meter-track) 100%)" /></li>
+    <li><span>Middle</span><span class="eqinfo">-2</span><input type="range" id="middle" min="-16" max="16" value="-2"
+        style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 43.75%, var(--meter-track) 43.75%, var(--meter-track) 100%)" /></li>
+    <li><span>Bass</span><span class="eqinfo">6</span><input type="range" id="bass" min="-16" max="16" value="6"
+        style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 68.75%, var(--meter-track) 68.75%, var(--meter-track) 100%)" /></li>
+    <li class="formbuttons"><div class="fb local">OK</div></li>
+  </ul>
+</div>
+
+</div></div>
+
+<!-- ============================== PLAYLIST EDITOR ======================================= -->
+<div class="sample wide" id="sample-editor"><div class="caption">Playlist editor (the player page with the editor open)</div><div class="pagewrap">
+
+<div id="pleditorwrap">
+  <div id="pleditor">
+    <h2>
+      <div id="search" class="gb gbsearch">
+        <svg viewBox="0 0 24 24" class="stroke"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zM9.5 14a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+      </div>
+      <span id="pleditortitle">Playlist Editor</span>
+      <div class="gb"><svg viewBox="0 0 24 24" class="stroke"><path d="M18 6l-12 12"></path><path d="M6 6l12 12"></path></svg></div>
+    </h2>
+
+    <div id="plImportWarning" class="pleditorwarning">Save to keep changes!</div>
+
+    <div id="pleheader">
+      <span class="grabbable">&#8693;</span>
+      <span class="space"><input type="checkbox" /></span>
+      <span class="plename">Name</span>
+      <span class="pleurl">URL</span>
+      <span class="pleovol pl-editor-only">Ovol</span>
+      <span class="plestatus">Status</span>
+    </div>
+
+    <ol id="pleditorcontent">
+      <li class="pleitem">
+        <span class="grabbable" draggable="true">001</span>
+        <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
+        <input class="pleinput plename" type="text" value="Radio Paradise" maxlength="140" />
+        <input class="pleinput pleurl" type="text" value="https://stream.radioparadise.com/aac-320" maxlength="140" />
+        <span class="pleinput pleplay">&#9658;</span>
+        <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />
+        <span class="pleinput plestatus"></span>
+      </li>
+      <li class="pleitem active">
+        <span class="grabbable" draggable="true">002</span>
+        <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
+        <input class="pleinput plename" type="text" value="FIP" maxlength="140" />
+        <input class="pleinput pleurl" type="text" value="https://icecast.radiofrance.fr/fip-hifi.aac" maxlength="140" />
+        <span class="pleinput pleplay">&#9658;</span>
+        <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="-6" />
+        <span class="pleinput plestatus"></span>
+      </li>
+      <li class="pleitem">
+        <span class="grabbable" draggable="true">003</span>
+        <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
+        <input class="pleinput plename" type="text" value="A station whose name is long enough to use the whole name column" maxlength="140" />
+        <input class="pleinput pleurl" type="text" value="https://example.invalid/stream/a/very/long/path/that/keeps/going.mp3" maxlength="140" />
+        <span class="pleinput pleplay">&#9658;</span>
+        <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />
+        <span class="pleinput plestatus"></span>
+      </li>
+      <li class="pleitem dragging">
+        <span class="grabbable" draggable="true">004</span>
+        <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
+        <input class="pleinput plename" type="text" value="Dragged row" maxlength="140" />
+        <input class="pleinput pleurl" type="text" value="https://example.invalid/dragged" maxlength="140" />
+        <span class="pleinput pleplay">&#9658;</span>
+        <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />
+        <span class="pleinput plestatus"></span>
+      </li>
+    </ol><!--pleditorcontent-->
+
+    <div class="formbuttons">
+      <div class="fb">Add</div>
+      <div class="fb">Remove</div>
+      <div class="fb">Save</div>
+      <div class="fb">Undo</div>
+    </div>
+  </div><!--pleditor-->
+</div><!--pleditorwrap--></div></div>
+
+<!-- ============================ SETTINGS - CONTROLS ===================================== -->
+<div class="sample" id="sample-settings"><div class="caption">Settings page - Controls section</div>
+
+<div class="pagewrap narrow">
+  <h2 class="pagetitle">Settings</h2>
+
+  <div class="navigation" id="navigation">
+    <div class="navitem">Controls</div>
+    <div class="navitem">Screen</div>
+    <div class="navitem">Screensaver</div>
+    <div class="navitem">Locale</div>
+    <div class="navitem">Weather</div>
+    <div class="navitem">System</div>
+    <div class="navitem">Wi-Fi</div>
+    <div class="navitem">Battery</div>
+  </div>
+
+  <div id="settingswrap">
+    <div id="settingscontent">
+
+      <section id="group_controls">
+        <div class="title"><span>Controls</span></div>
+        <div class="reset">
+          <svg viewBox="0 0 16 16" class="fill"><path d="M8 3v5a36.973 36.973 0 0 1-2.324-1.166A44.09 44.09 0 0 1 3.417 5.5a52.149 52.149 0 0 1 2.26-1.32A43.18 43.18 0 0 1 8 3z"/><path d="M7 5v1h4.5C12.894 6 14 7.106 14 8.5S12.894 11 11.5 11H1v1h10.5c1.93 0 3.5-1.57 3.5-3.5S13.43 5 11.5 5h-4z"/></svg>
+        </div>
+
+        <div class="flex-row">
+          <div class="inputwrap center">
+            <span class="inputtitle">Smart Start</span>
+            <div class="checkbox"><div class="knob"></div></div>
+          </div>
+          <div class="inputwrap center">
+            <span class="inputtitle">One-click Station Switching</span>
+            <div class="checkbox checked"><div class="knob"></div></div>
+          </div>
+        </div>
+
+        <div class="flex-row">
+          <div class="inputwrap pad">
+            <span class="inputtitle">Rotary Encoder Acceleration</span>
+            <span class="inputinfo">4</span>
+            <input type="range" id="enca" min="0" max="7" value="4"
+                   style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 57%, var(--meter-track) 57%, var(--meter-track) 100%)">
+          </div>
+        </div>
+
+        <div class="flex-row">
+          <div class="inputwrap">
+            <span class="inputtitle">IR Tolerance <a href="https://crankyoldgit.github.io/IRremoteESP8266/doxygen/html/" target="_blank">[?]</a></span>
+            <span class="inputinfo">40</span>
+            <input type="range" id="irtl" min="10" max="80" value="40"
+                   style="background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 43%, var(--meter-track) 43%, var(--meter-track) 100%)">
+          </div>
+        </div>
+
+        <div class="row-title"><span>Display</span></div>
+
+        <div class="flex-row">
+          <div class="inputwrap">
+            <span class="inputtitle">Display Theme</span>
+            <select type="text">
+              <option value="0" selected>ehRadio Blue & Red (Trip5)</option>
+              <option value="1">ёRadio Gold (e2002)</option>
+              <option value="2">Graphite (Kle7rx)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex-row">
+          <div class="inputwrap">
+            <span class="inputtitle">Timezone Name</span>
+            <select type="text">
+              <option selected>America/Halifax</option>
+              <option>America/Toronto</option>
+              <option>Europe/London</option>
+              <option>Europe/Budapest</option>
+              <option>Asia/Tokyo</option>
+              <option>Australia/Sydney</option>
+            </select>
+          </div>
+          <div class="inputwrap">
+            <span class="inputtitle">Timezone String</span>
+            <input type="text" value="AST4ADT,M3.2.0,M11.1.0">
+          </div>
+        </div>
+
+        <div class="flex-row">
+          <div class="inputwrap pad">
+            <span class="inputtitle">ehDP Name</span>
+            <input type="text" value="ehradio-a1b2c3">
+          </div>
+        </div>
+
+        <div class="row-title"><span>Buttons</span></div>
+
+        <div class="flex-row">
+          <div class="inputwrap center"><div class="fb">Apply Changes</div></div>
+          <div class="inputwrap center"><div class="fb hold">Save</div></div>
+          <div class="inputwrap center"><div class="fb pressed">Pressed</div></div>
+        </div>
+        <div class="flex-row last">
+          <div class="fb tool">Reboot</div>
+        </div>
+      </section>
+
+      <div class="hr"></div>
+      <div id="copy">powered by <a target="_blank" href="https://trip5.github.io/ehRadio/">ehRadio</a></div>
+    </div><!--settingscontent-->
+  </div><!--settingswrap-->
+
+  <div class="fb done" id="settingsdone">Done</div>
+</div><!--narrow--></div>
+
+<!-- ==================================== SEARCH ========================================= -->
+<div class="sample" id="sample-search"><div class="caption">Search page</div>
+
+<div class="pagewrap narrow">
+  <div id="searchcontent">
+    <div id="searchheader">
+      <h2 class="searchtitle1">Search</h2>
+      <h2 class="searchtitle2"><a href="../../data/www/curated.html">Curated Lists</a></h2>
+    </div>
+
+    <div class="quicksearches">
+      <table class="quicksearchtable">
+        <tr>
+          <td><button class="quicksearch">60s</button></td>
+          <td><button class="quicksearch">70s</button></td>
+          <td><button class="quicksearch">80s</button></td>
+          <td><button class="quicksearch">90s</button></td>
+          <td><button class="quicksearch">2000s</button></td>
+          <td><button class="quicksearch">2010s</button></td>
+        </tr>
+        <tr>
+          <td><button class="quicksearch">pop</button></td>
+          <td><button class="quicksearch">top 40</button></td>
+          <td><button class="quicksearch">pop rock</button></td>
+          <td><button class="quicksearch">oldies</button></td>
+          <td><button class="quicksearch">classic hits</button></td>
+          <td><button class="quicksearch">rock</button></td>
+        </tr>
+      </table>
+    </div>
+
+    <div id="searches">
+      <div class="sort-row">
+        <span>Sort</span>
+        <label><input type="radio" name="sortorder" /> <span>Name</span></label>
+        <label><input type="radio" name="sortorder" checked /> <span>Clicks</span></label>
+        <label><input type="radio" name="sortorder" /> <span>Votes</span></label>
+        <label><input type="radio" name="sortorder" /> <span>Country</span></label>
+      </div>
+
+      <div id="searchRow1" class="search-row">
+        <button class="searchbutton search plus" title="Add search criteria">
+          <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7" /></svg>
+        </button>
+        <select class="searchtextinput select">
+          <option>Name</option>
+          <option>Tag / Genre</option>
+          <option>Country</option>
+          <option>Language</option>
+        </select>
+        <input type="text" class="searchtextinput" placeholder="Enter search term">
+        <button class="searchbutton search" disabled>Search</button>
+      </div>
+    </div>
+
+    <div class="searchwrap">
+      <div class="scrollable">
+        <table class="stations">
+          <tr class="line">
+            <td class="preview"><button class="searchbutton preview">
+              <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+            </button></td>
+            <td class="name">Radio Paradise</td>
+            <td class="info">
+              <table>
+                <tr><td class="countrycode">US</td><td class="languagecode">en</td></tr>
+                <tr><td class="codec">AAC</td><td class="bitrate">320k</td></tr>
+              </table>
+            </td>
+            <td class="add"><button class="searchbutton addtoplaylist">
+              <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+            </button></td>
+          </tr>
+          <tr class="line">
+            <td class="preview"><button class="searchbutton preview">
+              <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+            </button></td>
+            <td class="name">FIP</td>
+            <td class="info">
+              <table>
+                <tr><td class="countrycode">FR</td><td class="languagecode">fr</td></tr>
+                <tr><td class="codec">MP3</td><td class="bitrate">192k</td></tr>
+              </table>
+            </td>
+            <td class="add"><button class="searchbutton addtoplaylist">
+              <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+            </button></td>
+          </tr>
+          <tr class="line">
+            <td class="preview"><button class="searchbutton preview">
+              <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+            </button></td>
+            <td class="name">A station with a very long name, so the row wraps while the buttons stay put</td>
+            <td class="info">
+              <table>
+                <tr><td class="countrycode">DE</td><td class="languagecode">de,&#8943;</td></tr>
+                <tr><td class="codec">MP3</td><td class="bitrate">128k</td></tr>
+              </table>
+            </td>
+            <td class="add"><button class="searchbutton addtoplaylist">
+              <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+            </button></td>
+          </tr>
+          <tr><td class="importantmessage" colspan="4">No results found. Try a different search.</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div id="pageNav">
+      <button class="searchbutton">&larr;</button>
+      <span>Page 1</span>
+      <button class="searchbutton">&rarr;</button>
+    </div>
+
+    <div class="fb" id="searchdone">Done</div>
+    <div id="copy">Search by <a href="https://radio-browser.info/">RadioBrowser</a> &mdash; Problem? Check
+      <a href="https://api.radio-browser.info/net">the status</a></div>
+  </div><!--searchcontent-->
+</div><!--narrow--></div>
+
+<!-- ================================ CURATED LISTS ====================================== -->
+<div class="sample" id="sample-curated"><div class="caption">Curated lists page</div>
+
+<div class="pagewrap narrow">
+  <div id="curatedcontent">
+    <div id="curatedheader">
+      <h2 class="searchtitle1">Curated Lists</h2>
+      <h2 class="searchtitle2"><a href="../../data/www/search.html">Search</a></h2>
+    </div>
+
+    <div id="loadSection">
+      <input type="button" class="fb searchbutton" value="Load Index">
+    </div>
+
+    <div id="indexwrap">
+      <table class="stations">
+        <tr class="line">
+          <td class="name">Jazz & Blues</td>
+          <td class="info">12 stations</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+        <tr class="line">
+          <td class="name">Ambient & Chillout</td>
+          <td class="info">9 stations</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+        <tr class="line">
+          <td class="name">Public Radio</td>
+          <td class="info">7 stations</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+      </table>
+    </div>
+
+    <h3 class="sectiontitle">Select a Playlist</h3>
+
+    <div id="listwrap">
+      <table class="stations">
+        <tr class="line">
+          <td class="preview"><button class="searchbutton preview">
+            <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+          </button></td>
+          <td class="name">Radio Paradise</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+        <tr class="line">
+          <td class="preview"><button class="searchbutton preview">
+            <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+          </button></td>
+          <td class="name">SomaFM Groove Salad</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+        <tr class="line">
+          <td class="preview"><button class="searchbutton preview">
+            <svg viewBox="0 0 52 52" class="fill"><path d="M8,43.7V8.3c0-1,1.3-1.7,2.2-0.9l33.2,17.3c0.8,0.6,0.8,1.9,0,2.5L10.2,44.7C9.3,45.4,8,44.8,8,43.7z"/></svg>
+          </button></td>
+          <td class="name">FIP</td>
+          <td class="add"><button class="searchbutton addtoplaylist">
+            <svg viewBox="0 0 24 24" class="stroke"><path d="M5 12h7m7 0h-7m0 0V5m0 7v7"/></svg>
+          </button></td>
+        </tr>
+      </table>
+    </div>
+
+    <div id="importSection">
+      <button class="fb searchbutton" disabled>Replace Playlist</button>
+      <button class="fb searchbutton" disabled>Merge with Playlist</button>
+    </div>
+
+    <div class="fb" id="curateddone">Done</div>
+    <div id="copy">Curated lists from <span>radio-browser.info</span></div>
+  </div><!--curatedcontent-->
+</div><!--narrow--></div>
+
+<!-- ================================ IR RECORDER ======================================== -->
+<div class="sample" id="sample-ir"><div class="caption">IR recorder page</div>
+
+<div class="pagewrap narrow">
+  <h2 class="irtitle">IR Recorder</h2>
+  <div id="irwrap">
+    <div id="irremote">
+      <div class="irbutton red">
+        <svg viewBox="0 0 16 16" class="fill">
+          <path d="M8 0a1 1 0 00-1 1v6a1 1 0 002 0V1a1 1 0 00-1-1z"></path>
+          <path d="M12.665 2.781a1 1 0 10-1.333 1.491 5 5 0 11-6.665.001 1 1 0 00-1.333-1.49 7 7 0 109.331-.002z"></path>
+        </svg>
+      </div>
+      <div class="irblank"></div>
+      <div class="irbutton blue" data-irid="mute">
+        <svg viewBox="0 0 16 16" class="fill">
+          <path clip-rule="evenodd" d="m2 7.5v3c0 .8.6 1.5 1.4 1.5h2.3l3.2 2.8c.1.1.3.2.4.2s.2 0 .3-.1c.2-.1.4-.4.4-.7v-.9l-7.2-7.2c-.5.2-.8.8-.8 1.4zm8 2v-5.8c0-.3-.1-.5-.4-.7-.1 0-.2 0-.3 0s-.3 0-.4.2l-2.8 2.5-4.1-4.1-1 1 3.4 3.4 5.6 5.6 3.6 3.6 1-1z" fill-rule="evenodd"></path>/>
+        </svg>
+      </div>
+
+      <div class="irblank"></div>
+      <div class="irbutton blue">
+        <svg viewBox="0 0 16 16" class="fill"><path d="M8.00003 7.82842L12.5858 12.4142L15.4142 9.58578L8.00003 2.17157L0.585815 9.58578L3.41424 12.4142L8.00003 7.82842Z"/></svg>
+      </div>
+      <div class="irblank"></div>
+
+      <div class="irbutton blue">
+        <svg viewBox="0 0 16 16" class="fill"><path d="M7.82842 8.00003L12.4142 3.41424L9.58578 0.585815L2.17157 8.00003L9.58578 15.4142L12.4142 12.5858L7.82842 8.00003Z"/></svg>
+      </div>
+      <div class="irbutton red">
+        <svg viewBox="0 0 16 16" class="fill"><path d="M1 14H3L9 8L3 2H1V14Z"/><path d="M15 2H13V14H15V2Z"/><path d="M9 2H11V14H9V2Z"/></svg>
+      </div>
+      <div class="irbutton blue">
+        <svg viewBox="0 0 16 16" class="fill"><path d="M8.1716 8.00003L3.58582 3.41424L6.41424 0.585815L13.8285 8.00003L6.41424 15.4142L3.58582 12.5858L8.1716 8.00003Z"/></svg>
+      </div>
+
+      <div class="irblank"></div>
+      <div class="irbutton blue">
+        <svg viewBox="0 0 16 16" class="fill"><path d="M8.00003 8.1716L3.41424 3.58582L0.585815 6.41424L8.00003 13.8285L15.4142 6.41424L12.5858 3.58582L8.00003 8.1716Z"/></svg>
+      </div>
+      <div class="irblank"></div>
+
+      <div class="irbutton">1</div><div class="irbutton">2</div><div class="irbutton">3</div>
+      <div class="irbutton">4</div><div class="irbutton">5</div><div class="irbutton">6</div>
+      <div class="irbutton">7</div><div class="irbutton">8</div><div class="irbutton">9</div>
+      <div class="irbutton red" data-irid="mode">
+        <svg viewBox="0 0 512 512" class="fill">
+          <polygon class="st0" points="501.539,169.221 453.886,86.7 303.669,173.449 303.669,0 208.365,0 208.365,173.479 58.114,86.73 
+            10.461,169.261 160.674,255.99 10.501,342.71 58.154,425.231 208.365,338.482 208.365,512 303.669,512 303.669,338.542 
+            453.846,425.271 501.499,342.74 351.267,255.99 	"/>
+        </svg>
+      </div><div class="irbutton" data-irid="n0">0</div><div class="irbutton red" data-irid="hash">#</div>
+    </div><!--irremote-->
+
+    <div id="irform">
+      <div id="irstartrecord">
+        <h3>Press a button on the left to record an IR remote code.</h3>
+        <a href="#" class="fb done" id="done_ir">Done</a>
+      </div>
+      <div id="irrecord">
+        <h3 id="irrecordtitle">Mode <span>#</span></h3>
+        <div id="irrecordcaption">Point the remote at the receiver and keep the button pressed.</div>
+        <form id="irrecordfields">
+          <div class="irrecordrow">
+            <div class="irradio active"><span></span></div>
+            <div class="irrecordvalue active">0xAF00B5</div>
+            <div class="irclear"></div>
+          </div>
+          <div class="irrecordrow">
+            <div class="irradio"><span></span></div>
+            <div class="irrecordvalue">0xAF00B6</div>
+            <div class="irclear"></div>
+          </div>
+        </form>
+        <div id="protocol">NEC</div>
+        <div class="fb done" id="back_ir">Done</div>
+      </div>
+    </div><!--irform-->
+  </div><!--irwrap-->
+  <div id="copy">powered by <a href="https://trip5.github.io/ehRadio/">ehRadio</a></div>
+</div><!--narrow--></div>
+
+<!-- =========================== STATES / SPINNERS / PROGRESS ============================ -->
+<div class="sample" id="sample-states"><div class="caption">States, spinners, progress</div>
+
+<div class="pagewrap narrow">
+  <p style="margin: 6px 0; font-size: 13px; line-height: 1.45; color: var(--main-text);">
+    Static page, forced states. <code>pressed</code>, <code>checked</code>, <code>active</code> and
+    <code>off</code> are shown as classes; toggle the rest in DevTools (<code>.cls</code> on the element, or
+    <code>switching</code> / <code>sdman</code> / <code>busy</code> / <code>listing</code> on
+    <code>&#60;body&#62;</code>).</p>
+
+  <div class="plloader"><span class="loader"></span></div>
+
+  <div class="stage">
+    <div id="progress"><span id="loader"></span></div>
+  </div>
+
+  <div class="pleditorwarning">Save to keep changes!</div>
+  <p style="margin: 10px 0;">
+    <span class="plestatus pass">ok</span> &nbsp; <span class="plestatus fail">dead</span>
+  </p>
+  <div class="fb off">Disabled button</div>
+
+  <p style="margin: 14px 0 6px 0; font-size: 13px; color: var(--main-text);">Text roles:
+    <span style="color: var(--main-text)">--main-text</span>,
+    <span style="color: var(--caption-text)">--caption-text</span>,
+    <span style="color: var(--link-quiet)">--link-quiet</span>,
+    <span style="color: var(--section-title-text)">--section-title-text</span>,
+    <span style="color: var(--small-text)">--small-text</span>,
+    <span style="color: var(--meta-text)">--meta-text</span>,
+    <span style="color: var(--info-text)">--info-text</span>,
+    <span style="color: var(--heading-text)">--heading-text</span>,
+    <span style="color: var(--button-text)">--button-text</span>,
+    <a href="#">a link</a>.</p>
+
+  <div id="copy">powered by <a href="https://trip5.github.io/ehRadio/">ehRadio</a></div>
+</div><!--narrow--></div>
+
+</main></div><!--layout-->
+
+<script>
+// ============================== THEME BUILDER ==============================
+// The table is the model: a head row carries data-head, the rows under it data-role.  Colours are applied
+// as inline custom properties on <html>, which win over :root by order, so style.css still owns every rule.
+(function () {
+  'use strict';
+  var html = document.documentElement;
+
+  var families = [], standalone = [], current = null;
+  Array.prototype.forEach.call(document.querySelectorAll('#roles tbody tr'), function (tr) {
+    if (tr.dataset.head) {
+      current = { name: tr.dataset.head, members: [] };
+      families.push(current);
+    } else if (tr.dataset.role) {
+      if (current) current.members.push(tr.dataset.role); else standalone.push(tr.dataset.role);
+    }
+  });
+  var familyOf = {};
+  families.forEach(function (f) {
+    f.members.forEach(function (m) { familyOf[m] = f.name; });
+  });
+  var names = [], headNames = [];
+  families.forEach(function (f) {
+    headNames.push(f.name);
+    names.push(f.name);
+    names = names.concat(f.members);
+  });
+  names = names.concat(standalone);
+
+  function css(name) {
+    var v = getComputedStyle(html).getPropertyValue('--' + name).trim(), guard = 0, m;
+    while (guard++ < 8 && (m = /^var\(\s*--([\w-]+)\s*\)$/.exec(v))) {
+      v = getComputedStyle(html).getPropertyValue('--' + m[1]).trim();
+    }
+    return v.toLowerCase();
+  }
+
+  var defaults = {};
+  names.forEach(function (n) { defaults[n] = css(n); });
+
+  var state = { heads: {}, members: {} }, applied = [];
+
+  function clearInline() {
+    applied.forEach(function (n) { html.style.removeProperty('--' + n); });
+    applied = [];
+  }
+  function apply() {
+    clearInline();
+    Object.keys(state.heads).forEach(function (h) {
+      html.style.setProperty('--' + h, state.heads[h]);
+      applied.push(h);
+    });
+    Object.keys(state.members).forEach(function (m) {
+      html.style.setProperty('--' + m, state.members[m]);
+      applied.push(m);
+    });
+    paint();
+    writeOutput();
+  }
+  function valueOf(name) {
+    if (state.members[name]) return state.members[name];
+    if (state.heads[name]) return state.heads[name];   // a head is keyed by its own name, not by a family
+    var fam = familyOf[name];
+    if (fam && state.heads[fam]) return state.heads[fam];
+    return defaults[name];
+  }
+  function paint() {
+    Array.prototype.forEach.call(document.querySelectorAll('#roles button.circle'), function (btn) {
+      var n = btn.dataset.name, isHead = headNames.indexOf(n) !== -1;
+      btn.style.background = valueOf(n);
+      btn.classList.toggle('set', isHead ? !!state.heads[n] : !!state.members[n]);
+      btn.classList.toggle('split', !isHead && !!state.members[n]);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#roles tr[data-role]'), function (tr) {
+      var n = tr.dataset.role, set = !!state.members[n];
+      // setrow shows the row's own reset arrow and follows ANY override, standalone or not; splitrow is the
+      // family-member marker, so it needs a family to be split away from.
+      tr.classList.toggle('setrow', set);
+      tr.classList.toggle('splitrow', !!(familyOf[n] && set));
+    });
+    // A family head offers its reset as soon as anything in that family is set.  The row names its head
+    // once (`data-head`) and the arrow is found through the row, so the two can never drift apart.
+    Array.prototype.forEach.call(document.querySelectorAll('#roles tr[data-head]'), function (tr) {
+      var head = tr.dataset.head, on = !!state.heads[head];
+      families.forEach(function (f) {
+        if (f.name !== head) return;
+        f.members.forEach(function (m) { if (state.members[m]) on = true; });
+      });
+      tr.classList.toggle('setrow', on);
+    });
+  }
+
+  // One hidden picker serves every circle.  The native dialog fires `input` while the user drags - that is
+  // the live preview - but `change` only when it is accepted, so the state at open is kept and put back if
+  // the dialog closes without one: Cancel is a real cancel.
+  var picker = document.getElementById('picker'), target = null, session = null;
+  function snapshot() {
+    return { heads: Object.assign({}, state.heads), members: Object.assign({}, state.members) };
+  }
+  function settle() {
+    if (!session || !session.dirty) return;   // nothing dragged yet: stay listening (a blur can fire on open)
+    var s = session;
+    // `change` and the page regaining focus arrive in either order, so decide one tick later: an accepted
+    // change has already replaced `session`, and then there is nothing to roll back.
+    setTimeout(function () {
+      if (session !== s) return;
+      state.heads = s.before.heads;
+      state.members = s.before.members;
+      session = null;
+      apply();
+    }, 200);
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('#roles button.circle');
+    if (btn) {
+      settle();
+      target = btn.dataset.name;
+      session = { before: snapshot(), dirty: false, accepted: false };
+      var r = btn.getBoundingClientRect();
+      picker.style.left = Math.round(r.left) + 'px';
+      picker.style.top = Math.round(r.bottom + 6) + 'px';
+      picker.value = valueOf(target);
+      picker.click();
+      return;
+    }
+    // Every arrow is the same control; the ROW decides what it resets.
+    var reset = e.target.closest && e.target.closest('#roles button.rejoin');
+    if (reset) {
+      var row = reset.closest('tr');
+      if (row.dataset.head) {                     // a family head: clear the head and every split in it
+        var head = row.dataset.head;
+        delete state.heads[head];
+        families.forEach(function (f) {
+          if (f.name === head) f.members.forEach(function (m) { delete state.members[m]; });
+        });
+      } else if (row.dataset.role) {              // one member, or one standalone colour
+        delete state.members[row.dataset.role];
+      }
+      apply();
+    }
+  });
+  picker.addEventListener('change', function () {
+    if (session) { session.accepted = true; session = null; }
+  });
+  picker.addEventListener('blur', settle);
+  // The dialog is a separate window: the page comes back without the input ever blurring, so settle on the
+  // page regaining focus too, and on the next click outside the picker as a last resort.
+  window.addEventListener('focus', settle);
+  document.addEventListener('pointerdown', function (e) {
+    if (session && e.target !== picker) settle();
+  }, true);
+  picker.addEventListener('input', function () {
+    if (!target || !session) return;
+    var v = picker.value;
+    if (v === valueOf(target)) return;      // opening the dialog can fire input with the colour it already has
+    session.dirty = true;
+    if (headNames.indexOf(target) !== -1) {
+      state.heads[target] = v;                      // setting a head locks its family
+      families.forEach(function (f) {
+        if (f.name === target) f.members.forEach(function (m) { delete state.members[m]; });
+      });
+    } else {
+      state.members[target] = v;                    // a member splits off on its own
+      // Once fewer than two members still follow the head, the head line is no longer worth writing:
+      // hand its colour to the last followers, forget it, and the block stays short with no visual move.
+      var fam = familyOf[target];
+      if (fam && state.heads[fam]) {
+        var followers = [];
+        families.forEach(function (f) {
+          if (f.name === fam) {
+            followers = f.members.filter(function (m) { return !state.members[m]; });
+          }
+        });
+        if (followers.length < 2) {
+          var held = state.heads[fam];
+          followers.forEach(function (m) { state.members[m] = held; });
+          delete state.heads[fam];
+        }
+      }
+    }
+    apply();
+  });
+
+  // ---- jump from a name to the first element that uses it ----
+  var LOOK = {
+    'input-border': '#settingscontent input[type=text]',
+    'list-bars': '#playlist li:nth-child(odd)',
+    'list-names': '.pleitem input.plename',
+    'list-urls': '.pleitem input.plename',
+    'logo': '#logo', 'logo-shadow': '#logo', 'logo-text': '#logo',
+    'page-bg': '.pagewrap',
+    'panel-gradient': '#settingscontent section',
+    'playlist-hover': '#playlist li',
+    'surfaces': '#playerwrap', 'panel-background': '#playerwrap',
+    'scrollbar-track': '#playlist', 'scrollbar-thumb': '#playlist',
+    'switch-track': '.checkbox', 'switch-track-on': '.checkbox.checked',
+    'switch-thumb': '.checkbox .knob', 'switch-text': '.checkbox.checked',
+    'switch-off-text': '.checkbox .knob',
+    'edges': '#settingscontent section', 'panel-border': '#settingscontent section',
+    'fills': '.fb', 'button-fill': '.fb', 'button-text': '.fb', 'button-outline': '.fb',
+    'button-active-fill': '.fb.pressed', 'button-active-text': '.fb.pressed',
+    'control-bg': '.plestatus', 'editor-grid': '.pleitem span', 'editor-cell-text': '.pleitem span',
+    'outlines': '.gb', 'icons-outline': '.gb', 'list-outline': '#playlist',
+    'meter-outline': '#volslider input', 'spinner-ring': '#loader',
+    'warning-outline': '.pleditorwarning',
+    'highlights': '#shuffle', 'highlight-fill': '#shuffle', 'list-active-bg': '#playlist li.active',
+    'meter-fill': '#volslider input', 'meter-track': '#volslider input',
+    'actives': '#shuffle', 'icon-active-glyph': '#shuffle',
+    'list-active-text': '#playlist li.active',
+    'labels': '#nameset', 'heading-text': '.irtitle', 'link-text': '#sample-states a',
+    'station-name': '#nameset',
+    'input-fill': '#settingscontent input[type=text]', 'input-text': '#settingscontent input[type=text]',
+    'select-fill': 'select[type=text]', 'select-text': 'select[type=text]',
+    'infotexts': '#meta', 'small-text': '#copy', 'meta-text': '#meta', 'info-text': '#info',
+    'eq-label-text': '#equalizer li',
+    'maintexts': '#settingscontent', 'main-text': '#settingscontent .inputinfo',
+    'caption-text': '#irrecordcaption',
+    'link-quiet': '.navitem', 'section-title-text': '#settingscontent section .title'
+  };
+  function jump(name) {
+    var sel = LOOK[name], fam = familyOf[name];
+    if (!sel && fam) {
+      if (LOOK[fam]) sel = LOOK[fam];
+      families.forEach(function (f) {
+        if (sel || f.name !== fam) return;
+        f.members.forEach(function (m) { if (!sel && LOOK[m]) sel = LOOK[m]; });
+      });
+    }
+    var el = sel ? document.querySelector(sel) : null;
+    if (!el) el = document.querySelector('#samples .sample');
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('jump-hit');
+    setTimeout(function () { el.classList.remove('jump-hit'); }, 1600);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#roles a.rolelink'), function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); jump(a.dataset.name); });
+  });
+
+  // ---- load an existing theme ----
+  // No theme list and no names: the page cannot read a linked stylesheet's rules on a file:// page, and
+  // themes.h is not reachable either. A numeric id is the future-proof form - it applies exactly what
+  // style.css holds for that slot, and an id with no block simply comes back as :root.
+  var themeId = document.getElementById('themeId');
+  var loadNote = document.getElementById('loadnote');
+  function loadTheme() {
+    var id = parseInt(themeId.value, 10);
+    if (isNaN(id) || id < 0) {
+      loadNote.textContent = 'type a theme id first';
+      return;
+    }
+    clearInline();
+    var prev = html.getAttribute('data-theme');
+    html.setAttribute('data-theme', String(id));
+    var vals = {};
+    names.forEach(function (n) { vals[n] = css(n); });
+    if (prev === null) html.removeAttribute('data-theme'); else html.setAttribute('data-theme', prev);
+    state.heads = {};
+    state.members = {};
+    families.forEach(function (f) {
+      var groups = {}, order = [];
+      f.members.forEach(function (m) {
+        var v = vals[m];
+        if (!groups[v]) { groups[v] = []; order.push(v); }
+        groups[v].push(m);
+      });
+      var best = null, bestN = 0, tie = false;
+      order.forEach(function (v) {
+        if (groups[v].length > bestN) { best = v; bestN = groups[v].length; tie = false; }
+        else if (groups[v].length === bestN) tie = true;
+      });
+      if (best && bestN >= 2 && !tie && best !== defaults[f.name]) {
+        state.heads[f.name] = best;
+        f.members.forEach(function (m) { if (vals[m] !== best) state.members[m] = vals[m]; });
+      } else {
+        f.members.forEach(function (m) { if (vals[m] !== defaults[m]) state.members[m] = vals[m]; });
+      }
+    });
+    standalone.forEach(function (n) { if (vals[n] !== defaults[n]) state.members[n] = vals[n]; });
+    apply();
+    var differ = 0;
+    names.forEach(function (n) { if (vals[n] !== defaults[n]) differ++; });
+    loadNote.textContent = differ
+      ? 'theme ' + id + ': ' + differ + ' of ' + names.length + ' colours differ from :root'
+      : 'theme ' + id + ' is the :root palette (no block, or an empty one)';
+  }
+  document.getElementById('loadBtn').addEventListener('click', loadTheme);
+  themeId.addEventListener('keydown', function (e) { if (e.key === 'Enter') loadTheme(); });
+
+  // ---- the block ----
+  var out = document.getElementById('toolout'), note = document.getElementById('outnote');
+  function blockText() {
+    var lines = [], printedHead = {};
+    // A line only earns its place if it says something: a colour equal to the one the role would inherit
+    // WITHOUT that line says nothing at all, so it is dropped. That is also what keeps a value left behind
+    // by a cancelled picker out of the block.
+    families.forEach(function (f) {
+      var head = state.heads[f.name];
+      var followers = f.members.filter(function (m) { return !state.members[m]; });
+      if (head && followers.length >= 2 && head !== defaults[f.name]) {
+        printedHead[f.name] = true;
+        lines.push([f.name, head]);
+      }
+      f.members.forEach(function (m) {
+        if (!state.members[m]) return;
+        var inherited = printedHead[f.name] ? head : defaults[m];
+        if (state.members[m] !== inherited) lines.push([m, state.members[m]]);
+      });
+      // The head line is not worth writing for a single follower, so that follower names the colour itself.
+      if (head && followers.length === 1 && head !== defaults[followers[0]]) {
+        lines.push([followers[0], head]);
+      }
+    });
+    standalone.forEach(function (n) {
+      if (state.members[n] && state.members[n] !== defaults[n]) lines.push([n, state.members[n]]);
+    });
+    lines.sort(function (a, b) { return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0); });
+    var body = lines.map(function (l) {
+      var name = '--' + l[0] + ':';
+      while (name.length < 22) name += ' ';
+      return '  ' + name + l[1] + ';';
+    });
+    return ':root[data-theme="X"] { /* Name here - and replace the X! */\n' +
+           (body.length ? body.join('\n') : '  /* no changes yet */') + '\n}';
+  }
+  function writeOutput() {
+    out.value = blockText();
+    var n = out.value.split('\n').length - 2;
+    note.textContent = n > 0 ? n + ' line(s) to paste' : 'nothing changed yet';
+  }
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var btn = this, was = btn.textContent;
+    function done(ok) {
+      btn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+      setTimeout(function () { btn.textContent = was; }, 1400);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(out.value).then(function () { done(true); }, function () {
+        out.select();
+        done(document.execCommand('copy'));
+      });
+    } else {
+      out.select();
+      done(document.execCommand('copy'));
+    }
+  });
+  document.getElementById('resetBtn').addEventListener('click', function () {
+    state.heads = {};
+    state.members = {};
+    loadNote.textContent = 'reset to the :root palette';
+    apply();
+  });
+
+  apply();
+})();
+</script>
+</body>
+</html>

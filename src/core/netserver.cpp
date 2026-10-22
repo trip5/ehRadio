@@ -1919,7 +1919,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var editorLayouts=%s;\n"
       "var dspFamily='%s';\n"
       "var confDsp={width:%d,height:%d,framewdt:%d,maxWidth:%d,scrollDelay:%d,scrollTime:%d,bootLogoTap:%d,hasConfMacros:%d,vuMaxWidth:%d,vuMaxHeight:%d};\n",
-      #if defined(DSP_TFT) || DBGWUI
+      #if defined(DSP_TFT)
         "true",
       #else
         "false",
@@ -1953,7 +1953,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
   // loader, Save and Apply alike.  TFT-only (the same test the theme group in the WebUI uses), because
   // on a monochrome build a theme never reaches the panel at all.
   // ---------------------------------------------------------------------------
-  #if defined(DSP_TFT) || DBGWUI
+  #if defined(DSP_TFT)
   if (request->url() == "/theme-elements.json") {
     // One object per element, in table order which is also the field order: the key the page sends back
     // with a value, and the label it shows in the grid instead.  Both come from the one table in

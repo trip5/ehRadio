@@ -373,7 +373,7 @@ function fillSlider(sl){
   const slaveid = sl.dataset.slaveid;
   const value = (sl.value-sl.min)/(sl.max-sl.min)*100;
   if(slaveid) getId(slaveid).innerText=sl.value;
-  sl.style.background = 'linear-gradient(to right, var(--icons-highlight) 0%,  var(--icons-highlight) ' + value + '%, var(--control-bg) ' + value + '%, var(--control-bg) 100%)';
+  sl.style.background = 'linear-gradient(to right, var(--meter-fill) 0%,  var(--meter-fill) ' + value + '%, var(--meter-track) ' + value + '%, var(--meter-track) 100%)';
 }
 function setupElement(id,value){
   // handle bitrate/codec specially

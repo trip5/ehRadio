@@ -3,11 +3,19 @@
 webuitheme.py — import display themes into the WebUI palette.
 
 USAGE:
-    py webuitheme.py                    # Add any theme missing from style.css, then reconcile renames
+    py webuitheme.py                    # Add any display theme from themes.h missing from style.css, then reconcile renames
     py webuitheme.py --update           # ...then compare every editable theme, element by element
     py webuitheme.py --blackbg --dry-run
-    py webuitheme.py --anchor 0         # display theme whose design :root represents (default 0)
+    py webuitheme.py --inflate          # give every block every role, copied from :root
+    py webuitheme.py --deflate          # drop a block's roles that exactly match :root
+    py webuitheme.py --deflate-lossy    # the same, asking [y/N] for near-matches
     py webuitheme.py -h | --help
+
+    --inflate, --deflate and --deflate-lossy are standalone maintenance modes: they never read
+    themes.h, they also process PERFECT blocks, and they cannot be combined with the other flags.
+    `--inflate` spells every role out at the colour it ALREADY has in that block; `--deflate` removes
+    what repeats `:root` and then folds each family back into one head line, keeping any member that
+    deliberately differs.  Running the two in either order changes nothing on screen.
 
 WHAT IT READS AND WRITES:
     src/displays/themes.h          -> the display colours
@@ -15,29 +23,43 @@ WHAT IT READS AND WRITES:
     The tool never writes :root and never deletes or reorders a block.
 
 HOW A THEME IS IMPORTED:
-    The master is the WebUI rendering of the anchor display theme.  For every theme the tool takes a
-    per-role "feature" from the display (see FEATURE_NOTES below), measures the master's offset from
-    the anchor's features, and adds that offset to the theme's features:
+    The master is the WebUI rendering of ONE display theme - the one whose block is empty, which is
+    exactly what `--deflate` leaves behind after a palette is copied into `:root`.  For every theme
+    the tool takes a per-role "feature" from the display, measures the master's offset from those
+    anchor features, and adds that offset to the theme's features:
 
         final(role) = feature(role, theme) + (master(role) - feature(role, anchor))
 
     The anchor therefore comes out as an empty block - the master already paints it - while every
-    other theme keeps the master's design offsets and follows its own display.  Roles with no
-    feature (`--list-bars`, `--playlist-hover`) stay at the master value.
+    other theme keeps the master's design offsets and follows its own display.
+
+FAMILIES IN :root:
+    `:root` is organised in families: a head such as `--fills` or `--infotexts` holds the one colour and every
+    member role points straight at its head.  A head is never painted by a rule, so a name that appears
+    only in `:root` is a head.  A head is NOT a role: `ROLE_ORDER` lists the members only, and no palette
+    is generated for a head.  A head may not appear in a page, but a BLOCK may declare one - `--outlines:
+    #e3d25f` recolours that whole family in one line, which is how a derived theme stays short.
+    Values are resolved before any comparison - block declarations first, then `:root` - so a block that
+    spells out `#262626` where `:root` says `var(--fills)` is redundant, and `--deflate` folds it back into
+    the head.  The generator always writes hex.  A theme splits a member by declaring that member on top of
+    the head; the split stays put through both maintenance modes.
 
 LOCKING A THEME:
-    A block whose title contains the whole word PERFECT is inert: it is never added, renamed,
-    compared or listed for update.  Delete the word to make it editable again.  The tool never
-    writes it.
+    A block whose title contains the whole word PERFECT is inert for the import stages: it is never
+    added, renamed, compared or listed for update.  Delete the word to make it editable again.  The
+    maintenance modes do process it - they only move declarations between a block and `:root`.
 
 THE TRANSLATION (feature map, calibrated from the current :root):
-    background      <- background            control-bg      <- metabg
-    panel-gradient  <- background darkened   panel-border    <- line (softened when it glares)
-    main-text-1     <- title2                main-text-2     <- title1
-    accent-text     <- title1                icons-outline   <- title1
-    list-names      <- title2                list-urls       <- title1
-    icons-highlight <- clock darkened        logo            <- clock
-    logo-text       <- metabg                input-border / logo-shadow / switch-text derived
+    panel-background  <- background          panel-gradient  <- background darkened
+    panel-border      <- line (softened)     control-bg      <- metabg
+    button/input/select/meter fills -> metabg
+    buttons, inputs, dropdown text, headings, links, names, outlines, icons -> title1
+    main-text, caption-text, editor-cell-text, link-quiet, section-title-text,
+    switch-off-text   <- title2
+    small-text, meta-text, info-text, eq-label-text -> title1
+    list-names        <- title2              list-urls       <- title1
+    highlight-fill    <- clock darkened      logo            <- clock
+    logo-text         <- metabg              input-border / logo-shadow / on-highlight text derived
 
 BLACK BACKGROUND MODE:
     --blackbg keeps the WebUI background dark and uses the DISPLAY's background as the logo; text is
@@ -59,23 +81,41 @@ STYLE_CSS = os.path.normpath(os.path.join(HERE, '..', '..', 'data', 'www', 'styl
 NEAR_MASTER = 32         # Euclidean RGB distance from the :root value that counts as "the master"
 READ_TEXT = 4.5          # contrast target for body text
 READ_ACCENT = 3.0        # contrast target for accents, icons and secondary text
-HIGHLIGHT_MIX = 0.28     # icons-highlight = clock darkened by this much
+HIGHLIGHT_MIX = 0.28     # highlight-fill = clock darkened by this much
 SHADOW_MIX = 0.16        # logo-shadow = logo darkened by this much
 SURFACE_MIX = 0.16       # blackbg control-bg = master background lifted by this much
 PANEL_MIX = 0.15         # panel-gradient = background darkened by this much
-DEFAULT_ANCHOR = 0
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 
+# The roles a theme may override - the MEMBERS of the :root families, never a head.  Alphabetical, and
+# `render_block()` sorts the declarations too, so a block reads the same way as a family block in `:root`.
+# The fixed colours (`page-bg`, `list-bars`, `playlist-hover`) are deliberately absent: never themed.
 ROLE_ORDER = [
-    'background', 'control-bg', 'list-bars', 'panel-gradient', 'panel-border', 'input-border',
-    'main-text-1', 'main-text-2', 'accent-text', 'list-names', 'list-urls', 'switch-text',
-    'highlight-text', 'icons-outline', 'icons-highlight', 'logo', 'logo-text', 'logo-shadow',
-    'playlist-hover',
+    'button-active-fill', 'button-active-text', 'button-fill', 'button-outline', 'button-text',
+    'caption-text',
+    'control-bg',
+    'editor-cell-text', 'editor-grid',
+    'eq-label-text',
+    'heading-text', 'highlight-fill',
+    'icon-active-glyph', 'icons-outline',
+    'info-text',
+    'input-border', 'input-fill', 'input-text',
+    'link-quiet', 'link-text',
+    'list-active-bg', 'list-active-text', 'list-names', 'list-outline', 'list-urls',
+    'logo', 'logo-shadow', 'logo-text',
+    'main-text', 'small-text',
+    'meta-text',
+    'meter-fill', 'meter-outline', 'meter-track',
+    'panel-background', 'panel-border', 'panel-gradient',
+    'scrollbar-thumb', 'scrollbar-track',
+    'section-title-text',
+    'select-fill', 'select-text',
+    'spinner-ring',
+    'station-name',
+    'switch-off-text', 'switch-text', 'switch-thumb', 'switch-track', 'switch-track-on',
+    'warning-outline',
 ]
-
-# Master-only roles: the design keeps these neutral on every theme.
-MASTER_ONLY = ('list-bars', 'playlist-hover')
 
 MARKER_RE = re.compile(r'/\* webuitheme\.py mode=(\w+)(?: anchor=(\d+))?[^*]*\*/')
 LOCK_RE = re.compile(r'\bPERFECT\b')
@@ -274,19 +314,61 @@ def feature(t, ui_bg, blackbg):
         control = metabg
         logo = clock
 
+    highlight = blend(clock, BLACK, HIGHLIGHT_MIX)
+
+    # One raw colour per role.  The contrast passes in transfer() replace the text roles; the
+    # placeholder values here only give the HSL transfer something to measure the offset against.
     return {
-        'background': background,
-        'control-bg': control,
+        'panel-background': background,
+        'panel-gradient': background,
         'panel-border': tuple(line),
-        'main-text-1': main_text_1,
-        'main-text-2': main_text_2,
-        'accent-text': main_text_2,
+        'control-bg': control,
+        'button-fill': control,
+        'button-text': main_text_2,
+        'button-outline': main_text_2,
+        'button-active-fill': highlight,
+        'button-active-text': main_text_2,
+        'icons-outline': main_text_2,
+        'highlight-fill': highlight,
+        'icon-active-glyph': background,
+        'main-text': main_text_1,
+        'small-text': main_text_2,
+        'caption-text': main_text_1,
+        'editor-cell-text': main_text_1,
+        'link-quiet': main_text_1,
+        'section-title-text': main_text_1,
+        'switch-off-text': main_text_1,
+        'meta-text': main_text_2,
+        'info-text': main_text_2,
+        'eq-label-text': main_text_2,
+        'heading-text': main_text_2,
+        'link-text': main_text_2,
+        'station-name': main_text_2,
         'list-names': main_text_1,
         'list-urls': main_text_2,
-        'icons-outline': main_text_2,
-        'icons-highlight': blend(clock, BLACK, HIGHLIGHT_MIX),
+        'switch-text': main_text_2,
+        'input-fill': control,
+        'input-text': main_text_2,
+        'input-border': tuple(line),
+        'select-fill': control,
+        'select-text': main_text_2,
+        'meter-fill': highlight,
+        'meter-track': control,
+        'meter-outline': main_text_2,
+        'switch-track': background,
+        'switch-track-on': highlight,
+        'switch-thumb': main_text_2,
+        'spinner-ring': main_text_2,
+        'scrollbar-thumb': tuple(line),
+        'scrollbar-track': background,
+        'list-outline': main_text_2,
+        'list-active-bg': highlight,
+        'list-active-text': main_text_2,
+        'editor-grid': control,
         'logo': logo,
         'logo-text': metabg,
+        'logo-shadow': logo,
+        'warning-outline': main_text_2,
     }
 
 
@@ -359,36 +441,51 @@ def transfer(feat, master_rgb, anchor_feat):
     for role, c in feat.items():
         out[role] = clamp_rgb(reanchor(master_rgb[role], anchor_feat[role], c))
 
-    out['panel-gradient'] = blend(out['background'], BLACK, PANEL_MIX)
-    out['panel-border'] = panel_border_for(out['panel-border'], out['background'], out['main-text-1'])
-    out['input-border'] = blend(out['background'], out['panel-border'], 0.52)
+    out['panel-gradient'] = blend(out['panel-background'], BLACK, PANEL_MIX)
+    out['panel-border'] = panel_border_for(out['panel-border'], out['panel-background'], out['main-text'])
+    out['input-border'] = blend(out['panel-background'], out['panel-border'], 0.52)
     out['logo-shadow'] = blend(out['logo'], BLACK, SHADOW_MIX)
     if contrast(out['logo-text'], out['logo']) < 1.5:
         out['logo-text'] = contrast_pick(out['logo'])
-    for role in MASTER_ONLY:
-        out[role] = master_rgb[role]
 
-    if contrast(out['icons-highlight'], out['background']) < 1.5:
-        out['icons-highlight'] = blend(out['icons-highlight'], WHITE, 0.25)
-    out['switch-text'] = contrast_pick(out['icons-highlight'])
-    out['highlight-text'] = out['switch-text']
+    # Every fill that means "highlight" follows the one highlight colour, and its text is chosen once.
+    if contrast(out['highlight-fill'], out['panel-background']) < 1.5:
+        out['highlight-fill'] = blend(out['highlight-fill'], WHITE, 0.25)
+    for role in ('button-active-fill', 'meter-fill', 'switch-track-on', 'list-active-bg'):
+        out[role] = out['highlight-fill']
+    # One ink for everything lit: the button label, the icon glyph, the playing row, the switch word.
+    on_highlight = contrast_pick(out['highlight-fill'])
+    out['button-active-text'] = on_highlight
+    out['icon-active-glyph'] = on_highlight
+    out['list-active-text'] = on_highlight
+    out['switch-text'] = on_highlight
 
-    for role in ('main-text-1', 'main-text-2', 'list-names', 'list-urls'):
-        out[role] = readable(out[role], out['background'], READ_TEXT)
-    if contrast(out['main-text-2'], out['background']) < contrast(out['main-text-1'], out['background']):
-        out['main-text-2'] = readable(out['main-text-2'], out['background'],
-                                      min(20.0, contrast(out['main-text-1'], out['background']) + 1.0))
-    # The list columns are the same two text tiers; keep them in step after the contrast pass.
-    out['list-names'] = out['main-text-1']
-    out['list-urls'] = out['main-text-2']
-    for role in ('accent-text', 'icons-outline'):
-        out[role] = readable(out[role], out['background'], READ_ACCENT)
+    for role in ('main-text', 'small-text', 'list-names', 'list-urls',
+                 'caption-text', 'editor-cell-text', 'link-quiet', 'section-title-text',
+                 'switch-off-text',
+                 'meta-text', 'info-text', 'eq-label-text'):
+        out[role] = readable(out[role], out['panel-background'], READ_TEXT)
+    if contrast(out['small-text'], out['panel-background']) < contrast(out['main-text'], out['panel-background']):
+        out['small-text'] = readable(out['small-text'], out['panel-background'],
+                                      min(20.0, contrast(out['main-text'], out['panel-background']) + 1.0))
+    # The split roles are members of one of the two text tiers, and the list columns use the same two
+    # tiers: keep every one of them in step with its tier after the contrast pass.
+    for role in ('caption-text', 'editor-cell-text', 'link-quiet', 'list-names',
+                 'section-title-text', 'switch-off-text'):
+        out[role] = out['main-text']
+    for role in ('eq-label-text', 'info-text', 'list-urls', 'meta-text'):
+        out[role] = out['small-text']
+
+    for role in ('heading-text', 'link-text', 'station-name', 'button-text', 'input-text',
+                 'select-text', 'button-outline', 'icons-outline', 'meter-outline', 'list-outline',
+                 'switch-thumb', 'spinner-ring', 'warning-outline'):
+        out[role] = readable(out[role], out['panel-background'], READ_ACCENT)
 
     return {role: rgb_to_hex(out[role]) for role in ROLE_ORDER}
 
 
 def build_palettes(themes, master, anchor, blackbg):
-    """One final 19-role palette per theme, using the anchor's design offset."""
+    """One final palette per theme, using the anchor's design offset.  `master` is hex already."""
     master_rgb = {}
     for role in ROLE_ORDER:
         if role not in master:
@@ -420,7 +517,131 @@ def theme_deltas(computed, master):
 MASTER_RE = re.compile(r':root\s*\{')
 BLOCK_RE = re.compile(r':root\[data-theme="(\d+)"\]\s*\{')
 COMMENT_RE = re.compile(r'/\*\s*(.*?)\s*\*/')
-PROP_RE = re.compile(r'--([A-Za-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{3,8})')
+PROP_RE = re.compile(r'--([A-Za-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{3,8}|var\(\s*--[A-Za-z0-9-]+\s*\))')
+VAR_RE = re.compile(r'var\(\s*--([A-Za-z0-9-]+)\s*\)')
+
+
+def normalise_hex(value):
+    """#abc -> #aabbcc, lower case; the form every comparison uses."""
+    v = value.strip().lower().lstrip('#')
+    if len(v) == 3:
+        v = ''.join(ch * 2 for ch in v)
+    return '#' + v
+
+
+def resolve_value(value, props, root, seen=()):
+    """A role's value as hex: follow var(--x) through the block first, then :root.
+
+    Returns None when the chain reaches a name neither place declares, so a comparison can treat it
+    as "different" rather than crash on a hand edit.
+    """
+    value = value.strip()
+    m = VAR_RE.fullmatch(value)
+    if not m:
+        return normalise_hex(value) if value.startswith('#') else None
+    name = m.group(1)
+    if name in seen:
+        fail(f"CSS variable loop in style.css: {' -> '.join(seen + (name,))}")
+    if name in props:
+        return resolve_value(props[name], props, root, seen + (name,))
+    if name in root:
+        return resolve_value(root[name], props, root, seen + (name,))
+    return None
+
+
+def resolve_master(master):
+    """The :root colours as hex, aliases followed."""
+    return {name: resolve_value(value, {}, master) for name, value in master.items()}
+
+
+def resolve_block(block, master):
+    """One block's declared colours as hex, its own declarations taking precedence."""
+    return {name: resolve_value(value, block['props'], master)
+            for name, value in block['props'].items()}
+
+
+def find_families(master):
+    """head -> its members, read from `:root` itself.
+
+    A head is a name another declaration points at (`--button-fill: var(--fills)`) that is not a role,
+    so a family added by hand is picked up with no list to maintain here.
+    """
+    families = {}
+    for name, value in master.items():
+        m = VAR_RE.fullmatch(value.strip())
+        if not m:
+            continue
+        head = m.group(1)
+        if head in ROLE_ORDER or head not in master:
+            continue
+        families.setdefault(head, []).append(name)
+    for head in families:
+        families[head].sort()
+    return families
+
+
+def collapse_families(props, root, families):
+    """Turn spelled-out members back into one head line: the inverse of `--inflate`.
+
+    A block may declare a head (`--outlines: #e3d25f`) and let the members inherit.  When a block
+    spells the members out instead, and two or more of them resolve to the same colour, one head line
+    says the same thing - and the members the block left out join the family, which is exactly the
+    short form a derived theme wants.
+    A member that resolves differently is a deliberate split and stays declared, so a theme can still
+    say "this one outline is not the family outline".
+
+    `props` is edited in place; returns (removed, added).
+    """
+    removed, added = {}, {}
+    for head in sorted(families):
+        spelled = [member for member in families[head] if member in props]
+        if head in props:
+            # The block already says it: drop the members that only repeat it.
+            candidate = resolve_value(props[head], props, root)
+            if candidate is None:
+                continue
+            drop = [m for m in spelled if resolve_value(props[m], props, root) == candidate]
+            put = None
+        else:
+            # The colour most of the members agree on IS the family colour; a lone member that says
+            # something else is a deliberate split and keeps its own line under the new head.
+            groups = {}
+            for member in spelled:
+                value = resolve_value(props[member], props, root)
+                if value is not None:
+                    groups.setdefault(value, []).append(member)
+            if not groups:
+                continue
+            best = max(groups, key=lambda value: len(groups[value]))
+            winners = groups[best]
+            if len(winners) < 2:
+                continue
+            if sum(1 for value in groups if len(groups[value]) == len(winners)) > 1:
+                continue          # a tie says nothing about which colour the family has
+            candidate = best
+            drop = winners
+            put = best
+        for member in drop:
+            removed[member] = props.pop(member)
+        if put is not None:
+            props[head] = put
+            added[head] = put
+    return removed, added
+
+
+def find_anchor(blocks, marker_anchor):
+    """The display theme whose block is empty - the one :root is the WebUI rendering of."""
+    empty = sorted(b['id'] for b in blocks if not b['props'])
+    if empty:
+        if len(empty) > 1:
+            print(f"Note: several blocks are empty ({', '.join(str(i) for i in empty)}); "
+                  f"using [{empty[0]}] as the master's reference.")
+        return empty[0]
+    if marker_anchor is not None:
+        return marker_anchor
+    print("WARNING: no block is empty, so the master's display theme cannot be inferred; assuming [0].")
+    print("         Copy a palette into :root and run --deflate to establish it.")
+    return 0
 
 
 def brace_end(text, open_pos):
@@ -489,16 +710,13 @@ def parse_style(text):
 
 
 def render_block(theme_id, name, props, eol):
+    """A block in alphabetical order - the same order as `:root`, hand-added properties included."""
     head = f':root[data-theme="{theme_id}"] {{ /* {name} */'
     if not props:
         return head + eol + '}'
     lines = [head]
-    for role in ROLE_ORDER:
-        if role in props:
-            lines.append('  ' + ('--' + role + ':').ljust(22) + props[role] + ';')
     for role in sorted(props):
-        if role not in ROLE_ORDER:              # hand-added property: keep it at the end
-            lines.append('  ' + ('--' + role + ':').ljust(22) + props[role] + ';')
+        lines.append('  ' + ('--' + role + ':').ljust(22) + props[role] + ';')
     lines.append('}')
     return eol.join(lines)
 
@@ -541,11 +759,35 @@ def write_style(text):
         f.write(text)
 
 
+def validate_props(text):
+    """Every palette declaration must begin its line.
+
+    A stray character in front of `--role:` makes the declaration invalid CSS, and the browser drops
+    it silently: the role then falls back to whatever its alias resolves to, which is very hard to
+    see.  Catching it at read time is the difference between a five-second error and a colour hunt.
+    """
+    spans = [(m.start(), m.end()) for m in re.finditer(r'/\*.*?\*/', text, re.S)]
+
+    def in_comment(pos):
+        return any(a <= pos < b for a, b in spans)
+
+    for m in PROP_RE.finditer(text):
+        if in_comment(m.start()):
+            continue
+        line_start = text.rfind('\n', 0, m.start()) + 1
+        prefix = text[line_start:m.start()]
+        if prefix.strip():
+            line = text.count('\n', 0, m.start()) + 1
+            fail(f"style.css line {line}: unexpected {prefix.strip()!r} before --{m.group(1)}.\n"
+                 f"       A palette declaration must start its line; only indentation is allowed.")
+
+
 def read_style():
     if not os.path.exists(STYLE_CSS):
         fail(f"{STYLE_CSS} not found.")
     with open(STYLE_CSS, 'r', encoding='utf-8', newline='') as f:
         text = f.read()
+    validate_props(text)
     return text, ('\r\n' if '\r\n' in text else '\n')
 
 
@@ -591,6 +833,7 @@ def fail(message):
 def stage_missing(text, eol, names, themes, master, anchor, blackbg, dry_run):
     """Add a block for every theme id that style.css does not have yet."""
     master_palette, blocks = parse_style(text)
+    master_palette = resolve_master(master_palette)
     have = {b['id'] for b in blocks}
     missing = [i for i in range(len(names)) if i not in have]
     if not missing:
@@ -646,6 +889,7 @@ def stage_missing(text, eol, names, themes, master, anchor, blackbg, dry_run):
 def stage_renames(text, eol, names, themes, master, anchor, blackbg, dry_run):
     """A comment name that no longer matches themes.h can be re-imported in place."""
     master_palette, blocks = parse_style(text)
+    master_palette = resolve_master(master_palette)
     changed = [b for b in blocks
                if b['id'] < len(names) and b['name'] and not b['locked']
                and b['name'] != names[b['id']]]
@@ -703,7 +947,9 @@ def print_diff(theme_id, name, added, changed, removed):
 def stage_update(text, eol, names, themes, master, anchor, blackbg, dry_run):
     """Element-by-element comparison for every editable theme."""
     palettes = build_palettes(themes, master, anchor, blackbg)
-    master_palette, blocks = parse_style(text)
+    raw_master, blocks = parse_style(text)
+    families = find_families(raw_master)
+    master_palette = resolve_master(raw_master)
     by_id = {b['id']: b for b in blocks}
 
     def pending_list():
@@ -712,7 +958,9 @@ def stage_update(text, eol, names, themes, master, anchor, blackbg, dry_run):
             b = by_id.get(i)
             if b is None or b['locked']:
                 continue
-            added, changed, removed = theme_diff(theme_deltas(palettes[i], master_palette), b['props'])
+            # A head line is not a role, so it is never a difference against themes.h.
+            current = {k: v for k, v in resolve_block(b, master_palette).items() if k in ROLE_ORDER}
+            added, changed, removed = theme_diff(theme_deltas(palettes[i], master_palette), current)
             if added or changed or removed:
                 pending.append((i, added, changed, removed))
         return pending
@@ -742,6 +990,7 @@ def stage_update(text, eol, names, themes, master, anchor, blackbg, dry_run):
         if not ask_yes("Update this theme from themes.h?", default=False):
             continue
         props = theme_deltas(palettes[choice], master_palette)
+        collapse_families(props, master_palette, families)   # write it short, one line per family
         block = by_id[choice]
         text = apply_edits(text, [(block['start'], block['end'],
                                    render_block(choice, names[choice], props, eol))])
@@ -749,8 +998,97 @@ def stage_update(text, eol, names, themes, master, anchor, blackbg, dry_run):
         write_style(text)
         print(f"Updated [{choice}] {names[choice]}.")
         text, eol = read_style()
-        master_palette, blocks = parse_style(text)
+        raw_master, blocks = parse_style(text)
+        families = find_families(raw_master)
+        master_palette = resolve_master(raw_master)
         by_id = {b['id']: b for b in blocks}
+
+
+# ---------------------------------------------------------------------------
+# Maintenance modes: style.css only, no themes.h, PERFECT blocks included
+# ---------------------------------------------------------------------------
+
+def run_maintenance(text, eol, master_raw, blocks, mode, dry_run):
+    """--inflate / --deflate / --deflate-lossy.  Works on every block, locked or not."""
+    master_hex = resolve_master(master_raw)
+    families = find_families(master_raw)
+    edits = []
+    touched_blocks = 0
+    touched_props = 0
+
+    for block in blocks:
+        props = dict(block['props'])
+        removed = {}
+        added = {}
+
+        for name, value in list(props.items()):
+            have = resolve_value(value, props, master_raw)
+            want = master_hex.get(name)
+            if have is None:
+                print(f"  [{block['id']}] --{name}: kept (not resolvable to one hex value)")
+                continue
+            if want is None:
+                print(f"  [{block['id']}] --{name}: kept (not in master)")
+                continue
+            if mode == 'inflate':
+                continue
+            if have == want:
+                removed[name] = value
+            elif mode == 'deflate-lossy':
+                distance = dist(hex_to_rgb(have), hex_to_rgb(want))
+                if 0 < distance <= NEAR_MASTER:
+                    if dry_run:
+                        print(f"  [{block['id']}] --{name}: {have} is {distance:.1f} from master {want}")
+                        removed[name] = value
+                    elif ask_yes(f"  [{block['id']}] remove --{name} "
+                                 f"({have}, {distance:.1f} from master {want})?", default=False):
+                        removed[name] = value
+
+        if mode == 'inflate':
+            for role in ROLE_ORDER:
+                if role in props:
+                    continue
+                # The value the role already resolves to in THIS block, so a block that declares a
+                # head keeps its cascade instead of being shadowed by the master's hex.
+                value = resolve_value(master_raw.get(role, 'var(--' + role + ')'),
+                                      props, master_raw)
+                if value is None:
+                    value = master_hex.get(role)
+                if value is None:
+                    continue
+                props[role] = value
+                added[role] = value
+        else:
+            for name in removed:
+                props.pop(name, None)
+            # members that all follow their head go back to being one head line
+            collapsed, kept = collapse_families(props, master_raw, families)
+            removed.update(collapsed)
+            added.update(kept)
+
+        if not added and not removed:
+            continue
+        touched_blocks += 1
+        touched_props += len(added) + len(removed)
+        if dry_run:
+            verb = 'add' if mode == 'inflate' else 'remove'
+            print(f"[{block['id']}] {block['name']}: would {verb} {len(added) + len(removed)} role(s)")
+            continue
+        edits.append((block['start'], block['end'],
+                      render_block(block['id'], block['name'], props, eol)))
+
+    if mode == 'inflate':
+        verb, noun = 'Inflated', 'added'
+    else:
+        verb, noun = 'Deflated', 'removed'
+    if dry_run:
+        print(f"\n--dry-run: {touched_blocks} theme(s) would change, "
+              f"{touched_props} declaration(s) {noun}.")
+        return text
+    text = apply_edits(text, edits)
+    write_style(text)
+    print(f"{verb} {touched_blocks} theme(s), {noun} {touched_props} declaration(s).")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -764,7 +1102,7 @@ def main():
     update = False
     blackbg = False
     dry_run = False
-    anchor = DEFAULT_ANCHOR
+    maintenance = None
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -774,41 +1112,50 @@ def main():
             blackbg = True
         elif arg == '--dry-run':
             dry_run = True
-        elif arg == '--anchor':
-            if i + 1 >= len(argv) or not argv[i + 1].isdigit():
-                fail("--anchor needs a theme number.")
-            anchor = int(argv[i + 1])
-            i += 1
-        elif arg.startswith('--anchor='):
-            value = arg.split('=', 1)[1]
-            if not value.isdigit():
-                fail("--anchor needs a theme number.")
-            anchor = int(value)
+        elif arg in ('--inflate', '--deflate', '--deflate-lossy'):
+            if maintenance is not None:
+                fail("choose only one of --inflate, --deflate, --deflate-lossy.")
+            maintenance = arg[2:]
         else:
             print(f"ERROR: unknown option: {arg}")
             print(__doc__)
             sys.exit(1)
         i += 1
 
-    names, themes = load_themes()
-    if not 0 <= anchor < len(themes):
-        fail(f"--anchor {anchor} is out of range (0-{len(themes) - 1}).")
+    if maintenance and (update or blackbg):
+        fail(f"--{maintenance} cannot be combined with --update or --blackbg.")
 
     text, eol = read_style()
     file_mode, file_anchor = mode_in(text)
+
+    if maintenance:
+        master_raw, blocks = parse_style(text)
+        print(f"Maintenance mode: --{maintenance} (PERFECT blocks included).")
+        run_maintenance(text, eol, master_raw, blocks, maintenance, dry_run)
+        if dry_run:
+            print("\n--dry-run: nothing was written.")
+        return
+
+    names, themes = load_themes()
+    master_raw, blocks = parse_style(text)
+    anchor = find_anchor(blocks, file_anchor)
+    if not 0 <= anchor < len(themes):
+        fail(f"The inferred anchor {anchor} is out of range (0-{len(themes) - 1}).")
+    print(f"Master reference: display theme [{anchor}] {names[anchor]}")
+
     mode = 'blackbg' if blackbg else 'normal'
     if file_mode is not None:
-        mode_differs = file_mode != mode
-        anchor_differs = file_anchor is not None and file_anchor != anchor
-        if mode_differs or anchor_differs:
-            print(f"WARNING: style.css was generated with mode={file_mode} anchor={file_anchor}, "
-                  f"this run is mode={mode} anchor={anchor}.")
+        if file_mode != mode:
+            print(f"WARNING: style.css was generated with mode={file_mode}, this run is mode={mode}.")
             print("         --update would show every editable theme as changed.")
             if not dry_run and not ask_yes("Continue anyway?", default=False):
                 print("Cancelled. Nothing was changed.")
                 return
+        elif file_anchor is not None and file_anchor != anchor:
+            print(f"Note: the marker says anchor={file_anchor}, but [{anchor}] is the empty block; "
+                  f"using [{anchor}].")
 
-    master, blocks = parse_style(text)
+    master = resolve_master(master_raw)
     locked = sum(1 for b in blocks if b['locked'])
     if locked:
         print(f"Locked by PERFECT: {locked} theme(s), skipped.")
@@ -818,6 +1165,7 @@ def main():
     # A different number of ids means stale blocks (a custom slot, or a deleted theme); stop before
     # the name stage, which assumes ids line up.
     master, blocks = parse_style(text)
+    master = resolve_master(master)
     if {b['id'] for b in blocks} != set(range(len(names))):
         extra = sorted({b['id'] for b in blocks} - set(range(len(names))))
         if extra:

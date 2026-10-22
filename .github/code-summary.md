@@ -1350,6 +1350,13 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
+- **`DSP_TFT` / `DSP_OLED` exist only in a translation unit that includes `../displays/dspcore.h`,** the driver
+  dispatcher that defines them from `DSP_MODEL`; `display.h` does not pull it in. The `theme` command guards its
+  `display.applyTheme()` with `#if defined(DSP_TFT)` because OLED has no display palette (there the id is only the
+  WebUI choice). That guard once sat in this file without the include, so it was silently false on a TFT too: the id
+  was saved and the dropdown moved, but the panel kept its colours until the next full state apply - which is why a
+  font change appeared to "apply" a theme that had never been applied. `DBGWUI` is a local `#define` inside
+  `GETACTIVE` in `netserver.cpp` and is always 0 in any other file.
 - The three screensaver-composition commands (`screensavertext`, `screensavervu`, `screensavervustyle`) are the
   only members of the screensaver family that also ask for `GETACTIVE` again, because they change which rows
   the Screen section shows. `GETACTIVE` sends `group_vu_ss` unconditionally inside the VU `#if` (the VU
@@ -1715,22 +1722,155 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 ## `src/displays/webuitheme.py`
 - Imports the display themes in `themes.h` into the `data/www/style.css` theme blocks. `:root` is the
   master design and is never written.
-- The master is the WebUI rendering of an **anchor** display theme (`--anchor`, default 0; the
-  `mode=... anchor=N` marker records it). Every role is a `feature()` of the panel - `background` ->
-  background, `metabg` -> control-bg, `title1` -> accent-text / icons-outline / main-text-2,
-  `title2` -> main-text-1 / list-names, `line` -> panel-border, `clock` -> icons-highlight (darkened)
-  and logo, `metabg` -> logo-text - and `transfer()` re-anchors it from the master through HSL: hue
-  and saturation follow the display, lightness keeps the master's offset, and a neutral feature hands
-  the decision to the other side. Border, shadow and switch roles are derived afterwards, text is
-  pushed to `READ_TEXT` / `READ_ACCENT`, and the anchor's block is empty by construction.
+- The master is the WebUI rendering of **one** display theme, and that theme is discovered rather than
+  configured: it is the block with no declarations (the identity transfer at that theme, which
+  `--deflate` leaves behind after a palette is copied into `:root`). Resolution order is lowest-id empty
+  block, then the marker's `anchor=`, then 0 with a warning. **There is no `--anchor` flag.**
+- 53 roles. Every role is a `feature()` of the panel - `metabg` -> the control/input/button fills,
+  `title1` -> the accent-family text and outlines, `title2` -> the dim text and list names, `line` ->
+  panel border and scrollbar, `clock` darkened -> `highlight-fill` and the logo,
+  `background` -> switch and scrollbar surfaces - and `transfer()` re-anchors each one from the master
+  through HSL: hue and saturation follow the display, lightness keeps the master's offset, and a neutral
+  feature hands the decision to the other side. Every fill that means "highlight" collapses to one
+  colour, its text is chosen once by contrast, borders/shadows are derived, and text is pushed to
+  `READ_TEXT` / `READ_ACCENT`. The ten split text roles (`caption-text`, `editor-cell-text`, `link-quiet`,
+  `section-title-text`, `switch-off-text` on the dim tier; `meta-text`, `info-text`, `eq-label-text` on the
+  bright one) are readable-checked with their tier and then tied
+  back to `main-text` / `small-text`, so a generated palette keeps each tier in step.
+- **The nine `:root` family heads are NOT roles, but a block may declare one.** `ROLE_ORDER` lists members only
+  and `feature()` has no key for a head, so no palette is generated for one. `find_families()` derives the map
+  from `:root` itself - a head is a name another declaration points at that is not a role - so a hand-added
+  family needs no list maintained in the tool. A theme can therefore write `--outlines: #e3d25f` and move seven
+  outline roles in one line. `--deflate` folds members back into that line (the value most of them agree on
+  wins; a member that differs stays declared as a deliberate split) and `--update` writes through the same
+  fold, so a freshly derived theme comes out short. `--inflate` writes each role at the colour it **already
+  has in that block**, never the master hex, so a head's cascade survives being frozen; `--inflate` followed
+  by `--deflate` returns the file byte for byte.
+- **Values may be `var(--other)`.** `resolve_value()` follows aliases block-first and then `:root`, so
+  every comparison is on hex; a block that spells out `#262626` where `:root` says `var(--fills)` is
+  redundant. The generator always writes hex. `--update` compares a block through its aliases.
+- **Declarations are alphabetical everywhere, and there is no sort mode.** `ROLE_ORDER` is alphabetical and
+  `render_block()` writes `sorted(props)`, so every block the tool creates or rewrites is alphabetical,
+  including hand-added properties. `:root` is the one exception by design: it is grouped by family (floats
+  first, then `surfaces`, `edges`, `fills`, `outlines`, `highlights`, `actives`, `labels`, `infotexts`,
+  `maintexts`), alphabetical inside each group. Sorting the file is a one-off edit, not a tool stage.
 - A block title containing the whole word `PERFECT` is locked: it is never added, renamed, compared,
   listed or overwritten, only counted. Removing the word makes it editable again, and the tool never
-  writes it.
+  writes it. **The maintenance modes ignore the lock** - inflating or deflating a locked block is upkeep,
+  not import.
+- **Maintenance modes**, style.css only, never reading `themes.h` and refusing to combine with the other
+  flags: `--inflate` gives every block every role it lacks, with the resolved `:root` value as hex
+  (appearance unchanged; the block is frozen while you hand-edit it); `--deflate` drops every declaration
+  whose resolved value is exactly the `:root` one; `--deflate-lossy` does the same for values within
+  `NEAR_MASTER`, one `[y/N]` per role per theme, default No. `--dry-run` reports instead of writing.
 - No arguments: add missing blocks in id order, then reconcile renamed ones (whole-body replace only
   on confirmation). `--update`: per-theme element diff on a menu of real ids, blank exits.
-  `--dry-run` prints and writes nothing. A mode or anchor mismatch is warned about before updating.
+  `--dry-run` prints and writes nothing. A mode mismatch is warned about before updating.
+- `read_style()` **validates that every palette declaration begins its line** (indentation only) and fails
+  with the line number and the offending prefix. A stray character in front of `--role:` makes the
+  declaration invalid CSS that the browser drops silently - the role then falls back to its alias, which
+  presents as a colour that "does not apply" and is otherwise a long hunt.
 - Never writes `:root`, never deletes or reorders a block, ignores ids with no display theme and
-  ignores `--page-bg` (the fixed window surround).
+  ignores the three fixed colours (`--page-bg`, `--list-bars`, `--playlist-hover`).
+
+## `src/displays/webui_tool.html`
+- Dev-only **theme builder and sampler**: one page showing every kind of coloured element from the player,
+  playlist editor, settings (Controls), search, curated lists, IR recorder and the equaliser popup, plus the
+  loader/progress states, with the whole palette beside it. Fake data; the only script is the builder described
+  below, and it never
+  touches `style.css`. It exists because a palette edit in DevTools dies on page navigation (the next page
+  reloads the stylesheet) and because a theme block is the real deliverable.
+- **Three columns on a wide screen:** a sticky help column (`.helpcol`, 420-560 px, with its own scrollbar)
+  carrying the text and the variable table, and `.samples` split into two page columns (`.sample`), the playlist
+  editor spanning both because `#pleditor` needs 880 px. Under 1580 px the samples fold to one column; under
+  980 px the help moves to the top and stops being sticky. Each sample is its own `.pagewrap` app column, so the
+  page-bg shows between them; `.narrow` keeps settings/search/curated at 580 px and the editor centres at 960.
+- **A sample is a `div`, never a `section`, and its frame is hardcoded.** `style.css` has a bare `section {}` rule -
+  the settings card, with a `--panel-border` ring, card padding and
+  `background-image: linear-gradient(--panel-background, --panel-gradient)` - and `section` exists nowhere but
+  options.html's cards and editor.html's `#themebox`/`#laybox`. While the frames were `<section class="sample">`
+  they inherited that wash, which read as if the whole WebUI were gradiented. The Settings sample keeps its real
+  `section#group_controls`, so the gradient is still previewed where it actually appears. The frame is a fixed
+  `#323232` ring on a `#000` cell (`--page-bg` is `#000000` and never themed), so no palette variable paints a
+  frame - the same rule as the help column: the instrument never borrows the subject's colours.
+- The real pages are exactly one screen tall and scroll their own boxes, so the harness relaxes a few heights -
+  `#playerwrap`, `#equalizerwrap`, `#playlist`, `#pleditor`, `#pleditorcontent`, `#settingswrap`, `#searchcontent`,
+  `#curatedcontent` go `height: auto`, the two lists are capped at 340 px, and `#pleditorwrap` becomes
+  `position: static` (on the device it is an absolute overlay). Those rules are layout only and define no colour.
+- Links the real stylesheet (`../../data/www/style.css`) and carries **no `data-theme`**, so the page's base is
+  the real `:root` and theme 0 is just another slot - it is not the default and its notes say nothing special.
+  The loader sets that attribute for one synchronous read and restores it.
+- **The tool's own chrome is hard-coded on purpose.** The help column, the table, the output block and the sample
+  captions are the instrument, not the subject: they read `--tool-*`, a fixed dark palette declared in the harness
+  `<style>`. They used to borrow the theme, and theme 6 (black text on a light page) made the editor unreadable
+  mid-edit. Everything inside `.pagewrap` - every sample - and the circle fills still come from `style.css`, so the
+  preview is still the real thing. The IR remote graphic is the one sample that is fixed by the stylesheet itself,
+  and the recorder rows beside it are palette-driven in both states, so the button roles are compared pressed
+  against unpressed. The **equaliser popup** (`#equalizer` and its four bands) is a sample of its own beside the
+  Player: on the device `#equalizerbg` is an absolute overlay inside `#playerwrap`, and an **id rule beats any
+  class**, so a `.sampler-eq` override never applied and the popup simply covered the player. It is now
+  `#samplereq`, a framed panel that takes the free grid cell to the right of the Player (the editor spans both
+  columns, so that cell is empty), with inline slider gradients like the player's own volume bar. It is the only
+  place `--eq-label-text` is ever painted, and it also shows `--meter-fill` / `--meter-track` and the `.fb` OK.
+- The sample markup reuses the production ids and classes (`#playerwrap`, `#playlist`, `#pleditor`,
+  `#settingscontent`, `#searchcontent`, `#curatedcontent`, `#irremote`, the `.gb`/`.fb`/`.pleitem` families). Both
+  dropdowns carry real data: the thirteen names from `_themeNames[]` and real `timezones.json` pairs. The IR sample
+  shows the recorder forced open with two rows, one `.irradio.active` + `.irrecordvalue.active` and one at rest, so
+  the pressed and unpressed key colours are judged side by side.
+- The table in the help column is also the editor. It lists all 62 declarations grouped the way `:root` is: the
+  nine standalone colours first, then the nine families, each opened by a bold head row (`tr.fam[data-head]`)
+  with its members beneath (`tr[data-role]`), one combined line each saying where it shows and what it does.
+- **The circles are the controls.** Every row carries a `button.circle` (a head's has a double ring), coloured
+  from the live palette, and it opens one shared `<input type="color">` parked at the circle that was clicked.
+  The choice is written as an **inline custom property on `<html>`** - the strongest origin, one element below
+  `:root` - so the preview repaints while every rule, hover and layout still comes from `style.css`; **Reset
+  all** just removes those properties. Reading the starting colours is `getComputedStyle`, with a `var()` walk
+  for a browser that hands back the token stream instead of the substituted value.
+- **The lock rule is the collapse rule.** Setting a head (`state.heads`) locks the family and clears its member
+  splits; setting a member (`state.members`) splits only that member and marks the row `splitrow` with an arrow
+  that rejoins it. When fewer than two members still follow a head, its colour is handed to the last followers
+  and the head is forgotten - which is why the copied block drops the head line at exactly the same point
+  `webuitheme.py --deflate` would.
+- **One arrow per row, and the ROW decides what it resets.** Every row carries a `button.rejoin` &#8635;;
+  `paint()` reveals it by adding `setrow` to the row. `tr[data-head]` clears the head **and** every split in its
+  family; `tr[data-role]` clears that one role. The key is read from the row's own `data-head` / `data-role` -
+  **never from a second attribute on the button**, because a rename then has one place to go wrong instead of two
+  (the first version kept `data-reset="text2"` beside `data-head="infotexts"` and the arrow silently looked for a
+  head that no longer existed). The standalone roles have no group colour to reset, so each keeps only its own
+  arrow beside its own circle. **`setrow` follows any override** - standalone included - while `splitrow` needs a
+  family to be split from. Family head rows are boxed - `tr.fam td` draws top and bottom, the first and last cell
+  close the ends - so a group reads as a sub-heading.
+- **Cancel is a real cancel, and accept wins the race.** A native colour dialog fires `input` on every drag (that
+  is the live preview) but `change` only when it is accepted, so the circle click snapshots `{heads, members}`,
+  `input` marks the session dirty (an `input` whose colour equals the current one is ignored - opening the dialog
+  can fire exactly that), and `change` accepts it. The close is seen on `blur`, on `window.focus` and on an
+  outside `pointerdown`, but those can arrive **before** `change`, so the rollback is deferred one 200 ms tick and
+  abandons itself if `session` has been replaced in the meantime; a session that is still clean (nothing dragged)
+  is never rolled back at all, which keeps an early blur from killing the preview. Every path ends in `apply()`.
+- **A line must say something.** `blockText()` drops any line whose colour equals the one that role would inherit
+  *without* that line - `defaults[head]` for a head, the printed head (or `defaults[member]` when no head line is
+  printed) for a member - so a value left behind by a cancelled picker, or a lock that happens to match `:root`,
+  never reaches the pasted block. The single-follower case still emits the follower explicitly, and only when it
+  differs from its own default, so "all but one unlocked" keeps working.
+- **Clicking a name jumps** to the first element that uses that colour: a `LOOK` map of role -> selector, a
+  head falling through to one of its members, and `#samples .sample` as the last resort. Each sample also has an
+  id for deep links: `#sample-player`, `#sample-eq`, `#sample-editor`, `#sample-settings`, `#sample-search`,
+  `#sample-curated`, `#sample-ir`, `#sample-states` (prefixed because the production markup already owns `#search`).
+- **The loader takes a numeric id, not a list.** No theme names live in the page: it cannot read a linked
+  stylesheet's rules on a `file://` page and `themes.h` is not reachable, so a hardcoded list would rot as soon as
+  a slot appeared. Typing an id and pressing Load sets `data-theme` for one synchronous read of all 65 names,
+  restores the attribute, and rebuilds the state by the same rule the tool uses (the value most of a family's
+  members agree on becomes the head, the rest stay split) - so a head-using theme loads short. The note reports
+  how many colours differed, or that the id came back as the `:root` palette (no block, or an empty one).
+  **Reset all to :root** clears the state, which is exactly "the root numbers". **Copy to Clipboard** emits
+  `:root[data-theme="X"] { /* Name here - and replace the X! */ ... }`, with `execCommand` as the fallback when
+  the async clipboard is unavailable on a `file://` page.
+- The logo is a **snapshot of `data/www/logo.svg` inlined** into `#logo`, not an `<img>`. The SVG paints itself with
+  `var(--logo)`, `var(--logo-shadow)` and `var(--logo-text)`, and only an inline SVG inherits the page's custom
+  properties - an `<img>` is a document of its own, which is why the device inlines it in `loadLogoThen()` too. It
+  appears once, in the Player sample, which is enough to judge the three logo roles; if the artwork changes, paste
+  the new file over the logo block again.
+- Never served: it lives outside `data/www` and is not in `Config::wwwFiles[]`, so it cannot reach the firmware image.
 
 ## `src/core/controls.h` / `controls.cpp`
 - `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`,
@@ -3585,6 +3725,14 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `n0`…`n9`) that maps 1:1 to the `irstore` field / NVS key, so DOM order is irrelevant.
 - The shell loads the page body from `irrecord.html`; the `/ir.html` route itself is handled by the PSRAM cache
   fallthrough.
+- **The remote is not themed; the rows under it are.** `#irremote` uses fixed hex in `style.css`, because hardware
+  looks the same in every theme. `#irrecord` instead borrows the flat button: `checkSelect()` puts `active` on the
+  clicked `.irradio` plus its sibling `.irrecordvalue` and on nothing else - there is no row-level class - so an
+  unselected row is a `.fb` at rest (`--button-fill` / `--button-text` / `--button-outline`) and the selected row is
+  that same button pressed (`--button-active-fill` / `--button-active-text`, ring unchanged - the pair `:hover` and
+  `.pressed` use). Deliberately no hover rule: the row reports a state. `.irclear` never receives `active`, so it is
+  always a button at rest; its cross is two CSS bars in `--button-text`, replacing a base64 PNG that was fixed dark
+  grey on whatever fill the theme had.
 
 ## `data/www/search.html`
 - Search UI for radio-browser integration.
@@ -3615,18 +3763,44 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   it again. Themes 0 (the anchor design) and 1 (the restored yoRadio Gold) are locked that way.
 - On a non-TFT build there is no display palette, so the same setting is labelled "WebUI Theme"
   (`group_webui_theme`) and the `theme` command saves `themeId` without calling
-  `display.applyTheme()` - on OLED that would only repaint the panel.
-- Variables are named by **role**, never by the colour they happen to hold, so a theme can move one role
-  without dragging the others along. Surfaces: `--page-bg` (the browser window around the app column,
-  never themed), `--background` (the app column and the panels inside it), `--control-bg` (inputs,
-  buttons, tracks, thumbs) and `--list-bars` (zebra rows only). Text: `--main-text-1` (body and dim UI),
-  `--main-text-2`
-  (bright: meta, info, IR key legends), `--accent-text` (links, headings, station names, button labels,
-  input text), `--list-names`, `--list-urls`, `--switch-text` (the On/Off word in a knob) and
-  `--highlight-text` (text and icons on an `--icons-highlight` surface). Icons: `--icons-outline` (outlines,
-  strokes, filled accents) and `--icons-highlight` (hover/active/selected fill). Panels:
-  `--panel-gradient` / `--panel-border`, which also paint the IR remote. Unchanged: `--input-border`,
-  `--logo`, `--logo-text`, `--logo-shadow`, `--playlist-hover`.
+  `display.applyTheme()` - on OLED that would only repaint the panel. On a TFT that call is compiled in, so
+  `commandhandler.cpp` has to include `dspcore.h` for `DSP_TFT` to exist there at all.
+- Variables are named by **role**, never by the colour they happen to hold, and the **62 declarations in
+  `:root` are grouped by family**: 9 family heads, 9 standalone colours and 44 members (53 roles, of which
+  50 may be themed and three are fixed - `--page-bg`, the window around the app column; `--list-bars`, zebra
+  rows; `--playlist-hover`, row hover). A head - `--surfaces`, `--edges`, `--fills`, `--outlines`,
+  `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts` - holds the one colour and its members
+  point straight at it, so one edit moves the family and a theme splits a member by declaring that member.
+  **A head is painted by no rule and never written into a block**: a name that appears only in `:root` is a
+  head, and `webuitheme.py` treats it as such (not in `ROLE_ORDER`, never inflated). The nine standalone
+  colours are `--input-border`, `--list-bars`, `--list-names`, `--logo`, `--logo-shadow`, `--logo-text`,
+  `--page-bg`, `--panel-gradient` and `--playlist-hover`.
+  **The default palette is deliberately neutral** (black/white/grey), so a theme is what adds colour; block 0
+  is still empty, so the default (`data-theme="0"`) is exactly `:root`. `--accent-text` no longer exists: it
+  was folded into `--heading-text` once it turned out to have no role of its own.
+  `--background` is now `--panel-background`, which says what it paints and matches the rest.
+  Families: `--surfaces` = `--panel-background` / `--scrollbar-track` / `--switch-track`; `--edges` =
+  `--panel-border` / `--scrollbar-thumb`; `--fills` = `--button-fill` / `--control-bg` / `--editor-grid` /
+  `--input-fill` / `--meter-track` / `--select-fill`; `--outlines` = `--button-outline` /
+  `--icons-outline` / `--list-outline` / `--meter-outline` / `--spinner-ring` / `--switch-thumb` /
+  `--warning-outline`; `--highlights` = `--button-active-fill` / `--highlight-fill` / `--list-active-bg` /
+  `--meter-fill` / `--switch-track-on`; `--actives` = `--button-active-text` / `--icon-active-glyph` /
+  `--list-active-text` / `--switch-text`; `--labels` = `--button-text` / `--heading-text` / `--input-text` /
+  `--link-text` / `--select-text` / `--station-name`; `--infotexts` (bright) = `--small-text` (the `#copy`
+  footer) / `--meta-text` / `--info-text` / `--eq-label-text` / `--list-urls`; `--maintexts` (dim) =
+  `--main-text` (the `body` default) / `--caption-text` /
+  `--editor-cell-text` / `--link-quiet` / `--section-title-text` / `--switch-off-text`.
+  `--info-text` is one role on purpose: bitrate, RSSI, volume and battery share the player's info row.
+  Outside the families: `--input-border` (text-field outline), `--list-names` (editor name column),
+  `--list-bars` and `--playlist-hover` (fixed list colours),
+  `--panel-gradient` (the wash in a settings card) and the logo trio `--logo`, `--logo-text`,
+  `--logo-shadow`. `--warning-outline` is the editor
+  warning ring. **The IR remote is not themed at all**: `#irremote`, `.irbutton` and its blue/red keys use
+  fixed hex values in `style.css` (a real remote looks the same in every theme), so it has no palette roles.
+  The rows under it are the opposite case: `#irrecord` is painted entirely from the button roles - at rest
+  `--button-fill` / `--button-text` / `--button-outline`, and the `active` row `--button-active-fill` /
+  `--button-active-text` with the ring unchanged - so a row reads as an unpressed or a pressed flat button, with
+  no hover. The title badge and the caption keep their own roles.
 - `data-theme` is the theme's id in `themes.h` (`0` = ehRadio Blue & Red, `1` = ёRadio Gold, `2` = Graphite,
   ...), written onto `<html>` by `/variables.js` before the first paint. A theme with no block - any custom
   slot, or a built-in never mapped - inherits `:root` whole, so the default palette is the fallback by
@@ -3636,12 +3810,16 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   or saturated theme never floods the browser window.
 - A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
   GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
-- `.fb` is the flat button: `--control-bg` / `--accent-text` at rest, `--icons-highlight` / `--highlight-text` on
-  hover (mouse only) and while it carries `.pressed`, which `script.js` adds for two seconds after a press so a touch
-  screen gets the same feedback. There is no permanently highlighted variant - the old `.fb.hl` is gone, and the
-  buttons that used it (Apply Changes, Save, Calibrate, the update page's Cancel) are ordinary `.fb` buttons now.
-- The built-in blocks are generated by `src/displays/webuitheme.py` and carry a `mode=` marker; hand
-  edits are expected, and `--update` shows them as diffs before replacing a block.
+- `.fb` is the flat button: `--button-fill` / `--button-text` at rest, `--button-active-fill` /
+  `--button-active-text` on hover (mouse only) and while it carries `.pressed`, which `script.js` adds for two
+  seconds after a press so a touch screen gets the same feedback. There is no permanently highlighted variant -
+  the old `.fb.hl` is gone, and the buttons that used it (Apply Changes, Save, Calibrate, the update page's
+  Cancel) are ordinary `.fb` buttons now.
+- To judge a change against every screen at once, or to build a theme block, open `src/displays/webui_tool.html` -
+  see its own section above.
+- The built-in blocks are generated by `src/displays/webuitheme.py` and carry a `mode=` marker; hand edits
+  are expected. `--inflate`/`--deflate` (or `--deflate-lossy`) keep a block lean, and `--update` shows the
+  import diffs before replacing one.
 - `#info` is a one-line flex row by construction: `nowrap`, no per-item minimum widths, and `#bitinfo` the only item
   that
   flexes (centred, ellipsising). The old `min-width: 110px` per item plus `flex-wrap: wrap` is what used to push an item

@@ -94,16 +94,17 @@
 
 :root[data-theme="0"] { /* ehRadio Blue & Red (Trip5) PERFECT */
   --actives:            #ffffff;
-  --button-active-fill: #f81c00;
   --control-bg:         #f81c00;
-  --highlight-fill:     #f81c00;
-  --highlights:         #115fff;
-  --info-text:          #ffff00;
+  --highlights:         #f81c00;
   --infotexts:          #cccccc;
   --link-quiet:         #115fff;
-  --link-text:          #98d8e8;
-  --list-bars:          #000c24;
-  --playlist-hover:     #a80c02;
+  --link-text:          #f81c00;
+  --list-active-bg:     #115fff;
+  --meter-track:        #003299;
+  --playlist-hover:     #f81c00;
+  --spinner-ring:       #115fff;
+  --switch-track-on:    #115fff;
+  --warning-outline:    #f81c00;
 }
 :root[data-theme="1"] { /* ёRadio Gold (e2002) PERFECT */
   --actives:            #000000;
@@ -129,7 +130,7 @@
   --maintexts:          #828282;
   --outlines:           #bbbbbb;
 }
-:root[data-theme="3"] { /* Gray (Krzsiek) */
+:root[data-theme="3"] { /* Gray (Krzsiek) PERFECT */
   --actives:            #000000;
   --highlights:         #b4b4b4;
   --logo:               #ffffff;

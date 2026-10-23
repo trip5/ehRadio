@@ -86,10 +86,11 @@
   .rbtn + .rbtn { margin-left: 10px; }
   .rbtn:hover { border-color: #bbb; }
   /* Copy / paste on a colour row.  They are always on screen - this table is long, and a control that appears only
-     under the pointer would be a hunt down a column.  Their glyphs never change colour; only the BOX under the
-     pointer does, and only that one box, in the clipboard's own colour (--clip, set on #grid by the copy). */
+     under the pointer would be a hunt down a column.  Their glyphs never change colour.  Only the PASTE box takes the
+     clipboard's own colour (--clip, set on #grid by the copy), and only while the pointer is on it; the copy box keeps
+     the ordinary #bbb hover, because a copy icon drawn in the colour reads as if it held one itself. */
   .clippair { margin-right: 10px; }
-  #grid.hasclip .clippair .rbtn:hover { border-color: var(--clip); }
+  #grid.hasclip .clippair .pastebtn:hover { border-color: var(--clip); }
   #grid th.acts, #grid td.acts { width: 1%; white-space: nowrap; }
 </style>
 </head>
@@ -216,11 +217,12 @@ var BTN_COPY = '\uD83D\uDDD0', BTN_PASTE = '\u21E4';
 var CLIP = null;
 
 // One builder for the two little buttons that sit on every row and every card.  type=button so a stray Enter
-// inside a card can never submit anything, and the title is the whole explanation.
-function actButton(glyph, title, fn) {
+// inside a card can never submit anything, and the title is the whole explanation.  `extra` is a second class for
+// the one button that is not an ordinary one: the paste chip, whose hover it needs to pick out of the pair.
+function actButton(glyph, title, fn, extra) {
   var b = document.createElement('button');
   b.type = 'button';
-  b.className = 'rbtn';
+  b.className = extra ? 'rbtn ' + extra : 'rbtn';
   b.textContent = glyph;
   b.title = title;
   b.addEventListener('click', fn);
@@ -307,8 +309,8 @@ function buildGrid() {
     row.appendChild(tdV);
 
     // Copy, paste and Reset, in their own column at the END so it never moves as the numbers change width.  No
-    // Clear: an element's "nothing" IS black, which is what Reset already puts back.  Copy and paste are wrapped in
-    // one span so hovering either of them lights the pair - they report one clipboard between them.
+    // Clear: an element's "nothing" IS black, which is what Reset already puts back.  Copy and paste share one span
+    // so they keep a single gap between them; only the paste box takes the clipboard's colour on hover.
     var tdA = document.createElement('td');
     tdA.className = 'acts';
     var pair = document.createElement('span');
@@ -316,7 +318,7 @@ function buildGrid() {
     // Paste then copy - the arrow first, then what puts something there, then Reset: the order asked for, and the
     // arrow sits on the side its colour comes from.
     pair.appendChild(actButton(BTN_PASTE, 'Paste the clipboard colour into this element',
-                               function() { pasteRow(rowIndex); }));
+                               function() { pasteRow(rowIndex); }, 'pastebtn'));
     pair.appendChild(actButton(BTN_COPY, "Copy this element's colour to the clipboard",
                                function() { copyRow(rowIndex); }));
     tdA.appendChild(pair);
@@ -354,7 +356,8 @@ function resetRow(i) {
 
 // --- the colour clipboard ---------------------------------------------------
 // A row's colour as its 565 value, so nothing is rounded twice: what is copied is what is pasted, and it is the same
-// number the device stores.  The hex is only ever for the buttons' colour and for the note that says what happened.
+// number the device stores.  The hex is only ever for the paste box's hover colour and the note that says what
+// happened.
 function clipHex() {
   var rgb = v565ToRgb(CLIP);
   return '#' + ((1 << 24) + (rgb[0] << 16) + (rgb[1] << 8) + rgb[2]).toString(16).slice(1);
@@ -363,7 +366,7 @@ function clipHex() {
 function copyRow(i) {
   CLIP = row565(i);
   var grid = document.getElementById('grid');
-  grid.style.setProperty('--clip', clipHex());   // the pair's hover colour, set once for the whole table
+  grid.style.setProperty('--clip', clipHex());   // the paste box's hover colour, set once for the whole table
   grid.classList.add('hasclip');
   msg('Copied ' + clipHex().toUpperCase() + ' from ' + ELEM[i].label + '.', false);
 }

@@ -1853,10 +1853,11 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   circle sideways under the pointer aiming at it. A copy reads `valueOf()` (what the circle shows, so a follower
   copies its family colour) and a paste goes through the same `setValue()` the picker's `input` handler calls, so
   the head lock and the last-follower collapse are written once and cannot drift. The clipboard colour is also
-  published as `--clip` on the table, which is the pair's glyph colour while `hasclip` holds - the icons are the
-  swatch - with a faint white glow so a near-black value stays readable on the tool's dark panel; hover lights the
-  chip's border in `--tool-accent` exactly as the reset arrow does, and leaves the glyph alone so the colour stays
-  visible.
+  published as `--clip` on the table, and while `hasclip` holds it is the **paste** arrow's glyph colour, with a faint
+  white glow so a near-black value stays readable on the tool's dark panel. **The copy chip keeps the tool's dim
+  grey** - a copy icon drawn in the colour read as if it held one itself, which is what made the pair confusing.
+  Hover lights the chip's border in `--tool-accent` exactly as the reset arrow does, and leaves the glyph alone so
+  the colour stays visible.
 - **Cancel is a real cancel, and accept wins the race.** A native colour dialog fires `input` on every drag (that
   is the live preview) but `change` only when it is accepted, so the circle click snapshots `{heads, members}`,
   `input` marks the session dirty (an `input` whose colour equals the current one is ignored - opening the dialog
@@ -3538,11 +3539,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   copied colour in the device's own unit, so nothing is rounded twice and what the row shows is what gets pasted:
   copy reads `row565(i)`, and paste is `setRow(i, CLIP)` + `onEdit(i)`, which is exactly the path a typed edit takes
   (levels, swatch, 565 cell, debounced preview). The pair is always visible - the column is long and a hover-only
-  control would be a hunt - but **the glyphs never change colour**: only the box under the pointer does, and only
-  that one box, in the clipboard's own colour (`border-color` from `--clip`, published on `#grid` by the copy). The
-  arrow points **left** because the cells it writes are to the left; in `webui_tool.html` the circle is to their
-  right, so there it points right. The page's message line reports the hex that was copied or pasted, which the
-  numbers alone do not make obvious.
+  control would be a hunt - but **the glyphs never change colour**: only the paste box under the pointer does, in the
+  clipboard's own colour (`border-color` from `--clip`, published on `#grid` by the copy), and the copy box keeps the
+  ordinary `#bbb` hover - a copy icon drawn in the colour read as if it held one itself. The arrow points **left**
+  because the cells it writes are to the left; in `webui_tool.html` the circle is to their right, so there it points
+  right. The page's message line reports the hex that was copied or pasted, which the numbers alone do not make
+  obvious.
 - **An initialiser is not a refresher, and a page must not rebuild what the user is editing.** `editor.html`
   builds its grid exactly once. After a save or a delete it refreshes only the dropdown *labels*, in place,
   by rewriting the text of the options that already exist — because the id set never changes, only which

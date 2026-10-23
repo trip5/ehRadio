@@ -9,6 +9,23 @@
 
   DspCore::DspCore(): Jamis_SSD1322(DSP_WIDTH, DSP_HEIGHT, &SPI, TFT_DC, TFT_RST, TFT_CS, DEF_SPI_FREQ) {}
 
+// handle lighter colors on the playlist when paged mode is on / shades when off
+// Declared before initDisplay()/clearDsp() — both call it, and C++ needs the
+// declaration to appear before the first use.
+static void playlistColors() {
+  #if OLED_GREYSCALE
+    if (config.store.playlistPages) {
+      for(byte i=0;i<5;i++) config.theme.playlist[i] = GRAY_3;
+    } else {
+      config.theme.playlist[0] = GRAY_7;
+      config.theme.playlist[1] = GRAY_3;
+      config.theme.playlist[2] = GRAY_1;
+      config.theme.playlist[3] = GRAY_1;
+      config.theme.playlist[4] = GRAY_1;
+    }
+  #endif
+}
+
 void DspCore::initDisplay() {
   #if !OLED_GREYSCALE
     #include "tools/oledcolorfix.h"
@@ -58,21 +75,6 @@ void DspCore::initDisplay() {
   flip();
   invert();
   setTextWrap(false);
-}
-
-static void playlistColors() {
-  // handle lighter colors on the playlist when paged mode is on / shades when off
-  #if OLED_GREYSCALE
-    if (config.store.playlistPages) {
-      for(byte i=0;i<5;i++) config.theme.playlist[i] = GRAY_3;
-    } else {
-      config.theme.playlist[0] = GRAY_7;
-      config.theme.playlist[1] = GRAY_3;
-      config.theme.playlist[2] = GRAY_1;
-      config.theme.playlist[3] = GRAY_1;
-      config.theme.playlist[4] = GRAY_1;
-    }
-  #endif
 }
 
 void DspCore::clearDsp(bool black) {

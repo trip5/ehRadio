@@ -19,8 +19,8 @@ const BootData _bootConfig PROGMEM = {
         /* WIDGETS             { offset, top, fontsize, align } */
         .bootstrConf         = { 0, 64-8, 1, WA_CENTER },
         .apNameConf          = { 0, 18, 1, WA_CENTER },
-        .apName2Conf         = { 0, 26, 1, WA_CENTER },
-        .apPassConf          = { 0, 37, 1, WA_CENTER },
+        .apName2Conf         = { 0, 28, 1, WA_CENTER },
+        .apPassConf          = { 0, 39, 1, WA_CENTER },
         .apPass2Conf         = { 0, 45, 1, WA_CENTER },
         .bootWdtConf         = { 0, 64-8*2-5, 1, WA_CENTER },
         /* BOOT PROGRESS       { frame interval, line character width, progress characters } */

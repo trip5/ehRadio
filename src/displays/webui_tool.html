@@ -129,14 +129,15 @@ body { height: auto; padding: 0; }
 .roles td.sw { white-space: nowrap; }
 /* Copy / paste, to the left of every circle and shown for one row at a time.  Their slots are always laid out and
    hidden with `visibility`, never `display`: a pair that appeared on hover would shove the circle sideways, under
-   the pointer trying to click it.  They are chips like the reset arrow, and their GLYPH carries the colour the
-   clipboard holds (`--clip`, set by a copy and removed by Escape), with a faint glow so a near-black value stays
-   readable against the tool's dark panel. */
+   the pointer trying to click it.  They are chips like the reset arrow.  Only the PASTE arrow carries the colour
+   the clipboard holds (`--clip`, set by a copy and removed by Escape), with a faint glow so a near-black value
+   stays readable against the tool's dark panel; a copy chip drawn in that colour read as if it held one itself. */
 .roles button.clipbtn, .roles button.pastebtn { visibility: hidden; width: 20px; padding: 0; margin: 0 1px;
     font-family: inherit; font-size: 15px; line-height: 20px; text-align: center; vertical-align: middle;
     color: var(--tool-dim); background: var(--tool-panel); border: 1px solid var(--tool-line);
-    border-radius: 5px; cursor: pointer; text-shadow: 0 0 2px rgba(255, 255, 255, 0.45); }
-.roles.hasclip button.clipbtn, .roles.hasclip button.pastebtn { color: var(--clip, var(--tool-dim)); }
+    border-radius: 5px; cursor: pointer; }
+.roles.hasclip button.pastebtn { color: var(--clip, var(--tool-dim));
+    text-shadow: 0 0 2px rgba(255, 255, 255, 0.45); }
 /* Hover is the reset arrow's hover: the box lights up, the glyph keeps showing the colour. */
 .roles button.clipbtn:hover, .roles button.pastebtn:hover { border-color: var(--tool-accent); }
 .roles button.clipbtn.ok { color: var(--tool-accent); border-color: var(--tool-accent); }
@@ -216,8 +217,8 @@ body { height: auto; padding: 0; }
       beside a <b>family head</b>'s circle resets that whole family, head and splits together.</li>
     <li><b>Copy a colour between rows.</b> Hover a colour circle and two small buttons appear beside it:
       &#128464; copies that row's colour into a clipboard of this page's own, &#8614; pastes it into the row you are
-      on. Once something is held, both icons are drawn in that colour, so the clipboard is always visible. The pair
-      stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
+      on. Once something is held, the &#8614; is drawn in that colour, so what the clipboard holds is always visible.
+      The pair stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
       clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves and locks that
       family, and pasting into a member splits it off.</li>
     <li><b>Start from an existing theme</b> by selecting its id number under the table and pressing Load. The id is
@@ -1220,7 +1221,7 @@ body { height: auto; padding: 0; }
       if (clipBtn) {
         copied = valueOf(cname);           // what the circle shows, so a follower copies its family colour
         roles.classList.add('hasclip');
-        roles.style.setProperty('--clip', copied);   // both glyphs now show what is held
+        roles.style.setProperty('--clip', copied);   // the paste arrow now shows what is held
         clipBtn.classList.add('ok');
         setTimeout(function () { clipBtn.classList.remove('ok'); }, 900);
         setHot(crow);

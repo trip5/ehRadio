@@ -85,6 +85,11 @@
           border-radius: 3px; color: inherit; cursor: pointer; }
   .rbtn + .rbtn { margin-left: 10px; }
   .rbtn:hover { border-color: #bbb; }
+  /* Copy / paste on a colour row.  They are always on screen - this table is long, and a control that appears only
+     under the pointer would be a hunt down a column.  Their glyphs never change colour; only the BOX under the
+     pointer does, and only that one box, in the clipboard's own colour (--clip, set on #grid by the copy). */
+  .clippair { margin-right: 10px; }
+  #grid.hasclip .clippair .rbtn:hover { border-color: var(--clip); }
   #grid th.acts, #grid td.acts { width: 1%; white-space: nowrap; }
 </style>
 </head>
@@ -203,6 +208,12 @@ var MSG = null;
 var LOADED = null;
 // Reset (undo) and Clear (trash), as text: no image, no icon font, and the same glyphs the layout cards use.
 var BTN_RESET = '\u238C', BTN_CLEAR = '\uD83D\uDDD1';
+// Copy / paste for a colour row.  The arrow points LEFT here because the cells it writes - Red, Green, Blue - are to
+// the left of the buttons; in webui_tool.html the circle is to their right, so there it points right.
+var BTN_COPY = '\uD83D\uDDD0', BTN_PASTE = '\u21E4';
+// The copied colour, as its 565 value: the device's own unit, so a copy/paste pair moves exactly what the row holds.
+// null means nothing has been copied yet.
+var CLIP = null;
 
 // One builder for the two little buttons that sit on every row and every card.  type=button so a stray Enter
 // inside a card can never submit anything, and the title is the whole explanation.
@@ -295,10 +306,20 @@ function buildGrid() {
     tdV.className = 'v565';
     row.appendChild(tdV);
 
-    // Reset's own column, at the END so it never moves as the numbers change width.  No Clear: an element's
-    // "nothing" IS black, which is what Reset already puts back.
+    // Copy, paste and Reset, in their own column at the END so it never moves as the numbers change width.  No
+    // Clear: an element's "nothing" IS black, which is what Reset already puts back.  Copy and paste are wrapped in
+    // one span so hovering either of them lights the pair - they report one clipboard between them.
     var tdA = document.createElement('td');
     tdA.className = 'acts';
+    var pair = document.createElement('span');
+    pair.className = 'clippair';
+    // Paste then copy - the arrow first, then what puts something there, then Reset: the order asked for, and the
+    // arrow sits on the side its colour comes from.
+    pair.appendChild(actButton(BTN_PASTE, 'Paste the clipboard colour into this element',
+                               function() { pasteRow(rowIndex); }));
+    pair.appendChild(actButton(BTN_COPY, "Copy this element's colour to the clipboard",
+                               function() { copyRow(rowIndex); }));
+    tdA.appendChild(pair);
     tdA.appendChild(actButton(BTN_RESET, 'Put this element back to what was loaded',
                               function() { resetRow(rowIndex); }));
     row.appendChild(tdA);
@@ -329,6 +350,29 @@ function resetRow(i) {
   var v = (LOADED && LOADED.colors) ? LOADED.colors[ELEM[i].key] : 0;
   setRow(i, v);
   onEdit(i);
+}
+
+// --- the colour clipboard ---------------------------------------------------
+// A row's colour as its 565 value, so nothing is rounded twice: what is copied is what is pasted, and it is the same
+// number the device stores.  The hex is only ever for the buttons' colour and for the note that says what happened.
+function clipHex() {
+  var rgb = v565ToRgb(CLIP);
+  return '#' + ((1 << 24) + (rgb[0] << 16) + (rgb[1] << 8) + rgb[2]).toString(16).slice(1);
+}
+
+function copyRow(i) {
+  CLIP = row565(i);
+  var grid = document.getElementById('grid');
+  grid.style.setProperty('--clip', clipHex());   // the pair's hover colour, set once for the whole table
+  grid.classList.add('hasclip');
+  msg('Copied ' + clipHex().toUpperCase() + ' from ' + ELEM[i].label + '.', false);
+}
+
+function pasteRow(i) {
+  if (CLIP === null) { msg('Nothing copied yet - use ' + BTN_COPY + ' on a row first.', true); return; }
+  setRow(i, CLIP);                                // levels and swatch, exactly as a typed edit would
+  onEdit(i);                                      // paints the row and queues the preview
+  msg('Pasted ' + clipHex().toUpperCase() + ' into ' + ELEM[i].label + '.', false);
 }
 
 

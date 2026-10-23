@@ -192,11 +192,14 @@ void Player::loop() {
   playerRequestParams_t requestP;
   if (xQueueReceive(playerQueue, &requestP, isRunning()?PL_QUEUE_TICKS:PL_QUEUE_TICKS_ST)) {
     switch (requestP.type) {
-      case PR_STOP: _stop(); break;
+      case PR_STOP: _muted = false; _stop(); break;
       case PR_PLAY: {
         if (requestP.payload>0) {
           config.setLastStation((uint16_t)requestP.payload);
         }
+        // Manual next/prev/playlist pick/station selection clears mute; the EOF auto-advance keeps it.
+        if (!autoAdvance) _muted = false;
+        autoAdvance = false;
         _play((uint16_t)abs(requestP.payload)); 
         break;
       }
@@ -205,6 +208,7 @@ void Player::loop() {
         break;
       }
       case PR_VOL: {
+        _muted = false;   // explicit volume change is a user action: clear mute
         config.setVolume(requestP.payload);
         config.saveValueButWait(&config.store.volume, (uint8_t)requestP.payload, 3000);
         uint8_t i2sVol = volToI2S(requestP.payload);
@@ -329,7 +333,7 @@ void Player::_play(uint16_t stationId) {
   config.setTitle(config.getMode()==PM_WEB?l10n(L10N_MSG_CONNECT):"[next track]");
   config.station.bitrate=0;
   config.setBitrateFormat(BF_UNKNOWN);
-  
+
   _loadVol(config.store.volume);
   display.putRequest(DBITRATE);
   display.putRequest(NEWSTATION);
@@ -355,9 +359,9 @@ void Player::_play(uint16_t stationId) {
     FUNCTIONLOG("Player", "connecttohost: %lums", (unsigned long)lastConnectMs);
   }
   if (isConnected) {
-  //if (config.store.play_mode==PM_WEB?connecttohost(config.station.url):connecttoFS(SD,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min)) {
     _status = PLAYING;
     _playingStationId = stationId;
+    _loadVol(config.store.volume);   // re-apply volume (respects _muted) after connect* — setDefaults() inside it must not win
     if (config.getMode()==PM_SDCARD) {
       config.sdResumePos = 0;
       config.saveValue(&config.store.lastSdStation, stationId);
@@ -391,6 +395,7 @@ void Player::_play(uint16_t stationId) {
     char errbuf[STATION_FIELD_LENGTH];
     snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
     player.setError(errbuf);
+    _muted = false;
     _stop(true);
     if (config.getMode() == PM_WEB && !network.lostPlaying) {
       network.noteConnectFailure(config.station.url);
@@ -407,6 +412,7 @@ void Player::browseUrl() {
 void Player::playUrl(const char* url) {
   setError("");
   _fatalStream = false;
+  _muted = false;
   remoteStationName = true;
   audioHandlers.resetMetadata();
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
@@ -420,6 +426,7 @@ void Player::playUrl(const char* url) {
   lastConnectMs = millis() - _t_ctu;
   if (_urlConnected) {
     _status = PLAYING;
+    _loadVol(config.store.volume);
     config.saveLastStationUrl(url);
     config.setTitle("");
     netserver.requestOnChange(MODE, 0);
@@ -433,6 +440,7 @@ void Player::playUrl(const char* url) {
   } else {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);
+    _muted = false;
     _stop(true);
     if (!network.lostPlaying) {
       network.noteConnectFailure(url);
@@ -514,7 +522,11 @@ uint8_t Player::volToI2S(uint8_t volume) {
 }
 
 void Player::_loadVol(uint8_t volume) {
-  setVolume(volToI2S(volume));
+  uint8_t v = _muted ? 0 : volToI2S(volume);
+  setVolume(v);
+  #ifdef USE_ES8311
+    es.setVolume((uint8_t)map(v, 0, VOLUME_SCALE, 0, 100));
+  #endif
 }
 
 void Player::setVol(uint8_t volume) {
@@ -522,10 +534,12 @@ void Player::setVol(uint8_t volume) {
 }
 
 void Player::mute() {
-  if (getVolume() == 0) {
-    setVolume(_muteVol);      // restore the last active level
+  if (_muted) {
+    _muted = false;
+    _loadVol(_muteVol);
   } else {
-    _muteVol = getVolume();   // capture current level before muting
-    setVolume(0);             // software/hardware mute via the core volume method
+    _muteVol = config.store.volume;
+    _muted = true;
+    _loadVol(config.store.volume);
   }
 }

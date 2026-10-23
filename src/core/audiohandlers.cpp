@@ -325,6 +325,7 @@ void AudioHandlers::handleId3Data(const char* info) {
 void AudioHandlers::handleEofMp3(const char* info) {
   (void)info;
   config.sdResumePos = 0;
+  player.autoAdvance = true;  // EOF auto-advance: mute must survive this track change
   player.next();
 }
 

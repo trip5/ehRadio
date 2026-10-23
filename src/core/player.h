@@ -26,6 +26,7 @@ class Player: public Audio {
   public:
     volatile bool lockOutput = true;  // volatile: written from WiFi callbacks, read from audio callbacks
     bool resumeAfterUrl = false;
+    bool autoAdvance = false;
     uint32_t sd_min, sd_max;
     bool remoteStationName = false;
     uint32_t lastConnectMs = 0;
@@ -55,6 +56,8 @@ class Player: public Audio {
     uint8_t volToI2S(uint8_t volume);
     void setVol(uint8_t volume);
     void mute();
+    bool isMuted() const { return _muted; }
+    void clearMute() { _muted = false; }
 
     bool hasError() { return strlen(_plError)>0; }
     plStatus_e status() { return _status; }
@@ -67,7 +70,8 @@ class Player: public Audio {
     bool        _fatalStream = false;  // 404/410 seen: the arm gate must not start the ladder
     uint16_t    _playingStationId = 0;
     char        _plError[PLERR_LN];
-    uint8_t     _muteVol = 30;  // last active raw audio volume, restored by mute()
+    uint8_t     _muteVol = 30;
+    bool        _muted = false;
 
     void _stop(bool alreadyStopped = false);
     void _play(uint16_t stationId);

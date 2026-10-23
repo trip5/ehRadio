@@ -2,7 +2,8 @@
 
 ## Note
 
-- **This file**: If you wish to NOT use this file, feel free to add it to your own private exclusions (`.git/info/exclude`).  Please do not try to sync your own version of this file back in a PR to `ehRadio:dev`.
+- **This file is a short rule sheet, not documentation.** Edit it only when the message you are working on asks for it (Rule #3), and keep any addition to a line or two: the detail belongs in `.github/code-summary.md`.
+- If you wish to NOT use this file, feel free to add it to your own private exclusions (`.git/info/exclude`).  Please do not try to sync your own version of this file back in a PR to `ehRadio:dev`.
 - **code-summary.md**: The ehRadio `Bible` may be hard for a human to read but provides a good (if lengthy) summary of the codebase to be more easily digested by an AI / LM Copilot.
 
 ## About
@@ -15,16 +16,15 @@
 ## ⚠️ Critical Rules
 
 > **These rules are HARD CONSTRAINTS, not guidelines. Violating any rule is an error.**
-> Before making ANY edit, running ANY command or suggesting code, mentally validate against ALL 8 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
+> Before making ANY edit, running ANY command or suggesting code, mentally validate against ALL 9 rules. If any rule would be violated, **STOP** and inform the user. When in doubt, ASK.
 
 **Rule #0**: **Never Commit or Touch the Remote Without Explicit Permission**
 - Do **NOT** run `git push` in any form (including `--force`), create or edit a **release**, **tag**, **pull request** or issue, or delete a remote branch, unless the user has explicitly asked for **that** action in the message you are working on.
-- **Do NOT commit either - not even locally - unless the user asks for a commit in the message you are working on.** The user reviews every change as a diff before it becomes a commit, and a commit takes the change out of that review: VS Code lists committed-but-unpushed work as read-only *Outgoing Changes*, which cannot be edited where the user found it. Leaving the work uncommitted keeps every file editable and the whole change visible as one diff set. A pause on committing is not lifted by finishing a stage, by a stage boundary, or by a plan that says to commit per stage.
-- A push mentioned while planning, or a general "we will push this later", is **not** permission. Nor is permission for one push permission for the next - each one is asked for on its own.
-- The repo is public and a push is not quietly undone. Treat the remote as production: say what you would push and to which branch, then **wait**.
-- **When the user asks you to commit, or to commit and publish, do it the way this repo does.** The subject is the date, `YYYY.MM.DD` (`2026.10.06`), with **no body** - that is the house style on `dev`. Dates are what make a point in history findable when one change spans hundreds of files and thousands of lines. A descriptive subject is not wanted however useful it looks: the why belongs in `code-summary.md` (Rule #4) and in the plan file (Rule #7), not in the commit.
+- **Do NOT commit either - not even locally - unless the user asks for a commit in the message you are working on.** The user reviews every change as a diff before it becomes a commit, and a commit takes the change out of that review: VS Code lists committed-but-unpushed work as read-only *Outgoing Changes*, which cannot be edited where the user found it. A pause on committing is not lifted by finishing a stage, by a stage boundary, or by a plan that says to commit per stage.
+- Permission is per action and never inherited: a push mentioned while planning, or "we will push this later", is not permission, and permission for one push is not permission for the next. The repo is public and a push is not quietly undone - say what you would push and to which branch, then **wait**.
+- **When the user asks you to commit, do it the way this repo does**: the subject is the date, `YYYY.MM.DD` (`2026.10.06`), with **no body**. The why belongs in `code-summary.md` (Rule #4) and the plan file (Rule #7), not in the commit.
+- **A local commit is not needed to undo a mistake, so it is never a valid reason to commit.** Use `git stash create` instead: it prints a SHA that snapshots the tracked tree **without touching the index or the files**, so an invasive step can be rolled back with `git checkout <sha> -- <path>` while history stays clean. Say that a snapshot is being taken and report the SHA.
 - This rule outranks every rule below it. When an instruction is ambiguous about the remote, **STOP** and ask.
-- **A local commit is NOT needed in order to undo a mistake, so it is never a valid reason to commit.** Use `git stash create` instead: it prints a commit SHA that snapshots the tracked working tree **without touching the index or the files**, so an invasive step can be rolled back with `git checkout <sha> -- <path>` while the history stays clean. A saved patch (`git diff > <name>.patch`), or the replaced content itself, covers a single file. Say that a snapshot is being taken before an invasive step and report the SHA, because with nothing committed that snapshot is the only restore point.
 
 **Rule #1**: **Plan Mode for Large Changes**
 - For changes spanning **more than 50 lines** (summed across ALL files in the change), you **MUST STOP** and inform the user:  
@@ -40,11 +40,13 @@
   - The user has given **explicit instructions** on what to modify.
 - **Self-check**: Before every edit, ask yourself: *"Am I touching exactly one file (or one .cpp+.h pair)?"* If not, Plan mode is required regardless of line count.
 
-**Rule #3**: **Restricted Configuration Files**
+**Rule #3**: **Restricted Files**
 - Do **NOT** edit or even **suggest** edits to the following files unless the user provides **explicit confirmation**:
   - `myoptions.h`
   - `src/core/options.h`
   - `platformio.ini`
+- **`.github/ai-coding-guide.md` (this file) is a short rule sheet and is edited only when the message you are working on asks for it.** It is not a place for explanation, history or subsystem detail - that is what `code-summary.md` is for, and one or two lines is the whole budget for a new rule.
+- **`.github/code-issues.md` records open issues that need investigation or are blocked** (for example, waiting on hardware the maintainer does not own). It is not a changelog: never add, edit or remove an entry unless asked. Do read it before editing an affected area, and say so if your change fixes or alters a described entry.
 
 **Rule #4**: **Code Interaction Documentation**
 - If your change affects **code interactions**, external APIs, storage keys, or external contracts:
@@ -58,17 +60,28 @@
   - **Search `plans/` for a plan covering the area**, whatever kind of file it touches. A previous plan carries the exact detail - the numbers, the API quirk, the ordering rule - that `code-summary.md` deliberately does not (Rule #7).
   - **If the change touches ONLY non-firmware files** (workflows, docs, build scripts, config generators, Home Assistant, images, etc.): `code-summary.md` review is **NOT** required. Still check `code-issues.md` if relevant.
   - **One-line/trivial fixes** (typos, formatting) are exempt regardless of file type.
-- **What `.github/code-issues.md` is for**: it tracks **open** issues that still need investigation, or that are blocked — for example, waiting on hardware the maintainer does not own. It is **not** a changelog.
-  - Do **not** add entries for problems found and fixed in the same change set.
-  - Do **not** add general rules or subsystem documentation there; that belongs in `code-summary.md` (Rule #4).
-  - Do read it before editing an affected area, and **update or close an existing entry** if your change fixes it or alters the code that entry describes.
 
 **Rule #6**: **Comments State Facts, Briefly**
 - **`//` is the default comment.** A block gets a 1-3 line summary above it; a call gets a short trailing `//` when its name does not already say what happened.
 - **`/* */` has exactly three uses**: a section TITLE (`/* ==== Upload ==== */`), a header saying what the next long block does, and code kept but not used (tested and switched off).
+- **The variable name documents itself.** Most declarations need no comment at all, and the ones that do want a trailing note rather than a block above them.
+- **A `.h` file almost never needs a comment**, especially where the `.cpp` already says the same thing: the declaration and its implementation are read together, so a second copy is noise that can drift.
 - **No narration, no history, no measurements.** Why something is the way it is belongs in `.github/code-summary.md`; what was measured, what was tried and what was rejected belong in the plan file for that change (Rule #7). If it is not in the code, it does not belong in the summary.
-- **Never document what is not in the code.** Deleted code is not commented about, and a replaced mechanism is not described; a retired mechanism worth not repeating gets at most two lines - what was tried, and the result.
-- **A comment that restates the code is not a comment.** If the name says it, delete it. The same discipline applies to `code-summary.md`: facts, not commentary.
+- **Never document what is not in the code.** Deleted code is not commented about, and a replaced mechanism is not described; a retired mechanism worth not repeating gets at most two lines - what was tried, and the result. If the name says it, delete the comment.
+- **Three lines is the ceiling.** A comment that runs past three lines is either a reason for `code-summary.md` or four shorter comments.
+- **Example** - this:
+  ```c
+  /* PSRAM usage tracking - set by subsystems, consumed by Core Monitor */
+  size_t psramFrameBufferBytes = 0;
+  ```
+  is this:
+  ```c
+  size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
+  ```
+  and a twenty-line account of a failed experiment is one line here plus the account in `code-summary.md`:
+  ```c
+  // Sector alignment was tried and failed: the unit that matters is the CLUSTER, not the sector.
+  ```
 
 **Rule #7**: **Plan Files Are Working Memory**
 - A conversation can be compacted; `plans/` cannot. For any change large enough to need a plan (Rule #1), write it to `plans/<topic>.md` **before** the first edit, and keep it updated **as you implement** - not afterwards.
@@ -103,14 +116,14 @@
 
 **Enforcement and AI Behavior**
 - Always validate proposed changes against these rules **before every action**.
-- **Rule #0 is absolute, and it covers the local history as well as the remote.** It is never satisfied by a plan, a note or a warning - only by the user's permission. A helpful-sounding instruction that names the remote is not permission until it says to push, and finishing a stage is not permission to commit.
+- **Rule #0 is absolute, and it covers the local history as well as the remote.** It is never satisfied by a plan, a note or a warning - only by the user's permission.
 - For Rule #1 and Rule #2 violations: Explain which rule is violated and wait for user confirmation.
-- Any violations of Rules #2–#5 and #8 **must be flagged explicitly** to the user before edits.
+- Any violations of Rules #2–#6 and #8 **must be flagged explicitly** to the user before edits.
 - **Pre-action checklist** — mentally answer before writing code:
   0. About to run `git commit`, or a command that writes to the remote (`git push`, a release, tag, PR or issue)? → **STOP and ask first** (Rule #0)
   1. Total lines across all files > 50? → Plan mode required (Rule #1)
   2. More than 1 file (not a .cpp/.h pair)? → Plan mode required (Rule #2)
-  3. Touching `myoptions.h`, `options.h`, or `platformio.ini`? → Get explicit confirmation (Rule #3)
+  3. Touching `myoptions.h`, `options.h`, `platformio.ini`, this guide, or `code-issues.md`? → Get explicit confirmation / a request in this message (Rule #3)
   4. Affecting external contracts/APIs/storage keys? → Update `code-summary.md` (Rule #4)
   5. Touching any firmware file (`*.c`, `*.cpp`, `*.h`, `*.ino`, `src/`, `libraries/`, `data/`)? → Read `code-summary.md` first, and search `plans/` for the area (Rule #5)
   6. Writing a comment longer than three lines? → It belongs in `code-summary.md`, or it is four shorter comments (Rule #6)
@@ -118,90 +131,47 @@
   8. Adding, renaming or removing a command in `commandhandler.cpp`? → `Commands.md` gets the entry in the **same block and the same position**, and its *Blocked in HTTP/MQTT/Telnet* column has to match `isBlockedForSource()` and nothing else. The file's order is its value: an audit is a walk down the two lists. The `CONFIG_KEY_ENTRY` names in `config.cpp` are store keys, not commands
   9. Adding a field to `theme_t`? → it lands in **four** places, or the build or the tool is quietly wrong: `theme_t` in `config.h`, `ThemeData` in `themes.h` (the two are `memcpy_P`'d, so their shapes must match exactly), every hand-overridden reduced palette (`displays/tools/oledcolorfix.h`, `displaySSD1322.cpp`), and **`importtheme.py`** - `FIELD_ORDER` plus its derivation rule, with the matching rows in `importtheme.md`. A field missing from `FIELD_ORDER` is dropped from every imported theme without a word. A new *screensaver* colour belongs in the "derived" list, not the computed one, if a stated rule produces it
   10. Patching `I2S_Audio` or `VS1053_Audio`? → `src/libraries/i2s-frankenstein-surgery-notes.md` or `src/libraries/vs1053-frankenstein-surgery-notes.md` - the matching one, not both - gets a new `## Post-Graft Patch Fixes (YYYY.MM.DD)` section: the file changed, and why. Same change set.
-  11. About to touch a `src/locale/**/*.json` file, or run a localization tool? → **STOP**; the maintainer owns both (Rule #8). WebUI strings go in the `data/www` sources as `t('key','English')` / `data-i18n` only. A display string also needs its key name, wording and position in `display/en_US.json` confirmed **before** it is added, and the tools confirmed again before they are run
-
-## Comment Style
-
-- **`//` over `/* */`.** The block form is for a TITLE (`/* ==== Upload ==== */`, as in `style.css` and `src/core/options.h`), for a header saying what the next long block does, and for keeping code that was tested and is not wanted. Nothing else.
-- **One to three lines.** A block gets a short summary above it, and a call gets a short trailing note only if it needs one. A comment that runs past three lines is either a reason for `code-summary.md` or four shorter comments.
-- **Code and `code-summary.md` divide the work.** The code says WHAT and stays quiet; `code-summary.md` says WHY, and carries the measurements, the history and the traps. A paragraph explaining a decision is in the wrong file.
-- **Nothing about what is gone.** A deleted line is not described and a replaced mechanism is not mourned. The one exception is a failed experiment worth not repeating, and that gets a line or two - what was tried, and the result.
-- **The variable name documents itself.** Most declarations need no comment at all, and the ones that do want a trailing note rather than a block above them.
-- **Examples:**
-
-  ```c
-  /* PSRAM usage tracking - set by subsystems, consumed by Core Monitor */
-  size_t psramFrameBufferBytes = 0;
-  ```
-  becomes
-  ```c
-  size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
-  ```
-
-  ```c
-  // Alignment to a sector could not help: the card's cluster was 8 KB, sixteen sectors, so a write
-  // rounded to 512 bytes never changed how the file system programmed a cluster.  Measured on the
-  // same 14-file batch: 12 then 17 failed transfers aligned, 7 then 7 as they arrived... (20 lines)
-  ```
-  becomes a note in `code-summary.md`, and at most this in the code:
-  ```c
-  // Sector alignment was tried and failed: the unit that matters is the CLUSTER, not the sector.
-  ```
+  11. About to touch a `src/locale/**/*.json` file, or run a localization tool? → **STOP**; the maintainer owns both (Rule #8)
 
 ## Project Structure
-- **Config Cascade**: `platformio.ini` (env #define) → `myoptions.h` (hardware profile, user defaults) → `options.h` (fallback defaults for anything undefined). Third-party libraries are their own translation units and never see this cascade: the few values they must agree with us about live in `src/core/options_overrides.h`, which `platformio.ini` force-includes into every TU.
+
+- **Config Cascade**: `platformio.ini` (env `#define`) → `myoptions.h` (hardware profile, user defaults) → `options.h` (fallback for anything undefined). Libraries never see it; the few values they must agree with us about live in `src/core/options_overrides.h`, which `platformio.ini` force-includes into every TU.
 - **Core logic**: `src/core/` (Player, Display, Network, Config, Controls).
-- **Headers that own data**: `src/locale/dsplocale.h` defines its locale tables (`l10n_strings[36][77]` and every translated string) as namespace-scope `const` arrays *inside the header*, so each translation unit that includes it embeds another complete copy - roughly 48 KB of flash. Do not add that include to a new file: call `l10n(...)` from a file that already has it, or expose a small accessor as `Player::isConnecting()` does for the "connecting" placeholder check. The same rule works in reverse: a `const` array has internal linkage, so a TU whose last `l10n()` call is removed stops emitting its copy entirely. Removing `sdmanager.cpp`'s two title placeholders (they became `player.setReady()`) dropped about 55 KB from both build environments with no other change.
-- **Libraries path**: Software codecs: `libraries/I2S_Audio/`, `libraries/ES8311_Audio` / Hardware decoder: `libraries/VS1053_Audio/` (Hardware chip), other folders are custom drivers for other display, touchscreen, and other hardware.
-- **UI**: Widgets in `src/displays/widgets/`, drivers in `src/displays/`.
-- **Plugins**: The former yoRadio plugin hook system has been removed. Add new behavior in the owning core module instead of reviving plugin-style hooks.
-- **Web UI**: Most files in `data/www` are served with headers in `src/core/netserver.h`. `search.html` and `curated.html` are not.
-- **WebUI palette**: every colour is a custom property in the `:root` block at the top of `data/www/style.css`. A theme's palette is one `:root[data-theme="N"]` block there (`N` = the theme's id in `themes.h`), never a second stylesheet: `/variables.js` publishes that id as `data-theme` on `<html>`, and an id with no block keeps the default palette. The block has 62 declarations, **grouped by family**: 9 family heads, 9 standalone colours and 44 members, every member pointing straight at its head (`--button-fill: var(--fills)`, never at another member), so one literal moves a family and a theme splits one member by declaring it; a block may also use `var(...)`, resolved block-first. 50 are roles a theme may override, three are fixed (`--page-bg`, `--list-bars`, `--playlist-hover`). A head (`--surfaces`, `--edges`, `--fills`, `--outlines`, `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts`) holds the colour and is painted by no rule, so a head must never appear in a page - but a **theme block may declare one** (`--outlines: #e3d25f`) to move that family in a single line. `--deflate` folds members back into the head (the value most of them agree on wins, a deliberate split stays declared) and `--inflate` spells them out at the colours they already have in that block, never at the master hex, so inflation cannot break a head's cascade. Properties are named by role (`--button-fill`, `--button-text`, `--button-outline`, `--highlight-fill`, `--meter-fill`, ...), so never paint text with an icon role or a surface with a text role - that is what the splits are for. `--page-bg` is the fixed window surround and is never themed; `--panel-background` is the app column, so a light theme cannot flood the browser window. The built-in blocks come from `themes.h` via `src/displays/webuitheme.py`, which infers the master's display theme from the empty block and writes blocks alphabetically (`render_block()` sorts, so no sort stage exists); `--inflate`, `--deflate` and `--deflate-lossy` shrink or expand blocks directly (they also touch `PERFECT` ones). A block title containing `PERFECT` is hand-owned: the import stages never add, compare, list or overwrite it, so remove the word only when it should become editable again. Hardware is not UI: `#irremote` is painted with fixed hex on purpose and gets no role, because a remote looks the same in every theme. A row that reports a state is the other case - `#irrecord` borrows the button roles (`--button-fill` / `--button-text` / `--button-outline` at rest, `--button-active-fill` / `--button-active-text` when selected) and takes no hover rule, so it follows the palette while still reading as pressed or unpressed.
+- **UI**: widgets in `src/displays/widgets/`, drivers in `src/displays/`.
+- **Libraries**: software codecs `libraries/I2S_Audio/`, `libraries/ES8311_Audio`; hardware decoder `libraries/VS1053_Audio/`; the other folders are drivers for other displays, touchscreens and hardware.
+- **Plugins**: the yoRadio plugin hook system is gone - add behaviour in the owning core module instead.
+- **Web UI**: most files in `data/www` are served with headers in `src/core/netserver.h`; `search.html` and `curated.html` are not.
+- **WebUI palette**: every colour is a custom property in the `:root` block of `data/www/style.css`, and a theme is one `:root[data-theme="N"]` block there (`N` = the id in `themes.h`; `/variables.js` publishes it). Never a second stylesheet, and never a colour literal in a rule. The 62 declarations are grouped in nine families whose head holds one literal (`--surfaces`, `--edges`, `--fills`, `--outlines`, `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts`); a head is painted by no rule, but a theme block may declare one to move the family in a single line. 53 of the declarations are roles: the generator derives 50 of them, and `--page-bg` (the window around the app column), `--list-bars` and `--playlist-hover` are hand-owned - no display theme supplies them - though a block may set any of the three. Blocks come from `themes.h` via `src/displays/webuitheme.py` (`--inflate`/`--deflate`/`--update`); the family lists, the split rules and the tool are in `code-summary.md`.
+- **`dsplocale.h` defines its tables inside the header**, so every TU that includes it embeds another copy (~48 KB). Never add that include to a new file: call `l10n(...)` from one that already has it, or expose an accessor the way `Player::isConnecting()` does.
 
 ## Functionality
-- **Hardware**: The firmware is built according to the hardware that is connected to it and users who will use it.  These are defined by files listed in Config Cascade.
-- **Software**: `src/core/options.h` and the Config Cascade should be used to extend functionality, not limit it. `#if defined` and `#ifndef` should not be used in the code for configuration not related to hardware.
-- **Granular Control in Web UI**: If not hardware-related, functionality should be changeable in the Web UI, not controlled by a `#define` in Config Cascade.
-- **A display label is not a wire format, and a control offers only the values the hardware can hold.** The theme editor's element column shows a human label and keeps the `.h` key one click away: the table in `themes.h` pairs them one per line, so a label can be reworded without touching a theme file, and it is deliberately not two parallel tables - a key added without its label would shift every entry after it while a count-based check still passed. The colour fields step in 565 levels (8 / 4 / 8, maximum 248 / 252) because 0-255 in steps of 1 offered 256 choices for 32 outcomes, where 248 to 255 are one red - `r8 >> 3` is 31 for all of them. `themes.h` writes the same level-times-step numbers, and `importtheme.py` forces them onto anything it writes, so one colour has one spelling in the editor, in the palette and in the tool. Both are one principle: the interface speaks the storage's own terms.
-- **The control that changed is the one that fired the event, never `document.activeElement`.** The theme editor captures each field's row index when it attaches the listener; the earlier version looked the row up from the focused element instead, and clicking a number field's spinner arrows fires `input` **without focusing that field** - so no row was found, nothing was painted locally, and the panel was still sent the new colour. The symptom was oddly specific and worth recognising: the display flashes while the swatch and the readout keep the old value. If only one of the two happened, or they disagree, the update is being inferred rather than carried.
-- **A restore must not be able to destroy what it is not restoring.** The theme backup is a set of themes with no placeholders and no slot numbers inside it, and a bulk import writes only into **free** slots, checking capacity *before* the first write so a file that does not fit changes nothing at all. The single-theme import is the deliberate exception, and it can only touch the one slot the user pointed at. Anything that overwrites while calling itself a restore is really a merge: an older file would silently destroy newer work, and the file would have to carry a full layout to be safe. The same reasoning is why a reader that skips an empty entry must be the design, not an accident - `null` meaning "erase" is a trap one careless line away.
 
-- **A repaint optimisation whose correctness depends on state that is not visible on the screen is a bug magnet.** The VU bars briefly drew incrementally - remembering where each channel's tip and peak marker were last frame (`_prevMeas*` / `_prevPk*`), repainting only the span between the old and the new value, and sending only that span with a dirty-rectangle blit. Nothing on the panel proved `_prev*` still described the canvas, so every way of breaking that assumption (the vspace gaps and the inter-channel strip left un-erased, a peak marker surviving in them, a crossed-over per-channel pairing, a partially undone clear) surfaced as a cosmetic artefact - in four rounds. It is removed: the bar family now full-wipes and full-repaints every frame, and the dirty rectangle, the partial blit, the `_prev*` fields and the `Widget::_invalidate()` hook that kept the belief fresh are gone with it. The reason the shortcut existed had also gone - the screensaver box is budget-capped (`VU_MAX_WIDTH x VU_MAX_HEIGHT`), so a full repaint of it is a fraction of the 99 ms it once cost. When a repaint shortcut keys off remembered state, ask what keeps that state true; if the answer is "every erase path has to be right", prefer the full repaint.
+- **Hardware**: the build is defined by the Config Cascade, not by `#if` scattered through the code. `#if defined` / `#ifndef` are for hardware only, never for configuration.
+- **Software**: extend behaviour through `options.h` and the Cascade; they exist to configure it, not to limit it.
+- **Granular Control in Web UI**: anything not hardware-related should be changeable in the Web UI rather than by a `#define`.
 
 ## Force-Included Config (`src/core/options_overrides.h`)
 
-`[ehradio] build_flags` in `platformio.ini` passes `-include src/core/options_overrides.h`, so that header is compiled first in **every** translation unit: our sources, every managed library (AsyncTCP, ESPAsyncWebServer, Adafruit, ...), and the framework's own `.c` files.
-
-- **Never force-include `options.h`.** It is not a library-safe header: it does `#include <SPI.h>`, and a library TU's compile line does not carry the SPI include path - `Wire.cpp` fails with `options.h:273:10: fatal error: SPI.h: No such file or directory` - and it uses C++-only `static_assert` while `build_flags` also apply to `.c` files. `options_overrides.h` exists to hold the few library-visible values instead.
-- **Keep it dependency-free**: preprocessor only, no framework or library includes, no types, no C++ syntax, and only values a library must agree with us about. The framework's `.c` files compile through it, so C compatibility is a hard requirement.
-- **`myoptions.h` stays the user channel**: the header includes it first, so a value set there beats every default in the header - that is the supported way to set `CONFIG_ASYNC_TCP_USE_WDT`, `CONFIG_ASYNC_TCP_RUNNING_CORE`, and so on. This holds only in builds that carry the force-include: root `platformio.ini` and `builds/trip5/platformio.ini` do, the other `builds/*` templates do not.
-- **The `NETWORK_CORE` tree is duplicated here and in `options.h` on purpose, and both copies must survive being evaluated twice** - this header is compiled first, so `options.h` always meets the value already set. That needs no marker macro: the dual-core branch is wrapped in `#ifndef NETWORK_CORE`, and the unicore branch only errors when the value it finds is not 0, so it cannot mistake our definition for a user's. Keep the two trees identical when editing either.
-- **A value change here may not rebuild libraries**: after the header was introduced, only `src/` objects were recompiled. Use `pio run -t clean -e <env>` when a value change must be guaranteed to take effect.
-- **Run one `pio run` at a time.** The post-build step gzips `data/www`, and two builds sharing that step race: the second reports a spurious `FAILED` on a link that actually succeeded. Start the next environment only after the first has exited - never background one and start another in the same command - and if a build does report `FAILED` right after another ran, re-run that environment alone before believing it.
-- **Any long card operation reachable from a web handler must feed the task watchdog** (`sdFeedWatchdog()`), because web handlers run in AsyncTCP's task and that task is subscribed (`CONFIG_ASYNC_TCP_USE_WDT 1`). The subscription is kept on deliberately: it turns a handler wedged on a stalled SD call into an automatic reboot instead of a device that needs a power cycle.
+- `[ehradio] build_flags` passes `-include src/core/options_overrides.h`, so it is compiled first in **every** TU - ours, every managed library and the framework's own `.c` files.
+- **Never force-include `options.h`.** It includes `SPI.h` (which a library TU cannot find) and uses C++-only `static_assert`; this header holds the few library-visible values instead.
+- **Keep it dependency-free**: preprocessor only - no includes, no types, no C++ syntax. C compatibility is a hard requirement.
+- **`myoptions.h` stays the user channel**: the header includes it first, so a user value beats every default here. That holds only in builds carrying the force-include (root `platformio.ini`, `builds/trip5/platformio.ini`).
+- **The `NETWORK_CORE` tree is duplicated here and in `options.h` on purpose**, and both copies must survive being evaluated twice. Keep them identical.
+- **A value change here may not rebuild libraries**: use `pio run -t clean -e <env>` when it must take effect.
+- **Run one `pio run` at a time.** The post-build step gzips `data/www` and two builds sharing it race into a spurious `FAILED`; re-run that environment alone before believing one.
+- **A long card operation reachable from a web handler must feed the watchdog** (`sdFeedWatchdog()`), because handlers run in AsyncTCP's task, which is subscribed (`CONFIG_ASYNC_TCP_USE_WDT 1`).
 
 ## File Handles and Cross-Task State
 
-- **A `File` has exactly one owning task.** Never close or reassign a handle another task may be using: `File::close()` closes the underlying filesystem file, and the failure this produces is not a compile error but `assert failed: lfs_file_seek lfs.c:NNNN (lfs_mlist_isopen(...))` - a stale handle used after someone else closed it. Do not cache a `File` across callbacks; open, use and close it inside the one call. If a second task touches the same files, take a mutex.
-- **Never do flash or SD I/O inside a critical section** (`portENTER_CRITICAL`). Use a FreeRTOS mutex. A critical section disables interrupts, and a flash write already runs with the cache disabled.
-- **One long operation at a time, and say so.** A request that finds another operation in flight is refused with 409 plus a reason string rather than sharing the state - the SD card manager's delete batch works this way. A shared handle or shared layout is what let two requests of the same kind corrupt each other.
-- **A subsystem that owns a filesystem must be shut down before that filesystem is erased.** `LittleFS.format()` (the danger-zone command) takes every open handle with it, so a holder of one must be told to stop first.
-- **A boot-time delay that exists to make the serial log readable must also fire after a crash.** `esp_reset_reason()` is `ESP_RST_PANIC` (or a WDT reason), not `ESP_RST_POWERON`, after a reset caused by a crash.
-- **State shared between a web handler and the display task belongs to the display task: the handler stages it and queues a request.** The theme editor's live preview is the worked example - the handler parses into `themeStaging()` and queues `THEMEPREVIEW`, and the display task is what copies the staging theme into `config.theme` before re-initialising the widgets. The handler never writes the live theme itself. Keeping it that way is also what makes the preview safe: it changes nothing the user did not ask for, because the widget re-init runs in place instead of through `_switchMode()`.
-- **When a task stages something and another task applies it, the applying side must not re-read the live source over the top of it.** `_applyState()` takes the *staged* theme when it is repainting in place and re-reads the stored one otherwise, and that branch is not an optimisation: re-reading `config.store.themeId` after the handler had staged new colours replaced them with the colours already on screen, so the preview repainted exactly what was there and looked like it did nothing at all.
-- **A widget re-init paints, so whoever runs one has to put the current page back afterwards.** `_reinitWidgets()` does not only rebuild the objects - it re-applies their layout visibility, and those calls paint as they go. The page that happens to be on screen therefore ends up with fresh player and dialog widgets drawn over it: on the playlist that showed as RSSI and the buffer bar appearing over a half-drawn list that was never repainted. The theme preview is the worked example of the repair - it re-asserts the *current mode's* page after the re-init (the player page plus the IP line that `setPage()` wipes, the playlist page through `_drawPlaylist()`), and leaves modes whose widgets the re-init just repainted alone. Two more things fall out of the same job: while asleep it rebuilds the screensaver directly instead of queueing it, because a queued rebuild leaves those paints on the panel for a pass and that reads as a flash of the main screen; and it never calls `_switchMode()`, which is what keeps the countdowns and any open overlay untouched.
-- **Coalescing repeated requests belongs in `Display::putRequest()`, not in the caller.** It is the only place that knows whether the send actually landed. A "is one already queued" flag set *before* the send would be left stuck by a request the saturated queue silently drops, and the feature it guards would then be blocked for good - `_previewPending` is set from the send result and cleared where the request is handled and in `resetQueue()`.
+- **A `File` has exactly one owning task.** Never close or reassign a handle another task may use: the failure is not a compile error but `assert failed: lfs_file_seek lfs.c:NNNN (lfs_mlist_isopen(...))`. Do not cache a `File` across callbacks - open, use and close it inside the one call; if a second task touches the same files, take a mutex.
+- **Never do flash or SD I/O inside a critical section** (`portENTER_CRITICAL`). Use a FreeRTOS mutex: a critical section disables interrupts, and a flash write already runs with the cache disabled.
+- **One long operation at a time, and say so.** A request that finds another in flight is refused with 409 plus a reason rather than sharing the state - a shared handle or layout is what let two requests of the same kind corrupt each other.
+- **A subsystem that owns a filesystem must be shut down before that filesystem is erased.** `LittleFS.format()` takes every open handle with it.
+- **State shared with another task belongs to that task**: the web handler stages it and queues a request, and the owning task applies it without re-reading the live source over the top of the staging area.
+- **Coalescing repeated requests belongs in `Display::putRequest()`**, not in the caller - it is the only place that knows whether the send landed.
 
-## Crash Reporting
+## Logging and Recovery
 
-- A panic cannot be logged by us - no application code runs afterwards. Instead ESP-IDF writes a core dump to the reserved `coredump` partition (core-dump-to-flash and ELF format are already enabled in the prebuilt S3 libraries, and every partition table reserves the partition). `src/core/crashreport.cpp` reads it back on the NEXT boot and `BOOTLOG`s the summary, so the serial log carries the crash next to the lines that caused it.
-- The report prints the crashing task, the `exc_pc`, the exception cause, up to 16 on-device backtrace PCs and the crashing ELF's SHA256. Symbolise those PCs against the ELF whose SHA256 was printed - addresses from a different build resolve to the wrong functions.
-- The dump is erased after being reported, or every later boot would repeat the same crash. `COREDUMP_KEEP_DUMP` in `options.h` keeps it for `esp-coredump` instead; `COREDUMP_SUMMARY_AT_BOOT` switches the whole feature off.
-- Reading a core dump requires the ELF-format build of the IDF libraries (`CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`); the code is `#if`-guarded so a target without it still builds, it just reports nothing.
-
-## Failure Handling and Logging
-
-- **A recovery rung must not depend on an allocation.** The stream ladder is the only thing that clears a wedged network stack, and it is a FreeRTOS task needing 8 KB of contiguous heap in a system whose heap is lowest exactly when the stack is wedged (the decoder and the failed connection objects are still held). The failure mode that produces is not a crash but a loop: the watchdog logged "a resume is still owed, starting a new one" every 5 s for minutes while nothing could be started at all. So the rung that matters - the link reset - is reachable from the 1 s timer as well as from the task, because `WiFi.disconnect(true, false)` needs no task, no heap and no scheduler. When a recovery step is designed, ask what it costs to *run* it, not only what it does.
-- **A cap with nothing behind it is a stop, not a policy.** Three link resets per outage was correct - a reset costs a scan, a reassociation and DHCP, so it should be spent only on evidence - but past those three the ladder retried a state that only a reset can clear, at 15 s and then 60 s, forever. Every ceiling needs either a rung above it or a written reason why the remaining retries are useful; if the answer is "nothing can fix this from software", the last rung is a restart. The restart must not set `bootStableMarker` (the intentional-reboot paths do, so the next boot is not safe mode) and must be counted in RTC memory, because a wedge that recurs on every boot otherwise reboots forever and safe mode will not catch it - each boot proves itself stable before the network fails.
-- **Only `FUNCTIONLOG` takes a category.** `SERIALLOG`, `SERIALLOGX`, `BOOTLOG`, `BOOTLOGX` and `ERRORLOG` are `#define X(fmt, ...)`, so `ERRORLOG("Network", "streamRetry task could not be created (%u bytes, free heap %u)", ...)` passes the category as the format and throws the message away - the log prints `[ERROR] Network` and nothing else. That is exactly what the two task-create failures in `network.cpp` did, which is how a 8 KB-versus-7 KB heap starvation stayed invisible for minutes. When adding a log call, copy the shape of the macro you are calling.
-- **A task that is parked is not a task that has finished - and "created" is not "running".** The startup services are created in `setup()` and can then sit in `while (cardInUse())` for the whole boot, so `SVC_WILL_RUN` outlives the decision its name suggests. The WebUI is held back until those TLS downloads are done, and the check that starts it has to treat a parked task as "not going to compete" - wait for `SVC_DONE` alone and SD mode loses its WebUI, which is exactly when it is needed. The same reading is what the boot-stable decision already needed. When a flag means "created", ask what it means when the thing it created never runs, and never make a resource wait on a state that may never arrive.
+- **Only `FUNCTIONLOG` takes a category.** `SERIALLOG`, `SERIALLOGX`, `BOOTLOG`, `BOOTLOGX` and `ERRORLOG` are `#define X(fmt, ...)`, so passing a category passes it as the format and throws the message away. Copy the shape of the macro you are calling.
+- **`ERRORLOG` is for a loss** - a failure with nothing recoverable and no partial kept. A fully recovered failure is an ordinary `FUNCTIONLOG` line, or a batch of them reads as a list of dead files.
+- **A recovery rung must not depend on an allocation**, and every ceiling needs a rung above it or a written reason why the remaining retries help. When the last rung is a restart, it must not set `bootStableMarker` and must be counted in RTC memory.

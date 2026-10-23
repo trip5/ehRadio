@@ -1771,7 +1771,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   declaration invalid CSS that the browser drops silently - the role then falls back to its alias, which
   presents as a colour that "does not apply" and is otherwise a long hunt.
 - Never writes `:root`, never deletes or reorders a block, ignores ids with no display theme and
-  ignores the three fixed colours (`--page-bg`, `--list-bars`, `--playlist-hover`).
+  ignores the three hand-owned colours (`--page-bg`, `--list-bars`, `--playlist-hover`).
 
 ## `src/displays/webui_tool.html`
 - Dev-only **theme builder and sampler**: one page showing every kind of coloured element from the player,
@@ -1785,14 +1785,18 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   editor spanning both because `#pleditor` needs 880 px. Under 1580 px the samples fold to one column; under
   980 px the help moves to the top and stops being sticky. Each sample is its own `.pagewrap` app column, so the
   page-bg shows between them; `.narrow` keeps settings/search/curated at 580 px and the editor centres at 960.
+- **The help note is folded away by default**, because the explanation is not what you open the tool for: `#whyq`
+  (the "Why does this file exist?" line) toggles `#whybody`, which wraps everything from the first paragraph to the
+  table. Hovering underlines it and brightens it to `#ffffff`, and a caret (`\25B8` / `\25BE` from CSS content)
+  reports the state, because the two hover hints cannot.
 - **A sample is a `div`, never a `section`, and its frame is hardcoded.** `style.css` has a bare `section {}` rule -
   the settings card, with a `--panel-border` ring, card padding and
   `background-image: linear-gradient(--panel-background, --panel-gradient)` - and `section` exists nowhere but
   options.html's cards and editor.html's `#themebox`/`#laybox`. While the frames were `<section class="sample">`
   they inherited that wash, which read as if the whole WebUI were gradiented. The Settings sample keeps its real
   `section#group_controls`, so the gradient is still previewed where it actually appears. The frame is a fixed
-  `#323232` ring on a `#000` cell (`--page-bg` is `#000000` and never themed), so no palette variable paints a
-  frame - the same rule as the help column: the instrument never borrows the subject's colours.
+  `#323232` ring on a `#000` cell (`--page-bg` holds `#000000` by default and is hand-owned), so no palette
+  variable paints a frame - the same rule as the help column: the instrument never borrows the subject's colours.
 - The real pages are exactly one screen tall and scroll their own boxes, so the harness relaxes a few heights -
   `#playerwrap`, `#equalizerwrap`, `#playlist`, `#pleditor`, `#pleditorcontent`, `#settingswrap`, `#searchcontent`,
   `#curatedcontent` go `height: auto`, the two lists are capped at 340 px, and `#pleditorwrap` becomes
@@ -1840,6 +1844,19 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   arrow beside its own circle. **`setrow` follows any override** - standalone included - while `splitrow` needs a
   family to be split from. Family head rows are boxed - `tr.fam td` draws top and bottom, the first and last cell
   close the ends - so a group reads as a sub-heading.
+- **Copy / paste uses a clipboard of the page's own, and the pair belongs to one row.** Hovering a `td.sw` makes
+  that row `hot` - a 3 s timer refreshed by movement *inside the cell*, so reaching for the icon beside the circle
+  does not hide it, and hovering another swatch moves it there - which reveals `button.clipbtn` (&#128464;).
+  `button.pastebtn` (&#8614;) waits for `#roles.hasclip`, set by the first copy, and Esc empties the clipboard.
+  Both carry no name: `tr.dataset.role || tr.dataset.head` decides, as with the reset arrow. Their two slots are
+  reserved with `visibility: hidden`, never `display`, because a pair that appeared on hover would shove the
+  circle sideways under the pointer aiming at it. A copy reads `valueOf()` (what the circle shows, so a follower
+  copies its family colour) and a paste goes through the same `setValue()` the picker's `input` handler calls, so
+  the head lock and the last-follower collapse are written once and cannot drift. The clipboard colour is also
+  published as `--clip` on the table, which is the pair's glyph colour while `hasclip` holds - the icons are the
+  swatch - with a faint white glow so a near-black value stays readable on the tool's dark panel; hover lights the
+  chip's border in `--tool-accent` exactly as the reset arrow does, and leaves the glyph alone so the colour stays
+  visible.
 - **Cancel is a real cancel, and accept wins the race.** A native colour dialog fires `input` on every drag (that
   is the live preview) but `change` only when it is accepted, so the circle click snapshots `{heads, members}`,
   `input` marks the session dirty (an `input` whose colour equals the current one is ignored - opening the dialog
@@ -3517,6 +3534,15 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   panel flash with a swatch and a 565 cell stuck on the old value. The panel is repainted after
   `PREVIEW_DELAY` (1000 ms) of quiet, because a preview is a full widget re-init and a colour hunt should not
   be twenty repaints.
+- **Each row's acts column reads `⇤ 🗐 ⎌` - paste, copy, reset - and the clipboard is a 565 value.** `CLIP` holds the
+  copied colour in the device's own unit, so nothing is rounded twice and what the row shows is what gets pasted:
+  copy reads `row565(i)`, and paste is `setRow(i, CLIP)` + `onEdit(i)`, which is exactly the path a typed edit takes
+  (levels, swatch, 565 cell, debounced preview). The pair is always visible - the column is long and a hover-only
+  control would be a hunt - but **the glyphs never change colour**: only the box under the pointer does, and only
+  that one box, in the clipboard's own colour (`border-color` from `--clip`, published on `#grid` by the copy). The
+  arrow points **left** because the cells it writes are to the left; in `webui_tool.html` the circle is to their
+  right, so there it points right. The page's message line reports the hex that was copied or pasted, which the
+  numbers alone do not make obvious.
 - **An initialiser is not a refresher, and a page must not rebuild what the user is editing.** `editor.html`
   builds its grid exactly once. After a save or a delete it refreshes only the dropdown *labels*, in place,
   by rewriting the text of the options that already exist — because the id set never changes, only which
@@ -3766,9 +3792,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `display.applyTheme()` - on OLED that would only repaint the panel. On a TFT that call is compiled in, so
   `commandhandler.cpp` has to include `dspcore.h` for `DSP_TFT` to exist there at all.
 - Variables are named by **role**, never by the colour they happen to hold, and the **62 declarations in
-  `:root` are grouped by family**: 9 family heads, 9 standalone colours and 44 members (53 roles, of which
-  50 may be themed and three are fixed - `--page-bg`, the window around the app column; `--list-bars`, zebra
-  rows; `--playlist-hover`, row hover). A head - `--surfaces`, `--edges`, `--fills`, `--outlines`,
+  `:root` are grouped by family**: 9 family heads, 9 standalone colours and 44 members (53 roles: the generator
+  derives 50, and the other three - `--page-bg`, the window around the app column; `--list-bars`, zebra rows;
+  `--playlist-hover`, row hover - are hand-owned, though a block may set them like any other role).
+  A head - `--surfaces`, `--edges`, `--fills`, `--outlines`,
   `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts` - holds the one colour and its members
   point straight at it, so one edit moves the family and a theme splits a member by declaring that member.
   **A head is painted by no rule and never written into a block**: a name that appears only in `:root` is a
@@ -3791,6 +3818,11 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `--main-text` (the `body` default) / `--caption-text` /
   `--editor-cell-text` / `--link-quiet` / `--section-title-text` / `--switch-off-text`.
   `--info-text` is one role on purpose: bitrate, RSSI, volume and battery share the player's info row.
+  **`--control-bg` is the lit part of a checkbox or radio**: the tick of a native `input[type=checkbox]` and the dot
+  of a native `input[type=radio]` (`accent-color`, which a native control shows only while it is on), the disc of the
+  update page's custom radio (`.checkmark`, whose ring and dot are `--switch-thumb`), and the SD manager's round icon
+  buttons. The toggle switches are a different widget and never use it: their groove is `--switch-track` /
+  `--switch-track-on` and the knob is `--switch-thumb`.
   Outside the families: `--input-border` (text-field outline), `--list-names` (editor name column),
   `--list-bars` and `--playlist-hover` (fixed list colours),
   `--panel-gradient` (the wash in a settings card) and the logo trio `--logo`, `--logo-text`,
@@ -3806,8 +3838,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   slot, or a built-in never mapped - inherits `:root` whole, so the default palette is the fallback by
   construction. Adding colours for another theme is one block here and nothing else.
 - The theme paints the app column only: `#content`, `#searchcontent`/`#curatedcontent`, `#editorwrap`
-  and the SD manager's `#pleditor`. `html`, `body` and `#progress` use the fixed `--page-bg`, so a light
-  or saturated theme never floods the browser window.
+  and the SD manager's `#pleditor`. `html`, `body` and `#progress` use `--page-bg`, which no generated theme
+  writes, so a light or saturated theme never floods the browser window.
 - A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
   GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
 - `.fb` is the flat button: `--button-fill` / `--button-text` at rest, `--button-active-fill` /

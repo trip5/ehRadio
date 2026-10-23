@@ -90,7 +90,9 @@ WHITE = (255, 255, 255)
 
 # The roles a theme may override - the MEMBERS of the :root families, never a head.  Alphabetical, and
 # `render_block()` sorts the declarations too, so a block reads the same way as a family block in `:root`.
-# The fixed colours (`page-bg`, `list-bars`, `playlist-hover`) are deliberately absent: never themed.
+# The three hand-owned colours (`page-bg`, `list-bars`, `playlist-hover`) are deliberately absent: no display
+# theme carries a colour meaning "the browser window" or "the zebra stripe", so the generator never writes them.
+# A block may still set one by hand - the absence is about derivation, not permission.
 ROLE_ORDER = [
     'button-active-fill', 'button-active-text', 'button-fill', 'button-outline', 'button-text',
     'caption-text',

@@ -39,6 +39,16 @@ body { height: auto; padding: 0; }
 .sampler-help code { font-family: Consolas, "Courier New", monospace; font-size: 15px; color: var(--tool-code); }
 .sampler-help a { color: var(--tool-accent); }
 .sampler-help b { color: var(--tool-strong); }
+/* The help note folds away so the table is on screen when the tool opens.  This line is the control: two hints that
+   it is clickable (underline and a brighter #ffffff on hover) plus a caret that says whether it is open. */
+.sampler-help .qline { margin: 6px 0 8px 0; }
+.sampler-help button#whyq { display: block; width: 100%; padding: 0; font: inherit; font-weight: bold;
+                            text-align: left; color: var(--tool-fg); background: none; border: 0; cursor: pointer; }
+.sampler-help button#whyq:hover { color: #ffffff; text-decoration: underline; }
+.sampler-help button#whyq .caret { display: inline-block; width: 1.1em; color: var(--tool-accent); }
+.sampler-help button#whyq .caret::before { content: "\25B8"; }        /* closed */
+.sampler-help button#whyq.open .caret::before { content: "\25BE"; }   /* open */
+#whybody.folded { display: none; }
 .sampler-help .fineprint { margin-top: 12px; padding-top: 8px; font-size: 16px;
                            border-top: 1px dashed var(--tool-line); }
 
@@ -57,7 +67,7 @@ body { height: auto; padding: 0; }
 .roles th { color: var(--tool-strong); font-weight: bold; }
 .roles td:first-child { white-space: nowrap; }
 .roles code { font-family: Consolas, "Courier New", monospace; font-size: 16px; color: var(--tool-code); }
-.roles td.sw { width: 30px; }
+.roles td.sw { width: 104px; }                 /* copy, paste, circle and reset all live in this cell */
 
 /* LAYOUT - the help column on the left, the sample pages on the right in two columns.
    Every sample is its own app column (pagewrap); the page-bg shows between them, as it does on the device.
@@ -117,6 +127,22 @@ body { height: auto; padding: 0; }
    The circles carry no colour of their own; the script paints them from the live palette, and
    everything around them stays on the tool's own greys. */
 .roles td.sw { white-space: nowrap; }
+/* Copy / paste, to the left of every circle and shown for one row at a time.  Their slots are always laid out and
+   hidden with `visibility`, never `display`: a pair that appeared on hover would shove the circle sideways, under
+   the pointer trying to click it.  They are chips like the reset arrow, and their GLYPH carries the colour the
+   clipboard holds (`--clip`, set by a copy and removed by Escape), with a faint glow so a near-black value stays
+   readable against the tool's dark panel. */
+.roles button.clipbtn, .roles button.pastebtn { visibility: hidden; width: 20px; padding: 0; margin: 0 1px;
+    font-family: inherit; font-size: 15px; line-height: 20px; text-align: center; vertical-align: middle;
+    color: var(--tool-dim); background: var(--tool-panel); border: 1px solid var(--tool-line);
+    border-radius: 5px; cursor: pointer; text-shadow: 0 0 2px rgba(255, 255, 255, 0.45); }
+.roles.hasclip button.clipbtn, .roles.hasclip button.pastebtn { color: var(--clip, var(--tool-dim)); }
+/* Hover is the reset arrow's hover: the box lights up, the glyph keeps showing the colour. */
+.roles button.clipbtn:hover, .roles button.pastebtn:hover { border-color: var(--tool-accent); }
+.roles button.clipbtn.ok { color: var(--tool-accent); border-color: var(--tool-accent); }
+.roles tr.hot button.clipbtn { visibility: visible; }
+/* The arrow is only worth showing once a colour has been copied, so it waits for the table's `hasclip`. */
+.roles.hasclip tr.hot button.pastebtn { visibility: visible; }
 .roles button.circle { width: 20px; height: 20px; padding: 0; vertical-align: middle; cursor: pointer;
                        border: 1px solid var(--tool-line); border-radius: 50%; }
 .roles button.circle.head { width: 26px; height: 26px; border: 4px double var(--tool-accent); }
@@ -163,7 +189,14 @@ body { height: auto; padding: 0; }
 <div class="layout"><header class="sampler-help helpcol">
   <h1>ehRadio WebUI theme builder</h1>
 
-  <p><b>Why this file exists.</b> Every colour the WebUI uses is a CSS variable declared in
+  <p class="qline"><button type="button" id="whyq" aria-expanded="false" aria-controls="whybody">
+    <span class="caret"></span>Why does this file exist?</button></p>
+
+  <!-- Everything up to the table folds away: the explanation is not what you open the tool for, and the question
+       line above is the control. -->
+  <div id="whybody" class="folded">
+
+  <p>Every colour the WebUI uses is a CSS variable declared in
   <code>data/www/style.css</code>, and most of them are used on several pages. Editing one in DevTools on a real
   page loses the change as soon as you go to another page, because that page reloads the stylesheet. This page
   paints a sample of every kind of coloured thing and puts the whole palette beside it, so one edit can be judged
@@ -181,10 +214,16 @@ body { height: auto; padding: 0; }
     <li><b>Split a single member</b> by picking a colour on it after its family was set: it stops following the
       head and the row is marked <i>split</i>. The &#8635; beside its circle puts it back in the family; the one
       beside a <b>family head</b>'s circle resets that whole family, head and splits together.</li>
-    <li><b>Start from an existing theme</b> by typing its id under the table and pressing Load. The id is applied
-      exactly as the device applies it, so you get whatever <code>style.css</code> holds for that slot - no names
-      are kept here, and every slot the file may gain later works without touching this page. An id with no block
-      comes back as <code>:root</code>, and the note tells you how many colours differed.</li>
+    <li><b>Copy a colour between rows.</b> Hover a colour circle and two small buttons appear beside it:
+      &#128464; copies that row's colour into a clipboard of this page's own, &#8614; pastes it into the row you are
+      on. Once something is held, both icons are drawn in that colour, so the clipboard is always visible. The pair
+      stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
+      clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves and locks that
+      family, and pasting into a member splits it off.</li>
+    <li><b>Start from an existing theme</b> by selecting its id number under the table and pressing Load. The id is
+      applied exactly as the device applies it, so you get whatever <code>style.css</code> holds for that slot -
+      no names are kept here, and every slot the file may gain later works without touching this page. An id with no
+      block comes back as <code>:root</code>, and the note tells you how many colours differed.</li>
     <li><b>Copy the block</b> and paste it into <code>data/www/style.css</code>, replacing <code>X</code> with the
       theme's id and the name in the comment. Then run
       <code>py src/displays/webuitheme.py --deflate</code> so it is folded back to its shortest form.</li>
@@ -192,9 +231,8 @@ body { height: auto; padding: 0; }
 
   <p><b>About the colours you see.</b> The circles write inline custom properties onto
   <code>&#60;html&#62;</code>, which beat the <code>:root</code> block by order, so the preview changes while every
-  rule, hover and layout still comes from <code>style.css</code> - nothing is duplicated there. This column, the
-  table and the block below are painted with fixed greys of their own, so no theme can make the tool unreadable
-  while you work on it. The block in the output holds only what you changed: a head line appears while two or more
+  rule, hover and layout still comes from <code>style.css</code> - nothing is duplicated there.
+  The block in the output holds only what you changed: a head line appears while two or more
   members still follow it, a member that was split off gets its own line, and a family whose members were all set
   one by one loses its head line altogether. <b>Reset all to :root</b> removes every inline value, so the preview
   is the <code>:root</code> palette again - the base every theme block is written against.</p>
@@ -203,20 +241,15 @@ body { height: auto; padding: 0; }
   <code>data/www/logo.svg</code>, inlined into this document. That is deliberate and it is also what the device does:
   <code>loadLogoThen()</code> fetches the file and assigns it to <code>#logo</code>, because the SVG paints itself
   with <code>var(--logo)</code>, <code>var(--logo-shadow)</code> and <code>var(--logo-text)</code> - and an
-  <code>&#60;img src="logo.svg"&#62;</code> is a document of its own, so it cannot see this page's variables. The
-  inline copy is a snapshot: if the artwork changes, paste the new file over the logo block again.
+  <code>&#60;img src="logo.svg"&#62;</code> is a document of its own, so it cannot see this page's variables.
   <b>About the layout.</b> The real pages are exactly one screen tall and scroll their own boxes. The markup here is
   the same, but a handful of heights at the top of this file are relaxed so each sample grows naturally inside its
   column - those rules are layout only, and the colours still come from the stylesheet alone. Narrow windows fold
   the samples to one column, then the help column moves to the top. <b>The dark grey ring around a sample, and the
-  black behind it, are the tool's and hardcoded</b> - black is what <code>--page-bg</code> always holds, so the
+  black behind it, are the tool's and hardcoded</b> - black is what <code>--page-bg</code> holds by default, so the
   surround reads as the browser window around a page. The one wash you can see, inside a card in the
   <i>Settings</i> sample, is the WebUI's own: <code>section</code> is the settings card, and it exists on no other
-  page.
-  <b>About the IR remote.</b> The remote graphic in the <i>IR recorder</i> sample is painted with fixed colours
-  rather than variables: it is hardware, it looks the same in every theme, and editing the palette changes nothing
-  there. The recording rows beside it do follow the palette - an unselected row is a flat button at rest and the
-  selected row is that same button pressed - so the button roles appear in both states side by side.</p>
+  page.</p>
 
   <h2>Every variable, by family</h2>
   <p>The palette is nine families plus a few colours that stand alone. A family head - the bold name above each
@@ -228,8 +261,13 @@ body { height: auto; padding: 0; }
   <code>:root[data-theme="1"]</code> block moves all seven outline roles at once. That is how a derived theme
   stays short - and <code>webuitheme.py --deflate</code> folds any block back into that form, leaving only the
   members that deliberately differ.</p>
-  <p>63 declarations in all: <b>9 family heads</b> and <b>54 roles</b>, of which 51 may be themed and three are
-  fixed (<code>--page-bg</code>, <code>--list-bars</code>, <code>--playlist-hover</code>).</p>
+  <p>62 declarations in all: <b>9 family heads</b> and <b>53 roles</b>. Any of them can be themed - a block
+  may set anything <code>:root</code> declares. The palette generator derives 50 of the 53;
+  <code>--page-bg</code>, <code>--list-bars</code> and <code>--playlist-hover</code> are hand-owned, because
+  no display theme carries a colour meaning "the browser window" or "the zebra stripe", so
+  <code>webuitheme.py</code> never writes them.</p>
+
+  </div><!--whybody-->
 
   <table class="roles" id="roles">
     <thead>
@@ -237,68 +275,68 @@ body { height: auto; padding: 0; }
     </thead>
     <tbody>
       <tr class="fam"><td><b>On their own</b></td><td class="sw"></td><td>Colours with no family: a rule paints each one directly, so each has its own arrow.</td></tr>
-      <tr data-role="input-border"><td><a class="rolelink" data-name="input-border" href="#"><code>--input-border</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-border" style="background: var(--input-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields and dropdowns</code> &mdash; The outline of a text field or dropdown.</td></tr>
-      <tr data-role="list-bars"><td><a class="rolelink" data-name="list-bars" href="#"><code>--list-bars</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-bars" style="background: var(--list-bars)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>odd playlist rows, odd search rows</code> &mdash; The zebra stripe behind every other row. Fixed: never themed.</td></tr>
-      <tr data-role="list-names"><td><a class="rolelink" data-name="list-names" href="#"><code>--list-names</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-names" style="background: var(--list-names)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor name field, station names</code> &mdash; The name column of the playlist editor.</td></tr>
-      <tr data-role="logo"><td><a class="rolelink" data-name="logo" href="#"><code>--logo</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo" style="background: var(--logo)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#eh and its gradient</code> &mdash; The "eh" of the logo.</td></tr>
-      <tr data-role="logo-shadow"><td><a class="rolelink" data-name="logo-shadow" href="#"><code>--logo-shadow</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo-shadow" style="background: var(--logo-shadow)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>logo gradient start</code> &mdash; The darker end of the logo gradient.</td></tr>
-      <tr data-role="logo-text"><td><a class="rolelink" data-name="logo-text" href="#"><code>--logo-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="logo-text" style="background: var(--logo-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#radio</code> &mdash; The "radio" wordmark.</td></tr>
-      <tr data-role="page-bg"><td><a class="rolelink" data-name="page-bg" href="#"><code>--page-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="page-bg" style="background: var(--page-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>html, body, #progress</code> &mdash; The browser window around the app column. Fixed: never themed.</td></tr>
-      <tr data-role="panel-gradient"><td><a class="rolelink" data-name="panel-gradient" href="#"><code>--panel-gradient</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-gradient" style="background: var(--panel-gradient)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards</code> &mdash; The subtle wash at the bottom of a settings card.</td></tr>
-      <tr data-role="playlist-hover"><td><a class="rolelink" data-name="playlist-hover" href="#"><code>--playlist-hover</code></a></td><td class="sw"><button type="button" class="circle" data-name="playlist-hover" style="background: var(--playlist-hover)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist row hover</code> &mdash; A playlist row under the mouse. Fixed: never themed.</td></tr>
-      <tr class="fam" data-head="surfaces"><td><a class="rolelink" data-name="surfaces" href="#"><code>--surfaces</code></a></td><td class="sw"><button type="button" class="circle head" data-name="surfaces" style="background: var(--surfaces)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The dark surfaces the app is drawn on.</td></tr>
-      <tr data-role="panel-background"><td><a class="rolelink" data-name="panel-background" href="#"><code>--panel-background</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-background" style="background: var(--panel-background)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>app column, panels, even list rows</code> &mdash; The backdrop of every page: the column behind the player, the settings cards, the list rows.</td></tr>
-      <tr data-role="scrollbar-track"><td><a class="rolelink" data-name="scrollbar-track" href="#"><code>--scrollbar-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="scrollbar-track" style="background: var(--scrollbar-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>the five scrollables</code> &mdash; The groove behind a scrollbar thumb.</td></tr>
-      <tr data-role="switch-track"><td><a class="rolelink" data-name="switch-track" href="#"><code>--switch-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-track" style="background: var(--switch-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; A switch in its off state.</td></tr>
-      <tr class="fam" data-head="edges"><td><a class="rolelink" data-name="edges" href="#"><code>--edges</code></a></td><td class="sw"><button type="button" class="circle head" data-name="edges" style="background: var(--edges)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The card outline and the scrollbar thumb.</td></tr>
-      <tr data-role="panel-border"><td><a class="rolelink" data-name="panel-border" href="#"><code>--panel-border</code></a></td><td class="sw"><button type="button" class="circle" data-name="panel-border" style="background: var(--panel-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards, scrollbars, recorder badge</code> &mdash; The edges of a settings card and its reset button, of a scrollbar thumb, and of the badge beside the recorder title.</td></tr>
-      <tr data-role="scrollbar-thumb"><td><a class="rolelink" data-name="scrollbar-thumb" href="#"><code>--scrollbar-thumb</code></a></td><td class="sw"><button type="button" class="circle" data-name="scrollbar-thumb" style="background: var(--scrollbar-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, settings, search, curated</code> &mdash; The draggable part of a scrollbar.</td></tr>
-      <tr class="fam" data-head="fills"><td><a class="rolelink" data-name="fills" href="#"><code>--fills</code></a></td><td class="sw"><button type="button" class="circle head" data-name="fills" style="background: var(--fills)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Every fill that is not a highlight: controls, inputs, dropdowns, meter grooves.</td></tr>
-      <tr data-role="button-fill"><td><a class="rolelink" data-name="button-fill" href="#"><code>--button-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-fill" style="background: var(--button-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, unselected IR recorder row</code> &mdash; The body of a flat button.</td></tr>
-      <tr data-role="control-bg"><td><a class="rolelink" data-name="control-bg" href="#"><code>--control-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="control-bg" style="background: var(--control-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>checkmark, SD icon button</code> &mdash; A generic control surface for widgets that are neither a button nor an input.</td></tr>
-      <tr data-role="editor-grid"><td><a class="rolelink" data-name="editor-grid" href="#"><code>--editor-grid</code></a></td><td class="sw"><button type="button" class="circle" data-name="editor-grid" style="background: var(--editor-grid)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells, SD size divider</code> &mdash; The thin grid between the playlist editor's cells.</td></tr>
-      <tr data-role="input-fill"><td><a class="rolelink" data-name="input-fill" href="#"><code>--input-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-fill" style="background: var(--input-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; The inside of a text field.</td></tr>
-      <tr data-role="meter-track"><td><a class="rolelink" data-name="meter-track" href="#"><code>--meter-track</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-track" style="background: var(--meter-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The empty part of a meter.</td></tr>
-      <tr data-role="select-fill"><td><a class="rolelink" data-name="select-fill" href="#"><code>--select-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="select-fill" style="background: var(--select-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The inside of a dropdown.</td></tr>
-      <tr class="fam" data-head="outlines"><td><a class="rolelink" data-name="outlines" href="#"><code>--outlines</code></a></td><td class="sw"><button type="button" class="circle head" data-name="outlines" style="background: var(--outlines)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The metal: rings, knobs and icon strokes.</td></tr>
-      <tr data-role="button-outline"><td><a class="rolelink" data-name="button-outline" href="#"><code>--button-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-outline" style="background: var(--button-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The ring around a flat button, in both of its states.</td></tr>
-      <tr data-role="icons-outline"><td><a class="rolelink" data-name="icons-outline" href="#"><code>--icons-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="icons-outline" style="background: var(--icons-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb ring, small glyphs</code> &mdash; Icon strokes and the ring around round icon buttons.</td></tr>
-      <tr data-role="list-outline"><td><a class="rolelink" data-name="list-outline" href="#"><code>--list-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-outline" style="background: var(--list-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, search and curated wraps</code> &mdash; The box around a scrolling list.</td></tr>
-      <tr data-role="meter-outline"><td><a class="rolelink" data-name="meter-outline" href="#"><code>--meter-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-outline" style="background: var(--meter-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The ring around a meter.</td></tr>
-      <tr data-role="spinner-ring"><td><a class="rolelink" data-name="spinner-ring" href="#"><code>--spinner-ring</code></a></td><td class="sw"><button type="button" class="circle" data-name="spinner-ring" style="background: var(--spinner-ring)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#loader, .plloader</code> &mdash; The spinning ring while something loads.</td></tr>
-      <tr data-role="switch-thumb"><td><a class="rolelink" data-name="switch-thumb" href="#"><code>--switch-thumb</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-thumb" style="background: var(--switch-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, checkmark</code> &mdash; The moving part of a switch, and the ring and dot of the file-input checkmark.</td></tr>
-      <tr data-role="warning-outline"><td><a class="rolelink" data-name="warning-outline" href="#"><code>--warning-outline</code></a></td><td class="sw"><button type="button" class="circle" data-name="warning-outline" style="background: var(--warning-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleditorwarning</code> &mdash; The ring around "Save to keep changes!".</td></tr>
-      <tr class="fam" data-head="highlights"><td><a class="rolelink" data-name="highlights" href="#"><code>--highlights</code></a></td><td class="sw"><button type="button" class="circle head" data-name="highlights" style="background: var(--highlights)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>What a hovered, pressed or selected control turns into.</td></tr>
-      <tr data-role="button-active-fill"><td><a class="rolelink" data-name="button-active-fill" href="#"><code>--button-active-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-active-fill" style="background: var(--button-active-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; What a flat button turns while it is hovered, or holds for two seconds after a press.</td></tr>
-      <tr data-role="highlight-fill"><td><a class="rolelink" data-name="highlight-fill" href="#"><code>--highlight-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="highlight-fill" style="background: var(--highlight-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active</code> &mdash; The fill behind a hovered or selected icon button; the other highlight roles are the same colour by default.</td></tr>
-      <tr data-role="list-active-bg"><td><a class="rolelink" data-name="list-active-bg" href="#"><code>--list-active-bg</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-active-bg" style="background: var(--list-active-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row, editor play glyph hover</code> &mdash; The row that is playing.</td></tr>
-      <tr data-role="meter-fill"><td><a class="rolelink" data-name="meter-fill" href="#"><code>--meter-fill</code></a></td><td class="sw"><button type="button" class="circle" data-name="meter-fill" style="background: var(--meter-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The filled part of a slider or progress bar.</td></tr>
-      <tr data-role="switch-track-on"><td><a class="rolelink" data-name="switch-track-on" href="#"><code>--switch-track-on</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-track-on" style="background: var(--switch-track-on)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; A switch in its on state.</td></tr>
-      <tr class="fam" data-head="actives"><td><a class="rolelink" data-name="actives" href="#"><code>--actives</code></a></td><td class="sw"><button type="button" class="circle head" data-name="actives" style="background: var(--actives)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The ink on anything lit: a button label, an icon glyph, the playing row, a switch that is on.</td></tr>
-      <tr data-role="button-active-text"><td><a class="rolelink" data-name="button-active-text" href="#"><code>--button-active-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-active-text" style="background: var(--button-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; The label on that fill.</td></tr>
-      <tr data-role="icon-active-glyph"><td><a class="rolelink" data-name="icon-active-glyph" href="#"><code>--icon-active-glyph</code></a></td><td class="sw"><button type="button" class="circle" data-name="icon-active-glyph" style="background: var(--icon-active-glyph)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active, .pleplay hover, SD manager icon buttons</code> &mdash; The glyph on an icon button that is lit by a highlight fill.</td></tr>
-      <tr data-role="list-active-text"><td><a class="rolelink" data-name="list-active-text" href="#"><code>--list-active-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-active-text" style="background: var(--list-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row</code> &mdash; The station name in the playing row.</td></tr>
-      <tr data-role="switch-text"><td><a class="rolelink" data-name="switch-text" href="#"><code>--switch-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-text" style="background: var(--switch-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; The word "On" inside a switch.</td></tr>
-      <tr class="fam" data-head="labels"><td><a class="rolelink" data-name="labels" href="#"><code>--labels</code></a></td><td class="sw"><button type="button" class="circle head" data-name="labels" style="background: var(--labels)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Labels and headings: text at full strength.</td></tr>
-      <tr data-role="button-text"><td><a class="rolelink" data-name="button-text" href="#"><code>--button-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="button-text" style="background: var(--button-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The button label at rest, and the row's clear cross.</td></tr>
-      <tr data-role="heading-text"><td><a class="rolelink" data-name="heading-text" href="#"><code>--heading-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="heading-text" style="background: var(--heading-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>h2, .sectiontitle, page titles</code> &mdash; Page and section titles.</td></tr>
-      <tr data-role="input-text"><td><a class="rolelink" data-name="input-text" href="#"><code>--input-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="input-text" style="background: var(--input-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; Text typed into a field.</td></tr>
-      <tr data-role="link-text"><td><a class="rolelink" data-name="link-text" href="#"><code>--link-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="link-text" style="background: var(--link-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>links, nav hover</code> &mdash; Link text.</td></tr>
-      <tr data-role="select-text"><td><a class="rolelink" data-name="select-text" href="#"><code>--select-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="select-text" style="background: var(--select-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The wording in a dropdown.</td></tr>
-      <tr data-role="station-name"><td><a class="rolelink" data-name="station-name" href="#"><code>--station-name</code></a></td><td class="sw"><button type="button" class="circle" data-name="station-name" style="background: var(--station-name)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#nameset, td.name</code> &mdash; The playing station's name, and station names in results.</td></tr>
-      <tr class="fam" data-head="infotexts"><td><a class="rolelink" data-name="infotexts" href="#"><code>--infotexts</code></a></td><td class="sw"><button type="button" class="circle head" data-name="infotexts" style="background: var(--infotexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Info and secondary text: the bright tier.</td></tr>
-      <tr data-role="eq-label-text"><td><a class="rolelink" data-name="eq-label-text" href="#"><code>--eq-label-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="eq-label-text" style="background: var(--eq-label-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>equalizer band labels</code> &mdash; The Hz labels in the equaliser popup.</td></tr>
-      <tr data-role="info-text"><td><a class="rolelink" data-name="info-text" href="#"><code>--info-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="info-text" style="background: var(--info-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#info, RSSI bars</code> &mdash; The player's info line: bitrate, signal, volume and battery together, as one style.</td></tr>
-      <tr data-role="list-urls"><td><a class="rolelink" data-name="list-urls" href="#"><code>--list-urls</code></a></td><td class="sw"><button type="button" class="circle" data-name="list-urls" style="background: var(--list-urls)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor URL cells</code> &mdash; Stream URLs in the playlist editor.</td></tr>
-      <tr data-role="small-text"><td><a class="rolelink" data-name="small-text" href="#"><code>--small-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="small-text" style="background: var(--small-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#copy footer</code> &mdash; The "powered by" line under every page.</td></tr>
-      <tr data-role="meta-text"><td><a class="rolelink" data-name="meta-text" href="#"><code>--meta-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="meta-text" style="background: var(--meta-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#meta</code> &mdash; The stream format line under the station name.</td></tr>
-      <tr class="fam" data-head="maintexts"><td><a class="rolelink" data-name="maintexts" href="#"><code>--maintexts</code></a></td><td class="sw"><button type="button" class="circle head" data-name="maintexts" style="background: var(--maintexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Main text: the quiet tier.</td></tr>
-      <tr data-role="caption-text"><td><a class="rolelink" data-name="caption-text" href="#"><code>--caption-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="caption-text" style="background: var(--caption-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#irrecordcaption, #previewinfo, battery hint</code> &mdash; The small explanatory lines.</td></tr>
-      <tr data-role="editor-cell-text"><td><a class="rolelink" data-name="editor-cell-text" href="#"><code>--editor-cell-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="editor-cell-text" style="background: var(--editor-cell-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells and play glyph</code> &mdash; The index and volume numbers in the playlist editor.</td></tr>
-      <tr data-role="link-quiet"><td><a class="rolelink" data-name="link-quiet" href="#"><code>--link-quiet</code></a></td><td class="sw"><button type="button" class="circle" data-name="link-quiet" style="background: var(--link-quiet)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>nav tabs, quick search cells, advanced-search link</code> &mdash; Dim clickable text; it turns --link-text on hover.</td></tr>
-      <tr data-role="main-text"><td><a class="rolelink" data-name="main-text" href="#"><code>--main-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="main-text" style="background: var(--main-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>body, playlist row hover</code> &mdash; The default text colour that everything inherits.</td></tr>
-      <tr data-role="section-title-text"><td><a class="rolelink" data-name="section-title-text" href="#"><code>--section-title-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="section-title-text" style="background: var(--section-title-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>section .title, .row-title span</code> &mdash; The card name, and the group heading inside a card.</td></tr>
-      <tr data-role="switch-off-text"><td><a class="rolelink" data-name="switch-off-text" href="#"><code>--switch-off-text</code></a></td><td class="sw"><button type="button" class="circle" data-name="switch-off-text" style="background: var(--switch-off-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; The word "Off" inside a switch.</td></tr>
+      <tr data-role="input-border"><td><a class="rolelink" data-name="input-border" href="#"><code>--input-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-border" style="background: var(--input-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields and dropdowns</code> &mdash; The outline of a text field or dropdown.</td></tr>
+      <tr data-role="list-bars"><td><a class="rolelink" data-name="list-bars" href="#"><code>--list-bars</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-bars" style="background: var(--list-bars)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>odd playlist rows, odd search rows</code> &mdash; The zebra stripe behind every other row. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr data-role="list-names"><td><a class="rolelink" data-name="list-names" href="#"><code>--list-names</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-names" style="background: var(--list-names)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor name field, station names</code> &mdash; The name column of the playlist editor.</td></tr>
+      <tr data-role="logo"><td><a class="rolelink" data-name="logo" href="#"><code>--logo</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo" style="background: var(--logo)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#eh and its gradient</code> &mdash; The "eh" of the logo.</td></tr>
+      <tr data-role="logo-shadow"><td><a class="rolelink" data-name="logo-shadow" href="#"><code>--logo-shadow</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-shadow" style="background: var(--logo-shadow)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>logo gradient start</code> &mdash; The darker end of the logo gradient.</td></tr>
+      <tr data-role="logo-text"><td><a class="rolelink" data-name="logo-text" href="#"><code>--logo-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-text" style="background: var(--logo-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#radio</code> &mdash; The "radio" wordmark.</td></tr>
+      <tr data-role="page-bg"><td><a class="rolelink" data-name="page-bg" href="#"><code>--page-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="page-bg" style="background: var(--page-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>html, body, #progress</code> &mdash; The browser window around the app column. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr data-role="panel-gradient"><td><a class="rolelink" data-name="panel-gradient" href="#"><code>--panel-gradient</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-gradient" style="background: var(--panel-gradient)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards</code> &mdash; The subtle wash at the bottom of a settings card.</td></tr>
+      <tr data-role="playlist-hover"><td><a class="rolelink" data-name="playlist-hover" href="#"><code>--playlist-hover</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="playlist-hover" style="background: var(--playlist-hover)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist row hover</code> &mdash; A playlist row under the mouse. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr class="fam" data-head="surfaces"><td><a class="rolelink" data-name="surfaces" href="#"><code>--surfaces</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="surfaces" style="background: var(--surfaces)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The dark surfaces the app is drawn on.</td></tr>
+      <tr data-role="panel-background"><td><a class="rolelink" data-name="panel-background" href="#"><code>--panel-background</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-background" style="background: var(--panel-background)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>app column, panels, even list rows</code> &mdash; The backdrop of every page: the column behind the player, the settings cards, the list rows.</td></tr>
+      <tr data-role="scrollbar-track"><td><a class="rolelink" data-name="scrollbar-track" href="#"><code>--scrollbar-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-track" style="background: var(--scrollbar-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>the five scrollables</code> &mdash; The groove behind a scrollbar thumb.</td></tr>
+      <tr data-role="switch-track"><td><a class="rolelink" data-name="switch-track" href="#"><code>--switch-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track" style="background: var(--switch-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; A switch in its off state.</td></tr>
+      <tr class="fam" data-head="edges"><td><a class="rolelink" data-name="edges" href="#"><code>--edges</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="edges" style="background: var(--edges)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The card outline and the scrollbar thumb.</td></tr>
+      <tr data-role="panel-border"><td><a class="rolelink" data-name="panel-border" href="#"><code>--panel-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-border" style="background: var(--panel-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards, scrollbars, recorder badge</code> &mdash; The edges of a settings card and its reset button, of a scrollbar thumb, and of the badge beside the recorder title.</td></tr>
+      <tr data-role="scrollbar-thumb"><td><a class="rolelink" data-name="scrollbar-thumb" href="#"><code>--scrollbar-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-thumb" style="background: var(--scrollbar-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, settings, search, curated</code> &mdash; The draggable part of a scrollbar.</td></tr>
+      <tr class="fam" data-head="fills"><td><a class="rolelink" data-name="fills" href="#"><code>--fills</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="fills" style="background: var(--fills)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Every fill that is not a highlight: controls, inputs, dropdowns, meter grooves.</td></tr>
+      <tr data-role="button-fill"><td><a class="rolelink" data-name="button-fill" href="#"><code>--button-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-fill" style="background: var(--button-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, unselected IR recorder row</code> &mdash; The body of a flat button.</td></tr>
+      <tr data-role="control-bg"><td><a class="rolelink" data-name="control-bg" href="#"><code>--control-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="control-bg" style="background: var(--control-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>checkbox and radio ticks, the update page's radio disc, SD icon buttons</code> &mdash; The lit part of a checkbox or radio, and a control surface for a widget that is neither a button nor an input.</td></tr>
+      <tr data-role="editor-grid"><td><a class="rolelink" data-name="editor-grid" href="#"><code>--editor-grid</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-grid" style="background: var(--editor-grid)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells, SD size divider</code> &mdash; The thin grid between the playlist editor's cells.</td></tr>
+      <tr data-role="input-fill"><td><a class="rolelink" data-name="input-fill" href="#"><code>--input-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-fill" style="background: var(--input-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; The inside of a text field.</td></tr>
+      <tr data-role="meter-track"><td><a class="rolelink" data-name="meter-track" href="#"><code>--meter-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-track" style="background: var(--meter-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The empty part of a meter.</td></tr>
+      <tr data-role="select-fill"><td><a class="rolelink" data-name="select-fill" href="#"><code>--select-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-fill" style="background: var(--select-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The inside of a dropdown.</td></tr>
+      <tr class="fam" data-head="outlines"><td><a class="rolelink" data-name="outlines" href="#"><code>--outlines</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="outlines" style="background: var(--outlines)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The metal: rings, knobs and icon strokes.</td></tr>
+      <tr data-role="button-outline"><td><a class="rolelink" data-name="button-outline" href="#"><code>--button-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-outline" style="background: var(--button-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The ring around a flat button, in both of its states.</td></tr>
+      <tr data-role="icons-outline"><td><a class="rolelink" data-name="icons-outline" href="#"><code>--icons-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icons-outline" style="background: var(--icons-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb ring, small glyphs</code> &mdash; Icon strokes and the ring around round icon buttons.</td></tr>
+      <tr data-role="list-outline"><td><a class="rolelink" data-name="list-outline" href="#"><code>--list-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-outline" style="background: var(--list-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, search and curated wraps</code> &mdash; The box around a scrolling list.</td></tr>
+      <tr data-role="meter-outline"><td><a class="rolelink" data-name="meter-outline" href="#"><code>--meter-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-outline" style="background: var(--meter-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The ring around a meter.</td></tr>
+      <tr data-role="spinner-ring"><td><a class="rolelink" data-name="spinner-ring" href="#"><code>--spinner-ring</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="spinner-ring" style="background: var(--spinner-ring)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#loader, .plloader</code> &mdash; The spinning ring while something loads.</td></tr>
+      <tr data-role="switch-thumb"><td><a class="rolelink" data-name="switch-thumb" href="#"><code>--switch-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-thumb" style="background: var(--switch-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, checkmark</code> &mdash; The moving part of a switch, and the ring and dot of the file-input checkmark.</td></tr>
+      <tr data-role="warning-outline"><td><a class="rolelink" data-name="warning-outline" href="#"><code>--warning-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="warning-outline" style="background: var(--warning-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleditorwarning</code> &mdash; The ring around "Save to keep changes!".</td></tr>
+      <tr class="fam" data-head="highlights"><td><a class="rolelink" data-name="highlights" href="#"><code>--highlights</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="highlights" style="background: var(--highlights)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>What a hovered, pressed or selected control turns into.</td></tr>
+      <tr data-role="button-active-fill"><td><a class="rolelink" data-name="button-active-fill" href="#"><code>--button-active-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-fill" style="background: var(--button-active-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; What a flat button turns while it is hovered, or holds for two seconds after a press.</td></tr>
+      <tr data-role="highlight-fill"><td><a class="rolelink" data-name="highlight-fill" href="#"><code>--highlight-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="highlight-fill" style="background: var(--highlight-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active</code> &mdash; The fill behind a hovered or selected icon button; the other highlight roles are the same colour by default.</td></tr>
+      <tr data-role="list-active-bg"><td><a class="rolelink" data-name="list-active-bg" href="#"><code>--list-active-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-bg" style="background: var(--list-active-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row, editor play glyph hover</code> &mdash; The row that is playing.</td></tr>
+      <tr data-role="meter-fill"><td><a class="rolelink" data-name="meter-fill" href="#"><code>--meter-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-fill" style="background: var(--meter-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The filled part of a slider or progress bar.</td></tr>
+      <tr data-role="switch-track-on"><td><a class="rolelink" data-name="switch-track-on" href="#"><code>--switch-track-on</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track-on" style="background: var(--switch-track-on)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; A switch in its on state.</td></tr>
+      <tr class="fam" data-head="actives"><td><a class="rolelink" data-name="actives" href="#"><code>--actives</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="actives" style="background: var(--actives)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The ink on anything lit: a button label, an icon glyph, the playing row, a switch that is on.</td></tr>
+      <tr data-role="button-active-text"><td><a class="rolelink" data-name="button-active-text" href="#"><code>--button-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-text" style="background: var(--button-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; The label on that fill.</td></tr>
+      <tr data-role="icon-active-glyph"><td><a class="rolelink" data-name="icon-active-glyph" href="#"><code>--icon-active-glyph</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icon-active-glyph" style="background: var(--icon-active-glyph)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active, .pleplay hover, SD manager icon buttons</code> &mdash; The glyph on an icon button that is lit by a highlight fill.</td></tr>
+      <tr data-role="list-active-text"><td><a class="rolelink" data-name="list-active-text" href="#"><code>--list-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-text" style="background: var(--list-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row</code> &mdash; The station name in the playing row.</td></tr>
+      <tr data-role="switch-text"><td><a class="rolelink" data-name="switch-text" href="#"><code>--switch-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-text" style="background: var(--switch-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; The word "On" inside a switch.</td></tr>
+      <tr class="fam" data-head="labels"><td><a class="rolelink" data-name="labels" href="#"><code>--labels</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="labels" style="background: var(--labels)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Labels and headings: text at full strength.</td></tr>
+      <tr data-role="button-text"><td><a class="rolelink" data-name="button-text" href="#"><code>--button-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-text" style="background: var(--button-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The button label at rest, and the row's clear cross.</td></tr>
+      <tr data-role="heading-text"><td><a class="rolelink" data-name="heading-text" href="#"><code>--heading-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="heading-text" style="background: var(--heading-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>h2, .sectiontitle, page titles</code> &mdash; Page and section titles.</td></tr>
+      <tr data-role="input-text"><td><a class="rolelink" data-name="input-text" href="#"><code>--input-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-text" style="background: var(--input-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; Text typed into a field.</td></tr>
+      <tr data-role="link-text"><td><a class="rolelink" data-name="link-text" href="#"><code>--link-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-text" style="background: var(--link-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>links, nav hover</code> &mdash; Link text.</td></tr>
+      <tr data-role="select-text"><td><a class="rolelink" data-name="select-text" href="#"><code>--select-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-text" style="background: var(--select-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The wording in a dropdown.</td></tr>
+      <tr data-role="station-name"><td><a class="rolelink" data-name="station-name" href="#"><code>--station-name</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="station-name" style="background: var(--station-name)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#nameset, td.name</code> &mdash; The playing station's name, and station names in results.</td></tr>
+      <tr class="fam" data-head="infotexts"><td><a class="rolelink" data-name="infotexts" href="#"><code>--infotexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="infotexts" style="background: var(--infotexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Info and secondary text: the bright tier.</td></tr>
+      <tr data-role="eq-label-text"><td><a class="rolelink" data-name="eq-label-text" href="#"><code>--eq-label-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="eq-label-text" style="background: var(--eq-label-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>equalizer band labels</code> &mdash; The Hz labels in the equaliser popup.</td></tr>
+      <tr data-role="info-text"><td><a class="rolelink" data-name="info-text" href="#"><code>--info-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="info-text" style="background: var(--info-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#info, RSSI bars</code> &mdash; The player's info line: bitrate, signal, volume and battery together, as one style.</td></tr>
+      <tr data-role="list-urls"><td><a class="rolelink" data-name="list-urls" href="#"><code>--list-urls</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-urls" style="background: var(--list-urls)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor URL cells</code> &mdash; Stream URLs in the playlist editor.</td></tr>
+      <tr data-role="small-text"><td><a class="rolelink" data-name="small-text" href="#"><code>--small-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="small-text" style="background: var(--small-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#copy footer</code> &mdash; The "powered by" line under every page.</td></tr>
+      <tr data-role="meta-text"><td><a class="rolelink" data-name="meta-text" href="#"><code>--meta-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meta-text" style="background: var(--meta-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#meta</code> &mdash; The stream format line under the station name.</td></tr>
+      <tr class="fam" data-head="maintexts"><td><a class="rolelink" data-name="maintexts" href="#"><code>--maintexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="maintexts" style="background: var(--maintexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Main text: the quiet tier.</td></tr>
+      <tr data-role="caption-text"><td><a class="rolelink" data-name="caption-text" href="#"><code>--caption-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="caption-text" style="background: var(--caption-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#irrecordcaption, #previewinfo, battery hint</code> &mdash; The small explanatory lines.</td></tr>
+      <tr data-role="editor-cell-text"><td><a class="rolelink" data-name="editor-cell-text" href="#"><code>--editor-cell-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-cell-text" style="background: var(--editor-cell-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells and play glyph</code> &mdash; The index and volume numbers in the playlist editor.</td></tr>
+      <tr data-role="link-quiet"><td><a class="rolelink" data-name="link-quiet" href="#"><code>--link-quiet</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-quiet" style="background: var(--link-quiet)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>nav tabs, quick search cells, advanced-search link</code> &mdash; Dim clickable text; it turns --link-text on hover.</td></tr>
+      <tr data-role="main-text"><td><a class="rolelink" data-name="main-text" href="#"><code>--main-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="main-text" style="background: var(--main-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>body, playlist row hover</code> &mdash; The default text colour that everything inherits.</td></tr>
+      <tr data-role="section-title-text"><td><a class="rolelink" data-name="section-title-text" href="#"><code>--section-title-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="section-title-text" style="background: var(--section-title-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>section .title, .row-title span</code> &mdash; The card name, and the group heading inside a card.</td></tr>
+      <tr data-role="switch-off-text"><td><a class="rolelink" data-name="switch-off-text" href="#"><code>--switch-off-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-off-text" style="background: var(--switch-off-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; The word "Off" inside a switch.</td></tr>
     </tbody>
   </table>
 
@@ -453,7 +491,7 @@ body { height: auto; padding: 0; }
   </div><!--equalizerwrap-->
 
   <div id="copy">powered by <a target="_blank" href="https://trip5.github.io/ehRadio/">ehRadio</a> |
-    <span id="version">v0.9.999</span></div>
+    <span id="version">1867.07.01</span></div>
 </div><!--playerwrap--></div></div>
 
 <!-- ================================ EQUALISER POPUP ==================================== -->
@@ -504,7 +542,7 @@ body { height: auto; padding: 0; }
     <ol id="pleditorcontent">
       <li class="pleitem">
         <span class="grabbable" draggable="true">001</span>
-        <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
+        <span class="pleinput plecheck"><input type="checkbox" class="plcb" checked /></span>
         <input class="pleinput plename" type="text" value="Radio Paradise" maxlength="140" />
         <input class="pleinput pleurl" type="text" value="https://stream.radioparadise.com/aac-320" maxlength="140" />
         <span class="pleinput pleplay">&#9658;</span>
@@ -1079,6 +1117,66 @@ body { height: auto; padding: 0; }
     });
   }
 
+  // The one place a colour is committed, so the picker and the paste arrow cannot drift apart: setting a head
+  // locks its family and clears the splits, setting a member splits that member off, and once fewer than two
+  // members still follow the head its colour is handed to the last followers and the head line is dropped.
+  function setValue(name, v) {
+    if (headNames.indexOf(name) !== -1) {
+      state.heads[name] = v;
+      families.forEach(function (f) {
+        if (f.name === name) f.members.forEach(function (m) { delete state.members[m]; });
+      });
+      return;
+    }
+    state.members[name] = v;
+    var fam = familyOf[name];
+    if (!fam || !state.heads[fam]) return;
+    var followers = [];
+    families.forEach(function (f) {
+      if (f.name === fam) followers = f.members.filter(function (m) { return !state.members[m]; });
+    });
+    if (followers.length < 2) {
+      var held = state.heads[fam];
+      followers.forEach(function (m) { state.members[m] = held; });
+      delete state.heads[fam];
+    }
+  }
+
+  // ---- copy / paste: an internal clipboard, nothing to do with the system one ----
+  // The pair beside a circle belongs to one row at a time.  Hovering a swatch makes that row hot; leaving it does
+  // NOT hide the pair, because the copy icon sits beside the circle rather than on it and the pointer has to
+  // cross empty space to reach it - three seconds of quiet hides them, and hovering another swatch moves them.
+  var roles = document.getElementById('roles');
+  var copied = null, hotRow = null, hotTimer = 0;
+  function clearHot() {
+    if (hotRow) hotRow.classList.remove('hot');
+    hotRow = null;
+  }
+  function armHot() {
+    clearTimeout(hotTimer);
+    hotTimer = setTimeout(clearHot, 3000);
+  }
+  function setHot(row) {
+    if (hotRow !== row) { clearHot(); hotRow = row; }
+    if (row) row.classList.add('hot');
+    armHot();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#roles td.sw'), function (td) {
+    var tr = td.closest('tr');
+    if (!tr.dataset.role && !tr.dataset.head) return;    // the "On their own" banner has an empty cell
+    td.addEventListener('mouseenter', function () { setHot(tr); });
+    // Movement inside the cell keeps the pair alive, and brings it back after the timer ran out while the
+    // pointer never left - a still pointer lets them go, which is the point of having a timer at all.
+    td.addEventListener('mousemove', function () { setHot(tr); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !copied) return;
+    copied = null;
+    roles.classList.remove('hasclip');
+    roles.style.removeProperty('--clip');
+    clearHot();
+  });
+
   // One hidden picker serves every circle.  The native dialog fires `input` while the user drags - that is
   // the live preview - but `change` only when it is accepted, so the state at open is kept and put back if
   // the dialog closes without one: Cancel is a real cancel.
@@ -1112,6 +1210,27 @@ body { height: auto; padding: 0; }
       picker.click();
       return;
     }
+    // Copy / paste act on the ROW's colour, and like the reset arrow they carry no name of their own.  The
+    // clipboard is the page's own, so nothing leaves the browser and no permission is asked for.
+    var clipBtn = e.target.closest && e.target.closest('#roles button.clipbtn');
+    var pasteBtn = e.target.closest && e.target.closest('#roles button.pastebtn');
+    if (clipBtn || pasteBtn) {
+      var crow = (clipBtn || pasteBtn).closest('tr');
+      var cname = crow.dataset.role || crow.dataset.head;
+      if (clipBtn) {
+        copied = valueOf(cname);           // what the circle shows, so a follower copies its family colour
+        roles.classList.add('hasclip');
+        roles.style.setProperty('--clip', copied);   // both glyphs now show what is held
+        clipBtn.classList.add('ok');
+        setTimeout(function () { clipBtn.classList.remove('ok'); }, 900);
+        setHot(crow);
+      } else if (copied) {
+        setValue(cname, copied);
+        apply();
+        setHot(crow);
+      }
+      return;
+    }
     // Every arrow is the same control; the ROW decides what it resets.
     var reset = e.target.closest && e.target.closest('#roles button.rejoin');
     if (reset) {
@@ -1143,30 +1262,7 @@ body { height: auto; padding: 0; }
     var v = picker.value;
     if (v === valueOf(target)) return;      // opening the dialog can fire input with the colour it already has
     session.dirty = true;
-    if (headNames.indexOf(target) !== -1) {
-      state.heads[target] = v;                      // setting a head locks its family
-      families.forEach(function (f) {
-        if (f.name === target) f.members.forEach(function (m) { delete state.members[m]; });
-      });
-    } else {
-      state.members[target] = v;                    // a member splits off on its own
-      // Once fewer than two members still follow the head, the head line is no longer worth writing:
-      // hand its colour to the last followers, forget it, and the block stays short with no visual move.
-      var fam = familyOf[target];
-      if (fam && state.heads[fam]) {
-        var followers = [];
-        families.forEach(function (f) {
-          if (f.name === fam) {
-            followers = f.members.filter(function (m) { return !state.members[m]; });
-          }
-        });
-        if (followers.length < 2) {
-          var held = state.heads[fam];
-          followers.forEach(function (m) { state.members[m] = held; });
-          delete state.heads[fam];
-        }
-      }
-    }
+    setValue(target, v);
     apply();
   });
 
@@ -1188,7 +1284,9 @@ body { height: auto; padding: 0; }
     'edges': '#settingscontent section', 'panel-border': '#settingscontent section',
     'fills': '.fb', 'button-fill': '.fb', 'button-text': '.fb', 'button-outline': '.fb',
     'button-active-fill': '.fb.pressed', 'button-active-text': '.fb.pressed',
-    'control-bg': '.plestatus', 'editor-grid': '.pleitem span', 'editor-cell-text': '.pleitem span',
+    // The cell, not the input: the jump must not depend on a box being ticked, and the cell is the bigger target.
+    'control-bg': '#pleditorcontent .plecheck',
+    'editor-grid': '.pleitem span', 'editor-cell-text': '.pleitem span',
     'outlines': '.gb', 'icons-outline': '.gb', 'list-outline': '#playlist',
     'meter-outline': '#volslider input', 'spinner-ring': '#loader',
     'warning-outline': '.pleditorwarning',
@@ -1216,7 +1314,12 @@ body { height: auto; padding: 0; }
       });
     }
     var el = sel ? document.querySelector(sel) : null;
-    if (!el) el = document.querySelector('#samples .sample');
+    if (!el) {
+      // A selector that matched nothing means the mapping is stale, not that the role is unpaintable.  Say so
+      // in the console as well as falling back, because the fallback looks like a successful jump to the Player.
+      console.warn('webui_tool: no anchor for --' + name + (sel ? ' (' + sel + ')' : ''));
+      el = document.querySelector('#samples .sample');
+    }
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('jump-hit');
@@ -1339,6 +1442,15 @@ body { height: auto; padding: 0; }
     state.members = {};
     loadNote.textContent = 'reset to the :root palette';
     apply();
+  });
+
+  // The help note folds away, so the table is what you see when the tool opens.  The question line is the control
+  // and the caret is the state; the two hover hints live in the stylesheet.
+  var whyQ = document.getElementById('whyq'), whyBody = document.getElementById('whybody');
+  whyQ.addEventListener('click', function () {
+    var open = !whyBody.classList.toggle('folded');
+    whyQ.classList.toggle('open', open);
+    whyQ.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
 
   apply();

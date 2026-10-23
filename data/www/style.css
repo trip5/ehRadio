@@ -10,9 +10,9 @@
   --input-border:       #4a4a4a;
   --list-bars:          #1c1c1c;
   --list-names:         #c9c9c9;
-  --logo:               #C80C02;
+  --logo:               #f81c00;
   --logo-shadow:        #A80C02;
-  --logo-text:          #003DA5;
+  --logo-text:          #115fff;
   --page-bg:            #000000;
   --panel-gradient:     #171717;
   --playlist-hover:     #2e2e2e;
@@ -92,7 +92,18 @@
 /* Theme starters can be imported using the tool in /src/displays: webuitheme.py mode=normal anchor=0 */
 /* Hand edits must be made after (use the browser's dev tools), then add PERFECT to lock a theme */
 
-:root[data-theme="0"] { /* ehRadio Blue & Red (Trip5) */
+:root[data-theme="0"] { /* ehRadio Blue & Red (Trip5) PERFECT */
+  --actives:            #ffffff;
+  --button-active-fill: #f81c00;
+  --control-bg:         #f81c00;
+  --highlight-fill:     #f81c00;
+  --highlights:         #115fff;
+  --info-text:          #ffff00;
+  --infotexts:          #cccccc;
+  --link-quiet:         #115fff;
+  --link-text:          #98d8e8;
+  --list-bars:          #000c24;
+  --playlist-hover:     #a80c02;
 }
 :root[data-theme="1"] { /* ёRadio Gold (e2002) PERFECT */
   --actives:            #000000;
@@ -290,8 +301,11 @@ input[type=text], select[type=text], input[type=password], input[type=number] {
 }
 select[type=text] { background: var(--select-fill); color: var(--select-text); }
 input[type=text]:focus, input[type=password]:focus, input[type=number]:focus { outline: none; }
-input[type=checkbox] { accent-color: var(--switch-thumb); width: 18px; height: 18px; cursor: pointer; vertical-align: middle; }
+/* The tick of a checkbox and the dot of a radio are the lit part of the widget, so both take the control
+   surface colour rather than the switch knob's.  A native control only shows `accent-color` when it is on. */
+input[type=checkbox] { accent-color: var(--control-bg); width: 18px; height: 18px; cursor: pointer; vertical-align: middle; }
 input[type=checkbox]:disabled { cursor: default; opacity: 0.4; }
+input[type=radio] { accent-color: var(--control-bg); cursor: pointer; vertical-align: middle; }
 
 /* SLIDERS */
 input[type=range]::-webkit-slider-runnable-track { background: transparent !important; }

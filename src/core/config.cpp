@@ -185,6 +185,7 @@ void Config::changeMode(int newmode) {
     saveValue(&store.play_mode, store.play_mode);
     player.resetQueue();  // clear stale ticks commands before mode transition
     _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&LittleFS:_SDplaylistFS);
+    player.clearMute();   // a mode change always cancels mute
     netserver.requestOnChange(GETPLAYERMODE, 0);
     if (getMode()==PM_SDCARD) {
       if (pir) player.sendCommand({PR_STOP, 0});

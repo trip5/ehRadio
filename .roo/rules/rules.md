@@ -16,4 +16,5 @@ The `.github/` directory is the single source of truth for all AI assistant rule
 
 - **Never add, edit or remove entries in `.github/code-issues.md`** unless the user asks for it in the message you are working on. It records issues that are unfixable now — not fixes underway, not fixes just completed, and not gotchas the assistant discovered while working.
 - The `(ALL FIXED)` markers and fix notes that file's own header mentions are for the user to add, not for the assistant.
+- **Never edit `.github/ai-coding-guide.md`** unless the message you are working on asks for it (it is Rule #3 there). It is a short rule sheet, not documentation: an addition is one or two lines, and explanation, history or subsystem detail belongs in `code-summary.md`.
 - Durable rules and lessons found while working go in this file or in `ai-coding-guide.md`; technical facts go in `code-summary.md`.

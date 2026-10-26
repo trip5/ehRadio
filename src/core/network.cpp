@@ -309,10 +309,9 @@ void ticks() {
       }
     }
     #ifndef DEEP_SLEEP_DISABLE
-      // Sleep timer: runs beside the screensaver thresholds, not after them, and needs no screensaver
       if (config.store.sleeptimer && (display.mode()==PLAYER || config.isScreensaver)) {
         if (config.sleepTicks < 0xFFFF) config.sleepTicks++;
-        if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY) utility.doSleepW();
+        if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY) utility.requestSleep();
       }
     #endif
   }

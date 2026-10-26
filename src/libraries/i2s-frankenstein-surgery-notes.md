@@ -1,5 +1,24 @@
 # I2S Frankenstein Surgery Notes
 
+## Read This With the Other Library's Notes
+
+The two audio libraries share their defect classes, and the dates here and in
+`vs1053-frankenstein-surgery-notes.md` show the same faults surfacing on both: `2026.10.11` (the m3u8 refetch pause, the
+media-sequence resync, the `TIT2` mis-wire), `2026-10-21` (the screensaver's VU gate) and `2026.10.24` (the per-track
+resets and the ID3v2 frame-size guard). Two practices follow:
+
+* **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+* **Expect the VS1053 board to find these first - and this library to be the reference for some of them.** The VS1053
+  library has a hardware decoder, a DREQ-gated SPI feed and the shallower graft, so end-of-stream accounting faults show
+  up there as audible stalls with readable counters, and that file carries the longer record (fixes from 2026-07 on,
+  against 2026-08 here). Working the VS1053 side patiently has produced the diagnosis every time. This library has then
+  either needed the same fix, or turned out to hold the correct version: the three per-track resets lost from the VS1053
+  graft (`m_sumBytesDecoded`, `m_audioDataStart`, `m_audioDataSize`) were present and correct here, and comparing
+  against them is what identified the loss. The reverse also happens - the tail-of-file fix recorded below, dated
+  `2026.10.24`, ended with a prediction that a VS1053 unit stopping at a track end would be the first place to look, and
+  that is exactly what subsequently happened.
+
 ## Purpose
 Graft ehRadio's adaptations from the current I2S library (based on Maleksm v0.9.434m / I2S 3.1.0) onto Maleksm's latest v0.9.720m (I2S 3.4.6w).
 
@@ -401,3 +420,70 @@ showing a meter, which keeps the CPU saving the old guard was for.
 
 **Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`,
 `getWaveform()`, `getSpectrum()`; `src/core/config.h` - `Config::vuSourceWanted()`.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.26)
+
+The same story as the VS1053 notes file - SD playback stopped silently, six root causes, four of them a per-track
+member this library never resets - but this library differs in three ways that shaped every fix, and they are worth
+knowing before reading a diff:
+
+* **The decoder runs on the audio task and owns nothing else.** `playAudioData()` must never touch the `File` handle, so
+  anything that has to ask the file a question (its size, its position) lives in `processLocalFile()`, which owns it.
+* **The VU meter is real work here** - a 32-band FFT over decoded samples - so it costs CPU on the decode task rather
+  than an SPI register read on a chip.
+* **The end of a track has to be declared by the reader**, because there is no chip to ask "are you still decoding?".
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | SD playback stops dead at a track end: no error, `isRunning()` true, VU at zero, `play pos` frozen with a small tail still buffered | `playAudioData()` sets `lastFrame` when less than a max block remains, then still asks `sendBytes()` for a **full** block; the decoder answers 0, nothing is consumed, and neither end rule can fire | `processLocalFile()` declares EOF once the reader is at EOF **and** `bufferFilled() < getMaxBlockSize()`. All three clauses matter: `bytesAddedToBuffer == 0` alone is also true when the buffer is full, and `position() >= size()` alone fires a whole buffer early because the reader runs ahead of the decoder |
+| 2 | Every ID3v2 track skipped in 0 ms, one after another; tagless files fine | the frame walk reads tag padding as a frame header, gets a garbage size (3.1 GB measured) and state 5 skips to the end of the FILE | state-4 guard, before any skip: `remainingHeaderBytes < 6 \|\| framesize > remainingHeaderBytes - 6` -> state 99 |
+| 3 | No symptom yet - found by reading this library for the VS1053 root causes, which is the practice at the top of this file | `m_sumBytesDecoded` was seeded with a FILE position (`m_resumeFilePos`, `m_audioDataStart`) while it is compared against an audio-relative size | `m_haveNewFilePos` keeps the file position; the counter becomes `m_resumeFilePos - m_audioDataStart`, and `0` on a loop |
+| 4 | `sum` ran ahead of the audio by exactly the guard's `rem` on every guarded tag, so `getAudioCurrentTime()` and the resume position were a few hundred bytes out | `sendBytes()` returns the offset of the first frame it finds - **the tail of the tag**, not audio - and that offset was counted as decoded | consume those bytes without counting them, gated by `m_f_firstSync`: a resync after a decode error is still counted as damaged audio, and a resume clears the flag because it lands mid-audio |
+| 5 | `MPEG-2.5, Layer I` printed for every working MP3 | the getters return enum/table indices while the label was written against the raw 2-bit header field, and the two numberings disagree | map version 0/1/2 to 1/2/2.5 and layer 3/2/1 to III/II/I, and print `Layer ?` when `MP3GetLastFrameInfo()` zero-filled the fields |
+| 6 | Silent web streams after an SD track (the VS1053 latch) | `f_isFile` was latched by `m_f_firstPlayCall`; `setDefaults()` re-arms it here, so this library was correct - one lost reset line away from the same bug | derive it every pass in both libraries, so there is no reset to lose |
+| 7 | A decoder that stops consuming was silent for ever: file open, running, taking nothing | nothing printed for that state at all | `loop()` progress watchdog, `AUDIO_PROGRESS_TIMEOUT_MS` = 5 s, gated on "a file is open and its header parsed" and nothing else |
+| 8 | `zero read` printed on every track, looking like a fault | the buffer-full case is benign and fires constantly | gate it on `availableBytes > 0`, so it prints only when the read had room and returned nothing |
+
+### The instrument that lied, and the one that did not
+
+The decode errors needed a way to see whether the ring was losing bytes. Three instruments, in order:
+
+1. **The error line** (`sum`, `buf`, `rd`, `wr`, `reader`) - it runs on the audio task while the main task writes the
+   ring, so its numbers are samples from different instants. It produced `gap +630,774` - exactly one buffer capacity -
+   on ten tracks, and that turned out to be a **torn sample**, not a lost buffer.
+2. **A 10 s trace from `loop()`** (`track 10s: sum … ring … buf … gap …`) - one task, therefore coherent. Two hours
+   settled it: `gap 0` on every untagged track at every sample (the ring is honest), and a small constant equal to the
+   ID3v2 guard's `rem` on every tagged one (the counter, not the start, was wrong).
+3. The fix that came out of it (row 4), and **the mistake worth remembering**: the first attempt moved the skip into
+   `m_audioDataStart` instead. `Audio-Length` changed by 576 bytes and rejected it - while `gap` did not budge, because
+   moving 576 from `sum` to `start` changes both terms of the same subtraction. **A composed metric can hide a change
+   that two raw ones would show**, and an invariant checked for days is worth more than a clever new number.
+
+Also worth keeping: `MP3FindSyncWord()` now checks the **layer** field, not just bitrate index 15 and sample rate index
+3, because an `FF F1` false sync passed the 11-bit test and was then rejected by `UnpackFrameHeader()`. And when
+`findSync()` returns -1 the search now returns -1 instead of doing `pos += -1; nBytes -= -1`, which walked *past* the
+block.
+
+**Files changed**: `Audio.cpp` - `loop()` (progress watchdog), `processLocalFile()` (zero-read gate, resume and loop
+seeds), `playAudioData()` (first-sync rule, ID3v1 range, per-pass `f_isFile`), `read_ID3_Header()` state 4,
+`setDecoderItems()` (label); `Audio.h` - `m_stallSum`, `m_stallMs`, `m_f_firstSync`; `mp3_decoder/mp3_decoder.cpp` -
+`MP3FindSyncWord()` (layer check, resync guard) and the `MP3GetLayer()` / `MP3GetVersion()` comments.
+
+## Future issues to watch for
+
+- **Two `mp3 err -6` per hour** in the most recent 2-hour soak, both on tracks whose ID3v2 walk mis-sized a frame, so the
+  sync search starts in the tag padding. Playback is unaffected and every track ends normally, but the recovery can lock
+  onto a plausible wrong header - a 128 kbps file was reported as 112000 for a while - and that is audible. The cure is
+  two-frame confirmation: accept a candidate only if another sync sits exactly `frameSize` later.
+- **`MP3FindSyncWord()` and `UnpackFrameHeader()` must stay in step.** The layer check was added because `FF F1` passed
+  the 11-bit test and was then rejected by the parser; every field the parser requires should be checked by the search.
+- **`audiofile.position()` is not "bytes delivered".** The reader runs a whole buffer ahead of the decoder, so new code
+  must not derive progress from the file position - use the ring counters or `m_sumBytesDecoded`.
+- **The error line is a cross-task sample.** It reads ring state from the audio task while the main task writes it, so
+  never reason from a composed figure there. The `track 10s` trace exists because it is taken on one task.
+- **The `stopSong()` probe is quiet for real ends** (they set `m_f_eof` first) but fires on a manual track change, which
+  is legitimate - read its numbers as "was the counter short at that moment", never as a fault by itself.
+- **When migrating upstream**, diff `setDefaults()` against the ancestor's first - the reset that goes missing there is
+  the one that hurts - then compare against Maleksm v0.9.720m for the decoder abstraction and the VU meter.

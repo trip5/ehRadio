@@ -1199,27 +1199,28 @@ int32_t MP3FindSyncWord(uint8_t *buf, int32_t nBytes) {
     if(pos == -1) return pos; // syncword not found
     nBytes -= pos;
 
-    while(nBytes > 0){
+    while(nBytes >= mp3FHsize){
         firstFH[0] = buf[pos + 0];
         firstFH[1] = buf[pos + 1];
         firstFH[2] = buf[pos + 2];
         firstFH[3] = buf[pos + 2];
 
-        if((firstFH[2] & 0b11110000) == 0b11110000){ // wrong bitrate index
-            log_d("wrong bitrate index");
-            pos += mp3FHsize;
-            nBytes -= mp3FHsize;
-           int32_t i = findSync(buf, pos, nBytes);
-            pos += i;
-            nBytes -= i;
-            continue;
-        }
+        // The eleven sync bits are not enough on their own. UnpackFrameHeader() also rejects a reserved layer, bitrate
+        // index 15 and sample rate index 3, so a search that accepts those hands the parser something it must refuse.
+        // A captured false sync (FF F1 43 8A, layer bits 0) cost one decode error, then another after the resync, and
+        // the decoder then locked onto a plausible but wrong header and reported 112 kbps for a 128 kbps file.
+        // The layer test is strict because this decoder only decodes Layer III: layer index 0 is reserved, 2 is Layer
+        // II and 3 is Layer I, and none of those can be decoded here.
+        bool badLayer   = ((firstFH[1] >> 1) & 0x03) != 0x01;
+        bool badBitrate = (firstFH[2] & 0b11110000) == 0b11110000;   // bitrate index 15
+        bool badRate    = (firstFH[2] & 0b00001100) == 0b00001100;   // sample rate index 3
 
-        if((firstFH[2] & 0b00001100) == 0b00001100){ // wrong sampling rate frequency index
-            log_d("wrong sampling rate");
+        if(badLayer || badBitrate || badRate){
+            log_d("rejected sync word");
             pos += mp3FHsize;
             nBytes -= mp3FHsize;
            int32_t i = findSync(buf, pos, nBytes);
+            if(i < 0) return -1;  // nothing left to search; adding -1 to pos used to run on past the block
             pos += i;
             nBytes -= i;
             continue;
@@ -1321,8 +1322,13 @@ int32_t MP3GetChannels(){return m_MP3FrameInfo->nChans;}
 int32_t MP3GetBitsPerSample(){return m_MP3FrameInfo->bitsPerSample;}
 int32_t MP3GetBitrate(){return m_MP3FrameInfo->bitrate;}
 int32_t MP3GetOutputSamps(){return m_MP3FrameInfo->outputSamps;}
-int32_t MP3GetLayer(){return m_MP3FrameInfo->layer;}     // 0: Reserviert, 1: Layer III, 2: Layer II, 3: Layer I
-int32_t MP3GetVersion(){return m_MP3FrameInfo->version;} // 0: MPEG-2.5, 1: Reserviert, 2: MPEG-2 (ISO/IEC 13818-3), 3: MPEG-1 (ISO/IEC 11172-3)
+// These return the values UnpackFrameHeader() stored, not the raw two-bit header fields, and the two numberings differ.
+int32_t MP3GetLayer(){return m_MP3FrameInfo->layer;}     // 1: Layer I, 2: Layer II, 3: Layer III (header layer index
+                                                         // is stored as 4 - index, and MP3GetLastFrameInfo() zeroes it
+                                                         // for anything that is not Layer III)
+int32_t MP3GetVersion(){return m_MP3FrameInfo->version;} // 0: MPEG-1, 1: MPEG-2 (ISO/IEC 13818-3), 2: MPEG-2.5
+                                                         // (the MPEGVersion_t value; the raw header field is
+                                                         // 0 = MPEG-2.5, 2 = MPEG-2, 3 = MPEG-1)
 /***********************************************************************************************************************
  * Function:    MP3GetNextFrameInfo
  *

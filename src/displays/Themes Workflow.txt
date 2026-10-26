@@ -1,0 +1,16 @@
+Themes Workflow:
+
+Create/edit a display theme using editor.html on-device
+Custom themes are saved to LittleFS as theme1.json...theme10.json.
+If using a custom theme through options, your WebUI will show the "root" theme (all greys).
+
+When satisfied with the display theme, export it from editor.html into the /src/displays folder.
+
+This will import the theme from .json (or a yoRadio .h file) into themes.h and themes.css simultaneously:
+
+  py theme_tool.py -i theme1.json
+  py theme_tool.py -i theme.h --name "New Theme (Creator)"
+
+Then load webui_tool.html into a local web browser and the theme can be edited directly.
+
+When finished, the new themes.css can be exported and can be used to replace the file in /data/www.

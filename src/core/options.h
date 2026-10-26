@@ -1103,13 +1103,16 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SCREENSAVERMOVE // how often to move the screensaver (in seconds)
   #define SCREENSAVERMOVE 15
 #endif
-#ifndef HEADER_TIMEOUT
+#ifndef SLEEP_MSG_HOLD // hold the sleep message on-screen before sleep actually starts (in seconds)
+  #define SLEEP_MSG_HOLD 5
+#endif
+#ifndef HEADER_TIMEOUT // audio stream connection header timeout (in ms)
   #define HEADER_TIMEOUT 5000
 #endif
 #ifndef USE_OTA // define true to enable Arduino OTA
   #define USE_OTA false
 #endif
-#ifdef OTA_PASS
+#ifndef OTA_PASS
   //#define OTA_PASS "myotapassword12345"
 #endif
 #ifndef AP_SSID // name of hotspot in AP Mode
@@ -1156,6 +1159,13 @@ or examine the examples in builds/trip5 and make your own!
   #ifndef WIDGET_DEBUG
     #define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
   #endif
+  #ifndef AUDIO_DEBUG
+    #define AUDIO_DEBUG // This shows the ID3 frame walk when a file's tags are read
+  #endif
+  #ifndef VU_VS1053_LOG
+    #define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
+  #endif
+  
 #endif
 #ifndef ESPFILEUPDATER_VERBOSE
   #ifdef ALL_DEBUG_LOGS

@@ -101,7 +101,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     if (cmdIs(command, "sleep")) {
       if (value[0] == '\0') {
         network.cancelStreamRetry();
-        utility.doSleepW();
+        utility.requestSleep();   // the message is shown and held by serviceSleep(), then the device sleeps
         return true;
       }
       int sfor = 0;

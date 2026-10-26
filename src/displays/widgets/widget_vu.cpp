@@ -1079,8 +1079,12 @@ void VuWidget::loop(){
 
   // The screensaver's meter reports the split of its frame at three points: the first frame after the
   // fade and the peak markers have settled, then twice more.  A pinned style is what marks this instance
-  // as the screensaver's - the player's box never reports.
-  if (_styleOverride != 0xFF && (_frame == 3 || _frame == 10 || _frame == 30)) _reportCost();
+  // as the screensaver's - the player's box never reports.  Gated: it is three lines a session at most, but
+  // a quiet log must not carry a measurement nobody asked for (the comment above _reportCost() already
+  // assumed this guard existed).
+  #ifdef WIDGET_DEBUG
+    if (_styleOverride != 0xFF && (_frame == 3 || _frame == 10 || _frame == 30)) _reportCost();
+  #endif
 
   // While the startup services are downloading, the network core holds up to three TLS sessions and the audio stream
   // is usually up, so the floor is raised and every style redraws VU_STARTUP_SERVICES_DIV times slower until they

@@ -29,9 +29,8 @@
 
 
 const char* const Config::wwwFiles[] = {"options.js", "script.js", "script2.js",
-                                        "logo.svg", "icon.png", "style.css", "rb_srvrs.json", "timezones.json",
-                                        "curated.html", "editor.html", "irrecord.html", "options.html",
-                                        "sdmanager.html", "search.html", "updform.html",
+                                        "logo.svg", "icon.png", "style.css", "themes.css", "rb_srvrs.json", "timezones.json",
+                                        "curated.html", "editor.html", "irrecord.html", "options.html", "sdmanager.html", "search.html", "updform.html",
                                         "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
 const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 

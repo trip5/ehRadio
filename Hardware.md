@@ -439,6 +439,11 @@ to avoid system stress and get maximum compatibility with the decoders.
 ABR and CBR encoding may work (mostly) but may also result in pops and clicks.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
 
+### ID3 Tags
+
+ID3v1 tags are at the end of the file so will not appear on the display while the track is playing.
+The display will show a derivation of the file name. It is recommended to use ID3v2 tags.
+
 ### SD Offline Mode
 
 The [SD Offline mode](README.md#sd-offline-mode) should be considered as a "fallback because wi-fi is not available" mode, not a primary playback mode.
@@ -450,6 +455,10 @@ If you wish to use a special pin, add something like `#define SDOFFLINE_BTN 2` o
 
 Remember that certain GPIOs may cause issues if held while powering-up (so best not to attach buttons to `GPIO0` or `GPIO3`).
 Most users will not remember the difference between "shortly after power-up" and "during power-up".
+
+### Limitation
+
+Due to the playlist being stored as a 16-bit number internally, the limit is 65,535 audio files.
 
 ### Special Note Regarding `/ehradio.data`
 

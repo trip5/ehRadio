@@ -316,6 +316,11 @@ void handleSearchPost(AsyncWebServerRequest *request) {
       player.sendCommand({PR_PLAY, (uint16_t)foundIdx});
       request->send(200, "text/plain", "DUPLICATE");
     } else { // add it and play it
+      if (cs >= MAX_PLAYLIST_ENTRIES) {
+        ERRORLOG("playlist is full (%u stations): not adding \"%s\"", (unsigned)MAX_PLAYLIST_ENTRIES, sName.c_str());
+        request->send(400, "text/plain", "PLAYLIST FULL");
+        return;
+      }
       File playlistfile = LittleFS.open(PLAYLIST_PATH, "a");
       if (playlistfile) {
         // can't use printf ??Arduino's Print::printf has a 64-byte stack buffer that overflows on long URLs

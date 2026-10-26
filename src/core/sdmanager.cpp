@@ -292,6 +292,16 @@ bool SDManager::listSD(File &plSDfile, File &plSDindex, const char* dirname, uin
       }
     } else {
       if (isAudioName(fn)) {
+        if (_sdFCount >= MAX_PLAYLIST_ENTRIES) {
+          static bool capWarned = false;
+          if (!capWarned) {
+            capWarned = true;
+            ERRORLOG("SD index is full at %u files: %s is where indexing stopped, the rest of the card has no ids",
+                     (unsigned)MAX_PLAYLIST_ENTRIES, filePath);
+          }
+          free(filePath);
+          continue;
+        }
         pos = plSDfile.position();
         const size_t rowBody = (size_t)plSDfile.print(fn) + (size_t)plSDfile.print('\t') + (size_t)plSDfile.print(filePath);
         const size_t rowTail = plSDfile.write((const uint8_t*)"\t0\r\n", 4);
@@ -442,7 +452,7 @@ uint32_t SDManager::_countAudioFilesRecursive(const char* dirname, uint8_t level
       }
     } else {
       if (isAudioName(fn)) {
-        _sdFCount++;
+        if (_sdFCount < MAX_PLAYLIST_ENTRIES) _sdFCount++;
       }
     }
     free(filePath);

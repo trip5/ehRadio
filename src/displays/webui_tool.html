@@ -153,12 +153,36 @@ body { height: auto; padding: 0; }
 .roles a.rolelink:hover { color: var(--tool-accent); }
 .roles tr.splitrow a.rolelink { color: var(--tool-strong); }
 .roles tr.splitrow a.rolelink::after { content: " \2022 split"; font-size: 13px; color: var(--tool-accent); }
-.roles button.rejoin { display: none; margin-left: 6px; padding: 0 4px; font-family: inherit; font-size: 14px;
+/* The two arrows beside a circle.  rejoin takes the row back to :root (or the whole family back to one colour);
+   reload takes it back to the colour the loaded theme gave it.  Both are out of the layout until they apply, and
+   both sit AFTER the circle, so one appearing never moves the circle out from under the pointer. */
+.roles button.rejoin, .roles button.reload { display: none; margin-left: 6px; padding: 0 4px;
+                       font-family: inherit; font-size: 14px;
                        line-height: 18px; color: var(--tool-strong); background: var(--tool-panel);
                        border: 1px solid var(--tool-line); border-radius: 5px; cursor: pointer; }
-.roles button.rejoin:hover { border-color: var(--tool-accent); }
+.roles button.rejoin:hover, .roles button.reload:hover { border-color: var(--tool-accent); }
 .roles tr.setrow button.rejoin { display: inline-block; }
-.jump-hit { outline: 3px solid var(--tool-accent); outline-offset: 3px; }
+.roles tr.loadrow button.reload { display: inline-block; }
+/* The jump outline is deliberately nothing a palette could contain: it cycles the spectrum, so it cannot be read
+   as one of the theme's own colours the way a fixed accent ring could.  Three cycles at 0.8 s - the class is on
+   for 2.5 s (see jump()), so the last one finishes.  Three cues in step: the outline hue steps 60 degrees at a
+   time, the glow grows and collapses, and the offset pulses.  An outline takes no space, so none of it moves the
+   layout. */
+@keyframes jump-rainbow {
+  0%   { outline-color: hsl(0, 100%, 60%);   outline-offset: 3px; box-shadow: 0 0 0 0 hsla(0, 100%, 60%, 0.55); }
+  17%  { outline-color: hsl(60, 100%, 60%);  outline-offset: 6px; box-shadow: 0 0 6px 2px hsla(60, 100%, 60%, 0.55); }
+  33%  { outline-color: hsl(120, 100%, 60%); outline-offset: 3px; box-shadow: 0 0 0 0 hsla(120, 100%, 60%, 0.55); }
+  50%  { outline-color: hsl(180, 100%, 60%); outline-offset: 6px; box-shadow: 0 0 6px 2px hsla(180, 100%, 60%, 0.55); }
+  67%  { outline-color: hsl(240, 100%, 60%); outline-offset: 3px; box-shadow: 0 0 0 0 hsla(240, 100%, 60%, 0.55); }
+  83%  { outline-color: hsl(300, 100%, 60%); outline-offset: 6px; box-shadow: 0 0 6px 2px hsla(300, 100%, 60%, 0.55); }
+  100% { outline-color: hsl(360, 100%, 60%); outline-offset: 3px; box-shadow: 0 0 0 0 hsla(360, 100%, 60%, 0.55); }
+}
+.jump-hit { outline: 3px solid hsl(0, 100%, 60%); outline-offset: 3px;
+            animation: jump-rainbow 0.8s linear 3; }
+/* A still ring for anyone who has asked for less motion: magenta is not a palette role, so it still stands out. */
+@media (prefers-reduced-motion: reduce) {
+  .jump-hit { animation: none; outline-color: #ff00ff; }
+}
 /* The block under the table */
 .outp { border-top: 1px dashed var(--tool-line); margin-top: 16px; padding-top: 10px; }
 .outp .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
@@ -173,7 +197,7 @@ body { height: auto; padding: 0; }
                padding: 3px 10px; cursor: pointer; }
 .outp button:hover { border-color: var(--tool-accent); }
 .outp button:active { background: var(--tool-accent); color: #1b1b1d; }
-.outp select { max-width: 100%; }
+.outp select { width: auto; min-width: 16em; max-width: 100%; }
 #loadnote { font-size: 14px; color: var(--tool-dim); }
 #toolout { width: 100%; box-sizing: border-box; min-height: 170px; margin: 4px 0; resize: vertical;
            font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.45;
@@ -197,8 +221,8 @@ body { height: auto; padding: 0; }
        line above is the control. -->
   <div id="whybody" class="folded">
 
-  <p>Every colour the WebUI uses is a CSS variable declared in
-  <code>data/www/style.css</code>, and most of them are used on several pages. Editing one in DevTools on a real
+  <p>Every colour the WebUI uses is a CSS variable: the design lives in <code>data/www/style.css</code> and the
+  per-theme overrides in <code>data/www/themes.css</code>, and most roles are used on several pages. Editing one in DevTools on a real
   page loses the change as soon as you go to another page, because that page reloads the stylesheet. This page
   paints a sample of every kind of coloured thing and puts the whole palette beside it, so one edit can be judged
   everywhere at once - and it is a <b>theme builder</b>: pick the colours here, copy the block out.</p>
@@ -211,23 +235,31 @@ body { height: auto; padding: 0; }
       <b>OK keeps the colour and Cancel puts it back</b>. The circle on a <b>family head</b> - the boxed row -
       moves that whole family at once and locks it.</li>
     <li><b>Click a variable name</b> to jump to the first element on the right that uses that colour. A head jumps
-      to a member of its family, so it lands where the colour really shows.</li>
+      to a member of its family, so it lands where the colour really shows. The element it lands on is ringed for
+      two and a half seconds in a colour that <b>cycles the spectrum three times</b>, so the ring can never be
+      mistaken for one of the theme's own colours.</li>
     <li><b>Split a single member</b> by picking a colour on it after its family was set: it stops following the
       head and the row is marked <i>split</i>. The &#8635; beside its circle puts it back in the family; the one
       beside a <b>family head</b>'s circle resets that whole family, head and splits together.</li>
+    <li><b>Two undos, not one.</b> &#8635; goes back to <code>:root</code>. The &#9100; beside it goes back to
+      the colour the <b>loaded theme</b> gave that row - a different thing as soon as the theme declares a value
+      of its own, and the same thing where it does not. It appears only while the row differs from what was
+      loaded, and on a <b>family head</b> it brings back that theme's head line, or the individual splits it
+      carried. A save moves the point it returns to, so it always means "back to the last file in or out".</li>
     <li><b>Copy a colour between rows.</b> Hover a colour circle and two small buttons appear beside it:
       &#128464; copies that row's colour into a clipboard of this page's own, &#8614; pastes it into the row you are
       on. Once something is held, the &#8614; is drawn in that colour, so what the clipboard holds is always visible.
       The pair stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
       clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves and locks that
       family, and pasting into a member splits it off.</li>
-    <li><b>Start from an existing theme</b> by selecting its id number under the table and pressing Load. The id is
-      applied exactly as the device applies it, so you get whatever <code>style.css</code> holds for that slot -
-      no names are kept here, and every slot the file may gain later works without touching this page. An id with no
-      block comes back as <code>:root</code>, and the note tells you how many colours differed.</li>
-    <li><b>Copy the block</b> and paste it into <code>data/www/style.css</code>, replacing <code>X</code> with the
-      theme's id and the name in the comment. Then run
-      <code>py src/displays/webuitheme.py --deflate</code> so it is folded back to its shortest form.</li>
+    <li><b>Start from an existing theme</b> by picking it in the dropdown under the table and pressing Load. There is
+      no theme list on this page at all: the names are read out of <code>themes.css</code> itself, so a block that
+      <code>theme_tool.py -i</code> or <code>-d</code> adds, removes or renumbers shows up here on the next
+      reload, name and all. The note says how many colours that theme changes.</li>
+    <li><b>Save writes the file.</b> The window below shows the one block you are editing; <b>Save themes.css</b>
+      writes the whole of <code>data/www/themes.css</code> - your block from what is on screen, every other theme
+      from its own colours - and you overwrite the file with it. Nothing needs reloading afterwards, because this
+      page already holds what it wrote. Rebuild the filesystem image so the device picks the file up.</li>
   </ol>
 
   <p><b>About the colours you see.</b> The circles write inline custom properties onto
@@ -260,13 +292,13 @@ body { height: auto; padding: 0; }
   is that member painted with itself; the description says where you will see it.</p>
   <p>A theme block may set a head instead of listing its members: <code>--outlines: #e3d25f</code> inside a
   <code>:root[data-theme="1"]</code> block moves all seven outline roles at once. That is how a derived theme
-  stays short - and <code>webuitheme.py --deflate</code> folds any block back into that form, leaving only the
+  stays short - and <code>webui_tool.py --deflate</code> folds any block back into that form, leaving only the
   members that deliberately differ.</p>
   <p>62 declarations in all: <b>9 family heads</b> and <b>53 roles</b>. Any of them can be themed - a block
   may set anything <code>:root</code> declares. The palette generator derives 50 of the 53;
   <code>--page-bg</code>, <code>--list-bars</code> and <code>--playlist-hover</code> are hand-owned, because
   no display theme carries a colour meaning "the browser window" or "the zebra stripe", so
-  <code>webuitheme.py</code> never writes them.</p>
+  <code>theme_tool.py -i</code> never writes them.</p>
 
   </div><!--whybody-->
 
@@ -276,84 +308,87 @@ body { height: auto; padding: 0; }
     </thead>
     <tbody>
       <tr class="fam"><td><b>On their own</b></td><td class="sw"></td><td>Colours with no family: a rule paints each one directly, so each has its own arrow.</td></tr>
-      <tr data-role="input-border"><td><a class="rolelink" data-name="input-border" href="#"><code>--input-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-border" style="background: var(--input-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields and dropdowns</code> &mdash; The outline of a text field or dropdown.</td></tr>
-      <tr data-role="list-bars"><td><a class="rolelink" data-name="list-bars" href="#"><code>--list-bars</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-bars" style="background: var(--list-bars)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>odd playlist rows, odd search rows</code> &mdash; The zebra stripe behind every other row. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
-      <tr data-role="list-names"><td><a class="rolelink" data-name="list-names" href="#"><code>--list-names</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-names" style="background: var(--list-names)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor name field, station names</code> &mdash; The name column of the playlist editor.</td></tr>
-      <tr data-role="logo"><td><a class="rolelink" data-name="logo" href="#"><code>--logo</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo" style="background: var(--logo)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#eh and its gradient</code> &mdash; The "eh" of the logo.</td></tr>
-      <tr data-role="logo-shadow"><td><a class="rolelink" data-name="logo-shadow" href="#"><code>--logo-shadow</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-shadow" style="background: var(--logo-shadow)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>logo gradient start</code> &mdash; The darker end of the logo gradient.</td></tr>
-      <tr data-role="logo-text"><td><a class="rolelink" data-name="logo-text" href="#"><code>--logo-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-text" style="background: var(--logo-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>path#radio</code> &mdash; The "radio" wordmark.</td></tr>
-      <tr data-role="page-bg"><td><a class="rolelink" data-name="page-bg" href="#"><code>--page-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="page-bg" style="background: var(--page-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>html, body, #progress</code> &mdash; The browser window around the app column. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
-      <tr data-role="panel-gradient"><td><a class="rolelink" data-name="panel-gradient" href="#"><code>--panel-gradient</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-gradient" style="background: var(--panel-gradient)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards</code> &mdash; The subtle wash at the bottom of a settings card.</td></tr>
-      <tr data-role="playlist-hover"><td><a class="rolelink" data-name="playlist-hover" href="#"><code>--playlist-hover</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="playlist-hover" style="background: var(--playlist-hover)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist row hover</code> &mdash; A playlist row under the mouse. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
-      <tr class="fam" data-head="surfaces"><td><a class="rolelink" data-name="surfaces" href="#"><code>--surfaces</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="surfaces" style="background: var(--surfaces)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The dark surfaces the app is drawn on.</td></tr>
-      <tr data-role="panel-background"><td><a class="rolelink" data-name="panel-background" href="#"><code>--panel-background</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-background" style="background: var(--panel-background)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>app column, panels, even list rows</code> &mdash; The backdrop of every page: the column behind the player, the settings cards, the list rows.</td></tr>
-      <tr data-role="scrollbar-track"><td><a class="rolelink" data-name="scrollbar-track" href="#"><code>--scrollbar-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-track" style="background: var(--scrollbar-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>the five scrollables</code> &mdash; The groove behind a scrollbar thumb.</td></tr>
-      <tr data-role="switch-track"><td><a class="rolelink" data-name="switch-track" href="#"><code>--switch-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track" style="background: var(--switch-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; A switch in its off state.</td></tr>
-      <tr class="fam" data-head="edges"><td><a class="rolelink" data-name="edges" href="#"><code>--edges</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="edges" style="background: var(--edges)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The card outline and the scrollbar thumb.</td></tr>
-      <tr data-role="panel-border"><td><a class="rolelink" data-name="panel-border" href="#"><code>--panel-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-border" style="background: var(--panel-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>settings cards, scrollbars, recorder badge</code> &mdash; The edges of a settings card and its reset button, of a scrollbar thumb, and of the badge beside the recorder title.</td></tr>
-      <tr data-role="scrollbar-thumb"><td><a class="rolelink" data-name="scrollbar-thumb" href="#"><code>--scrollbar-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-thumb" style="background: var(--scrollbar-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, settings, search, curated</code> &mdash; The draggable part of a scrollbar.</td></tr>
-      <tr class="fam" data-head="fills"><td><a class="rolelink" data-name="fills" href="#"><code>--fills</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="fills" style="background: var(--fills)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Every fill that is not a highlight: controls, inputs, dropdowns, meter grooves.</td></tr>
-      <tr data-role="button-fill"><td><a class="rolelink" data-name="button-fill" href="#"><code>--button-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-fill" style="background: var(--button-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, unselected IR recorder row</code> &mdash; The body of a flat button.</td></tr>
-      <tr data-role="control-bg"><td><a class="rolelink" data-name="control-bg" href="#"><code>--control-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="control-bg" style="background: var(--control-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>checkbox and radio ticks, the update page's radio disc, SD icon buttons</code> &mdash; The lit part of a checkbox or radio, and a control surface for a widget that is neither a button nor an input.</td></tr>
-      <tr data-role="editor-grid"><td><a class="rolelink" data-name="editor-grid" href="#"><code>--editor-grid</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-grid" style="background: var(--editor-grid)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells, SD size divider</code> &mdash; The thin grid between the playlist editor's cells.</td></tr>
-      <tr data-role="input-fill"><td><a class="rolelink" data-name="input-fill" href="#"><code>--input-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-fill" style="background: var(--input-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; The inside of a text field.</td></tr>
-      <tr data-role="meter-track"><td><a class="rolelink" data-name="meter-track" href="#"><code>--meter-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-track" style="background: var(--meter-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The empty part of a meter.</td></tr>
-      <tr data-role="select-fill"><td><a class="rolelink" data-name="select-fill" href="#"><code>--select-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-fill" style="background: var(--select-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The inside of a dropdown.</td></tr>
-      <tr class="fam" data-head="outlines"><td><a class="rolelink" data-name="outlines" href="#"><code>--outlines</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="outlines" style="background: var(--outlines)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The metal: rings, knobs and icon strokes.</td></tr>
-      <tr data-role="button-outline"><td><a class="rolelink" data-name="button-outline" href="#"><code>--button-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-outline" style="background: var(--button-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The ring around a flat button, in both of its states.</td></tr>
-      <tr data-role="icons-outline"><td><a class="rolelink" data-name="icons-outline" href="#"><code>--icons-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icons-outline" style="background: var(--icons-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb ring, small glyphs</code> &mdash; Icon strokes and the ring around round icon buttons.</td></tr>
-      <tr data-role="list-outline"><td><a class="rolelink" data-name="list-outline" href="#"><code>--list-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-outline" style="background: var(--list-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playlist, editor, search and curated wraps</code> &mdash; The box around a scrolling list.</td></tr>
-      <tr data-role="meter-outline"><td><a class="rolelink" data-name="meter-outline" href="#"><code>--meter-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-outline" style="background: var(--meter-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The ring around a meter.</td></tr>
-      <tr data-role="spinner-ring"><td><a class="rolelink" data-name="spinner-ring" href="#"><code>--spinner-ring</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="spinner-ring" style="background: var(--spinner-ring)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#loader, .plloader</code> &mdash; The spinning ring while something loads.</td></tr>
-      <tr data-role="switch-thumb"><td><a class="rolelink" data-name="switch-thumb" href="#"><code>--switch-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-thumb" style="background: var(--switch-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, checkmark</code> &mdash; The moving part of a switch, and the ring and dot of the file-input checkmark.</td></tr>
-      <tr data-role="warning-outline"><td><a class="rolelink" data-name="warning-outline" href="#"><code>--warning-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="warning-outline" style="background: var(--warning-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleditorwarning</code> &mdash; The ring around "Save to keep changes!".</td></tr>
-      <tr class="fam" data-head="highlights"><td><a class="rolelink" data-name="highlights" href="#"><code>--highlights</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="highlights" style="background: var(--highlights)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>What a hovered, pressed or selected control turns into.</td></tr>
-      <tr data-role="button-active-fill"><td><a class="rolelink" data-name="button-active-fill" href="#"><code>--button-active-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-fill" style="background: var(--button-active-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; What a flat button turns while it is hovered, or holds for two seconds after a press.</td></tr>
-      <tr data-role="highlight-fill"><td><a class="rolelink" data-name="highlight-fill" href="#"><code>--highlight-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="highlight-fill" style="background: var(--highlight-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active</code> &mdash; The fill behind a hovered or selected icon button; the other highlight roles are the same colour by default.</td></tr>
-      <tr data-role="list-active-bg"><td><a class="rolelink" data-name="list-active-bg" href="#"><code>--list-active-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-bg" style="background: var(--list-active-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row, editor play glyph hover</code> &mdash; The row that is playing.</td></tr>
-      <tr data-role="meter-fill"><td><a class="rolelink" data-name="meter-fill" href="#"><code>--meter-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-fill" style="background: var(--meter-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>sliders, upload progress</code> &mdash; The filled part of a slider or progress bar.</td></tr>
-      <tr data-role="switch-track-on"><td><a class="rolelink" data-name="switch-track-on" href="#"><code>--switch-track-on</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track-on" style="background: var(--switch-track-on)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; A switch in its on state.</td></tr>
-      <tr class="fam" data-head="actives"><td><a class="rolelink" data-name="actives" href="#"><code>--actives</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="actives" style="background: var(--actives)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>The ink on anything lit: a button label, an icon glyph, the playing row, a switch that is on.</td></tr>
-      <tr data-role="button-active-text"><td><a class="rolelink" data-name="button-active-text" href="#"><code>--button-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-text" style="background: var(--button-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; The label on that fill.</td></tr>
-      <tr data-role="icon-active-glyph"><td><a class="rolelink" data-name="icon-active-glyph" href="#"><code>--icon-active-glyph</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icon-active-glyph" style="background: var(--icon-active-glyph)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.gb:hover, .gb.active, .pleplay hover, SD manager icon buttons</code> &mdash; The glyph on an icon button that is lit by a highlight fill.</td></tr>
-      <tr data-role="list-active-text"><td><a class="rolelink" data-name="list-active-text" href="#"><code>--list-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-text" style="background: var(--list-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>playing playlist row</code> &mdash; The station name in the playing row.</td></tr>
-      <tr data-role="switch-text"><td><a class="rolelink" data-name="switch-text" href="#"><code>--switch-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-text" style="background: var(--switch-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when on</code> &mdash; The word "On" inside a switch.</td></tr>
-      <tr class="fam" data-head="labels"><td><a class="rolelink" data-name="labels" href="#"><code>--labels</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="labels" style="background: var(--labels)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Labels and headings: text at full strength.</td></tr>
-      <tr data-role="button-text"><td><a class="rolelink" data-name="button-text" href="#"><code>--button-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-text" style="background: var(--button-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The button label at rest, and the row's clear cross.</td></tr>
-      <tr data-role="heading-text"><td><a class="rolelink" data-name="heading-text" href="#"><code>--heading-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="heading-text" style="background: var(--heading-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>h2, .sectiontitle, page titles</code> &mdash; Page and section titles.</td></tr>
-      <tr data-role="input-text"><td><a class="rolelink" data-name="input-text" href="#"><code>--input-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-text" style="background: var(--input-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>text fields</code> &mdash; Text typed into a field.</td></tr>
-      <tr data-role="link-text"><td><a class="rolelink" data-name="link-text" href="#"><code>--link-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-text" style="background: var(--link-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>links, nav hover</code> &mdash; Link text.</td></tr>
-      <tr data-role="select-text"><td><a class="rolelink" data-name="select-text" href="#"><code>--select-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-text" style="background: var(--select-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>dropdowns</code> &mdash; The wording in a dropdown.</td></tr>
-      <tr data-role="station-name"><td><a class="rolelink" data-name="station-name" href="#"><code>--station-name</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="station-name" style="background: var(--station-name)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#nameset, td.name</code> &mdash; The playing station's name, and station names in results.</td></tr>
-      <tr class="fam" data-head="infotexts"><td><a class="rolelink" data-name="infotexts" href="#"><code>--infotexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="infotexts" style="background: var(--infotexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Info and secondary text: the bright tier.</td></tr>
-      <tr data-role="eq-label-text"><td><a class="rolelink" data-name="eq-label-text" href="#"><code>--eq-label-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="eq-label-text" style="background: var(--eq-label-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>equalizer band labels</code> &mdash; The Hz labels in the equaliser popup.</td></tr>
-      <tr data-role="info-text"><td><a class="rolelink" data-name="info-text" href="#"><code>--info-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="info-text" style="background: var(--info-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#info, RSSI bars</code> &mdash; The player's info line: bitrate, signal, volume and battery together, as one style.</td></tr>
-      <tr data-role="list-urls"><td><a class="rolelink" data-name="list-urls" href="#"><code>--list-urls</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-urls" style="background: var(--list-urls)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>editor URL cells</code> &mdash; Stream URLs in the playlist editor.</td></tr>
-      <tr data-role="small-text"><td><a class="rolelink" data-name="small-text" href="#"><code>--small-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="small-text" style="background: var(--small-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#copy footer</code> &mdash; The "powered by" line under every page.</td></tr>
-      <tr data-role="meta-text"><td><a class="rolelink" data-name="meta-text" href="#"><code>--meta-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meta-text" style="background: var(--meta-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#meta</code> &mdash; The stream format line under the station name.</td></tr>
-      <tr class="fam" data-head="maintexts"><td><a class="rolelink" data-name="maintexts" href="#"><code>--maintexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="maintexts" style="background: var(--maintexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button></td><td>Main text: the quiet tier.</td></tr>
-      <tr data-role="caption-text"><td><a class="rolelink" data-name="caption-text" href="#"><code>--caption-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="caption-text" style="background: var(--caption-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>#irrecordcaption, #previewinfo, battery hint</code> &mdash; The small explanatory lines.</td></tr>
-      <tr data-role="editor-cell-text"><td><a class="rolelink" data-name="editor-cell-text" href="#"><code>--editor-cell-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-cell-text" style="background: var(--editor-cell-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>.pleitem cells and play glyph</code> &mdash; The index and volume numbers in the playlist editor.</td></tr>
-      <tr data-role="link-quiet"><td><a class="rolelink" data-name="link-quiet" href="#"><code>--link-quiet</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-quiet" style="background: var(--link-quiet)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>nav tabs, quick search cells, advanced-search link</code> &mdash; Dim clickable text; it turns --link-text on hover.</td></tr>
-      <tr data-role="main-text"><td><a class="rolelink" data-name="main-text" href="#"><code>--main-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="main-text" style="background: var(--main-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>body, playlist row hover</code> &mdash; The default text colour that everything inherits.</td></tr>
-      <tr data-role="section-title-text"><td><a class="rolelink" data-name="section-title-text" href="#"><code>--section-title-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="section-title-text" style="background: var(--section-title-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>section .title, .row-title span</code> &mdash; The card name, and the group heading inside a card.</td></tr>
-      <tr data-role="switch-off-text"><td><a class="rolelink" data-name="switch-off-text" href="#"><code>--switch-off-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-off-text" style="background: var(--switch-off-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button></td><td><code>switch, when off</code> &mdash; The word "Off" inside a switch.</td></tr>
+      <tr data-role="input-border"><td><a class="rolelink" data-name="input-border" href="#"><code>--input-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-border" style="background: var(--input-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>text fields and dropdowns</code> &mdash; The outline of a text field or dropdown.</td></tr>
+      <tr data-role="list-bars"><td><a class="rolelink" data-name="list-bars" href="#"><code>--list-bars</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-bars" style="background: var(--list-bars)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>odd playlist rows, odd search rows</code> &mdash; The zebra stripe behind every other row. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr data-role="list-names"><td><a class="rolelink" data-name="list-names" href="#"><code>--list-names</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-names" style="background: var(--list-names)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>editor name field, station names</code> &mdash; The name column of the playlist editor.</td></tr>
+      <tr data-role="logo"><td><a class="rolelink" data-name="logo" href="#"><code>--logo</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo" style="background: var(--logo)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>path#eh and its gradient</code> &mdash; The "eh" of the logo.</td></tr>
+      <tr data-role="logo-shadow"><td><a class="rolelink" data-name="logo-shadow" href="#"><code>--logo-shadow</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-shadow" style="background: var(--logo-shadow)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>logo gradient start</code> &mdash; The darker end of the logo gradient.</td></tr>
+      <tr data-role="logo-text"><td><a class="rolelink" data-name="logo-text" href="#"><code>--logo-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="logo-text" style="background: var(--logo-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>path#radio</code> &mdash; The "radio" wordmark.</td></tr>
+      <tr data-role="page-bg"><td><a class="rolelink" data-name="page-bg" href="#"><code>--page-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="page-bg" style="background: var(--page-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>html, body, #progress</code> &mdash; The browser window around the app column. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr data-role="panel-gradient"><td><a class="rolelink" data-name="panel-gradient" href="#"><code>--panel-gradient</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-gradient" style="background: var(--panel-gradient)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>settings cards</code> &mdash; The subtle wash at the bottom of a settings card.</td></tr>
+      <tr data-role="playlist-hover"><td><a class="rolelink" data-name="playlist-hover" href="#"><code>--playlist-hover</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="playlist-hover" style="background: var(--playlist-hover)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>playlist row hover</code> &mdash; A playlist row under the mouse. Hand-owned: the palette generator never writes it, but a block may set it.</td></tr>
+      <tr class="fam" data-head="surfaces"><td><a class="rolelink" data-name="surfaces" href="#"><code>--surfaces</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="surfaces" style="background: var(--surfaces)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>The dark surfaces the app is drawn on.</td></tr>
+      <tr data-role="panel-background"><td><a class="rolelink" data-name="panel-background" href="#"><code>--panel-background</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-background" style="background: var(--panel-background)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>app column, panels, even list rows</code> &mdash; The backdrop of every page: the column behind the player, the settings cards, the list rows.</td></tr>
+      <tr data-role="scrollbar-track"><td><a class="rolelink" data-name="scrollbar-track" href="#"><code>--scrollbar-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-track" style="background: var(--scrollbar-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>the five scrollables</code> &mdash; The groove behind a scrollbar thumb.</td></tr>
+      <tr data-role="switch-track"><td><a class="rolelink" data-name="switch-track" href="#"><code>--switch-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track" style="background: var(--switch-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>switch, when off</code> &mdash; A switch in its off state.</td></tr>
+      <tr class="fam" data-head="edges"><td><a class="rolelink" data-name="edges" href="#"><code>--edges</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="edges" style="background: var(--edges)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>The card outline and the scrollbar thumb.</td></tr>
+      <tr data-role="panel-border"><td><a class="rolelink" data-name="panel-border" href="#"><code>--panel-border</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="panel-border" style="background: var(--panel-border)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>settings cards, scrollbars, recorder badge</code> &mdash; The edges of a settings card and its reset button, of a scrollbar thumb, and of the badge beside the recorder title.</td></tr>
+      <tr data-role="scrollbar-thumb"><td><a class="rolelink" data-name="scrollbar-thumb" href="#"><code>--scrollbar-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="scrollbar-thumb" style="background: var(--scrollbar-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>playlist, editor, settings, search, curated</code> &mdash; The draggable part of a scrollbar.</td></tr>
+      <tr class="fam" data-head="fills"><td><a class="rolelink" data-name="fills" href="#"><code>--fills</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="fills" style="background: var(--fills)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>Every fill that is not a highlight: controls, inputs, dropdowns, meter grooves.</td></tr>
+      <tr data-role="button-fill"><td><a class="rolelink" data-name="button-fill" href="#"><code>--button-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-fill" style="background: var(--button-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.fb, .searchbutton, file button, unselected IR recorder row</code> &mdash; The body of a flat button.</td></tr>
+      <tr data-role="control-bg"><td><a class="rolelink" data-name="control-bg" href="#"><code>--control-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="control-bg" style="background: var(--control-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>checkbox and radio ticks, the update page's radio disc, SD icon buttons</code> &mdash; The lit part of a checkbox or radio, and a control surface for a widget that is neither a button nor an input.</td></tr>
+      <tr data-role="editor-grid"><td><a class="rolelink" data-name="editor-grid" href="#"><code>--editor-grid</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-grid" style="background: var(--editor-grid)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.pleitem cells, SD size divider</code> &mdash; The thin grid between the playlist editor's cells.</td></tr>
+      <tr data-role="input-fill"><td><a class="rolelink" data-name="input-fill" href="#"><code>--input-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-fill" style="background: var(--input-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>text fields</code> &mdash; The inside of a text field.</td></tr>
+      <tr data-role="meter-track"><td><a class="rolelink" data-name="meter-track" href="#"><code>--meter-track</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-track" style="background: var(--meter-track)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>sliders, upload progress</code> &mdash; The empty part of a meter.</td></tr>
+      <tr data-role="select-fill"><td><a class="rolelink" data-name="select-fill" href="#"><code>--select-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-fill" style="background: var(--select-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>dropdowns</code> &mdash; The inside of a dropdown.</td></tr>
+      <tr class="fam" data-head="outlines"><td><a class="rolelink" data-name="outlines" href="#"><code>--outlines</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="outlines" style="background: var(--outlines)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>The metal: rings, knobs and icon strokes.</td></tr>
+      <tr data-role="button-outline"><td><a class="rolelink" data-name="button-outline" href="#"><code>--button-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-outline" style="background: var(--button-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The ring around a flat button, in both of its states.</td></tr>
+      <tr data-role="icons-outline"><td><a class="rolelink" data-name="icons-outline" href="#"><code>--icons-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icons-outline" style="background: var(--icons-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.gb ring, small glyphs</code> &mdash; Icon strokes and the ring around round icon buttons.</td></tr>
+      <tr data-role="list-outline"><td><a class="rolelink" data-name="list-outline" href="#"><code>--list-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-outline" style="background: var(--list-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>playlist, editor, search and curated wraps</code> &mdash; The box around a scrolling list.</td></tr>
+      <tr data-role="meter-outline"><td><a class="rolelink" data-name="meter-outline" href="#"><code>--meter-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-outline" style="background: var(--meter-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>sliders, upload progress</code> &mdash; The ring around a meter.</td></tr>
+      <tr data-role="spinner-ring"><td><a class="rolelink" data-name="spinner-ring" href="#"><code>--spinner-ring</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="spinner-ring" style="background: var(--spinner-ring)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#loader, .plloader</code> &mdash; The spinning ring while something loads.</td></tr>
+      <tr data-role="switch-thumb"><td><a class="rolelink" data-name="switch-thumb" href="#"><code>--switch-thumb</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-thumb" style="background: var(--switch-thumb)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>switch, checkmark</code> &mdash; The moving part of a switch, and the ring and dot of the file-input checkmark.</td></tr>
+      <tr data-role="warning-outline"><td><a class="rolelink" data-name="warning-outline" href="#"><code>--warning-outline</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="warning-outline" style="background: var(--warning-outline)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.pleditorwarning</code> &mdash; The ring around "Save to keep changes!".</td></tr>
+      <tr class="fam" data-head="highlights"><td><a class="rolelink" data-name="highlights" href="#"><code>--highlights</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="highlights" style="background: var(--highlights)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>What a hovered, pressed or selected control turns into.</td></tr>
+      <tr data-role="button-active-fill"><td><a class="rolelink" data-name="button-active-fill" href="#"><code>--button-active-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-fill" style="background: var(--button-active-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; What a flat button turns while it is hovered, or holds for two seconds after a press.</td></tr>
+      <tr data-role="highlight-fill"><td><a class="rolelink" data-name="highlight-fill" href="#"><code>--highlight-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="highlight-fill" style="background: var(--highlight-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.gb:hover, .gb.active</code> &mdash; The fill behind a hovered or selected icon button; the other highlight roles are the same colour by default.</td></tr>
+      <tr data-role="list-active-bg"><td><a class="rolelink" data-name="list-active-bg" href="#"><code>--list-active-bg</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-bg" style="background: var(--list-active-bg)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>playing playlist row, editor play glyph hover</code> &mdash; The row that is playing.</td></tr>
+      <tr data-role="meter-fill"><td><a class="rolelink" data-name="meter-fill" href="#"><code>--meter-fill</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meter-fill" style="background: var(--meter-fill)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>sliders, upload progress</code> &mdash; The filled part of a slider or progress bar.</td></tr>
+      <tr data-role="switch-track-on"><td><a class="rolelink" data-name="switch-track-on" href="#"><code>--switch-track-on</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-track-on" style="background: var(--switch-track-on)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>switch, when on</code> &mdash; A switch in its on state.</td></tr>
+      <tr class="fam" data-head="actives"><td><a class="rolelink" data-name="actives" href="#"><code>--actives</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="actives" style="background: var(--actives)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>The ink on anything lit: a button label, an icon glyph, the playing row, a switch that is on.</td></tr>
+      <tr data-role="button-active-text"><td><a class="rolelink" data-name="button-active-text" href="#"><code>--button-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-active-text" style="background: var(--button-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.fb:hover, .fb.pressed, selected IR recorder row</code> &mdash; The label on that fill.</td></tr>
+      <tr data-role="icon-active-glyph"><td><a class="rolelink" data-name="icon-active-glyph" href="#"><code>--icon-active-glyph</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="icon-active-glyph" style="background: var(--icon-active-glyph)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.gb:hover, .gb.active, .pleplay hover, SD manager icon buttons</code> &mdash; The glyph on an icon button that is lit by a highlight fill.</td></tr>
+      <tr data-role="list-active-text"><td><a class="rolelink" data-name="list-active-text" href="#"><code>--list-active-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-active-text" style="background: var(--list-active-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>playing playlist row</code> &mdash; The station name in the playing row.</td></tr>
+      <tr data-role="switch-text"><td><a class="rolelink" data-name="switch-text" href="#"><code>--switch-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-text" style="background: var(--switch-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>switch, when on</code> &mdash; The word "On" inside a switch.</td></tr>
+      <tr class="fam" data-head="labels"><td><a class="rolelink" data-name="labels" href="#"><code>--labels</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="labels" style="background: var(--labels)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>Labels and headings: text at full strength.</td></tr>
+      <tr data-role="button-text"><td><a class="rolelink" data-name="button-text" href="#"><code>--button-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="button-text" style="background: var(--button-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.fb, .searchbutton, file button, IR recorder row</code> &mdash; The button label at rest, and the row's clear cross.</td></tr>
+      <tr data-role="heading-text"><td><a class="rolelink" data-name="heading-text" href="#"><code>--heading-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="heading-text" style="background: var(--heading-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>h2, .sectiontitle, page titles</code> &mdash; Page and section titles.</td></tr>
+      <tr data-role="input-text"><td><a class="rolelink" data-name="input-text" href="#"><code>--input-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="input-text" style="background: var(--input-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>text fields</code> &mdash; Text typed into a field.</td></tr>
+      <tr data-role="link-text"><td><a class="rolelink" data-name="link-text" href="#"><code>--link-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-text" style="background: var(--link-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>links, nav hover</code> &mdash; Link text.</td></tr>
+      <tr data-role="select-text"><td><a class="rolelink" data-name="select-text" href="#"><code>--select-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="select-text" style="background: var(--select-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>dropdowns</code> &mdash; The wording in a dropdown.</td></tr>
+      <tr data-role="station-name"><td><a class="rolelink" data-name="station-name" href="#"><code>--station-name</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="station-name" style="background: var(--station-name)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#nameset, td.name</code> &mdash; The playing station's name, and station names in results.</td></tr>
+      <tr class="fam" data-head="infotexts"><td><a class="rolelink" data-name="infotexts" href="#"><code>--infotexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="infotexts" style="background: var(--infotexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>Info and secondary text: the bright tier.</td></tr>
+      <tr data-role="eq-label-text"><td><a class="rolelink" data-name="eq-label-text" href="#"><code>--eq-label-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="eq-label-text" style="background: var(--eq-label-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>equalizer band labels</code> &mdash; The Hz labels in the equaliser popup.</td></tr>
+      <tr data-role="info-text"><td><a class="rolelink" data-name="info-text" href="#"><code>--info-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="info-text" style="background: var(--info-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#info, RSSI bars</code> &mdash; The player's info line: bitrate, signal, volume and battery together, as one style.</td></tr>
+      <tr data-role="list-urls"><td><a class="rolelink" data-name="list-urls" href="#"><code>--list-urls</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="list-urls" style="background: var(--list-urls)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>editor URL cells</code> &mdash; Stream URLs in the playlist editor.</td></tr>
+      <tr data-role="small-text"><td><a class="rolelink" data-name="small-text" href="#"><code>--small-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="small-text" style="background: var(--small-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#copy footer</code> &mdash; The "powered by" line under every page.</td></tr>
+      <tr data-role="meta-text"><td><a class="rolelink" data-name="meta-text" href="#"><code>--meta-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="meta-text" style="background: var(--meta-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#meta</code> &mdash; The stream format line under the station name.</td></tr>
+      <tr class="fam" data-head="maintexts"><td><a class="rolelink" data-name="maintexts" href="#"><code>--maintexts</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle head" data-name="maintexts" style="background: var(--maintexts)"></button><button type="button" class="rejoin" title="Reset this family">&#8635;</button><button type="button" class="reload" title="Back to what this family was loaded with">&#9100;</button></td><td>Main text: the quiet tier.</td></tr>
+      <tr data-role="caption-text"><td><a class="rolelink" data-name="caption-text" href="#"><code>--caption-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="caption-text" style="background: var(--caption-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>#irrecordcaption, #previewinfo, battery hint</code> &mdash; The small explanatory lines.</td></tr>
+      <tr data-role="editor-cell-text"><td><a class="rolelink" data-name="editor-cell-text" href="#"><code>--editor-cell-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="editor-cell-text" style="background: var(--editor-cell-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>.pleitem cells and play glyph</code> &mdash; The index and volume numbers in the playlist editor.</td></tr>
+      <tr data-role="link-quiet"><td><a class="rolelink" data-name="link-quiet" href="#"><code>--link-quiet</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="link-quiet" style="background: var(--link-quiet)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>nav tabs, quick search cells, advanced-search link</code> &mdash; Dim clickable text; it turns --link-text on hover.</td></tr>
+      <tr data-role="main-text"><td><a class="rolelink" data-name="main-text" href="#"><code>--main-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="main-text" style="background: var(--main-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>body, playlist row hover</code> &mdash; The default text colour that everything inherits.</td></tr>
+      <tr data-role="section-title-text"><td><a class="rolelink" data-name="section-title-text" href="#"><code>--section-title-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="section-title-text" style="background: var(--section-title-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>section .title, .row-title span</code> &mdash; The card name, and the group heading inside a card.</td></tr>
+      <tr data-role="switch-off-text"><td><a class="rolelink" data-name="switch-off-text" href="#"><code>--switch-off-text</code></a></td><td class="sw"><button type="button" class="clipbtn" title="Copy this colour">&#128464;</button><button type="button" class="pastebtn" title="Paste the copied colour">&#8614;</button><button type="button" class="circle" data-name="switch-off-text" style="background: var(--switch-off-text)"></button><button type="button" class="rejoin" title="Follow the family again">&#8635;</button><button type="button" class="reload" title="Back to the colour this theme was loaded with">&#9100;</button></td><td><code>switch, when off</code> &mdash; The word "Off" inside a switch.</td></tr>
     </tbody>
   </table>
 
   <h2>Your block</h2>
-  <p>Paste this into <code>data/www/style.css</code>, replace <code>X</code> with the theme id and the comment with
-  the theme name, then let <code>webuitheme.py --deflate</code> tidy it up.</p>
+  <p>The window shows what this page would write for the theme you loaded: only the colours that differ from
+  <code>:root</code>. <b>Save</b> rewrites the whole of <code>data/www/themes.css</code> with every other theme
+  left as it is, so overwrite that file with the download and then rebuild the filesystem image.</p>
+  <p>It will re-save the entire file but only changes to the <b>currently-selected theme</b> are recorded,
+  so if needing to work on multiple themes, be sure to save after altering each theme.</p>
   <div class="outp">
     <div class="row">
-      <label for="themeId">Load theme id:</label>
-      <input id="themeId" type="number" min="0" max="99" step="1" value="0">
+      <label for="themePick">Load theme:</label>
+      <select id="themePick"></select>
       <button type="button" id="loadBtn">Load</button>
       <span id="loadnote"></span>
     </div>
     <textarea id="toolout" readonly spellcheck="false"></textarea>
     <div class="row">
-      <button type="button" id="copyBtn">Copy to Clipboard</button>
+      <button type="button" id="saveBtn">Save themes.css</button>
       <button type="button" id="resetBtn">Reset all to :root</button>
       <span id="outnote"></span>
     </div>
@@ -1067,6 +1102,9 @@ body { height: auto; padding: 0; }
   names.forEach(function (n) { defaults[n] = css(n); });
 
   var state = { heads: {}, members: {} }, applied = [];
+  // What the loaded theme gave each role, so the second arrow can put a row back to it.  null until something
+  // has been loaded, which is exactly when that arrow has nothing to offer.
+  var LOADED = null;
 
   function clearInline() {
     applied.forEach(function (n) { html.style.removeProperty('--' + n); });
@@ -1085,12 +1123,34 @@ body { height: auto; padding: 0; }
     paint();
     writeOutput();
   }
-  function valueOf(name) {
-    if (state.members[name]) return state.members[name];
-    if (state.heads[name]) return state.heads[name];   // a head is keyed by its own name, not by a family
+  // A role's colour in a given state: its own setting, its own head line, its family's head, then :root.  Both
+  // arrows and the comparison behind them go through this, so a split, a head line and plain inheritance all
+  // read the same way.
+  function valueIn(st, name) {
+    if (st.members[name]) return st.members[name];
+    if (st.heads[name]) return st.heads[name];   // a head is keyed by its own name, not by a family
     var fam = familyOf[name];
-    if (fam && state.heads[fam]) return state.heads[fam];
+    if (fam && st.heads[fam]) return st.heads[fam];
     return defaults[name];
+  }
+  function valueOf(name) { return valueIn(state, name); }
+  function snapshot() {
+    return { heads: Object.assign({}, state.heads), members: Object.assign({}, state.members) };
+  }
+  // Back to the loaded theme: a role takes the colour it was given, or loses its override when the block never
+  // named it - where the two coincide, that is the :root colour and rejoin would do the same thing.
+  function reloadRole(name) {
+    delete state.members[name];
+    if (LOADED && LOADED.members[name]) state.members[name] = LOADED.members[name];
+  }
+  // A family comes back as the head line it had, or as the individual splits it carried.
+  function reloadFamily(head) {
+    delete state.heads[head];
+    if (LOADED && LOADED.heads[head]) state.heads[head] = LOADED.heads[head];
+    families.forEach(function (f) {
+      if (f.name !== head) return;
+      f.members.forEach(reloadRole);
+    });
   }
   function paint() {
     Array.prototype.forEach.call(document.querySelectorAll('#roles button.circle'), function (btn) {
@@ -1105,16 +1165,23 @@ body { height: auto; padding: 0; }
       // family-member marker, so it needs a family to be split away from.
       tr.classList.toggle('setrow', set);
       tr.classList.toggle('splitrow', !!(familyOf[n] && set));
+      // loadrow shows the second arrow: this row no longer holds the colour the loaded theme gave it.
+      tr.classList.toggle('loadrow', !!LOADED && valueIn(state, n) !== valueIn(LOADED, n));
     });
     // A family head offers its reset as soon as anything in that family is set.  The row names its head
     // once (`data-head`) and the arrow is found through the row, so the two can never drift apart.
     Array.prototype.forEach.call(document.querySelectorAll('#roles tr[data-head]'), function (tr) {
-      var head = tr.dataset.head, on = !!state.heads[head];
+      var head = tr.dataset.head, on = !!state.heads[head], changed = false;
       families.forEach(function (f) {
         if (f.name !== head) return;
-        f.members.forEach(function (m) { if (state.members[m]) on = true; });
+        f.members.forEach(function (m) {
+          if (state.members[m]) on = true;
+          if (LOADED && valueIn(state, m) !== valueIn(LOADED, m)) changed = true;
+        });
       });
+      if (LOADED && valueIn(state, head) !== valueIn(LOADED, head)) changed = true;
       tr.classList.toggle('setrow', on);
+      tr.classList.toggle('loadrow', changed);
     });
   }
 
@@ -1232,6 +1299,15 @@ body { height: auto; padding: 0; }
       }
       return;
     }
+    // The second arrow puts the row back to the colour the loaded theme gave it, not to :root.
+    var reload = e.target.closest && e.target.closest('#roles button.reload');
+    if (reload && LOADED) {
+      var lrow = reload.closest('tr');
+      if (lrow.dataset.head) reloadFamily(lrow.dataset.head);
+      else if (lrow.dataset.role) reloadRole(lrow.dataset.role);
+      apply();
+      return;
+    }
     // Every arrow is the same control; the ROW decides what it resets.
     var reset = e.target.closest && e.target.closest('#roles button.rejoin');
     if (reset) {
@@ -1323,25 +1399,63 @@ body { height: auto; padding: 0; }
     }
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Removing the class and putting it back restarts the animation when the same element is jumped to twice;
+    // the reflow between the two is what makes the browser notice.  One timer per element, so a second jump
+    // does not let the first one switch the ring off early.
+    clearTimeout(el.jumphitTimer);
+    el.classList.remove('jump-hit');
+    void el.offsetWidth;
     el.classList.add('jump-hit');
-    setTimeout(function () { el.classList.remove('jump-hit'); }, 1600);
+    el.jumphitTimer = setTimeout(function () { el.classList.remove('jump-hit'); }, 2500);
   }
   Array.prototype.forEach.call(document.querySelectorAll('#roles a.rolelink'), function (a) {
     a.addEventListener('click', function (e) { e.preventDefault(); jump(a.dataset.name); });
   });
 
-  // ---- load an existing theme ----
-  // No theme list and no names: the page cannot read a linked stylesheet's rules on a file:// page, and
-  // themes.h is not reachable either. A numeric id is the future-proof form - it applies exactly what
-  // style.css holds for that slot, and an id with no block simply comes back as :root.
-  var themeId = document.getElementById('themeId');
+  // ---- the themes in the file ----
+  // A page can read a stylesheet's VALUES but never its text, so the list of themes is discovered the only way
+  // it can be: set data-theme and ask what --theme-name says.  That is why the name is a declaration.  There is
+  // no list to keep in step here, and a block added, removed or renumbered by the python tools appears on the
+  // next reload.
+  var themePick = document.getElementById('themePick');
   var loadNote = document.getElementById('loadnote');
+  var CURRENT = null;
+
+  function unquote(v) {
+    if (v.length > 1 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') v = v.slice(1, -1);
+    return v.replace(/\\(["\\])/g, '$1');
+  }
+  function quoteCss(v) {
+    return '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+
+  var THEMES = (function () {
+    var found = [], prev = html.getAttribute('data-theme');
+    clearInline();
+    for (var id = 0; id < 64; id++) {
+      html.setAttribute('data-theme', String(id));
+      var v = getComputedStyle(html).getPropertyValue('--theme-name').trim();
+      if (v) found.push({ id: id, name: unquote(v) });
+    }
+    if (prev === null) html.removeAttribute('data-theme'); else html.setAttribute('data-theme', prev);
+    found.forEach(function (t) {
+      var o = document.createElement('option');
+      o.value = String(t.id);
+      o.textContent = '[' + t.id + '] ' + t.name;
+      themePick.appendChild(o);
+    });
+    if (!found.length) loadNote.textContent = 'no theme blocks found in themes.css';
+    return found;
+  })();
+
+  // ---- load an existing theme ----
   function loadTheme() {
-    var id = parseInt(themeId.value, 10);
+    var id = parseInt(themePick.value, 10);
     if (isNaN(id) || id < 0) {
-      loadNote.textContent = 'type a theme id first';
+      loadNote.textContent = 'pick a theme first';
       return;
     }
+    CURRENT = id;
     clearInline();
     var prev = html.getAttribute('data-theme');
     html.setAttribute('data-theme', String(id));
@@ -1371,6 +1485,7 @@ body { height: auto; padding: 0; }
     });
     standalone.forEach(function (n) { if (vals[n] !== defaults[n]) state.members[n] = vals[n]; });
     apply();
+    LOADED = snapshot();          // from here on, the second arrow means "back to this theme"
     var differ = 0;
     names.forEach(function (n) { if (vals[n] !== defaults[n]) differ++; });
     loadNote.textContent = differ
@@ -1378,69 +1493,181 @@ body { height: auto; padding: 0; }
       : 'theme ' + id + ' is the :root palette (no block, or an empty one)';
   }
   document.getElementById('loadBtn').addEventListener('click', loadTheme);
-  themeId.addEventListener('keydown', function (e) { if (e.key === 'Enter') loadTheme(); });
+  themePick.addEventListener('change', function () { loadNote.textContent = ''; });
 
   // ---- the block ----
   var out = document.getElementById('toolout'), note = document.getElementById('outnote');
-  function blockText() {
-    var lines = [], printedHead = {};
-    // A line only earns its place if it says something: a colour equal to the one the role would inherit
-    // WITHOUT that line says nothing at all, so it is dropped. That is also what keeps a value left behind
-    // by a cancelled picker out of the block.
+  // themes.css in this repo has CRLF endings, and a save is meant to be a small diff, so match it.
+  var EOL = '\r\n';
+
+  function pad(s) { while (s.length < 22) s += ' '; return s; }
+
+  // The theme on screen, as {role: colour}.  A line only earns its place if it says something: a colour equal
+  // to the one the role would inherit WITHOUT that line says nothing at all, which is also what keeps a value
+  // left behind by a cancelled picker out of the block.
+  function modelDeltas() {
+    var deltas = {}, printedHead = {};
     families.forEach(function (f) {
       var head = state.heads[f.name];
       var followers = f.members.filter(function (m) { return !state.members[m]; });
       if (head && followers.length >= 2 && head !== defaults[f.name]) {
         printedHead[f.name] = true;
-        lines.push([f.name, head]);
+        deltas[f.name] = head;
       }
       f.members.forEach(function (m) {
         if (!state.members[m]) return;
         var inherited = printedHead[f.name] ? head : defaults[m];
-        if (state.members[m] !== inherited) lines.push([m, state.members[m]]);
+        if (state.members[m] !== inherited) deltas[m] = state.members[m];
       });
       // The head line is not worth writing for a single follower, so that follower names the colour itself.
       if (head && followers.length === 1 && head !== defaults[followers[0]]) {
-        lines.push([followers[0], head]);
+        deltas[followers[0]] = head;
       }
     });
     standalone.forEach(function (n) {
-      if (state.members[n] && state.members[n] !== defaults[n]) lines.push([n, state.members[n]]);
+      if (state.members[n] && state.members[n] !== defaults[n]) deltas[n] = state.members[n];
     });
-    lines.sort(function (a, b) { return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0); });
-    var body = lines.map(function (l) {
-      var name = '--' + l[0] + ':';
-      while (name.length < 22) name += ' ';
-      return '  ' + name + l[1] + ';';
+    return deltas;
+  }
+
+  // A theme that is NOT the one on screen, as {role: colour}: every role whose value differs from :root, with a
+  // family folded back into one head line when two or more of its members agree - the same shape --deflate makes.
+  // Only values are available here, so a role a hand edit set to exactly the :root colour cannot be seen; that
+  // is the one thing this path cannot know, and --deflate would drop such a line anyway.
+  function valueDeltas(vals) {
+    var deltas = {};
+    families.forEach(function (f) {
+      var groups = {}, order = [];
+      f.members.forEach(function (m) {
+        var v = vals[m];
+        if (!v || v === defaults[m]) return;
+        if (!groups[v]) { groups[v] = []; order.push(v); }
+        groups[v].push(m);
+      });
+      var best = null, bestN = 0, tie = false;
+      order.forEach(function (v) {
+        if (groups[v].length > bestN) { best = v; bestN = groups[v].length; tie = false; }
+        else if (groups[v].length === bestN) tie = true;
+      });
+      if (best && bestN >= 2 && !tie) {
+        deltas[f.name] = best;
+        order.forEach(function (v) { if (v !== best) groups[v].forEach(function (m) { deltas[m] = v; }); });
+      } else {
+        order.forEach(function (v) { groups[v].forEach(function (m) { deltas[m] = v; }); });
+      }
     });
-    return ':root[data-theme="X"] { /* Name here - and replace the X! */\n' +
-           (body.length ? body.join('\n') : '  /* no changes yet */') + '\n}';
+    standalone.forEach(function (n) {
+      if (vals[n] && vals[n] !== defaults[n]) deltas[n] = vals[n];
+    });
+    return deltas;
+  }
+
+  // One block in the file's own shape: the name first, then every colour, alphabetical, aligned to column 22 -
+  // the same form render_block() in theme_tool.py writes.
+  function pairsText(id, name, deltas) {
+    var keys = Object.keys(deltas).sort();
+    var res = [':root[data-theme="' + id + '"] {'];
+    res.push('  ' + pad('--theme-name:') + quoteCss(name) + ';');
+    keys.forEach(function (k) { res.push('  ' + pad('--' + k + ':') + deltas[k] + ';'); });
+    res.push('}');
+    return res.join(EOL);
+  }
+
+  function blockText() {
+    return pairsText('X', 'Name here - and replace the X!', modelDeltas()).replace(/\r\n/g, '\n');
   }
   function writeOutput() {
     out.value = blockText();
     var n = out.value.split('\n').length - 2;
-    note.textContent = n > 0 ? n + ' line(s) to paste' : 'nothing changed yet';
+    note.textContent = n > 0 ? n + ' line(s) in this block' : 'nothing changed yet';
   }
 
-  document.getElementById('copyBtn').addEventListener('click', function () {
-    var btn = this, was = btn.textContent;
-    function done(ok) {
-      btn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
-      setTimeout(function () { btn.textContent = was; }, 1400);
+  // ---- save ----
+  // Every other theme's colours, read the only way a page can: set data-theme and ask.  The inline properties
+  // of the theme being edited come off for the read, and apply() puts them back afterwards.
+  function allValues() {
+    var all = {}, prev = html.getAttribute('data-theme');
+    clearInline();
+    THEMES.forEach(function (t) {
+      if (t.id === CURRENT) return;                 // the theme on screen is read from the model, not from CSS
+      html.setAttribute('data-theme', String(t.id));
+      var vals = {};
+      names.forEach(function (n) { vals[n] = css(n); });
+      all[t.id] = vals;
+    });
+    if (prev === null) html.removeAttribute('data-theme'); else html.setAttribute('data-theme', prev);
+    apply();
+    return all;
+  }
+
+  // The header is HEADER_LINES in theme_tool.py word for word: either may write the file next, and a save
+  // from here must not read as a wholesale rewrite.
+  var FILE_HEADER = [
+    '/* WEBUI THEMES - the per-display-theme overrides.',
+    "   One block per entry in _themes[] of src/displays/themes.h, keyed by that entry's index.  Every colour a",
+    '   block does not name comes from :root in style.css, which is the design, so a block stays a short list of',
+    '   differences rather than a second palette.  --theme-name is a copy of _themeNames[] so a page can show the',
+    '   name it belongs to: themes.h is the authority and theme_tool.py refreshes these on every run.',
+    '   style.css imports this file.  It is written by src/displays/theme_tool.py and by the browser tool',
+    '   in src/displays/webui_tool.html, which can only see values and therefore rewrites the file whole. */'
+  ];
+
+  function buildFile() {
+    var parts = FILE_HEADER.slice();
+    var others = allValues();
+    THEMES.forEach(function (t) {
+      var deltas = (t.id === CURRENT) ? modelDeltas() : valueDeltas(others[t.id] || {});
+      parts.push(pairsText(t.id, t.name, deltas));
+    });
+    return parts.join(EOL) + EOL;
+  }
+
+  function downloadText(text) {
+    var blob = new Blob([text], { type: 'text/css;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'themes.css';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }
+
+  // showSaveFilePicker writes the file in place and is the nicer path; on a file:// page it is refused, and the
+  // download is the fallback.  Either way the tool already holds what it wrote, so nothing needs reloading.
+  function saveThemesCss() {
+    if (!THEMES.length) { note.textContent = 'nothing to save: no theme blocks were found'; return; }
+    var text = buildFile();
+    if (!window.showSaveFilePicker) {
+      downloadText(text);
+      LOADED = snapshot();        // the saved state is what the second arrow now goes back to
+      note.textContent = 'saved as a download';
+      return;
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(out.value).then(function () { done(true); }, function () {
-        out.select();
-        done(document.execCommand('copy'));
+    window.showSaveFilePicker({
+      suggestedName: 'themes.css',
+      types: [{ description: 'CSS', accept: { 'text/css': ['.css'] } }]
+    }).then(function (handle) {
+      return handle.createWritable().then(function (w) {
+        return w.write(new Blob([text], { type: 'text/css' })).then(function () { return w.close(); });
       });
-    } else {
-      out.select();
-      done(document.execCommand('copy'));
-    }
-  });
+    }).then(function () {
+      LOADED = snapshot();
+      note.textContent = 'wrote themes.css';
+    }, function (err) {
+      if (err && err.name === 'AbortError') { note.textContent = 'save cancelled'; return; }
+      note.textContent = 'no direct save here - downloading themes.css instead';
+      downloadText(text);
+      LOADED = snapshot();
+    });
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', saveThemesCss);
   document.getElementById('resetBtn').addEventListener('click', function () {
     state.heads = {};
     state.members = {};
+    CURRENT = null;
+    LOADED = null;                // nothing is loaded any more, so there is nothing to go back to
     loadNote.textContent = 'reset to the :root palette';
     apply();
   });

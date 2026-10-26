@@ -28,6 +28,24 @@ Grouped (not one-by-one deep explained) areas:
 
 ---
 
+## The Two Audio Libraries (read together)
+
+`src/libraries/I2S_Audio/` and `src/libraries/VS1053_Audio/` are separate backends, selected by whether `VS1053_CS`
+is defined. They share their defect classes, and the same bug has repeatedly appeared in both - the fixes in the two
+`*-frankenstein-surgery-notes.md` files land under the same dates (`2026.10.11`, `2026-10-21`, `2026.10.24`).
+
+- **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+- **The VS1053 board tends to surface these first** - hardware decoder, DREQ-gated SPI feed, a shallower graft and
+  readable per-track counters - and its notes file carries the longer record (fixes from 2026-07 on).
+- **The I2S library is often the correct reference** for what the VS1053 graft lost, and sometimes the reverse: its
+  `2026.10.24` tail-of-file note predicted on the record that a VS1053 unit stopping at a track end would be the next
+  thing to look at, and that is what happened.
+- Anything a fix teaches about end-of-stream accounting, per-track state or the reader/consumer split applies to both;
+  the histories live in the two notes files, which are the place to look before theorising.
+
+---
+
 ## Fast Architecture Overview
 
 ### Build-time chain
@@ -968,6 +986,18 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     `mute` command, and the IR mute button — the `DSP_DUMMY` suppression lives only at the physical-button call site.
   - `prev()` / `next()` / `toggle()` delegate retry cancellation to `network.cancelStreamRetry()` (previously duplicated
     inline).
+  - **Shuffle used to be a uniform draw *with replacement*, and three defects followed from that shape.** `next()` called
+    `random(1, utility.playlistLength())` - Arduino's `random(min, max)` excludes `max`, so **the last track could never
+    be chosen** (and a one-track playlist drew station 0); consecutive draws shared no memory, so repeats were expected
+    rather than impossible (23 draws from 159 tracks contain ~1.6 duplicate pairs); and `prev()` had no shuffle branch,
+    so it replayed the current track. **All three are fixed (2026.10.25):** `_shuffleNext()` now deals from a **keyed
+    Feistel permutation with cycle-walking** over `1..n` - no repeat until the whole playlist has played, **zero bytes
+    per track** (one `uint32_t` counter is the entire state), and because a Feistel network is invertible `_shufflePrev()`
+    steps back through the same walk, so "the track that played three tracks ago" is `counter - 3` re-derived. The domain
+    is the smallest **even-bit** power of two `>= n`, so fewer than half of all counters are skipped and a step costs two
+    checks on average. **A shuffle bag was considered and rejected** (4 bytes per track = 4 MB at a million tracks), and
+    **seeding a PRNG once cannot do this**: reducing a large output space onto `n` values repeats by the birthday bound
+    whatever the period. See `plans/shuffle-without-repeats.md`.
   - **`setReady()`: the text a mode shows before anything has started playing in it - the one place a mode entry decides
     the title lines.** Called from `Config::changeMode()` (both directions, beside the `NEWSTATION`/`NEWTITLE` requests
     it already sends), from `SDManager::trySdRemount()`, and from the SD manager's close. It clears the player error and
@@ -988,6 +1018,30 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - interacts with radio-browser click reporting (clicks are gated on `!network.lostPlaying` so automatic retry
     reconnections do not fire clicks; only explicit user-initiated plays do)
   - calls `rgbled` and `backlightControls` directly during playback start/stop
+- **A silent audio stop is now recorded, because nothing else can report one.** `Player::loop()`'s
+  `!isRunning() && _status==PLAYING` gate prints one `Player` line (pos, duration, InBuff fill, `autoAdvance`, mode,
+  and the card's `ready`/strike pair) before it stops. That gate also fires on **every normal SD track change**,
+  because a clean EOF clears `m_f_running` inside `Audio::loop()` a few statements earlier - so `advance 1` with `pos`
+  at the end of the file is a completed hand-over, `pos 0` is a dead file handle, and the line is the split between
+  them. The audio callbacks cannot supply this: `AUDIO_INFO` is only produced by code that is no longer running once
+  the library's `processLocalFile()` guard fails, and the EOF exit path's `Closing audio file` / `End of file` are
+  both gated on a valid `audiofile`, so a smeared handle prints nothing at all.
+- **The card heartbeat is `SD_PLAY_TRACE_MS`** (default 30000, `0` disables), an `#ifndef` in `player.h` like
+  `SDMAN_AUTO_EXIT_MS` rather than an `options.h` value, so a `myoptions.h` can change it: one `SD` line per interval
+  while a card file plays (`pos`, `buffer`, `card ready/strikes`), re-armed on every entry to playback. It is the only
+  record of *when* a silent stop happened, since the stop itself produces no line.
+- **`PR_CHECKSD` stops the file before it unmounts, and asks the card again before leaving the mode.** The probe
+  shares the bus with the file being read, so three misses mean "busy" as easily as "gone": the branch closes the
+  audio file first (`stopSync()`, 50 ms settle), re-probes once with nothing reading the card, and only then decides -
+  a card that answers resumes the station with `PR_PLAY, lastStation()`, a card that does not drops to `PM_WEB`
+  through `changeMode()` (which unmounts in its own order), and `SDOFFLINE` handles it locally because `changeMode()`
+  returns immediately in that mode. **Rule for new code: the audio file is closed before `sdman.stop()`, always** -
+  unmounting under an open `File` leaves the library's guard returning silently with `m_f_running` still true.
+- **`lastSdStation` is a deferred save.** Both write sites - the `lastStation()` setter in `config.h`, which
+  `next()`/`prev()` reach from inside the audio EOF callback, and `_play()`'s own save - use
+  `saveValueButWait(..., 5000)`. An immediate `saveValue` there put an NVS commit (and its page compaction) on the
+  main loop at every track change; `plans/sd-playback-silent-stop.md` has the measurements and the remaining hole
+  (NVS still runs on the main task when the deferred slot fires).
 
 ## `src/core/audiohandlers.h` / `audiohandlers.cpp`
 - Callback bridge used by the audio libraries.
@@ -1069,7 +1123,15 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **A user action wakes the panel, and the wake is explicit.** The screensaver is only ever left by a
   `NEWMODE, PLAYER`, which is issued from two places: `Controls::screenSaverExit()` - which every panel handler
   (encoder, buttons, IR) runs first, clearing the display queue, restarting the countdown and queueing the mode -
-  and `_play()`'s success branch ([`player.cpp`](../src/core/player.cpp:345)). The WebUI has no handler of its own,
+  and `_play()`'s success branch ([`player.cpp`](../src/core/player.cpp:345)), **but only when `_play()` was not
+  reached from the EOF callback**. `Player::_autoAdvancePlay` is re-derived from `autoAdvance` on every `PR_PLAY` -
+  the only call site of `_play()` - and it gates three things there: `setDspOn(1)` (which calls `display.wakeup()`,
+  so it lit a **blanked** panel), `resetScreensaverTimers()` (which restarted both the screensaver and the sleep
+  countdown) and the `NEWMODE, PLAYER` above. Without that gate an SD playlist woke the panel, exited the
+  screensaver and restarted its timers **on every track boundary**, then re-entered it after the playing timeout -
+  a wake/exit/re-enter loop per track, and a sleep timer that could never expire. Every user path is unaffected
+  because they all reach `screenSaverExit()` first, and `autoAdvance` is set nowhere except
+  [`handleEofMp3()`](../src/core/audiohandlers.cpp:328). The WebUI has no handler of its own,
   so its transport commands (`toggle`, `prev`, `next`, `playstation`/`play`, `start`, `stop`, `burl`/`playurl`) now
   call `Controls::screenSaverExit()` from `CommandHandler::exec` as well. That was the pause gap: pause is
   `player.toggle()` with `_status == PLAYING` -> `PR_STOP` -> `_stop()`, which queues only `DBITRATE`/`PSTOP` and so
@@ -1628,7 +1690,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   it carries newer colours for the same repaint and a torn read could only mix two of the user's own palettes.
 - **A knowingly accepted cost:** the built-in tables are `const` at namespace scope, so including `themes.h`
   here makes a second copy for this translation unit (about 2 KB of flash). Giving them one definition would
-  mean restructuring a header that `importtheme.py` generates into.
+  mean restructuring a header that `theme_tool.py` generates into.
 
 ## `src/displays/themes.h`
 - Runtime theme switching data, loaded from PROGMEM at runtime.
@@ -1650,11 +1712,11 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **Every colour in `_themes[]` is written on the 565 steps** — `level * step`, so red and blue are
   multiples of 8 and green of 4, the same numbers `editor.html` shows. This is a spelling of the same colour
   and not a change to it: `(r >> 3) * 8` packs back to the same 565 that `r` did, so the 502 literals
-  `importtheme.py --quantise` moved in the shipped file compiled to a **byte-identical firmware** in all
+  `theme_tool.py -q` moved in the shipped file compiled to a **byte-identical firmware** in all
   three environments.
-- Populated by `importtheme.py`, which takes either an old-style `#define COLOR_*` file or a WebUI JSON
+- Populated by `theme_tool.py -i`, which takes either an old-style `#define COLOR_*` file or a WebUI JSON
   export (one theme or a whole backup), routes both through the same fallback rules, and snaps everything it
-  writes onto those steps. See [`importtheme.md`](../src/displays/importtheme.md).
+  writes onto those steps. See [`theme_tool.md`](../src/displays/theme_tool.md).
 - **`.line` and `.vuaxis`: the two entries with no old-format source, both derived from `.div`.** `line` sits between
   `.div` and `.weather`, `vuaxis` between `.weather` and `.vupeak`, and their place in the entry is fixed because the
   entries are designated initialisers. The rules are part of the palette now, not values to eyeball: **`.line` =
@@ -1706,8 +1768,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     initialiser, the null block for builds without a display, and `_setLayoutPointers()`) and never read, because the
     swap goes through `metaBGConf_ptr`. Recorded, not fixed.
 
-## `src/displays/importtheme.py`
-- Imports old-style `#define COLOR_*` theme files into `themes.h`.
+## `src/displays/theme_tool.py` - the import mode (`-i`)
+- Imports old-style `#define COLOR_*` theme files and ehRadio JSON exports into `themes.h`, **and** writes
+  the `themes.css` block that entry belongs to, so the two sides of a theme never arrive separately.
 - Handles `#ifdef`/`#ifndef` branching to generate multiple theme variants (permutation).
 - Smart fallbacks for missing colors (e.g., `.dow` ← `.date`, `.battery` ← `.rssi`).
 - Meta fallback for everything else (uses `.meta` color instead of zeros).
@@ -1717,61 +1780,59 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `DERIVED_RULES`, which exempts them from the `// needs fixing?` marker that every other computed fallback keeps. They
   are rules, not guesses; the rest are still eyeballed.
 - Name truncation at 31 chars for `_themeNames[][32]`.
-- `--dry-run` writes to `.new.h`.
+- `-n` sets the starting index; without it the entry is appended after the last one.
 
-## `src/displays/webuitheme.py`
-- Imports the display themes in `themes.h` into the `data/www/style.css` theme blocks. `:root` is the
-  master design and is never written.
-- The master is the WebUI rendering of **one** display theme, and that theme is discovered rather than
-  configured: it is the block with no declarations (the identity transfer at that theme, which
-  `--deflate` leaves behind after a palette is copied into `:root`). Resolution order is lowest-id empty
-  block, then the marker's `anchor=`, then 0 with a warning. **There is no `--anchor` flag.**
-- 53 roles. Every role is a `feature()` of the panel - `metabg` -> the control/input/button fills,
-  `title1` -> the accent-family text and outlines, `title2` -> the dim text and list names, `line` ->
-  panel border and scrollbar, `clock` darkened -> `highlight-fill` and the logo,
-  `background` -> switch and scrollbar surfaces - and `transfer()` re-anchors each one from the master
-  through HSL: hue and saturation follow the display, lightness keeps the master's offset, and a neutral
-  feature hands the decision to the other side. Every fill that means "highlight" collapses to one
-  colour, its text is chosen once by contrast, borders/shadows are derived, and text is pushed to
-  `READ_TEXT` / `READ_ACCENT`. The ten split text roles (`caption-text`, `editor-cell-text`, `link-quiet`,
-  `section-title-text`, `switch-off-text` on the dim tier; `meta-text`, `info-text`, `eq-label-text` on the
-  bright one) are readable-checked with their tier and then tied
-  back to `main-text` / `small-text`, so a generated palette keeps each tier in step.
-- **The nine `:root` family heads are NOT roles, but a block may declare one.** `ROLE_ORDER` lists members only
-  and `feature()` has no key for a head, so no palette is generated for one. `find_families()` derives the map
-  from `:root` itself - a head is a name another declaration points at that is not a role - so a hand-added
-  family needs no list maintained in the tool. A theme can therefore write `--outlines: #e3d25f` and move seven
-  outline roles in one line. `--deflate` folds members back into that line (the value most of them agree on
-  wins; a member that differs stays declared as a deliberate split) and `--update` writes through the same
-  fold, so a freshly derived theme comes out short. `--inflate` writes each role at the colour it **already
-  has in that block**, never the master hex, so a head's cascade survives being frozen; `--inflate` followed
-  by `--deflate` returns the file byte for byte.
-- **Values may be `var(--other)`.** `resolve_value()` follows aliases block-first and then `:root`, so
-  every comparison is on hex; a block that spells out `#262626` where `:root` says `var(--fills)` is
-  redundant. The generator always writes hex. `--update` compares a block through its aliases.
+## `src/displays/theme_tool.py` - the palette files and the other modes
+- **Three files hold the palette.** `data/www/style.css` keeps `:root` - the hand-authored design, its nine
+  families and their aliases - plus every rule, and *imports* `data/www/themes.css` on its first line.
+  `themes.css` holds one `:root[data-theme="N"]` block per display theme, each a short list of what differs from
+  `:root`, and nothing else. `src/displays/themes.h` stays the authority for how many themes exist and their
+  names. Nothing writes `:root`; every tool treats `style.css` as read-only input.
+- **`--theme-name` is a declaration, not a comment**, because a page can read a stylesheet's VALUES but never its
+  text. It is what lets `webui_tool.html` list the themes, and therefore what lets that page rebuild the file
+  without ever seeing it. `themes.h` wins whenever the two disagree: `-i` rewrites every `--theme-name` from it
+  on each run.
+- **One file, one set of readers and writers**: paths, EOL-preserving read and write,
+  `parse_master()`, `parse_blocks()`, `render_block()`, `render_file()`, `apply_edits()`, alias resolution,
+  `ROLE_ORDER`, `find_families()`, `collapse_families()`, the `themes.h` readers, and the sync check. Three
+  scripts import it, so no two of them can disagree about how a file is read or written.
+- **`check_sync()` is the contract, `require_sync()` is the door.** The blocks must be exactly
+  `0 .. len(_themeNames)-1`, in order, no duplicates, no gaps; anything else is a hard stop that names the ids and
+  tells you to hand-edit until they line up. A name that differs is a warning and never a stop, because themes.h
+  is the authority and the name is only a cache. A bare run (or `-a`) is exactly this report plus the quantise
+  status and nothing else; every other mode calls the same check before touching anything.
+- **`:root` is the anchor.** A block is a diff against `:root`, so there is no second reference to name:
+  no `--anchor` flag, no `mode=`/`anchor=` marker, no empty-block convention - block `[0]` carrying declarations
+  is normal. To retune the design: `--inflate`, edit `:root`, `--deflate`.
+- **Maintenance modes**, over `themes.css` with the master from `style.css`, never reading
+  `themes.h`: `--inflate` gives every block every role it lacks, at the colour it **already has in that block**,
+  never the master hex, so a head's cascade survives being frozen; `--deflate` drops every declaration whose
+  resolved value is exactly the `:root` one; `--deflate-lossy` does the same within `NEAR_MASTER`, one `[y/N]` per
+  role per theme, default No. `--dry-run` reports instead of writing. Run over a canonical file `--deflate` must
+  report nothing to do - that is the file's form check.
+- **`--inflate` then `--deflate` returns the file byte for byte**, given the file is already in the canonical
+  alphabetical form every tool writes. It is not a no-op on a hand-ordered block: it normalises the order, which
+  is the one thing a round trip can change.
 - **Declarations are alphabetical everywhere, and there is no sort mode.** `ROLE_ORDER` is alphabetical and
-  `render_block()` writes `sorted(props)`, so every block the tool creates or rewrites is alphabetical,
-  including hand-added properties. `:root` is the one exception by design: it is grouped by family (floats
-  first, then `surfaces`, `edges`, `fills`, `outlines`, `highlights`, `actives`, `labels`, `infotexts`,
-  `maintexts`), alphabetical inside each group. Sorting the file is a one-off edit, not a tool stage.
-- A block title containing the whole word `PERFECT` is locked: it is never added, renamed, compared,
-  listed or overwritten, only counted. Removing the word makes it editable again, and the tool never
-  writes it. **The maintenance modes ignore the lock** - inflating or deflating a locked block is upkeep,
-  not import.
-- **Maintenance modes**, style.css only, never reading `themes.h` and refusing to combine with the other
-  flags: `--inflate` gives every block every role it lacks, with the resolved `:root` value as hex
-  (appearance unchanged; the block is frozen while you hand-edit it); `--deflate` drops every declaration
-  whose resolved value is exactly the `:root` one; `--deflate-lossy` does the same for values within
-  `NEAR_MASTER`, one `[y/N]` per role per theme, default No. `--dry-run` reports instead of writing.
-- No arguments: add missing blocks in id order, then reconcile renamed ones (whole-body replace only
-  on confirmation). `--update`: per-theme element diff on a menu of real ids, blank exits.
-  `--dry-run` prints and writes nothing. A mode mismatch is warned about before updating.
-- `read_style()` **validates that every palette declaration begins its line** (indentation only) and fails
-  with the line number and the offending prefix. A stray character in front of `--role:` makes the
-  declaration invalid CSS that the browser drops silently - the role then falls back to its alias, which
-  presents as a colour that "does not apply" and is otherwise a long hunt.
-- Never writes `:root`, never deletes or reorders a block, ignores ids with no display theme and
-  ignores the three hand-owned colours (`--page-bg`, `--list-bars`, `--playlist-hover`).
+  `render_block()` writes `sorted(props)`, so every block any tool creates or rewrites is alphabetical, including
+  hand-added properties. `:root` is the one exception by design: grouped by family (standalone first, then
+  `surfaces`, `edges`, `fills`, `outlines`, `highlights`, `actives`, `labels`, `infotexts`, `maintexts`),
+  alphabetical inside each group.
+- **The nine `:root` family heads are NOT roles, but a block may declare one.** `ROLE_ORDER` lists members only,
+  so no palette is generated for a head. `find_families()` derives the map from `:root` itself - a head is a name
+  another declaration points at that is not a role - so a hand-added family needs no list maintained anywhere. A
+  theme can write `--outlines: #e3d25f` and move seven outline roles in one line, and `--deflate` folds members
+  back into that line (the value most of them agree on wins; a member that differs stays declared as a deliberate
+  split).
+- **Values may be `var(--other)`.** `resolve_value()` follows aliases block-first and then `:root`, so every
+  comparison is on hex; a block that spells out `#262626` where `:root` says `var(--fills)` is redundant.
+- `validate_props()` **checks that every palette declaration begins its line** (indentation only) and fails with
+  the file and line number and the offending prefix. A stray character in front of `--role:` makes the
+  declaration invalid CSS that the browser drops silently - the role then falls back to its alias, which presents
+  as a colour that "does not apply" and is otherwise a long hunt.
+- There is no lock and no `--update` any more: a theme is finished by not editing it, and every mode processes
+  every block. The three hand-owned colours (`--page-bg`, `--list-bars`, `--playlist-hover`) are never generated,
+  because no display theme carries a colour meaning "the browser window" or "the zebra stripe".
 
 ## `src/displays/webui_tool.html`
 - Dev-only **theme builder and sampler**: one page showing every kind of coloured element from the player,
@@ -1834,16 +1895,32 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   splits; setting a member (`state.members`) splits only that member and marks the row `splitrow` with an arrow
   that rejoins it. When fewer than two members still follow a head, its colour is handed to the last followers
   and the head is forgotten - which is why the copied block drops the head line at exactly the same point
-  `webuitheme.py --deflate` would.
-- **One arrow per row, and the ROW decides what it resets.** Every row carries a `button.rejoin` &#8635;;
-  `paint()` reveals it by adding `setrow` to the row. `tr[data-head]` clears the head **and** every split in its
+  `theme_tool.py --deflate` would.
+- **Two arrows per row, and the ROW decides what each resets.** `button.rejoin` &#8635; goes back to `:root`,
+  and `paint()` reveals it by adding `setrow` to the row. `tr[data-head]` clears the head **and** every split in its
   family; `tr[data-role]` clears that one role. The key is read from the row's own `data-head` / `data-role` -
   **never from a second attribute on the button**, because a rename then has one place to go wrong instead of two
   (the first version kept `data-reset="text2"` beside `data-head="infotexts"` and the arrow silently looked for a
   head that no longer existed). The standalone roles have no group colour to reset, so each keeps only its own
-  arrow beside its own circle. **`setrow` follows any override** - standalone included - while `splitrow` needs a
+  arrows beside its own circle. **`setrow` follows any override** - standalone included - while `splitrow` needs a
   family to be split from. Family head rows are boxed - `tr.fam td` draws top and bottom, the first and last cell
   close the ends - so a group reads as a sub-heading.
+- **`button.reload` &#9100; is the second undo: back to what the loaded theme gave the row.** `LOADED` is a
+  `{heads, members}` snapshot taken at the end of `loadTheme()`, refreshed after a save, and cleared by
+  `Reset all to :root` - so it always means "the last file in or out", and the arrow disappears when nothing has
+  been loaded. `paint()` adds `loadrow` when `valueIn(state, name) !== valueIn(LOADED, name)`, and `valueIn()`
+  resolves member, own head, family head, then `:root`, so a split, a head line and plain inheritance compare
+  exactly as `valueOf()` paints them. On a head row `reloadFamily()` restores the head line the theme carried, or
+  the individual splits it had, rather than one head colour. **Where the block never named a role the two arrows
+  coincide** - the loaded value IS the `:root` one - which is correct rather than a bug. Both arrows sit after the
+  circle and are `display: none` until their row class appears, so one showing never moves the circle.
+- **A jump is marked by a rainbow, not by an accent colour.** `jump()` rings the element it lands on with
+  `.jump-hit`, whose `jump-rainbow` keyframes step the hue 60 degrees at a time for three 0.8 s cycles while the
+  glow and the outline offset pulse with it; the class lives 2.5 s. The ring is deliberately a colour no palette
+  can contain, because `--tool-accent` sat close enough to a theme's own colour to be mistaken for it. A repeat
+  jump restarts the animation (class off, forced reflow, class on) and clears the element's own `jumphitTimer`, so
+  a second click cannot inherit the first one's deadline. `prefers-reduced-motion` drops the animation and keeps a
+  still magenta ring. An outline takes no space, so none of it disturbs the layout it is pointing at.
 - **Copy / paste uses a clipboard of the page's own, and the pair belongs to one row.** Hovering a `td.sw` makes
   that row `hot` - a 3 s timer refreshed by movement *inside the cell*, so reaching for the icon beside the circle
   does not hide it, and hovering another swatch moves it there - which reveals `button.clipbtn` (&#128464;).
@@ -2122,6 +2199,18 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
       layer of wrapping quotes, and the `play` value-shape handling (`play` alone becomes `start`, `play <url>` becomes
       `burl`)
   - playlist CSV parsing and station lookup/load helpers
+  - **`playlistLength()` derives the SD count from the index file - `(size - 8) / 4` - and opens and closes it on every
+    call**, so it is not free on the main loop: `player.next()`, `player.prev()`, `loadStation()` and `findStationByUrl()`
+    all call it, plus the web handlers. **It returns `uint16_t`, which is what caps the library at 65,535 tracks - and at
+    65,536 the count wraps to 0**, so the radio sees an *empty playlist* rather than a truncated one. **Capped on
+    2026.10.26** by `MAX_PLAYLIST_ENTRIES` (`config.h`): `playlistLength()` clamps to it and warns once, and the three
+    places that could create a row past it stop instead - `SDManager::listSD()` (stops adding to `sdplaylist.csv`/
+    `sdindex`), `SDManager::_countAudioFilesRecursive()` (so the footer count still matches what was indexed and the
+    card does not re-index every boot), `Utility::indexPlaylist()` (stops reading `playlist.csv`) - and the WebUI add
+    endpoint refuses the 65,536th station rather than computing `cs + 1 == 0`. The index footer already stores the count
+    as 4 bytes, so the file format is not the limit; widening to `uint32_t` means `playlistLength()`,
+    `config.countStation`, `config.lastStation`, the `PR_PLAY` payload and the web/display station ids. **Widening
+    deliberately deferred on 2026.10.25** - see `plans/shuffle-without-repeats.md`.
   - WiFi credential parse/save/import helpers
   - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`); `doSleepW()` is also reached from `ticks()`'s
     deep-sleep timer (`sleeptimer` / `sleepSsTimeout`, 5..1080 minutes)
@@ -3787,8 +3876,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - Primary stylesheet, and the WebUI's only palette: the `:root` block at the top declares every colour
   variable (this was `data/www/theme.css`, folded in), followed by one `:root[data-theme="N"]` block per
   Display Theme that changes the palette.
-- A theme finished by hand carries `PERFECT` in its block title; `webuitheme.py` then never touches
-  it again. Themes 0 (the anchor design) and 1 (the restored yoRadio Gold) are locked that way.
+- There is no lock any more: every block is processed by every mode, and a theme is finished by not editing it.
+  The old `PERFECT` title suffix went with the `--update` stage it existed to protect, and `--theme-name` is a
+  declaration rather than part of a comment.
 - On a non-TFT build there is no display palette, so the same setting is labelled "WebUI Theme"
   (`group_webui_theme`) and the `theme` command saves `themeId` without calling
   `display.applyTheme()` - on OLED that would only repaint the panel. On a TFT that call is compiled in, so
@@ -3801,11 +3891,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts` - holds the one colour and its members
   point straight at it, so one edit moves the family and a theme splits a member by declaring that member.
   **A head is painted by no rule and never written into a block**: a name that appears only in `:root` is a
-  head, and `webuitheme.py` treats it as such (not in `ROLE_ORDER`, never inflated). The nine standalone
+  head, and `theme_tool.find_families()` treats it as such (not in `ROLE_ORDER`, never inflated). The nine standalone
   colours are `--input-border`, `--list-bars`, `--list-names`, `--logo`, `--logo-shadow`, `--logo-text`,
   `--page-bg`, `--panel-gradient` and `--playlist-hover`.
-  **The default palette is deliberately neutral** (black/white/grey), so a theme is what adds colour; block 0
-  is still empty, so the default (`data-theme="0"`) is exactly `:root`. `--accent-text` no longer exists: it
+  **The default palette is deliberately neutral** (black/white/grey), so a theme is what adds colour. `:root` is
+  also the fallback whenever no `data-theme` is set, which is what the on-device editor shows while previewing an
+  unsaved theme; block 0 carries its own declarations like every other block. `--accent-text` no longer exists: it
   was folded into `--heading-text` once it turned out to have no role of its own.
   `--background` is now `--panel-background`, which says what it paints and matches the rest.
   Families: `--surfaces` = `--panel-background` / `--scrollbar-track` / `--switch-track`; `--edges` =
@@ -3851,9 +3942,10 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   Cancel) are ordinary `.fb` buttons now.
 - To judge a change against every screen at once, or to build a theme block, open `src/displays/webui_tool.html` -
   see its own section above.
-- The built-in blocks are generated by `src/displays/webuitheme.py` and carry a `mode=` marker; hand edits
-  are expected. `--inflate`/`--deflate` (or `--deflate-lossy`) keep a block lean, and `--update` shows the
-  import diffs before replacing one.
+- The blocks in `data/www/themes.css` are generated by `theme_tool.py -i` when a display theme is imported, and
+  then by hand in `webui_tool.html`; `theme_tool.py --inflate`/`--deflate` (or `--deflate-lossy`) keep one lean.
+  There is no `mode=` marker and no `--update`: themes.h is written once per theme and the WebUI palette is
+  tuned after that.
 - `#info` is a one-line flex row by construction: `nowrap`, no per-item minimum widths, and `#bitinfo` the only item
   that
   flexes (centred, ellipsising). The old `min-width: 110px` per item plus `flex-wrap: wrap` is what used to push an item
@@ -3922,19 +4014,28 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     wider than the window, was painted at an underflowed centre offset, which reads as "nothing drawn". `_draw()` was
     already virtual, so this removes a static/dynamic mismatch rather than adding a mechanism.
   - `TextWidget::_realLeft()` **clamps** rather than underflowing: when `_textwidth` is not smaller than the available
-    width it returns `0` (the widget's own left edge) instead of wrapping the subtraction to ~65500 and painting
-    off-panel. Only reachable for text wider than its space — a `ScrollWidget` scrolls instead and a plain `TextWidget`
-    is conf-sized — so the clamp is insurance against the invisible-rather-than-misplaced failure mode.
+    width it returns the SPAN's left edge — `offset` where the widget has a span, the panel edge where it has not —
+    instead of wrapping the subtraction to ~65500 and painting off-panel. Only reachable for text wider than its
+    space — a `ScrollWidget` scrolls instead and a plain `TextWidget` is conf-sized — so the clamp is insurance
+    against the invisible-rather-than-misplaced failure mode, and it keeps a too-wide line spilling to the RIGHT, into
+    the direction its own window clips and erases, rather than out of its span to the left.
   - The boot text line (`Display::_bootstring`, built in `Display::_bootScreen()`) is a `ScrollWidget` fed from the
     conf's plain `bootstrConf` `WidgetConfig`, so a string that fits is drawn statically at the conf's align (WA_CENTER
-    still rules) and a longer one parks at the edge and scrolls. Its window and buffer are derived in code (`width =
-    MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128, uppercase), and its **scroll cadence is borrowed from the panel's own
+    still rules) and a longer one parks at the span's edge and scrolls. Its window and buffer are derived in code
+    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128, uppercase), and its **scroll cadence is
+    borrowed from the panel's own
     `apSettConf`** — `startscrolldelay`, `scrolldelta` and `scrolltime` only, never that entry's
     `left/top/width/buffsize/fontsize`, which belong to its own line and differ on the round TFT (`left =
     TFT_BORDER+32`, `width = MAX_WIDTH-64`) and the 220x176 (`width = DSP_WIDTH+10`). That inherits each panel's tuned
     step: 1px on the OLEDs and small TFTs, 2px on the 220x176 and every panel 240px and up, 4px on the 428x142,
     `apSettConf.widget.textsize > 0` is the guard if the entry is `{ }`, which zero-initialises it and would leave the
-    boot line standing still — the fallback is `SCROLLTIME`.
+    boot line standing still — the fallback is `SCROLLTIME`. **`offset` is the one field the conf cannot supply**:
+    it is the span's LEFT EDGE, not a margin (`WidgetConfig::offset`), and it is dead in the plain centred widget the
+    conf declares — which is why every conf leaves it `0`. It goes live as soon as the line becomes a scroll, so with
+    `width = MAX_WIDTH` it must be the border inset; left at `0` the line centred inside `[0, MAX_WIDTH)` and sat one
+    `TFT_BORDER` left of the glass (10 px on a 480x320, 8 px on the 320x240/240x240 — a character or two at the boot
+    sizes). The OTA/validator label in `Display::_buildPages()` had the same shape (`offset = 0` while keeping
+    `apSettConf`'s inset width) and now centres that span on the glass instead.
   - **One line scrolls at a time, and a DESTROYED line used to leave that slot dangling.** `dsp.setScrollId()` is a
     single pointer for the whole panel: `ScrollWidget::_calcX()` takes it while a line is mid-scroll and releases it
     on wrap, `setText()` releases it when the line owns it, and `_draw()` returns early while it names someone else.

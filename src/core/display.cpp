@@ -378,9 +378,16 @@ void Display::_bootScreen() {
   _boot->addWidget(new ProgressWidget(_bootConfig.bootWdtConf, _bootConfig.bootPrgConf, BOOT_PRG_COLOR, 0,
                                       "\023", startup.icon()));
   // A ScrollWidget fed from bootstrConf's plain WidgetConfig: text that fits is drawn at the conf's align
-  // (so WA_CENTER still rules), a longer string parks at the edge and scrolls.  Only the scroll fields are derived.
+  // (so WA_CENTER still rules), a longer string parks at the span's edge and scrolls.  Only the scroll fields are
+  // derived.
   ScrollConfig bootScroll;
-  bootScroll.widget = _bootConfig.bootstrConf;  // offset, top, textsize and align straight from the conf
+  bootScroll.widget = _bootConfig.bootstrConf;  // top, textsize and align straight from the conf
+  // `offset` is the span's LEFT EDGE, not a margin (see WidgetConfig::offset), and it is dead in the plain centred
+  // widget this conf is declared as - which is why every conf leaves it 0.  It goes live the moment the line
+  // becomes a scroll, so centring inside [0, MAX_WIDTH) put the text one TFT_BORDER left of the glass: a character
+  // or two at the boot sizes, and the only line on the boot screen that was off.  The span is MAX_WIDTH wide, so
+  // its edge is the border inset itself.
+  bootScroll.widget.offset = TFT_BORDER;
   bootScroll.width = MAX_WIDTH;
   // The cadence is borrowed from the panel's own message line rather than hardcoded: apSettConf is the same
   // species of line and its step and scrolltime are tuned per panel.  Only these three fields are taken, and a
@@ -490,9 +497,12 @@ void Display::_buildPager() {
   pages[PG_DIALOG]->addWidget(_nums);
     // scrolling update/validate label and progress bar.  Built in every build - the online update drives it,
     // and so does the playlist validator.
-    // copy apSettConf scroll params but center position on dialog page
+    // Copy apSettConf's scroll params, but centre on the GLASS.  A WA_CENTER line centres inside its span, and
+    // that span starts at `offset`, so zeroing offset while keeping the conf's inset width left the label one
+    // border left of centre - the same rule the boot line below now honours.  Centre the span itself, whatever
+    // width this panel's apSettConf asks for.
     ScrollConfig updConf = _bootConfig.apSettConf;
-    updConf.widget.offset = 0;
+    updConf.widget.offset = (dsp.width() > updConf.width) ? (uint16_t)((dsp.width() - updConf.width) / 2) : 0;
     updConf.widget.align = WA_CENTER;
     updConf.widget.top = (dsp.height() - (updConf.widget.textsize * CHARHEIGHT)) / 2;
     updConf.widget.top = max<int16_t>(0, updConf.widget.top - CHARHEIGHT);
@@ -1398,6 +1408,21 @@ char *split(char *str, const char *delim) {
   return dmp + strlen(delim);
 }
 
+// A title that came from a FILENAME carries its extension; one that came from a tag never does.  Stripping a known
+// audio suffix in place is therefore safe and is what stops the second title line reading "Nothingman.mp3" on a card
+// whose files have no readable tags (ID3v1 lives at the end of the file and is only read when the track ends).
+static void stripAudioExtension(char* s) {
+  static const char* const ext[] = { ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".m4b", ".aac", ".wav", ".mp4" };
+  const size_t n = strlen(s);
+  for (size_t i = 0; i < sizeof(ext) / sizeof(ext[0]); ++i) {
+    const size_t e = strlen(ext[i]);
+    if (n <= e) continue;
+    size_t k = 0;
+    while (k < e && tolower((unsigned char)s[n - e + k]) == ext[i][k]) ++k;
+    if (k == e) { s[n - e] = '\0'; return; }
+  }
+}
+
 // config.station.title arrives as "artist - song" and the layout has two title lines for it.  Both the
 // player page and the screensaver's info line want the two halves, so the rule lives here rather than in
 // either caller.  False when there is no title at all; otherwise `first` is the whole string with
@@ -1406,6 +1431,8 @@ static bool splitTitle(char* dst, size_t dstSize, char*& first, char*& second) {
   first = second = nullptr;
   if (!config.station.title[0]) return false;
   strlcpy(dst, config.station.title, dstSize);
+  stripAudioExtension(dst);
+  if (!dst[0]) return false;
   second = split(dst, " - ");
   first = dst;
   return true;

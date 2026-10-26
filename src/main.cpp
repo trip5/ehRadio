@@ -16,6 +16,7 @@
 #include "core/player.h"
 #include "core/rgbled.h"
 #include "core/sdmanager.h"
+#include "core/utility.h"   // Utility::serviceSleep(): the main loop performs a sleep a Ticker asked for
 #ifdef USE_SD
   #include "core/filemanager.h"   // SD card file manager: /sdman and its mode
 #endif
@@ -47,16 +48,20 @@ void setup() {
     Serial.setTxBufferSize(4096); // activate ring-buffer
   #endif
   Serial.begin(115200);
-  #if (CORE_DEBUG_LEVEL > 0) || defined(ALL_DEBUG_LOGS)
-    // A crash needs the same wait as a cold boot: after a panic esp_reset_reason() is not ESP_RST_POWERON, so
-    // without this the summary would print before the host terminal attached.  A crash reports on the NEXT boot.
+  {
     const bool dumpedCrash = crashDumpAvailable();
-    if (dumpedCrash || esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_EXT) { // poweron boot or a crash
-      delay(1000);
-      BOOTLOG("1 second delay after cold boot to ensure serial logs are available (CORE_DEBUG_LEVEL > 0 or ALL_DEBUG_LOGS)...");
-    }
+    #if (CORE_DEBUG_LEVEL > 0) || defined(ALL_DEBUG_LOGS)
+      if (dumpedCrash || esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_EXT) {
+        delay(1000);
+        BOOTLOG("1 second delay after cold boot to ensure serial logs are available (CORE_DEBUG_LEVEL > 0 or ALL_DEBUG_LOGS)...");
+      }
+    #else
+      // And a del
+      BOOTLOG("1 second delay after cold boot to ensure crash log is available...");
+      if (dumpedCrash) delay(1000);
+    #endif
     if (dumpedCrash) crashDumpReport();   // the previous boot's crash, reported into this boot's serial log
-  #endif
+  }
   #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
     Serial.setTxTimeoutMs(BOOTLOG_TX_TIMEOUT_MS);
   #endif
@@ -202,9 +207,9 @@ void loop() {
           (unsigned long)(staged[2] / 1000UL), (unsigned long)(staged[3] / 1000UL),
           (unsigned long)(staged[4] / 1000UL));
     }
-}
+  }
 
-#ifdef CORE_MONITOR
+  #ifdef CORE_MONITOR
     cmMainCount++;
     uint32_t cmDur = micros() - cmLoopStart;
     if (cmDur > cmMaxMainLoop) cmMaxMainLoop = cmDur;
@@ -244,10 +249,29 @@ void loop() {
       if (++cmEtcCount >= CORE_MONITOR_ETC_LOOPS) {
         cmEtcCount = 0;
         FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes());
-        // Internal free and the largest CONTIGUOUS block - the figure a TLS handshake actually needs
-        FUNCTIONLOG("Heap", "Internal: %uKB free, %uKB largest block",
+        const bool heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
+        const bool heapPsramOk = !psramFound() || heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+        const char* heapVerdict =
+              (heapInternalOk && heapPsramOk)  ? " | heap ok"
+            : (!heapInternalOk && !heapPsramOk) ? " | heap CORRUPT (internal+PSRAM)"
+            : !heapInternalOk                   ? " | heap CORRUPT (internal)"
+                                                : " | heap CORRUPT (PSRAM)";
+        if (!heapInternalOk || !heapPsramOk) {
+          // One ERROR per boot on top of the per-tick verdicts: it carries the uptime, which is what a bisect needs.
+          static bool heapErrorLogged = false;
+          if (!heapErrorLogged) {
+            heapErrorLogged = true;
+            ERRORLOG("heap corruption detected %lus after boot: internal %s, PSRAM %s",
+                     (unsigned long)(millis() / 1000UL),
+                     heapInternalOk ? "ok" : "CORRUPT", heapPsramOk ? "ok" : "CORRUPT");
+          }
+        }
+        FUNCTIONLOG("Heap", "Internal: %uKB free, %uKB largest | PSRAM: %uKB free, %uKB largest%s",
             ESP.getFreeHeap() / 1024,
-            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024,
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024,
+            heapVerdict);
         if (psramFound()) {
           size_t psramTotal = ESP.getPsramSize();
           size_t psramUsed  = psramTotal - ESP.getFreePsram();
@@ -270,6 +294,11 @@ void loop() {
   #ifdef USE_SD
     filemanager.loop();
   #endif
+
+  /* A sleep the timers asked for is performed HERE, on the main loop.  Both requesters (the sleep timer in ticks() and
+     the Ticker armed by sleepForAfter()) are esp_timer callbacks, and display.deepsleep() plus a telnet-capable log line
+     do not belong on that task. */
+  utility.serviceSleep();
 }
 
 

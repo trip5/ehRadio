@@ -199,6 +199,9 @@ void Player::loop() {
         }
         // Manual next/prev/playlist pick/station selection clears mute; the EOF auto-advance keeps it.
         if (!autoAdvance) _muted = false;
+        // Re-derived on every PR_PLAY, which is the only call site of _play(): an EOF advance must not wake the panel,
+        // restart its countdown or force a mode change, because none of that was the user's doing.
+        _autoAdvancePlay = autoAdvance;
         autoAdvance = false;
         _play((uint16_t)abs(requestP.payload)); 
         break;
@@ -223,9 +226,22 @@ void Player::loop() {
           // Debounced: one failed raw read is a busy card, not a removal, and acting on it dropped the mode to web
           // right after the SD File Manager closed on a freshly remounted card.
           if (config.getMode()==PM_SDCARD && !sdman.cardPresentStable()) {
-            FUNCTIONLOG("SD", "Card gone for %u checks - leaving SD mode", (unsigned)sdman.cardGoneStrikes());
-            sdman.stop();
-            config.changeMode(PM_WEB);
+            // The probe shares the bus with the file being read, so three misses mean "busy" as easily as "gone" -
+            // and unmounting under an open handle strands the audio library with no way to report it.  Close the
+            // file first, then ask once more with nothing reading the card.
+            FUNCTIONLOG("SD", "card probe failed %u times - stopping the file before the verdict", (unsigned)sdman.cardGoneStrikes());
+            stopSync();
+            vTaskDelay(pdMS_TO_TICKS(50));  // let the card finish the block the closed read left in flight
+            if (sdman.cardPresent()) {
+              FUNCTIONLOG("SD", "card answers again - resuming the track");
+              sendCommand({PR_PLAY, config.lastStation()});
+            } else if (network.status == SDOFFLINE) {
+              sdman.stop();  // changeMode() refuses to act offline, so this mode does it here
+              display.putRequest(NEWMODE, PLAYER);
+              setReady();
+            } else {
+              config.changeMode(PM_WEB);  // stops (already stopped), unmounts, re-indexes
+            }
           }
           break;
         }
@@ -244,12 +260,41 @@ void Player::loop() {
   Audio::loop();
   audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
 
+  #ifdef USE_SD
+    // A card file that stops feeding prints no audio line at all, so this heartbeat is the record of when it stopped.
+    // Re-armed on every entry, which makes the first line of a play land immediately.
+    if (SD_PLAY_TRACE_MS > 0 && _status==PLAYING && isRunning() && config.getMode()==PM_SDCARD) {
+      const uint32_t now = millis();
+      if (_traceNextMs == 0 || (int32_t)(now - _traceNextMs) >= 0) {
+        _traceNextMs = now + SD_PLAY_TRACE_MS;
+        FUNCTIONLOG("SD", "play pos %u buffer %u card %u/%u", (unsigned)getFilePos(), (unsigned)inBufferFilled(),
+            (unsigned)sdman.ready, (unsigned)sdman.cardGoneStrikes());
+      }
+    } else {
+      _traceNextMs = 0;
+    }
+  #endif
+
   // Clear the "connecting" placeholder on player state
   if (isRunning() && isConnecting()) {
     config.setTitle("");
   }
 
   if (!playlistValidator.active() && !isRunning() && _status==PLAYING) {
+    // Name the state whenever the engine goes down under a live PLAYING status.  A clean end of track passes through
+    // here too - it clears m_f_running inside Audio::loop() a few statements earlier - so an in-flight EOF advance is
+    // not a fault and gets no line of its own; the two [Audio.info] lines already record it.  Anything else is news.
+    if (!autoAdvance) {
+      #ifdef USE_SD
+        FUNCTIONLOG("Player", "audio stopped while PLAYING: pos %u dur %u buffer %u mode %u card %u/%u",
+            (unsigned)getFilePos(), (unsigned)getAudioFileDuration(), (unsigned)inBufferFilled(),
+            (unsigned)config.getMode(), (unsigned)sdman.ready, (unsigned)sdman.cardGoneStrikes());
+      #else
+        FUNCTIONLOG("Player", "audio stopped while PLAYING: pos %u dur %u buffer %u mode %u",
+            (unsigned)getFilePos(), (unsigned)getAudioFileDuration(), (unsigned)inBufferFilled(),
+            (unsigned)config.getMode());
+      #endif
+    }
     // Stream died unexpectedly - trigger reconnection if WiFi is still up and this is not a dead URL
     if (!_fatalStream && config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
       FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
@@ -314,16 +359,22 @@ void Player::_play(uint16_t stationId) {
     }
   #endif
   if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
+  #ifdef USE_SD
+    if(config.getMode()==PM_SDCARD && config.store.sdshuffle && stationId > 0 && !_shuffleWalkOwns) {
+      _shuffleRestart(stationId);  // Selkecting track manually resets the shuffle
+    }
+    _shuffleWalkOwns = false;
+  #endif
   setError("");
   _fatalStream = false;  // a new station clears a previous permanent-error stop
   setDefaults();
   audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
-  config.setDspOn(1);
+  if (!_autoAdvancePlay) config.setDspOn(1);   // setDspOn(true) wakes a blanked panel
   config.vuThreshold = 0;
   //display.putRequest(PSTOP);
-  config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
+  if (!_autoAdvancePlay) config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
   if (config.getMode()!=PM_SDCARD) {
     display.putRequest(PSTOP);
   }
@@ -364,14 +415,14 @@ void Player::_play(uint16_t stationId) {
     _loadVol(config.store.volume);   // re-apply volume (respects _muted) after connect* — setDefaults() inside it must not win
     if (config.getMode()==PM_SDCARD) {
       config.sdResumePos = 0;
-      config.saveValue(&config.store.lastSdStation, stationId);
+      config.saveValueButWait(&config.store.lastSdStation, stationId, 5000);  // an NVS write here stalls the loop
     } else {
       config.saveLastStationUrl(config.station.url);
     }
     //config.setTitle("");
     netserver.requestOnChange(MODE, 0);
     setOutputPins(true);
-    display.putRequest(NEWMODE, PLAYER);
+    if (!_autoAdvancePlay) display.putRequest(NEWMODE, PLAYER);   // NEWMODE PLAYER is what leaves the screensaver
     display.putRequest(PSTART);
     #ifdef RADIO_BROWSER_SEND_CLICKS
       if (config.getMode()==PM_WEB && !network.lostPlaying) radioBrowserSendClick(config.station.url);
@@ -448,22 +499,110 @@ void Player::playUrl(const char* url) {
   }
 }
 
+// The shuffle walk:
+// A Feistel network shuffle gives predictable shuffle without storing anything: the k-th track of a pass is computed from
+// k and a per-pass key, and outputs >= n are skipped ("cycle-walking").  The domain is the smallest EVEN-bit power of two >= n,
+// so fewer than half of all values are skipped and a step costs two checks on average.  Being a permutation it is invertible.
+
+// The walk's raw value for counter x, before cycle-walking.  Four balanced Feistel rounds round the key.
+uint32_t Player::_shuffleEnc(uint32_t x, uint32_t bits) {
+    const uint32_t half = bits / 2;
+    const uint32_t mask = (1ul << half) - 1ul;
+    uint32_t l = (x >> half) & mask;
+    uint32_t r = x & mask;
+    for(uint32_t round = 0; round < 4; round++) {
+        uint32_t f = (r ^ _shuffleKey ^ (0x9E3779B9ul * (round + 1ul))) * 2654435761ul;
+        f ^= f >> 16;
+        f &= mask;
+        uint32_t t = l ^ f;
+        l = r;
+        r = t;
+    }
+    return ((l & mask) << half) | (r & mask);
+}
+
+// The first id this key would produce, without advancing the walk; -1 if the walk is degenerate.
+int32_t Player::_shuffleFirst() {
+    for(uint32_t c = 0; c < 4096; c++) {
+        uint32_t v = _shuffleEnc(c, _shuffleBits);
+        if(v < _shuffleN) return (int32_t)(v + 1);
+    }
+    return -1;
+}
+
+// Start a pass over the playlist.  Re-key until the pass does not OPEN with the track that just played, so the boundary
+// between two passes cannot repeat a track either - the walk itself stays a permutation, nothing is dropped.
+void Player::_shuffleStartPass(uint16_t avoidId) {
+    for(uint8_t attempt = 0; attempt < 8; attempt++) {
+        _shuffleKey = ((uint32_t)random(0x7FFFFFFF) << 1) ^ (uint32_t)micros() ^ ((uint32_t)millis() << 12);
+        int32_t first = _shuffleFirst();
+        if(first < 0 || (uint16_t)first != avoidId) break;
+    }
+    _shuffleRaw = 0;
+    _shufflePass = 0;
+    FUNCTIONLOG("Player", "shuffle pass over %u tracks", (unsigned)_shuffleN);
+}
+
+void Player::_shuffleRestart(uint16_t avoidId) {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return;
+    _shuffleBits = 0;
+    while(_shuffleBits < 32 && (1ul << _shuffleBits) < n) _shuffleBits++;
+    if(_shuffleBits & 1) _shuffleBits++;  // a balanced Feistel split needs an even width
+    _shuffleN = n;
+    _shuffleStartPass(avoidId);
+}
+
+uint16_t Player::_shuffleNext() {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return n ? 1 : 0;  // nothing to shuffle
+    if(_shuffleN != n) _shuffleRestart(config.lastStation());  // first shuffled next(), or the playlist changed
+    if(_shufflePass >= _shuffleN) _shuffleStartPass(config.lastStation());  // that pass is complete
+    for(uint16_t guard = 0; guard < 4096; guard++) {
+        uint32_t v = _shuffleEnc(_shuffleRaw++, _shuffleBits);
+        if(v < _shuffleN) { _shufflePass++; return (uint16_t)(v + 1); }
+    }
+    return (uint16_t)random(1, (long)n + 1);  // cannot happen: keep playing rather than stop
+}
+
+uint16_t Player::_shufflePrev() {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return n ? 1 : 0;
+    if(_shuffleN != n) return 0;  // no walk for this playlist yet, so there is no "back"
+    uint32_t c = (_shuffleRaw > 0) ? _shuffleRaw - 1 : 0;   // the counter that produced the current track
+    uint16_t guard = 0;
+    while(c > 0 && guard++ < 4096) {
+        c--;
+        uint32_t v = _shuffleEnc(c, _shuffleBits);
+        if(v < _shuffleN) {
+            _shuffleRaw = c + 1;  // a following next() reproduces the track we came from
+            if(_shufflePass) _shufflePass--;
+            return (uint16_t)(v + 1);
+        }
+    }
+    return 0;  // this is the first track of the pass
+}
+
 void Player::prev() {
   network.cancelStreamRetry();
-  uint16_t lastStation = config.lastStation();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
+    uint16_t lastStation = config.lastStation();
     if (lastStation == 1) config.lastStation(utility.playlistLength()); else config.lastStation(lastStation-1);
+  } else {
+    uint16_t id = _shufflePrev();
+    if (id) { _shuffleWalkOwns = true; config.lastStation(id); }  // 0 = nothing behind this one: it restarts the track
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }
 
 void Player::next() {
   network.cancelStreamRetry();
-  uint16_t lastStation = config.lastStation();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
+    uint16_t lastStation = config.lastStation();
     if (lastStation == utility.playlistLength()) config.lastStation(1); else config.lastStation(lastStation+1);
   } else {
-    config.lastStation(random(1, utility.playlistLength()));
+    uint16_t id = _shuffleNext();
+    if (id) { _shuffleWalkOwns = true; config.lastStation(id); }
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }

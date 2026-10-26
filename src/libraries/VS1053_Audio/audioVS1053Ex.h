@@ -324,6 +324,7 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     bool            m_f_eof = false;                // end of file reached
     bool            m_f_ID3v1TagFound = false;      // ID3v1 tag found
     uint32_t        m_sumBytesDecoded = 0;          // used for streaming position tracking
+    bool            m_f_paused = false;             // user pause: the no-progress watchdog must not end a paused track
     uint32_t        m_bytesNotDecoded = 0;          // pictures or other non-audio data in stream
     int16_t         m_validSamples = {0};           // samples still to play (I2S leftover, may be 0 for VS1053)
     bool            m_f_unsync = false;
@@ -338,7 +339,17 @@ protected:
     inline void DCS_LOW()  {(dcs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << (dcs_pin - 32) : GPIO.out_w1tc = 1 << dcs_pin;}
     inline void CS_HIGH()  {( cs_pin&0x20) ? GPIO.out1_w1ts.data = 1 << ( cs_pin - 32) : GPIO.out_w1ts = 1 <<  cs_pin;}
     inline void CS_LOW()   {( cs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << ( cs_pin - 32) : GPIO.out_w1tc = 1 <<  cs_pin;}
-    inline void await_data_request() {while(!digitalRead(dreq_pin)) NOP();}    // Very short delay
+    /* Bounded wait for DREQ.  This used to spin for ever, so a decoder that stopped accepting data (DREQ stuck low)
+       hung the caller instead of reporting a problem - and both send paths and stopSong() call it.  50 ms is two
+       orders of magnitude above the longest legitimate wait, so a false answer always means the chip is wedged. */
+    inline bool await_data_request(uint32_t timeoutUs = 50000) {
+        const uint32_t start = micros();
+        while(!digitalRead(dreq_pin)) {
+            if((uint32_t)(micros() - start) > timeoutUs) return false;
+            NOP();
+        }
+        return true;
+    }
     inline bool data_request()     {return(digitalRead(dreq_pin) == HIGH);}
 
     void     initInBuff();
@@ -444,14 +455,43 @@ private:
     static void     taskWrapper(void *param);
     void            audioTask();
     void            performAudioTask();
+    void            endLocalFile();        // the single end-of-track path for a local file
     uint8_t         m_audioTaskCoreId = 1;
     bool            m_f_audioTaskIsRunning = false;
+    // SDI liveness, written by sendBytes() and read by the VU flat-meter report: total bytes handed to the
+    // decoder and when the last non-zero write happened.  Two stores per feed call, no gate.
+    volatile uint32_t m_feedBytes = 0;
+    volatile uint32_t m_feedLastMs = 0;
+    // Silent exit counters.  Every one of these exits returns without logging, so a stalled audio task is
+    // indistinguishable from a healthy one; these name the exit instead.  Only the printing is gated.
+    volatile uint32_t m_dbgStopCalls = 0;
+    volatile uint32_t m_dbgDefaultsCalls = 0;
+    volatile uint32_t m_dbgTaskCalls = 0;
+    volatile uint32_t m_dbgEarlyRun = 0;
+    volatile uint32_t m_dbgEarlyStream = 0;
+    volatile uint32_t m_dbgEarlyCodec = 0;
+    volatile uint32_t m_dbgPlayCalls = 0;
+    volatile uint32_t m_dbgPlayEof = 0;
+    volatile uint32_t m_dbgPlayValid = 0;
+    volatile uint32_t m_dbgPlayLock = 0;
+    volatile uint32_t m_dbgPlayTakes = 0;
+    // Reader telemetry: the end-of-track path in processLocalFile() is not being reached, so publish what the reader
+    // itself sees rather than inferring it.  Only the reader task writes these, the display task only reads them.
+    volatile uint32_t m_dbgReaderCalls = 0;
+    volatile uint32_t m_dbgReaderEof = 0;
+    volatile uint32_t m_dbgReadPos = 0;
+    volatile uint32_t m_dbgLastRoom = 0;
+    volatile int32_t  m_dbgLastAdded = 0;
+    volatile uint32_t m_dbgTrackStartMs = 0;   // set by setDefaults(), drives the per-track report
+    volatile bool     m_dbgTrackReported = true; // true until the next connection arms it
 
 public:
     /* VU METER */
     void     setVUmeter();
     uint16_t get_VUlevel(uint16_t dimension);
     void     computeVUlevel();
+    // Two-line diagnostic report; defined only under AUDIO_DEBUG (a declaration without a definition is legal).
+    void     vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR);
     /* No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
        these return false, which keeps the widget's "is there a spectrum?" path the same on both audio
        backends.  The spectrum style is still offered on this build - it is drawn from the synthesised

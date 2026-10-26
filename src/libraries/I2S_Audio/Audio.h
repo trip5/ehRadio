@@ -768,6 +768,12 @@ private:
     uint32_t        m_stsz_position = 0;            // pos of stsz atom within file
     uint32_t        m_haveNewFilePos = 0;           // user changed the file position
     uint32_t        m_sumBytesDecoded = 0;          // used for streaming
+    uint32_t        m_stallSum = 0;                 // m_sumBytesDecoded at the last sign of decoder progress
+    uint32_t        m_stallMs = 0;                  // millis() of that sign; 0 = no window open
+    uint32_t        m_ringWritten = 0;              // cumulative bytes handed to the ring this track; see mp3 err line
+    uint32_t        m_gapTraceMs = 0;               // last "track 10s" ring-arithmetic trace, 0 = not yet
+    bool            m_f_firstSync = true;           // still looking for the first frame: a skip here is pre-audio, not audio
+    int32_t         m_lastFrameBytes = 0;           // bytes the decoder consumed on the last good frame
     uint32_t        m_webFilePos = 0;               // same as audiofile.position() for SD files
     bool            m_f_metadata = false;           // assume stream without metadata
     bool            m_f_unsync = false;             // set within ID3 tag but not used

@@ -1,5 +1,22 @@
 # Frankenstein Surgery Notes — VS1053 Library
 
+## Read This With the Other Library's Notes
+
+The two audio libraries share their defect classes, and the dates in this file and in
+`i2s-frankenstein-surgery-notes.md` show the same faults surfacing on both: `2026.10.11` (the m3u8 refetch pause, the
+media-sequence resync, the `TIT2` mis-wire), `2026-10-21` (the screensaver's VU gate) and `2026.10.24` (the per-track
+resets and the ID3v2 frame-size guard). Two practices follow:
+
+* **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+* **The VS1053 board finds these first; the I2S library is the better reference.** This library has a hardware decoder,
+  a DREQ-gated SPI feed and the shallower graft, so end-of-stream accounting faults show up here as audible stalls with
+  readable counters - and this file carries the longer record (fixes from 2026-07 on, against the I2S file's 2026-08).
+  Patient work here has produced the diagnosis every time. But do not assume I2S is "already fine" because it is not
+  the board failing: the three per-track resets that this graft had lost were present and correct in `I2S_Audio`, and
+  copying them back - then correcting the origin the copy brought with it - is what fixed playback. Diff the other
+  library; sometimes it is the fault, sometimes it is the reference.
+
 ## ehRadio Additions After the Graft (read this first)
 
 Recorded for the same reason as the graft itself: so a future migration does not quietly lose them.
@@ -369,7 +386,7 @@ gate — worth remembering when reading the rate figures below.
 **Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — the `everyn` constant.
 
 **Note**: this widens the window in which a display-task `read_register()` can interleave with the
-audio task's `sendBytes()` on the shared SPI bus. No artefacts observed so far, but see Open Items.
+audio task's `sendBytes()` on the shared SPI bus. No artefacts observed so far, but see Future issues to watch for.
 
 ### VU Meter — Integer Division by Zero on a Zeroed Threshold
 
@@ -502,7 +519,7 @@ Safe because:
 - the 16 bits are transferred before the wait would have happened, so the value cannot change.
 
 `control_mode_on()`/`control_mode_off()` still wrap the read, so `beginTransaction`/`endTransaction` still
-hold the SPI bus — this does not widen the mutex-less window noted in Open Items.
+hold the SPI bus — this does not widen the mutex-less window noted under Future issues to watch for.
 
 **Measured effect** (SH1106 build, same station):
 
@@ -524,8 +541,6 @@ be nursed to survive it.
 **Kept deliberately**: the read timing stays in the `VU_VS1053_LOG` diagnostic as a regression check.
 Anything in the hundreds of microseconds there means the DREQ wait has crept back into the VU path.
 
-The full analysis, including the arithmetic behind every number above, is in
-`plans/vu-vs1053-attack.md` §7.
 
 ---
 
@@ -682,29 +697,76 @@ page's setting is ignored and `screensaverVU` decides; while awake `vumeter` dec
 
 ---
 
-## Open Items
+## Post-Graft Patch Fixes (2026.10.26)
 
-1. **Mutex guards on connect functions** (Step 9 deferred): `connecttohost()` and `connecttoFS()` should be wrapped with `mutex_playAudioData` to prevent race conditions. Same pattern Maleksm used.
+Everything from 2026.10.24 to today, consolidated: SD playback stopped silently, and finding out why took six root
+causes. Four of them are one defect - **a per-track member the graft never resets**: the ancestor resets it, the graft
+lost the reset, so it carries over from the previous track or from the boot. The I2S library has every one of these
+fixed in the same commit, because the walk, the tail test and the counter are the same code.
 
-2. **`m_validSamples` in performAudioTask()**: The `while(m_validSamples)` loop is an I2S leftover. For VS1053, `m_validSamples` is initialized to 0 and never incremented, so this loop never executes. Safe to leave as-is or remove.
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | Every ID3v2 track skipped in 0 ms, one per second; tagless (ID3v1) files fine | the ID3 frame walk reads tag padding as a frame header, gets a garbage size (measured 1.4 GB) and state 5 skips to the end of the FILE | in state 4, before any skip: `if(remainingHeaderBytes < 6 \|\| framesize > remainingHeaderBytes - 6) { m_controlCounter = 99; return 0; }` - fall through to the normal tag end, which a healthy tag never reaches |
+| 2 | Audio dies seconds after the screensaver meter appears; only a power cycle recovers; reader frozen with the buffer FULL | the VU read asserts SCI while the audio task holds SDI low mid-chunk, the chip refuses data (DREQ low), and `await_data_request()` waited for ever - including inside `stopSong()` | `await_data_request(timeoutUs = 50000)` returns bool and abandons the chunk on false; `computeVUlevel()` runs under `mutex_audioTask` with a 2 ms timeout (skip the sample, never wait) |
+| 3 | Every track after the first is born past its end: `sum 3470048` against `size 3411531` | `m_sumBytesDecoded` is incremented twice and assigned nowhere - a running total for the boot | reset in `setDefaults()` |
+| 4 | Tracks end early by exactly their own tag size, within 600 bytes | the counter was seeded with `m_audioDataStart` (file-relative) but compared against `m_audioDataSize` (audio-relative) | seed `0`, or `m_resumeFilePos - m_audioDataStart` on a resume |
+| 5 | `Audio-Length` short by the previous track's tag plus its own (`67935 = 43441 + 24494`) | `m_audioDataStart += id3Size` with nothing resetting it | reset `m_audioDataStart`, `m_audioDataSize`, `m_bytesNotDecoded` in `setDefaults()` |
+| 6 | Silent web streams after an SD track in the same boot, with a half-second burst per station change | `f_isFile` was a function-static latched by `m_f_firstPlayCall`, which is initialised `true` and never re-armed - the first play of a boot chose the branch for the whole boot | derive it every pass: `M3U8 ? false : datamode == AUDIO_LOCALFILE ? true : streamType == ST_WEBFILE ? true : false` |
 
-3. **Core assignment**: `m_audioTaskCoreId` defaults to 1. Maleksm recommends opposite core from Arduino loop. For ESP32-S3 where loop runs on Core 1, task should be on Core 0. Adjust via `setAudioTaskCore(0)`.
+Also, and easily missed: the ID3v1 tail test is a **range** (`<= 128`, not `== 128`). `sendBytes()` is handed a full max
+block and the error path skips 200 bytes, so an exact test is stepped over whenever a frame straddles the tag boundary,
+and the decoder reads the 128-byte tag as audio.
 
-4. **Future comparison recommendations**: When migrating to a new upstream library version, always compare:
-   - New upstream vs `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — what changed in the audio core?
-   - New upstream vs `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — what Maleksm changes need re-grafting?
-   - Then re-apply the graft steps documented here, adapting for any API changes.
+### What made it findable, and what nearly stopped it
 
-5. **Mutex-less register reads**: `read_register()` and the new `read_register_nowait()` take no mutex,
-   and `mutex_playAudioData` is created and destroyed but never taken anywhere. The display task can
-   therefore interleave a VU register read with the audio task's `sendBytes()` on the shared SPI bus. In
-   practice `beginTransaction()`/`endTransaction()` hold the bus itself, so the exposure is the
-   control-mode window rather than a torn transfer, and no artefacts have appeared at a 20 Hz read rate.
-   Fixing it properly means having both tasks take `mutex_playAudioData`, which is a real change to the
-   audio path with deadlock and priority-inversion risk — poor value against a hazard that is currently
-   theoretical.
+- **A detector may require that _something is open_, never that _everything is healthy_.** The first watchdog tested
+  `m_f_running && m_f_stream_ready && !m_f_eof`, so a stalled track silenced the very report that would have named it.
+  It now tests `audiofile != nullptr && !m_f_paused`, and nothing else.
+- **Count the silent exits before theorising.** `playAudioData()` and `performAudioTask()` had seven `return`s with no
+  log between them; four theories lived and died in that silence. Each has a counter now, printed beside the state it
+  explains in the `track10s` report.
+- **A member that only accumulates, or is written on one path, is a bug waiting.** Grep every member for `=` and `+=`
+  and compare the count against the ancestor - that audit turned four separate hunts into one shape.
+- **Read the counters, not the audio.** `buf 295903` is the ring's *capacity*, so a constant `[SD] play pos` means the
+  consumer stopped. `HDAT1 0xFFFB` / `HDAT0 0x8064` are the current frame header, so a non-zero HDAT during silence
+  means the decoder is fine and the fault is downstream. `STATUS 0x0240` with `MODE 0x4800` is the known-good pair, and
+  use `read_register_nowait()` when measuring, because `read_register()` busy-waits 50 ms first.
+- **`setDefaults()` is the reset point that matters.** Diff it against the ancestor's before trusting a graft.
+
+### Reports to keep
+
+| line | when | why |
+|---|---|---|
+| `zero read: room … pos … ctrl … filled … stream …` | once per file, at a zero-length read | separates a real end of track (`pos == size`) from a failed read - `room` and `ctrl` say which |
+| `track10s:` (two lines) | 10 s after every connection | records every track whether or not the meter moved, with the counters above |
+| `vu stuck` / `vu flat` / `vu deep` | counter frozen 3 s / meter at the floor | the only detectors for a decoder that goes silent while data keeps flowing |
+| `no decode progress for 5 s` | watchdog in `loop()` | closes the track and advances; `endLocalFile()` is the one path both endings use |
+| `mp3 err -6 … <4 header bytes> … last <frame size>` | decode error | separates a false sync from mid-frame misalignment |
+| `peof` climbing to match `play` with `eof 1` | the `track10s` line, on a connection making no sound | the file/stream branch is being decided wrongly (the 2026.10.26 latch) |
 
 ---
+
+## Future issues to watch for
+
+Not bugs in hand - things a future reader should know are still true, in the order they are likely to bite.
+
+- **`connecttohost()` / `connecttoFS()` take no mutex.** `mutex_playAudioData` is created and destroyed but never taken,
+  so a connect can race the feeder. Never observed to fail, and it is the last unbounded window in the library.
+- **`m_validSamples` gates the task loop and is never incremented** on this backend (an I2S leftover). `m_dbgPlayCalls`
+  against `m_dbgTaskCalls` in the `track10s` line would show it the day that changes.
+- **The audio task runs on core 1**, the same core as the Arduino loop. Maleksm's advice is the opposite core;
+  `setAudioTaskCore(0)` is the intended setting for this board and has never been tried.
+- **`stop` and `defaults` advance four and three times per track** where one or two is expected. Constant per track, so
+  nothing accumulates - but it dilutes the counters used to spot a real double-stop, so it is worth one look.
+- **Two `mp3 err -6` per hour on the I2S board**, both on tracks whose ID3v2 walk mis-sizes a frame, so the search
+  starts in the tag padding. Playback is unaffected. The cure is to accept a sync only if another one sits exactly one
+  frame away.
+- **`read_register()` / `write_register()` elsewhere still take no mutex.** Only the VU path was guarded (2026.10.26);
+  nothing else reads the chip outside the feeder today.
+- **When migrating upstream**, compare the new version against `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` for the
+  audio core and against `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` for Maleksm's graft, then re-apply the
+  steps above. Diff `setDefaults()` first: four per-track resets were lost that way.
+
 
 ## Notes For Future Use
 

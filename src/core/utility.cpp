@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <cstdlib>
 #include <cstring>
+#include <stdarg.h>
 #include <driver/rtc_io.h>
 #include "backlightcontrols.h"
 #include "config.h"
@@ -21,7 +22,7 @@
 // clockTrustworthy() and refreshClock() both ask here instead of each calling time(NULL) and localtime_r().
 bool systemLocalTime(struct tm& out) {
   const time_t now = time(nullptr);
-  if (now <= 31536000) return false;                 // seconds since boot, not a date
+  if (now <= 31536000) return false;  // seconds since boot, not a date
   return localtime_r(&now, &out) != nullptr;
 }
 
@@ -98,10 +99,58 @@ void Utility::sleepCore() {
   #endif
 }
 
+volatile uint8_t Utility::sleepWanted = 0;
+
+// Both of these are called from an esp_timer task, never from the main loop: `ticks()` is a Ticker callback
+// (`network.ctimer.attach(1, ticks)`) and so is the sleep timer that sleepForAfter() arms.  So they do the one thing that
+// is safe from any task - raise a flag - and the sleep itself happens in serviceSleep() below, on the main loop.
+void Utility::requestSleep()     { sleepWanted = 1; }  // sleep now, no wake timer
+void Utility::requestSleepWake() { sleepWanted = 2; }  // sleep, then wake after `sleepfor` minutes
+
+// Main loop: carry out a sleep that a timer, a button or the `sleep` command asked for.  Two phases, because the request
+// and the teardown used to happen in the same instant: display.putRequest(NEWMODE, SLEEPING) is queued to the display
+// task, while sleepCore() calls display.deepsleep() microseconds later - so the message was never painted, and the timer
+// paths never asked for one at all.  Phase A wakes a blanked panel, requests the message and arms SLEEP_MSG_HOLD; phase B
+// does the teardown once the hold has expired.  Deliberately non-blocking: the display task needs those seconds to draw,
+// and the audio task keeps feeding through them.
+void Utility::serviceSleep() {
+  static uint32_t sleepAtMs = 0;
+  static bool     holding   = false;
+  const uint8_t what = sleepWanted;
+  #ifndef DEEP_SLEEP_DISABLE
+    if (what && !holding && SLEEP_MSG_HOLD > 0) {
+      holding = true;
+      sleepAtMs = millis() + (uint32_t)SLEEP_MSG_HOLD * 1000UL;
+      // Silence first, so the message is noticed.
+      network.cancelStreamRetry();
+      player.sendCommand({PR_STOP, 0});
+      config.setDspOn(true);            // a blanked panel would swallow the message we are about to ask for
+      display.putRequest(NEWMODE, SLEEPING);
+      FUNCTIONLOG("SLEEP", "Sleeping in %u s", (unsigned)SLEEP_MSG_HOLD);
+      return;
+    }
+    if (holding && (int32_t)(millis() - sleepAtMs) < 0) return;   // signed: correct across the millis() wrap
+  #endif
+  if (!what && !holding) return;                       // nothing asked and nothing pending: the common case
+  sleepWanted = 0;
+  holding = false;
+  #ifndef DEEP_SLEEP_DISABLE
+    if (what == 2) doSleep(); else doSleepW();
+  #endif
+}
+
 void Utility::doSleep() {
   #ifndef DEEP_SLEEP_DISABLE
+    // 'sleepfor' is minutes: the wake timer takes microseconds, and the message says minutes.  It used to say
+    // "Will wake after %i minutes" with sleepfor * 60, i.e. five minutes printed as three hundred.
+    if (sleepfor > 0) FUNCTIONLOG("SLEEP", "Sleeping now.  Will wake after %i minutes.", (int)sleepfor);
+    else              FUNCTIONLOG("SLEEP", "Sleeping now.");
+    Serial.flush();  // esp_deep_sleep_start() does not wait for the UART to drain, and this line is the record
+    delay(50);
     sleepCore();
-    if (sleepfor > 0) esp_sleep_enable_timer_wakeup(sleepfor * 60 * 1000000ULL);
+    if (sleepfor > 0) {
+      esp_sleep_enable_timer_wakeup(sleepfor * 60 * 1000000ULL);
+    }
     esp_deep_sleep_start();
   #endif
 }
@@ -398,10 +447,19 @@ void Utility::indexPlaylist() {
   char stationUrl[STATION_FIELD_LENGTH] = {0};
   int stationOvol = 0;
   File index = LittleFS.open(INDEX_PATH, "w");
+  uint32_t entries = 0;
   while (playlist.available()) {
     uint32_t pos = playlist.position();
     if (parseCSV(playlist.readStringUntil('\n').c_str(), stationName, stationUrl, stationOvol)) {
+      // Stop READING at the ceiling: a row past MAX_PLAYLIST_ENTRIES can never be given an id. Breaking here
+      // rather than skipping keeps the index contiguous and stops the parse of a hopeless file.
+      if (entries >= MAX_PLAYLIST_ENTRIES) {
+        ERRORLOG("playlist.csv has more than %u stations: the rest are not indexed and cannot be played",
+                 (unsigned)MAX_PLAYLIST_ENTRIES);
+        break;
+      }
       index.write((uint8_t*)&pos, 4);
+      entries++;
     }
   }
   index.close();
@@ -534,12 +592,20 @@ uint16_t Utility::playlistLength() {
     File index = config.SDPLFS()->open(REAL_INDEX, "r");
     size_t sz = index.size();
     // SD index has an 8-byte footer: [magic:4][count:4]
-    if (config.getMode() == PM_SDCARD) {
-      out = (sz >= 8) ? ((sz - 8) / 4) : 0;
-    } else {
-      out = sz / 4;
-    }
+    size_t rows = (config.getMode() == PM_SDCARD) ? ((sz >= 8) ? ((sz - 8) / 4) : 0) : (sz / 4);
     index.close();
+    // This narrowing is where a full card used to become an empty one: 65536 rows truncate to 0, and every consumer then sees an
+    // empty playlist.  Clamping here is the one chokepoint no future writer can defeat. See MAX_PLAYLIST_ENTRIES in config.h.
+    if (rows > MAX_PLAYLIST_ENTRIES) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        ERRORLOG("playlist index holds %u entries; only the first %u have ids and can be played",
+                 (unsigned)rows, (unsigned)MAX_PLAYLIST_ENTRIES);
+      }
+      rows = MAX_PLAYLIST_ENTRIES;
+    }
+    out = (uint16_t)rows;
   }
   return out;
 }
@@ -659,6 +725,9 @@ char* Utility::stationByNum(uint16_t num) {
 
 void Utility::doSleepW() {
   #ifndef DEEP_SLEEP_DISABLE
+    FUNCTIONLOG("SLEEP", "Sleeping now.");
+    Serial.flush();  // esp_deep_sleep_start() does not wait for the UART to drain
+    delay(50);
     sleepCore();
     esp_deep_sleep_start();
   #endif
@@ -667,9 +736,9 @@ void Utility::doSleepW() {
 void Utility::sleepForAfter(uint16_t sleepfor, uint16_t sa) {
   Utility::sleepfor = sleepfor;
   if (sa > 0) {
-    sleepTimer.attach(sa * 60, Utility::doSleep);
+    sleepTimer.attach(sa * 60, Utility::requestSleepWake);  // the callback only raises the flag; serviceSleep() sleeps
   } else {
-    Utility::doSleep();
+    Utility::doSleep();  // already on the main loop, so sleep here and now
   }
 }
 

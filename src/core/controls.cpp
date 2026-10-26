@@ -391,7 +391,7 @@ void Controls::onBtnLongPressStop(int id) {
     case EVT_ENC2_SW: {
         if (network.status == SDOFFLINE) break;
         #ifndef DEEP_SLEEP_DISABLE
-          utility.doSleepW();
+          utility.requestSleep();   // serviceSleep() shows the message, holds it, then sleeps
         #endif
         break;
       }

@@ -1,17 +1,28 @@
-# Importing Themes with `importtheme.py`
+# Themes: `theme_tool.py`
 
 
 ## Want a Good Theme Editor?
 
-Try: https://vip-cxema.org/index.php/online-kalkulyatory/yoradio-redaktor-tem
-
-Which can be mostly be used to feed the importtheme.py script... read below for more information.
+If you have a legacy yoRadio theme or a theme created by a yoRadio theme maker such as
+https://vip-cxema.org/index.php/online-kalkulyatory/yoradio-redaktor-tem then it
+can be used to feed `theme_tool.py -i`... read below for more information.
 
 ## What it does
 
-[`importtheme.py`](../src/displays/importtheme.py) turns theme files into ehRadio's
-[`themes.h`](../src/displays/themes.h) runtime entries. It always appends to the existing `themes.h` —
-never overwrites.
+[`theme_tool.py`](theme_tool.py) turns theme files into ehRadio's
+[`themes.h`](../src/displays/themes.h) runtime entries **and** into the WebUI palette block that entry belongs
+to in [`themes.css`](../data/www/themes.css). It always appends to the existing `themes.h` — never overwrites —
+and the block is written *deflated*, so the two sides of a theme are one run and one index apart: the entry in
+`_themes[]`, its name in `_themeNames[]`, and the block that names itself with `--theme-name`.
+
+The WebUI block comes from the display colours through the same feature map the panel themes were designed
+with, with the offset measured from display theme `[0]` — the theme `:root` in `style.css` was designed for —
+which is what keeps a generated block at ten to twenty lines. `:root` itself is neither read nor written as a
+document: it stays the design, and `theme_tool.py --inflate` / `--deflate` is how it is retuned.
+
+If the two files disagree about how many themes there are, or about their ids, the script stops and asks you
+to hand-edit before it touches anything. A difference in *name* is not a stop: `_themeNames[]` is the
+authority, and every `--theme-name` in `themes.css` is refreshed from it on each run.
 
 Two input formats, told apart by the file itself:
 
@@ -20,10 +31,22 @@ Two input formats, told apart by the file itself:
   `Backup All` array. See *JSON input* below; it is the shorter read.
 
 ```
-py importtheme.py mytheme.h --name "My Theme"      # old style, a name is required
-py importtheme.py "ehRadioTheme-My Neon.json"      # one theme, named by the file
-py importtheme.py ehRadioThemes-Backup.json        # a whole backup, numbered
+py theme_tool.py -i mytheme.h --name "My Theme"      # old style: there is no name inside to use
+py theme_tool.py -i "ehRadioTheme-My Neon.json"      # asks whether to use the name inside
+py theme_tool.py -i ehRadioThemes-Backup.json        # a whole backup, asked and numbered per theme
 ```
+
+Without `--name` the tool prints the name the file carries and asks whether to use it:
+
+```
+The theme should be formatted as "Name (Creator)".
+The current name is "My Neon".
+Do you wish to use this name? [y/N]
+```
+
+Refusing writes nothing and prints the command that would name it, path and all, because a theme's name is
+only ever set on the command line. A theme file with no name inside - every old-style `.h`, and a JSON whose
+`name` is empty - does not get the question at all: it goes straight to that command.
 
 Either way, every colour written is put onto the 565 steps the WebUI editor uses — see
 *565 steps and `--quantise`* below.
@@ -227,11 +250,10 @@ This script writes those same numbers, so a palette, the editor and the panel al
 Everything the script writes is snapped onto those steps, including the computed fallbacks, which are
 percentages of another colour and so land anywhere.
 
-`--quantise` does the same for the colours **already** in `themes.h`:
+`-q` / `--quantise` does the same for the colours **already** in `themes.h`:
 
 ```
-py importtheme.py --quantise --dry-run     # report, then write themes.h.new.h
-py importtheme.py --quantise               # rewrite themes.h
+py theme_tool.py -q     # report what it moved, then rewrite themes.h
 ```
 
 It cannot change a pixel: `(r >> 3) * 8` packs back to the same 565 that `r` did, so the panel draws the
@@ -240,16 +262,22 @@ the file's alignment survives, and a value already on a step is left alone — w
 run report nothing to do. It says how many colours it moved, and it refuses to write at all if any of them
 would have changed its 565.
 
-## Dry-run mode
+## Checking the two files
 
-Always test first with `--dry-run`:
+Run the tool with no argument, or with `-a`, to see whether `themes.h` and `themes.css` still describe the
+same themes:
 
 ```
-py importtheme.py mytheme.h --name "Test" --dry-run
+py theme_tool.py
+py theme_tool.py -a
 ```
 
-This writes to `themes.h.new.h` without modifying the real file. It is what `--quantise --dry-run` uses
-too.
+It reports the theme count on both sides, any block whose `--theme-name` no longer matches `_themeNames[]`,
+and how many `RGB()` values in `themes.h` are off the 565 steps. It writes nothing.
+
+A mismatch in the count or in the ids is a hard error, and every mode refuses to guess which side is right:
+both files are positions in one list, so hand-edit them until they agree. A name that differs is only a
+warning - `_themeNames[]` is the authority and the next import rewrites the copies in `themes.css` from it.
 
 ## Note Regarding "Invert Title"
 

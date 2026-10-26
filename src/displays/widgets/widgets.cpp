@@ -140,7 +140,10 @@ uint16_t TextWidget::_realLeft(bool w_fb) {
   uint16_t offset = w_fb?0:_config.offset;
   // Text wider than the space it is being placed in would wrap these subtractions to ~65500 and paint the string
   // clean off the panel - which reads as "nothing was drawn" rather than as "drawn in the wrong place".  Park it
-  // at the edge instead.  A ScrollWidget with a too-long string never reaches here: it scrolls in _draw().
+  // at the SPAN's left edge instead: `offset` where the widget has a span, the panel edge where it has not.  The
+  // string then spills to the RIGHT, into the direction its own window clips and erases, instead of out of the
+  // span to the left - which, for a line a MOVE shifted off centre, spilled over a neighbour on the same row.
+  // A ScrollWidget with a too-long string never reaches here: it scrolls in _draw().
   switch (_config.align) {
     case WA_CENTER: {
       // Centred in the widget's own span when it has one, and on the screen when it has not.  A scroll brings a
@@ -150,7 +153,7 @@ uint16_t TextWidget::_realLeft(bool w_fb) {
       // clock is the one that has always done something else, centring on the screen and adding `left`.
       const uint16_t span  = (_width > 0) ? _width : realwidth;
       const uint16_t start = (_width > 0) ? offset : 0;
-      return (_textwidth >= span) ? 0 : (uint16_t)(start + (span - _textwidth) / 2);
+      return (_textwidth >= span) ? start : (uint16_t)(start + (span - _textwidth) / 2);
     }
     case WA_RIGHT: return ((uint32_t)_textwidth + offset >= realwidth)?0:(uint16_t)(realwidth - _textwidth - offset); break;
     default: return offset; break;

@@ -350,6 +350,7 @@
 //#define ALL_DEBUG_LOGS
 //#define CORE_MONITOR
 //#define BOOTLOG_TIME
+//#define AUDIO_DEBUG
 
 /* --- Display --- */
 // Display Font:

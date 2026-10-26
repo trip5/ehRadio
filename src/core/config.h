@@ -46,6 +46,10 @@ extern uint32_t vuPsramBytes;
 #define REAL_PLAYL   config.getMode()==PM_WEB?PLAYLIST_PATH:PLAYLIST_SD_PATH
 #define REAL_INDEX   config.getMode()==PM_WEB?INDEX_PATH:INDEX_SD_PATH
 
+#ifndef MAX_PLAYLIST_ENTRIES
+  #define MAX_PLAYLIST_ENTRIES 65535 // unint_16 maximum
+#endif
+
 #define WEATHERKEY_LENGTH 64
 #define MDNS_LENGTH 32
 #define EHDPNAME_LENGTH 32
@@ -341,7 +345,7 @@ class Config {
     }
     void lastStation(uint16_t newstation) {
       if (getMode()==PM_WEB) store.lastStation = newstation;
-      else saveValue(&store.lastSdStation, newstation);
+      else saveValueButWait(&store.lastSdStation, newstation, 5000);
     }
     uint8_t getMode() { return store.play_mode; }
     bool vuSourceWanted() const {
@@ -481,9 +485,8 @@ class Config {
     void setDefaults();
 
     uint16_t _randomStation() {
-      randomSeed(esp_random() ^ millis());
-      uint16_t station = random(1, store.countStation);
-      return station;
+      if (store.countStation < 2) return store.countStation ? 1 : 0;
+      return random(1, (long)store.countStation + 1);
     }
 };
 

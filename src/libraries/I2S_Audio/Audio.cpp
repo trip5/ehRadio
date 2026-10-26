@@ -444,6 +444,9 @@ void Audio::setDefaults() {
     m_M4A_objectType = 0;
     m_M4A_sampleRate = 0;
     m_sumBytesDecoded = 0;
+    m_ringWritten = 0;              // per-track: the ring-write total the mp3 err line compares against sum + buf
+    m_gapTraceMs = 0;               // trace once immediately at the start of the next track
+    m_f_firstSync = true;           // the next bytes we skip belong to the tag, not to the audio
     vuLeft = vuRight = 0; 		// #835
 }
 //****************************************************************************************
@@ -1833,6 +1836,29 @@ int Audio::read_ID3_Header(uint8_t* data, size_t len) {
         else {
             framesize = bigEndian(data, 4); 	// << 8
         }
+        #ifdef AUDIO_DEBUG
+        // Trace the frame walk; twin of the VS1053 line.  A frame larger than what is left in the tag is the desync,
+        // so every implausible frame prints even past the cap, while the first twelve print unconditionally.
+        {
+            static size_t  s_lastRemaining = 0;
+            static uint8_t s_frames = 0;
+            if(remainingHeaderBytes > s_lastRemaining) s_frames = 0;   // a new tag header was parsed
+            s_lastRemaining = remainingHeaderBytes;
+            if(s_frames < 12 || framesize > remainingHeaderBytes) {
+                AUDIO_INFO("id3 frame %.4s size %u rem %u", frameid,
+                    (unsigned)framesize, (unsigned)remainingHeaderBytes);
+            }
+            if(s_frames < 255) s_frames++;
+        }
+        #endif
+        // A frame cannot be longer than the bytes left in the tag.  When it is, the walk has reached the tag's padding
+        // or lost its place, and the tag is over: go to the completion step instead of trusting the number.  It never
+        // fires on a healthy tag, whose last frame ends exactly at id3Size, and it is what stops a bogus 3.1 GB frame
+        // from sending state 5 to the end of the FILE - which is what made every ID3v2 track skip.
+        if(remainingHeaderBytes < 6 || framesize > remainingHeaderBytes - 6) {
+            m_controlCounter = 99;
+            return 0;
+        }
         remainingHeaderBytes -= 4;
         uint8_t flag = *(data + 4); 			// skip 1st flag
         (void)flag;
@@ -2410,6 +2436,16 @@ size_t Audio::process_m3u8_ID3_Header(uint8_t* packet) {
 }
 //****************************************************************************************
 uint32_t Audio::stopSong() {
+    // A stop while a track is still open and not at its end is the one event that can leave m_sumBytesDecoded far
+    // behind the reader: setDefaults() zeroes the counter right after this returns. The end-of-track paths all set
+    // m_f_eof first, so this line stays quiet for them and prints only for the case worth reading.
+    if(audiofile && !m_f_eof && m_dataMode == AUDIO_LOCALFILE) {
+        // The raw counters only: no composed `gap`, because `sum` is written by the audio task while `ring` and `buf`
+        // are the main task's - see the note in the mp3 err line.  A reader who wants the difference has all four.
+        AUDIO_INFO("stopSong() with a live track: sum %u of %u, ring %u, reader %u, buf %u, running %u",
+            (unsigned)m_sumBytesDecoded, (unsigned)m_audioDataSize, (unsigned)m_ringWritten,
+            (unsigned)audiofile.position(), (unsigned)InBuff.bufferFilled(), (unsigned)m_f_running);
+    }
     m_f_lockInBuffer = true; 			// wait for the decoding to finish
         static uint8_t maxWait = 0;
         while(m_f_audioTaskIsDecoding) {vTaskDelay(1); maxWait++; if(maxWait > 100) break;} // in case of error wait max 100ms
@@ -2561,11 +2597,43 @@ exit:
 // The manifest only advances on a segment boundary, so a poll that finds nothing new waits for one.
 static const uint32_t M3U8_NO_SEGMENT_WAIT_MS = 2000;
 
+// A decoder that stops consuming the buffer ends no track by itself: the tail rule in processLocalFile() needs the
+// reader at EOF, and playAudioData() sets m_f_eof only when it decides the data is finished.  With the file still open
+// and m_f_running still true, the radio is silent and says nothing about it for as long as it is powered.
+static const uint32_t AUDIO_PROGRESS_TIMEOUT_MS = 5000;
+
 void Audio::loop() {
     if(!m_f_running) {
       vuLeft=0; vuRight=0;
+      m_stallMs = 0;                    // window closed while paused; it opens again on the next block the decoder takes
       vTaskDelay(2);
       return;    }
+
+    // A fault detector may require that something is open - never that everything is healthy.  Only m_f_stream is
+    // tested here: it means the header parsed and the decoder is being fed.  Nothing is tested that would have to be
+    // wrong for this report to be needed.
+    if(m_dataMode == AUDIO_LOCALFILE && m_f_stream && audiofile && !m_f_eof) {
+        uint32_t nowMs = millis();
+        if(m_sumBytesDecoded != m_stallSum)     { m_stallSum = m_sumBytesDecoded; m_stallMs = nowMs; }
+        else if(m_stallMs == 0)                 { m_stallMs = nowMs; }
+        else if((nowMs - m_stallMs) > AUDIO_PROGRESS_TIMEOUT_MS) {
+            AUDIO_INFO("no decode progress for %u ms: closing the track at %u of %u, buf %u",
+                (unsigned)AUDIO_PROGRESS_TIMEOUT_MS, (unsigned)m_sumBytesDecoded,
+                (unsigned)m_audioDataSize, (unsigned)InBuff.bufferFilled());
+            m_f_eof = true;               // the m_f_eof block in processLocalFile() does the teardown from here
+        }
+        // Every remaining decode error arrives with `gap` at exactly one buffer capacity, and the error line cannot say
+        // WHEN that buffer's worth went missing.  Ten seconds of trace answers it: a gap that jumps at one line and then
+        // holds is a single loss at that moment; a gap that grows line by line is a different mechanism altogether.
+        if(nowMs - m_gapTraceMs >= 10000) {
+            m_gapTraceMs = nowMs;
+            int32_t gap = (int32_t)(m_ringWritten - m_sumBytesDecoded - m_audioDataStart - InBuff.bufferFilled());
+            AUDIO_INFO("track 10s: sum %u/%u ring %u buf %u gap %d rd %u wr %u reader %u",
+                (unsigned)m_sumBytesDecoded, (unsigned)m_audioDataSize, (unsigned)m_ringWritten,
+                (unsigned)InBuff.bufferFilled(), (int)gap, (unsigned)InBuff.getReadPos(),
+                (unsigned)InBuff.getWritePos(), (unsigned)(audiofile.position()));
+        }
+    }
 
     if(m_playlistFormat != FORMAT_M3U8) { 			// normal process
         switch(m_dataMode) {
@@ -3305,6 +3373,7 @@ void Audio::processLocalFile() {
     if(!(audiofile && m_f_running && m_dataMode == AUDIO_LOCALFILE)) return; 		// guard
 
     static uint32_t ctime = 0;
+    static bool     f_zeroLogged = false;   // the zero-read line prints once per file
     const uint32_t  timeout = 4500; 					// ms
     const uint32_t  maxFrameSize = InBuff.getMaxBlockSize(); // every mp3/aac frame is not bigger
     uint32_t        availableBytes = 0;
@@ -3312,6 +3381,7 @@ void Audio::processLocalFile() {
     if(m_f_firstCall) { // runs only one time per connection, prepare for start
         m_f_firstCall = false;
         m_f_stream = false;
+        f_zeroLogged = false;
         ctime = millis();
         uint32_t pos = audiofile.position();
         if(m_codec == CODEC_M4A) seek_m4a_stsz(); // determine the pos of atom stsz
@@ -3322,9 +3392,42 @@ void Audio::processLocalFile() {
         return;
     }
     availableBytes = InBuff.writeSpace();
+    {   // The ring can lose audio in exactly one way: a write bigger than the space the reader has actually freed.
+        // writeSpace() is "to the physical end of the buffer", freeSpace() is "bytes the reader has freed", so the
+        // second is the real bound.  This should never fire; if it ever does, the size in the line says by how much.
+        size_t room = InBuff.freeSpace();
+        if(availableBytes > room) {
+            AUDIO_INFO("ring overrun prevented: asked %u, free %u, buf %u, sum %u, ring %u",
+                (unsigned)availableBytes, (unsigned)room, (unsigned)InBuff.bufferFilled(),
+                (unsigned)m_sumBytesDecoded, (unsigned)m_ringWritten);
+            availableBytes = room;
+        }
+    }
 
     int32_t bytesAddedToBuffer = audiofile.read(InBuff.getWritePtr(), availableBytes);
-    if(bytesAddedToBuffer > 0) {InBuff.bytesWritten(bytesAddedToBuffer);}
+    if(bytesAddedToBuffer > 0) {InBuff.bytesWritten(bytesAddedToBuffer); m_ringWritten += bytesAddedToBuffer;}
+
+    // A zero-length read has three causes and they are indistinguishable in the log without this line: no room in the
+    // buffer, a failed read, or the card really is at the end.  The buffer-full case is the common one and printed on
+    // every track as "zero read: room 0 ... filled 630774", which reads like a fault and is not - availableBytes > 0
+    // keeps the line for the two causes worth reading.  Once per file.
+    if(bytesAddedToBuffer == 0 && availableBytes > 0 && !f_zeroLogged) {
+        f_zeroLogged = true;
+        AUDIO_INFO("zero read: room %u pos %u/%u ctrl %u filled %u stream %u",
+            (unsigned)availableBytes, (unsigned)audiofile.position(), (unsigned)audiofile.size(),
+            (unsigned)m_controlCounter, (unsigned)InBuff.bufferFilled(), (unsigned)m_f_stream);
+    }
+
+    // A tail smaller than one max block is never consumed: playAudioData() hands the decoder a fixed-size block, it
+    // answers 0 and consumes nothing, so m_sumBytesDecoded stops short of m_audioDataSize and the end-of-track block
+    // below never runs - silence with m_f_running still true.  Reader at EOF plus a buffer the decoder has stopped
+    // draining is the end of the track, tag or no tag.
+    if(m_f_stream && bytesAddedToBuffer == 0 && audiofile && audiofile.size() > 0 &&
+       audiofile.position() >= audiofile.size() && InBuff.bufferFilled() < InBuff.getMaxBlockSize()) {
+        m_f_eof = true;
+        AUDIO_INFO("tail eof declared: pos %u/%u filled %u", (unsigned)audiofile.position(),
+            (unsigned)audiofile.size(), (unsigned)InBuff.bufferFilled());
+    }
 
     if(!m_f_stream) {
         if(m_codec == CODEC_OGG) { 					// log_i("determine correct codec here");
@@ -3372,7 +3475,15 @@ void Audio::processLocalFile() {
             while(m_f_audioTaskIsDecoding) vTaskDelay(1); // We can't reset the InBuffer while the decoding is in progress
             audiofile.seek(m_resumeFilePos);
             InBuff.resetBuffer();
-            m_sumBytesDecoded = m_haveNewFilePos = m_resumeFilePos;
+            // Two numberings, and they must not be mixed. m_haveNewFilePos is a position in the file -
+            // getAudioCurrentTime() maps it back with m_audioDataStart. m_sumBytesDecoded counts from the first audio
+            // byte, because playAudioData() compares it against m_audioDataSize, which is m_contentlength -
+            // m_audioDataStart.  Seeding both with the file position makes the counter look m_audioDataStart bytes into
+            // the track before a byte has been decoded here.
+            m_haveNewFilePos = m_resumeFilePos;
+            m_sumBytesDecoded = (m_resumeFilePos > (int32_t)m_audioDataStart) ? (m_resumeFilePos - m_audioDataStart) : 0;
+            m_ringWritten = 0;                    // counts from the seek, like the counter above it
+            m_f_firstSync = false;                // a resume lands mid-audio: a resync here is damaged audio, not padding
             m_resumeFilePos = -1;
             if(m_codec == CODEC_MP3) MP3Decoder_ClearBuffer();
         m_f_lockInBuffer = false;
@@ -3381,7 +3492,8 @@ void Audio::processLocalFile() {
     // end of file reached? - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_f_eof){ // m_f_eof and m_f_ID3v1TagFound will be set in playAudioData()
         if(m_f_loop){ // file loop
-            m_sumBytesDecoded = m_haveNewFilePos = m_audioDataStart;
+            m_haveNewFilePos = m_audioDataStart;
+            m_sumBytesDecoded = 0;              // audio-relative, as above: the loop restarts at the first audio byte
             audiofile.seek(m_audioDataStart);
             InBuff.resetBuffer();
             AUDIO_INFO("file loop");
@@ -3813,17 +3925,19 @@ void Audio::playAudioData() {
 
     if(!m_f_stream) return; // guard
 
-    static bool f_isFile = false;
     bool lastFrame = false;
     uint32_t bytesToDecode = 0;
 
-    if(m_f_firstPlayCall) {
-        m_f_firstPlayCall = false;
-        if (m_playlistFormat == FORMAT_M3U8)     f_isFile = false;
-        else if(m_dataMode   == AUDIO_LOCALFILE) f_isFile = true;
-        else if(m_streamType == ST_WEBFILE)      f_isFile = true;
-        else                                     f_isFile = false;
-    }
+    /* Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
+       setDefaults(), so the latch happened to be correct here, but depending on that re-arm is what the VS1053 graft
+       lost - and with it, every web stream played after an SD track in the same boot.  Deriving the branch from the
+       state that is actually current removes the whole class: a local file is a file, a live stream is not, and a web
+       file becomes one only after parseHttpResponseHeader() has set ST_WEBFILE (before that, m_audioDataSize is 0 and
+       means nothing). */
+    const bool f_isFile = (m_playlistFormat == FORMAT_M3U8) ? false
+                        : (m_dataMode == AUDIO_LOCALFILE)   ? true
+                        : (m_streamType == ST_WEBFILE)      ? true
+                                                            : false;
 
     if(m_validSamples) {playChunk(); return;}    // play samples first
     if(m_f_eof) return;
@@ -3852,13 +3966,31 @@ void Audio::playAudioData() {
     else {
         if(bytesDecoded > 0) {
             InBuff.bytesWasRead(bytesDecoded);
-            m_sumBytesDecoded += bytesDecoded;
+            // The bytes skipped to reach the FIRST frame of a track are the TAIL OF THE TAG, not audio: the frame walk
+            // stopped early, so the reader is still inside the tag and the sync search walks its padding to reach the
+            // first frame at id3Size.  They are already accounted for by m_audioDataStart, so consume them WITHOUT
+            // counting them as audio - counting them made m_sumBytesDecoded exceed the real audio by exactly that skip
+            // (the guard's `rem`: 556, 994, 304, 915, 473 ...), which put current time and the end-of-file test a few
+            // hundred bytes out on every guarded tag.  m_audioDataStart and m_audioDataSize are deliberately NOT touched:
+            // the audio begins exactly at the tag end, so Audio-Length stays Content-Length minus the tag.  A soak on
+            // 2026.10.26 tried moving the start instead and the log rejected it: Audio-Length went 2413214 -> 2412638,
+            // 576 short, and `rd 84258 + skip 576 = 84834` is exactly the tag size.
+            if(m_f_firstSync && f_isFile) {
+                m_f_firstSync = false;
+            } else {
+                m_sumBytesDecoded += bytesDecoded;
+            }
             if(f_isFile && m_codec == CODEC_MP3){
-                if (m_audioDataSize - m_sumBytesDecoded == 128){m_f_ID3v1TagFound = true; m_f_eof = true; goto exit;}
+                // <= 128 rather than == 128: the decoder is handed a full max block even on the last frame (see the
+                // sendBytes() call above), and the error path skips 200 bytes and counts them.  200 > 128, so a frame
+                // that straddles the tag boundary steps over an exact test - the decoder then reads the tag as audio,
+                // logs INVALID_FRAMEHEADER and republishes a bitrate parsed out of it.  Remaining audio can only be
+                // under 128 bytes at the very end, inside the tag.
+                if (m_audioDataSize - m_sumBytesDecoded <= 128){m_f_ID3v1TagFound = true; m_f_eof = true; goto exit;}
             }
             goto exit;
         }
-        if(bytesDecoded == 0) goto exit; // syncword at pos0
+        if(bytesDecoded == 0) { m_f_firstSync = false; goto exit; } // syncword at pos0: nothing skipped, next block is audio
     }
 exit:
     m_f_audioTaskIsDecoding = false;
@@ -4597,7 +4729,12 @@ void Audio::setDecoderItems() {
         setSampleRate(MP3GetSampRate());
         setBitsPerSample(MP3GetBitsPerSample());
         setBitrate(MP3GetBitrate());
-        AUDIO_INFO("MPEG-%s, Layer %s",(MP3GetVersion()==0) ? "2.5" : (MP3GetVersion()==2) ? "2" : "1", (MP3GetLayer()==1) ? "III" : (MP3GetLayer()==2) ? "II" : "I");
+        // The getters return table indices, not the raw two-bit header fields: version 0 = MPEG-1, 1 = MPEG-2,
+        // 2 = MPEG-2.5, and layer 3 = III, 2 = II, 1 = I (UnpackFrameHeader() stores 4 - the index).  Written against
+        // the raw bits - as the getters' own comments were - this printed "MPEG-2.5, Layer I" for every ordinary
+        // MPEG-1 Layer III file.  Layer 0 is the "not Layer III" zero-fill in MP3GetLastFrameInfo().
+        AUDIO_INFO("MPEG-%s, Layer %s", (MP3GetVersion()==0) ? "1" : (MP3GetVersion()==1) ? "2" : "2.5",
+                                        (MP3GetLayer()==3) ? "III" : (MP3GetLayer()==2) ? "II" : (MP3GetLayer()==1) ? "I" : "?");
     }
     if(m_codec == CODEC_AAC || m_codec == CODEC_M4A) {
         setChannels(AACGetChannels());
@@ -4690,6 +4827,26 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
 
     if(m_decodeError < 0) { 									// Error, skip the frame...
 
+        // A decode error is otherwise indistinguishable from a real fault, and its two candidates - a false sync inside
+        // the audio data, or a block that starts mid-frame - look identical in the log. The four bytes at the block
+        // start decide it: FF Ex carrying a reserved field (layer bits 0, srIdx 3, or brIdx 15) is a false sync that
+        // the header check rejected; anything else is a misalignment. m_lastFrameBytes is what the previous block
+        // consumed, so the offset of the next syncword can be compared against a real frame size.
+        if(m_codec == CODEC_MP3) {
+            // No composed ring arithmetic here, on purpose.  This line runs on the AUDIO task while the main task is
+            // writing into the ring, so sum, ring, buf and the reader position are four samples from different instants
+            // and their combination is meaningless - that sampling artefact is what produced the phantom "one buffer
+            // lost" reading (+630,774) on 2026.10.25.  The ring arithmetic is measured by the `track 10s` trace in
+            // loop(), which runs on the task that writes.  What stays here is what the audio task itself knows.
+            AUDIO_INFO("mp3 err %d at sum %u/%u buf %u rd %u wr %u reader %u: %02X %02X %02X %02X (ver %u layer %u sr %u br %u) last %d",
+                m_decodeError, (unsigned)m_sumBytesDecoded, (unsigned)m_audioDataSize,
+                (unsigned)InBuff.bufferFilled(), (unsigned)InBuff.getReadPos(), (unsigned)InBuff.getWritePos(),
+                (unsigned)(audiofile ? audiofile.position() : 0),
+                data[0], data[1], data[2], data[3],
+                (unsigned)((data[1] >> 3) & 0x03), (unsigned)((data[1] >> 1) & 0x03),
+                (unsigned)((data[2] >> 2) & 0x03), (unsigned)((data[2] >> 4) & 0x0F),
+                (int)m_lastFrameBytes);
+        }
         printDecodeError(m_decodeError);
         m_f_playing = false; 									// seek for new syncword
         if(m_codec == CODEC_FLAC) {
@@ -4709,6 +4866,7 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
         return 1; 										// skip one byte and seek for the next sync word
     }
     bytesDecoded = len - bytesLeft;
+    if(bytesDecoded > 0) m_lastFrameBytes = bytesDecoded;      // frame size, reported by the next decode error
 
     if(bytesDecoded == 0 && m_decodeError == 0) { 				// unlikely framesize
         audio_info("framesize is 0, start decoding again");

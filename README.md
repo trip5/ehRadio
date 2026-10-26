@@ -132,8 +132,8 @@ This folder contains files needed for operation. You can put your own files here
 None are mandatory.  All of these files should be exported directly from ehRadio.
 
 Examples of these files may be found in the `/builds/data` folder:
-  - `playlist.csv` contains a list of radio streams
-  - `wifi.csv` is list of Wireless APs and passwords
+  - `playlist.csv` contains a list of radio streams (up to 65,535 stations)
+  - `wifi.csv` is list of Wireless APs and passwords (up to 5 APs)
   - `theme1.json`...`theme10.json` custom themes (must be single exported themes)
   - `layout1.json`...`layout10.json` custom layouts (must be single exported layouts)
 

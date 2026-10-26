@@ -13,6 +13,10 @@
 #define PLERR_LN        64
 #define SET_PLAY_ERROR(...) {char buff[576]; snprintf(buff, sizeof(buff), __VA_ARGS__); setError(buff);}
 
+#ifndef SD_PLAY_TRACE_MS
+  #define SD_PLAY_TRACE_MS 30000
+#endif
+
 enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9 };
 struct playerRequestParams_t
 {
@@ -72,6 +76,22 @@ class Player: public Audio {
     char        _plError[PLERR_LN];
     uint8_t     _muteVol = 30;
     bool        _muted = false;
+    uint32_t    _traceNextMs = 0;  // SD_PLAY_TRACE_MS heartbeat due time, 0 = not armed
+    bool        _autoAdvancePlay = false;  // this _play() came from the EOF callback, not from a user action
+
+    uint32_t    _shuffleKey  = 0;  // per-pass key for the Feistel rounds
+    uint32_t    _shuffleRaw  = 0;  // raw counter; outputs >= n are skipped by cycle-walking
+    uint32_t    _shufflePass = 0;  // ids produced this pass, 0.._shuffleN
+    uint32_t    _shuffleBits = 0;  // even bit width of the domain, the smallest 2^bits >= n
+    uint16_t    _shuffleN    = 0;  // playlist length the walk was started for, 0 = no walk yet
+    bool        _shuffleWalkOwns = false;  // the _play() now being queued came from next()/prev()'s walk
+
+    uint32_t _shuffleEnc(uint32_t x, uint32_t bits);  // one Feistel round-trip, before cycle-walking
+    int32_t  _shuffleFirst();                         // first id the current key produces, without advancing
+    void     _shuffleStartPass(uint16_t avoidId);  // start a pass that does not open with avoidId
+    void     _shuffleRestart(uint16_t avoidId);  // size the domain and start a pass (a hand-picked track)
+    uint16_t _shuffleNext();
+    uint16_t _shufflePrev();  // 0 = nothing behind this one in the current pass
 
     void _stop(bool alreadyStopped = false);
     void _play(uint16_t stationId);

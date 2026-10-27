@@ -76,6 +76,7 @@ struct theme_t {
   uint16_t title1;
   uint16_t title2;
   uint16_t digit;
+  uint16_t digitbg;
   uint16_t div;
   uint16_t line;
   uint16_t weather;

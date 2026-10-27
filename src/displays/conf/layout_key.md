@@ -337,10 +337,10 @@ Three details of those two sizes are worth knowing when you lay one out:
 - the box is sized for whichever row is wider — usually the date — so the date is never clipped.
 
 **The glow is off at size 0, and it follows the row everywhere else.** The clock glow paints the cells the digits
-sit in with `clockbg`, which needs a clock font's own glow character; at size 0 there is no clock font, so the
-character would fall back to the digit `0` and the "glow" would be a literal `00:00` behind the time. Size 0
-therefore draws no glow at all — the time's, the seconds' and the colon's own off colour alike — and the WebUI's
-Clock Glow row is not offered while the clock is that size. Where the glow does apply it starts where the digits
+sit in with `clockbg`, and the big number widget (`numConf`) paints its own with `digitbg`; each needs a clock
+font's own glow character, so at size 0 there is none and the "glow" would be a literal `00:00` behind the time.
+Size 0 therefore draws no glow at all — the time's, the seconds' and the colon's own off colour alike — and the
+WebUI's Clock Glow row is not offered for a widget that size. Where the glow does apply it starts where the digits
 start, so it follows the same per-row alignment as the time and the colon rather than the box's edge.
 
 ### What a size index means for `top`

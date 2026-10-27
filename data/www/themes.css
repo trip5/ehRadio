@@ -138,23 +138,6 @@
   --surfaces:           #00005a;
 }
 :root[data-theme="8"] {
-  --theme-name:         "Pretty in Pink (Levente Daradici)";
-  --edges:              #6c016c;
-  --fills:              #c600d5;
-  --highlights:         #000000;
-  --icon-active-glyph:  #c200c2;
-  --input-border:       #950095;
-  --list-names:         #ffffff;
-  --logo:               #000000;
-  --logo-shadow:        #000000;
-  --logo-text:          #ffffff;
-  --maintexts:          #ffffff;
-  --outlines:           #f2f9f2;
-  --panel-gradient:     #a500a5;
-  --playlist-hover:     #ff00ff;
-  --surfaces:           #c200c2;
-}
-:root[data-theme="9"] {
   --theme-name:         "Poison (András Daradici)";
   --actives:            #000000;
   --edges:              #aa96ba;
@@ -171,13 +154,13 @@
   --panel-gradient:     #522a6e;
   --surfaces:           #613181;
 }
-:root[data-theme="10"] {
+:root[data-theme="9"] {
   --theme-name:         "Monochrome (András Daradici)";
   --logo:               #e3e3e3;
   --logo-shadow:        #bfbfbf;
   --logo-text:          #ffffff;
 }
-:root[data-theme="11"] {
+:root[data-theme="10"] {
   --theme-name:         "UltraPerfect (András Daradici)";
   --actives:            #000000;
   --edges:              #9b7d7a;
@@ -196,7 +179,7 @@
   --surfaces:           #420000;
   --switch-track-on:    #f70000;
 }
-:root[data-theme="12"] {
+:root[data-theme="11"] {
   --theme-name:         "vip-cxema.org";
   --actives:            #000000;
   --edges:              #007c00;
@@ -206,4 +189,22 @@
   --logo-shadow:        #2f9a17;
   --logo-text:          #1f1f1f;
   --outlines:           #f2f9f2;
+}
+:root[data-theme="12"] {
+  --theme-name:         "Elle (Trip5)";
+  --actives:            #ffffff;
+  --control-bg:         #f81c00;
+  --highlights:         #f81c00;
+  --infotexts:          #cccccc;
+  --link-quiet:         #115fff;
+  --link-text:          #f81c00;
+  --list-active-bg:     #115fff;
+  --logo:               #ff80ff;
+  --logo-shadow:        #ff00ff;
+  --logo-text:          #ffffff;
+  --meter-track:        #400040;
+  --playlist-hover:     #ff00ff;
+  --spinner-ring:       #115fff;
+  --switch-track-on:    #115fff;
+  --warning-outline:    #f81c00;
 }

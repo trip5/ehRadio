@@ -8,7 +8,7 @@
 // PROGMEM is a no-op on ESP32 and memcpy_P is memcpy, so there is no second code path to keep in
 // step.  The cost is one more translation-unit copy of _themes[] and _themeNames[] (about 2 KB of
 // flash, since a namespace-scope const array has internal linkage); that was accepted over giving
-// the tables a single definition, which would mean restructuring themes.h that importtheme.py
+// the tables a single definition, which would mean restructuring themes.h that theme_tool.py
 // generates into.
 static const ThemeData* _slotData[THEME_TOTAL_MAX];
 static const char*      _slotNames[THEME_TOTAL_MAX];

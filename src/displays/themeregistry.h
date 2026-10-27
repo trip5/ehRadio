@@ -87,7 +87,7 @@ size_t themeElementCount();
 // key the document leaves out comes back black, so there is one rule for the loader, Save and the preview
 // and nothing to reason about: what a file does not say is black.  There is deliberately no
 // inherit-from-a-base rule any more - it made a partial file mean different things in different places, and
-// the editor always sends all 43 keys.  An [r,g,b] array is accepted in place of a 565 integer so a
+// the editor always sends all 42 keys.  An [r,g,b] array is accepted in place of a 565 integer so a
 // hand-edited file still loads.  nameOut is only written when the document carries a name.  Returns false
 // on malformed JSON.
 bool themeParseTheme(const char* json, ThemeData* out, char* nameOut, size_t nameRoom);

@@ -426,6 +426,11 @@ void Config::_initHW() {
   #endif
 }
 
+// theme_t is filled by memcpy from a ThemeData, field for field, so the two shapes are one contract: the
+// element table is asserted against ThemeData in themes.h, and this closes the other end of it.
+static_assert(sizeof(theme_t) == sizeof(ThemeData),
+              "theme_t and ThemeData have drifted: a field was added to one and not the other.");
+
 void Config::loadTheme() {
   // Through the registry rather than straight off the table: the id may name a user slot, and it may
   // name a slot whose file has since been deleted.  themeValidId() answers both - it hands back the

@@ -440,6 +440,9 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Defines key constants for LittleFS paths and data file locations.
 - `theme_t` now includes screensaver-specific clock palette fields (`clockss`, `clockbgss`, `secondsss`, `dowss`,
   `datess`) so screensaver clock/date elements can use colors independent from normal PLAYER-mode clock colors.
+- `theme_t` carries a glow backdrop per widget: `clockbg` behind the clock and `digitbg` behind the big number
+  (`NumWidget`), so the two can glow in different colours. Both are `uint16_t` directly after their own ink
+  (`clock`, `digit`) in the same order in `ThemeData`, which is what keeps the `memcpy` sound.
 - `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (170, defined in `config.h`).
   These are RAM-only fields — not NVS-stored. `BUFLEN` has been retired; use `STATION_FIELD_LENGTH` for station metadata
   buffers across the codebase.
@@ -1694,7 +1697,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 
 ## `src/displays/themes.h`
 - Runtime theme switching data, loaded from PROGMEM at runtime.
-- `ThemeData` struct: 38 `uint16_t` colour fields + `playlist[5]` — 43 in all, and it mirrors `config.h`'s
+- `ThemeData` struct: 37 `uint16_t` colour fields + `playlist[5]` — 42 in all, and it mirrors `config.h`'s
   `theme_t`, which is what lets `memcpy` carry one into the other.
 - `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported), reached only through the
   theme registry.
@@ -4269,9 +4272,10 @@ design record; this is the shape of it.
   size 1 the DOW and the seconds share the column and their bands overlap.  Sizes 2..4 are untouched, and the
   screensaver's clock follows the same rule (same widget, same print).  Note this is the SCREENSAVER's full date,
   not `fullClock` itself - the widget keeps the date on the main screen at 0 and 1, on its own row.
-  **The WebUI's two clock rows are gated on the SIZE INDEX the clock actually has**, in `GETACTIVE`
-  (`netserver.cpp`): the glow row needs a theme whose `clockbg` differs from the background *and* a clock with a
-  font at all (`clockConf.textsize != 0`), while the SCREENSAVER'S FULL DATE row (`group_full_time`) is offered
+  **The WebUI's two clock rows are gated on the SIZE INDEX the widget actually has**, in `GETACTIVE`
+  (`netserver.cpp`): the glow row needs a theme whose `clockbg` (or `digitbg`, for the number) differs from the
+  background *and* a widget with a clock font at all (`clockConf.textsize` / `numConf.textsize`), while the
+  SCREENSAVER'S FULL DATE row (`group_full_time`) is offered
   when `(fullClock || seconds)` and the clock has a font.  The `seconds` half matters: at size 1 the switch still
   governs the seconds on the screensaver (only the date is not drawn at 0 or 1), so withholding the row there
   would hide a switch that does something.  Size 0 is the one with nothing to offer - no clock font, so no glow
@@ -4347,15 +4351,18 @@ design record; this is the shape of it.
   templates `_timewidth`/`_secwidth` are read off, so they must not be blanked instead), and printing them would
   paint a literal `00:00` behind the time.  Size 0 therefore has NO glow anywhere, and the WebUI's Clock Glow row
   is offered on the same rule plus that font test, via the `group_clockglow` / `hide_group_clockglow` token in
-  `GETACTIVE` (`netserver.cpp`): `config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize
-  != 0` - an AND, because it is a "hide when", never a second reason to show.  The `theme` command re-sends the
+  `GETACTIVE` (`netserver.cpp`).  The gate is two independent halves, one per widget: the clock's is
+  `clockbg != background && clockConf.textsize != 0`, the number's is `digitbg != background && numConf.textsize
+  != 0`, and the row shows when either holds.  Each half is an AND, because each is a "hide when", never a second
+  reason to show.  The `theme` command re-sends the
   token so the row follows a theme switch with the settings page open, and a `layout` switch re-sends it for the
   same reason (the clock's size index lives in the layout, not in the theme).
   **The NUMBER widget glows too** (`NumWidget`, `numConf`), on that same stored setting and the same three tests -
-  `NumWidget::_glowOn()` is the number's copy, needing a clock font, the setting and `clockbg != background`.  The
-  glow colour is `theme.clockbg` for both widgets; the digits keep `theme.digit`, and a layout sizes the clock and
-  the number independently while the glow is one switch, so `GETACTIVE` offers the row when EITHER
-  `clockConf.textsize` or `numConf.textsize` is non-zero.  A number cannot reserve cells out of nothing, so the
+  `NumWidget::_glowOn()` is the number's copy, needing a clock font, the setting and `digitbg != background`.  The
+  digits keep `theme.digit` and the glow behind them is `.digitbg`, its own field since 2026.10.27 (15% of
+  `.digit`; `plans/digitbg-glow.md`), so the clock and the number glow in different colours - which is what the
+  eight themes that draw the number in blue needed, having glowed it in the clock's grey.  A number cannot reserve
+  cells out of nothing, so the
   widget is told the WIDEST value its screen can show (`setFieldMax()`): `VOLUME_SCALE` for the volume,
   `config.store.countStation` for a station/track number and for the SDCHANGE scan counter.  It reserves
   `max(digits(fieldmax), digits(value))` digit cells - at least one, never a hardcoded two, because any total can

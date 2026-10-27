@@ -112,20 +112,20 @@ Either way, every colour written is put onto the 565 steps the WebUI editor uses
 | `COLOR_PL_CURRENT_BG` | `.plcurrentbg` |
 | `COLOR_PLAYLIST_0..4` | `.playlist[0..4]` |
 
-The two clock families are **not** clock-only. `.clockbg` / `COLOR_CLOCK_BG` is the glow colour behind both the
-clock and the big number widget (`numConf`), and `.digit` / `COLOR_DIGITS` is the colour the number's own digits
-are drawn in. A theme that glows is a theme where `clockbg` differs from the background; on a one-bit palette they
-are equal and nothing glows.
+The clock family is the clock's own. `.digit` / `COLOR_DIGITS` is the ink of the big number widget (`numConf` -
+the volume, the station number and the SD counter), and `.digitbg` is that widget's glow colour, which is why the
+number no longer borrows the clock's backdrop. A theme that glows is a theme where `clockbg` (or `digitbg`) differs
+from the background; on a one-bit palette each is equal to it and nothing glows.
 
 Two legacy defines are ignored: `COLOR_STATION_FILL` (the meta band is drawn with `.metabg`) and
 `COLOR_PL_CURRENT_FILL` (the playlist highlight is drawn with `.plcurrentbg`). Likewise any JSON key the
 script does not recognise is skipped.
 
-Three fields in `ThemeData` have **no** old-format counterpart, so no `COLOR_*` maps to them: `.line`
-(sits between `.div` and `.weather`), `.vuaxis` (between `.weather` and `.vupeak`) and `.textss`
-(between `.datess` and `.buffer`). All three are derived by rule - the first two from `.div`, the third
-from `.clockss`, see below. They still occupy their place in `FIELD_ORDER`, because the emitted entries
-are designated initialisers and have to follow the struct's own order.
+Four fields in `ThemeData` have **no** old-format counterpart, so no `COLOR_*` maps to them: `.digitbg`
+(between `.digit` and `.div`), `.line` (between `.div` and `.weather`), `.vuaxis` (between `.weather` and
+`.vupeak`) and `.textss` (between `.datess` and `.buffer`). All four are derived by rule - `.digitbg` from
+`.digit`, the next two from `.div`, the last from `.clockss`, see below. They still occupy their place in
+`FIELD_ORDER`, because the emitted entries are designated initialisers and have to follow the struct's own order.
 
 ## Smart fallbacks
 
@@ -137,8 +137,8 @@ If a color is missing from the old file, the script fills it in automatically:
 | `.dow` | `.date` (same color) |
 | `.battery` | `.rssi` (same color) |
 
-Any *other* missing field is filled with `.meta` and flagged with a `// needs fixing?` comment
-on the generated line, so the values that need a human eye are easy to spot.
+Any *other* missing field is filled with `.meta`. Nothing is annotated in the output: an entry carries no
+comment but its name header, so a value worth a human eye is found by reading the theme.
 
 ## Screensaver colors — COMPUTED, CHECK MANUALLY!
 
@@ -165,10 +165,11 @@ If the old theme file has `COLOR_CLOCK_SS` etc., those values are used directly.
 | `.dowss` | `.dow` | 50% |
 | `.datess` | `.date` | 50% |
 | `.clockbg` | `.clock` | 15% |
+| `.digitbg` | `.digit` | 15% |
 
 `.textss` is deliberately **not** in that table. It is a rule rather than a computed guess - the
 screensaver's info line is the same ink as the screensaver clock, so it is `.clockss` verbatim, which
-is why it is listed under the derived rules below and carries no `// needs fixing?` marker.
+is why it is listed under the derived rules below.
 
 **These computed values are a starting point — they should be reviewed and
 tweaked by hand.** The screensaver runs on a black background and often benefits
@@ -184,15 +185,16 @@ Example of hand-adjusted screensaver colors in a theme entry:
 .datess        = RGB(255, 255, 255),
 ```
 
-## Line, VU axis and info line — DERIVED, NO REVIEW NEEDED
+## Line, VU axis, digits glow and info line — DERIVED, NO REVIEW NEEDED
 
-Three palette entries were added to ehRadio after the old theme format was defined, so no old theme file
-can carry them. `.line` and `.vuaxis` derive from `.div`, which every theme file sets, and `.textss`
-from `.clockss` - which makes them rules rather than guesses:
+Four palette entries were added to ehRadio after the old theme format was defined, so no old theme file
+can carry them. `.line` and `.vuaxis` derive from `.div`, which every theme file sets, `.textss` from
+`.clockss`, and `.digitbg` from `.digit` - which makes them rules rather than guesses:
 
 | Field | Derived from | Multiplier | Consumed by |
 |---|---|---|---|
 | `.line` | `.div` | 100% (the divider verbatim) | the under and over line widgets (`underLineConf` / `overLineConf` in the layout) |
+| `.digitbg` | `.digit` | 15% | the glow behind the big number widget (`numConf`): volume, station number and SD counter |
 | `.vuaxis` | `.div` | 25% | every reference line the VU draws: the centre cross, the bar baseline, the histogram line and the Spectrum divider |
 | `.textss` | `.clockss` | 100% (verbatim) | the scrolling info line the screensaver draws when `screensavertext` is on |
 
@@ -203,9 +205,9 @@ Black (229,229,229 on 255 white), Ocean (0,0,62 on 0,0,91) and vip-cxema (29,29,
 divider keeps real contrast on black and on white alike - white dividers give 63, Graphite's 91 gives
 22 - and it reads as a relationship, the axis being a dimmed divider.
 
-Because the two are derived by a stated rule, the script emits them **without** the
-`// needs fixing?` marker (they are listed in `DERIVED_RULES`); every other computed fallback keeps its
-marker, because those are still eyeballed.
+Every one of these is a stated rule, and so is every other row of `COMPUTED_FALLBACK`; the script
+annotates nothing either way, so a fallback is judged from its row in the tables above rather than from a
+marker in the output.
 
 On reduced palettes the rule is overridden by hand, in the palette rather than the theme:
 `displaySSD1322.cpp` sets `.line = GRAY_9` (equal to its `.div`) and `.vuaxis = GRAY_3`, since a

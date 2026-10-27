@@ -30,14 +30,14 @@ MODES:
                             prints the name the file carries and asks whether to use it, because every theme
                             should read as "Name (Creator)"; refusing writes nothing and prints the command that
                             would name it.
-    -q, --quantise          Rewrite the RGB() values already in themes.h onto the 565 steps.  Cannot change a
+    -q, --quantise          themes.h: Rewrite the RGB() values already in themes.h onto the 565 steps.  Cannot change a
                             pixel; a value already on the grid is left alone, so a second run does nothing.
     -d, --delete [INDEX]    Remove a theme from both files.  An index IS a position in themes.h, so every theme
                             above it is renumbered by one in both.
-    --inflate               Give every block every role it lacks, at the colour it already resolves to.
-    --deflate               Remove every declaration whose resolved colour is exactly the :root one, then fold
+    --inflate               themes.css: Give every block every role it lacks, at the colour it already resolves to.
+    --deflate               themes.css: Remove every declaration whose resolved colour is exactly the :root one, then fold
                             each family back into one head line.
-    --deflate-lossy         The same for values close to :root, one [y/N] per role per theme, default No.
+    --deflate-lossy         themes.css: The same for values close to :root, one [y/N] per role per theme, default No.
 
 ROOT IS THE ANCHOR:
     A block lists only its differences from `:root`, so `:root` is what everything is measured against: there is
@@ -561,7 +561,7 @@ COLOR_TO_FIELD = {
 
 FIELD_ORDER = [
     'background', 'meta', 'metabg',
-    'title1', 'title2', 'digit', 'div', 'line', 'weather', 'vuaxis',
+    'title1', 'title2', 'digit', 'digitbg', 'div', 'line', 'weather', 'vuaxis',
     'vupeak', 'vumax', 'vumin',
     'clock', 'clockbg', 'seconds', 'secondsbg', 'dow', 'date',
     'clockss', 'clockbgss', 'secondsss', 'secondsbgss', 'dowss', 'datess', 'textss',
@@ -578,15 +578,16 @@ SMART_FALLBACK = [
 ]
 
 # Computed fallbacks: (field, source_field, multiplier) — applied after SMART_FALLBACK.
-# Resolved in dependency order so later entries can depend on earlier ones.
+# Resolved in dependency order so later entries can depend on earlier ones.  These produce a VALUE only:
+# the emitted entry carries no annotation, so a fallback worth eyeballing is found by reading the theme.
 COMPUTED_FALLBACK = [
     # The two palette entries ehRadio added after the old theme format was defined.  Both come from
-    # the divider, which every theme file sets, so both are rules rather than guesses - see
-    # DERIVED_RULES.  line is the divider's own ink, used by the vertical and horizontal line
-    # widgets; vuaxis is a quarter of it, which keeps the VU's reference lines (centre cross, bar
-    # baseline, divider) visible in every theme, on black and on white alike.
+    # the divider, which every theme file sets.  line is the divider's own ink, used by the vertical
+    # and horizontal line widgets; vuaxis is a quarter of it, which keeps the VU's reference lines
+    # (centre cross, bar baseline, divider) visible in every theme, on black and on white alike.
     ('line',      'div',     1.00),   # the divider verbatim
     ('vuaxis',    'div',     0.25),   # 25% of the divider
+    ('digitbg',   'digit',   0.15),   # 15% of the digits' ink - the glow behind the IR/volume number
     ('clockbg',   'clock',   0.15),   # 15% of clock
     ('clockss',   'clock',   0.50),   # 50% of clock
     ('textss',    'clockss', 1.00),   # the screensaver info line: the clockss ink verbatim
@@ -597,11 +598,6 @@ COMPUTED_FALLBACK = [
     ('secondsbg',   'seconds',   0.15),   # 15% of seconds
     ('secondsbgss', 'secondsss', 0.15),   # 15% of secondsss (resolved above)
 ]
-
-# Computed values that are derived by a stated rule rather than guessed, so they are emitted
-# without the '// needs fixing?' marker - it would appear on every line of every import otherwise.
-# Every other computed fallback stays flagged, because those are eyeballed.
-DERIVED_RULES = {'line', 'vuaxis', 'textss'}
 
 MAX_NAME_LEN = 50  # _themeNames[][64] -- truncate at 50 for safety
 
@@ -827,21 +823,17 @@ def emit_theme_entry(name, data, index):
 
     # Working copy that we fill with fallbacks
     final = dict(colors)
-    needs_fixing = set()
 
     # ---- smart fallbacks (dependency order) ----
     for field, source in SMART_FALLBACK:
         if field not in final and source in final:
             final[field] = final[source]
-            needs_fixing.add(field)
 
     # ---- computed fallbacks (dependency order) ----
     for field, source, pct in COMPUTED_FALLBACK:
         if field not in final and source in final:
             sr, sg, sb = final[source]
             final[field] = (int(sr * pct), int(sg * pct), int(sb * pct))
-            if field not in DERIVED_RULES:
-                needs_fixing.add(field)
 
     # ---- meta fallback for everything still missing ----
     meta = final.get('meta', (0, 0, 0))
@@ -851,10 +843,8 @@ def emit_theme_entry(name, data, index):
                 k = f'playlist[{i}]'
                 if k not in final:
                     final[k] = meta
-                    needs_fixing.add(k)
         elif fname not in final:
             final[fname] = meta
-            needs_fixing.add(fname)
 
     # ---- quantise ----
     # Everything that lands in themes.h goes onto the 565 steps, whichever way it arrived: a JSON export is
@@ -867,23 +857,19 @@ def emit_theme_entry(name, data, index):
             quantised.add(fname)
 
     # ---- emit ----
+    # No comments: too many tools rewrite this file for an annotation to survive, and nothing parses one.
+    # The name header stays - it is what makes the table readable, and the names live in _themeNames anyway.
     lines = [f'    {{   // {name}']
     for fname in FIELD_ORDER:
         if fname == 'playlist':
             vals = []
-            any_fix = False
             for i in range(5):
-                k = f'playlist[{i}]'
-                r, g, b = final[k]
+                r, g, b = final[f'playlist[{i}]']
                 vals.append(f'RGB({r:3d}, {g:3d}, {b:3d})')
-                if k in needs_fixing:
-                    any_fix = True
-            comment = ' // needs fixing?' if any_fix else ''
-            lines.append(f'        .{fname:13s} = {{{", ".join(vals)}}},{comment}')
+            lines.append(f'        .{fname:13s} = {{{", ".join(vals)}}},')
         else:
             r, g, b = final[fname]
-            comment = ' // needs fixing?' if fname in needs_fixing else ''
-            lines.append(f'        .{fname:13s} = RGB({r:3d}, {g:3d}, {b:3d}),{comment}')
+            lines.append(f'        .{fname:13s} = RGB({r:3d}, {g:3d}, {b:3d}),')
 
     lines.append('    },')
     return '\n'.join(lines), len(colors), len(quantised)

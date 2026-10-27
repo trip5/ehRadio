@@ -13,6 +13,7 @@
   config.theme.title1      = TFT_FG;
   config.theme.title2      = TFT_FG;
   config.theme.digit       = TFT_FG;
+  config.theme.digitbg     = TFT_BG;
   config.theme.div         = TFT_FG;
   config.theme.line        = TFT_FG;
   config.theme.weather     = TFT_FG;

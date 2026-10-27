@@ -561,9 +561,11 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            if ((config.theme.clockbg != config.theme.background
-                 && (activeLayout.clockConf.textsize != 0 || activeLayout.numConf.textsize != 0)) || DBGWUI)
-                                                                act += F("\"group_clockglow\",");
+            // One row for two widgets, each judged on its own glow colour and its own size index: a theme can
+            // glow the clock and not the digits, or the other way round.
+            if (((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0)
+                 || (config.theme.digitbg != config.theme.background && activeLayout.numConf.textsize != 0))
+                || DBGWUI)                                      act += F("\"group_clockglow\",");
                                                            else act += F("\"hide_group_clockglow\",");
             if (activeLayout.clockConf.textsize != 0 || DBGWUI) act += F("\"group_smaller\",");
                                                            else act += F("\"hide_group_smaller\",");
@@ -2174,7 +2176,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
     }
     // The body lands in the staging theme and the display task takes it from there; this task never
     // touches the live theme, and nothing at all is written to a file or to NVS.  A key the body leaves
-    // out comes back black, the same rule the files follow - and the page always sends all 43 keys, so
+    // out comes back black, the same rule the files follow - and the page always sends all 42 keys, so
     // that only ever shows up for a hand-made request.
     if (!themeParseTheme(dataArg->value().c_str(), themeStaging(), nullptr, 0)) {
       request->send(400, "text/plain", "Bad theme JSON");

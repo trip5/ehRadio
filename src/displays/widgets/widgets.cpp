@@ -752,12 +752,11 @@ void NumWidget::setFieldMax(uint32_t maxval) {
   if (_oldtext) _oldtext[0] = '\0';
 }
 
-// The clock's three glow tests, unchanged: a clock font to take the glow glyph from, the stored setting, and a
-// backdrop that differs from the glow colour.  A one-bit palette sets clockbg == background, so no such panel
-// can glow and needs no panel macro here.
+// The clock's three glow tests: a clock font to take the glow glyph from, the stored setting, and a backdrop
+// that differs from the glow colour.  A one-bit palette sets digitbg == background, so no such panel can glow.
 bool NumWidget::_glowOn(){
   return _cf.font != nullptr && editorOpt(config.store.clockglow)
-         && config.theme.clockbg != config.theme.background;
+         && config.theme.digitbg != config.theme.background;
 }
 
 void NumWidget::_getBounds() {
@@ -793,7 +792,7 @@ void NumWidget::_draw() {
     dsp.fillRect(x, _config.top - _textheight, _textwidth, (uint16_t)(_textHeight(_cf) + 1), _bgcolor);
     dsp.setTextSize(1);
     dsp.setFont(_cf.font);
-    dsp.setTextColor(config.theme.clockbg);
+    dsp.setTextColor(config.theme.digitbg);
     dsp.setCursor(x, _config.top);
     dsp.print(_glowField);
     dsp.setTextColor(_fgcolor);

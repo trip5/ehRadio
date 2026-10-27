@@ -252,11 +252,14 @@ body { height: auto; padding: 0; }
       The pair stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
       clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves and locks that
       family, and pasting into a member splits it off.</li>
-    <li><b>Start from an existing theme</b> by picking it in the dropdown under the table and pressing Load. There is
-      no theme list on this page at all: the names are read out of <code>themes.css</code> itself, so a block that
-      <code>theme_tool.py -i</code> or <code>-d</code> adds, removes or renumbers shows up here on the next
-      reload, name and all. The note says how many colours that theme changes.</li>
-    <li><b>Save writes the file.</b> The window below shows the one block you are editing; <b>Save themes.css</b>
+    <li><b>The dropdown is the block you are writing; Load fills the table from it.</b> Picking a theme retargets the
+      block in the window below - its id and its <code>--theme-name</code> change, the colours on screen do not - and
+      pressing <b>Load</b> replaces those colours with that theme's own. So you can load a theme you like, pick the
+      theme you want to overwrite, and save one palette into the other block. There is no theme list on this page at
+      all: the names are read out of <code>themes.css</code> itself, so a block that <code>theme_tool.py -i</code> or
+      <code>-d</code> adds, removes or renumbers shows up here on the next reload, name and all. The note says how
+      many colours that theme changes.</li>
+    <li><b>Save writes the file.</b> The window below shows the block the dropdown names; <b>Save themes.css</b>
       writes the whole of <code>data/www/themes.css</code> - your block from what is on screen, every other theme
       from its own colours - and you overwrite the file with it. Nothing needs reloading afterwards, because this
       page already holds what it wrote. Rebuild the filesystem image so the device picks the file up.</li>
@@ -1419,7 +1422,21 @@ body { height: auto; padding: 0; }
   // next reload.
   var themePick = document.getElementById('themePick');
   var loadNote = document.getElementById('loadnote');
+  // Two different questions, kept apart on purpose.  CURRENT is where the colours in the table came from, which is
+  // what Load sets.  The SLOT is the block a save writes, and that is whatever the dropdown says - pressing Load is
+  // not required.  Separating them is what lets one palette be written into another theme's block: load a theme you
+  // like, pick the theme you mean to overwrite, Save.
   var CURRENT = null;
+
+  function slotId() {
+    var id = parseInt(themePick.value, 10);
+    return (isNaN(id) || id < 0) ? null : id;
+  }
+  function slotTheme() {
+    var id = slotId();
+    for (var i = 0; i < THEMES.length; i++) if (THEMES[i].id === id) return THEMES[i];
+    return null;
+  }
 
   function unquote(v) {
     if (v.length > 1 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') v = v.slice(1, -1);
@@ -1493,7 +1510,14 @@ body { height: auto; padding: 0; }
       : 'theme ' + id + ' is the :root palette (no block, or an empty one)';
   }
   document.getElementById('loadBtn').addEventListener('click', loadTheme);
-  themePick.addEventListener('change', function () { loadNote.textContent = ''; });
+  // Retargeting is not loading: the block in the box takes the new id and name, the colours on screen stay as they
+  // are, so say where a save would land whenever that is not where the colours came from.
+  themePick.addEventListener('change', function () {
+    writeOutput();
+    var t = slotTheme();
+    loadNote.textContent = (!t || t.id === CURRENT) ? ''
+      : 'Save writes [' + t.id + '] ' + t.name + '; press Load to start from its colours';
+  });
 
   // ---- the block ----
   var out = document.getElementById('toolout'), note = document.getElementById('outnote');
@@ -1573,13 +1597,20 @@ body { height: auto; padding: 0; }
     return res.join(EOL);
   }
 
+  // The box is the block a save writes, so its id and name are the slot's rather than a reminder to edit them - the
+  // dropdown retargets the block without touching the colours in the table.  The placeholder survives only for a file
+  // with no blocks at all, where there is no slot to name.
   function blockText() {
-    return pairsText('X', 'Name here - and replace the X!', modelDeltas()).replace(/\r\n/g, '\n');
+    var t = slotTheme();
+    return pairsText(t ? t.id : 'X', t ? t.name : 'Name here - and replace the X!', modelDeltas())
+      .replace(/\r\n/g, '\n');
   }
   function writeOutput() {
     out.value = blockText();
+    var t = slotTheme();
     var n = out.value.split('\n').length - 2;
-    note.textContent = n > 0 ? n + ' line(s) in this block' : 'nothing changed yet';
+    var where = t ? ' in block [' + t.id + ']' : '';
+    note.textContent = (n > 0 ? n + ' line(s)' : 'nothing changed yet') + where;
   }
 
   // ---- save ----
@@ -1588,8 +1619,9 @@ body { height: auto; padding: 0; }
   function allValues() {
     var all = {}, prev = html.getAttribute('data-theme');
     clearInline();
+    var slot = slotId();
     THEMES.forEach(function (t) {
-      if (t.id === CURRENT) return;                 // the theme on screen is read from the model, not from CSS
+      if (t.id === slot) return;                    // the target block is written from the model, not from CSS
       html.setAttribute('data-theme', String(t.id));
       var vals = {};
       names.forEach(function (n) { vals[n] = css(n); });
@@ -1615,8 +1647,9 @@ body { height: auto; padding: 0; }
   function buildFile() {
     var parts = FILE_HEADER.slice();
     var others = allValues();
+    var slot = slotId();
     THEMES.forEach(function (t) {
-      var deltas = (t.id === CURRENT) ? modelDeltas() : valueDeltas(others[t.id] || {});
+      var deltas = (t.id === slot) ? modelDeltas() : valueDeltas(others[t.id] || {});
       parts.push(pairsText(t.id, t.name, deltas));
     });
     return parts.join(EOL) + EOL;

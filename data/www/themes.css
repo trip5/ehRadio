@@ -100,7 +100,7 @@
   --control-bg:         #e20000;
   --edges:              #e20000;
   --fills:              #000000;
-  --heading-text:       #e20000;
+  --heading-text:       #6464ff;
   --highlights:         #000000;
   --infotexts:          #000000;
   --input-border:       #ff0000;
@@ -112,7 +112,7 @@
   --logo-shadow:        #000000;
   --logo-text:          #ff0000;
   --maintexts:          #020202;
-  --meter-fill:         #e20000;
+  --meter-fill:         #6464ff;
   --outlines:           #e20000;
   --panel-gradient:     #d4d7d4;
   --playlist-hover:     #e20000;
@@ -129,13 +129,11 @@
   --highlights:         #b4b4b4;
   --icon-active-glyph:  #00005a;
   --input-border:       #76002b;
-  --labels:             #ff2323;
-  --list-names:         #fbff01;
-  --logo:               #e3e3e3;
-  --logo-shadow:        #bfbfbf;
-  --logo-text:          #000000;
+  --labels:             #00ffff;
+  --list-names:         #ffffff;
+  --logo-text:          #ffffff;
   --maintexts:          #fbff01;
-  --outlines:           #ef0000;
+  --outlines:           #6064ff;
   --panel-gradient:     #00004c;
   --surfaces:           #00005a;
 }

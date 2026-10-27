@@ -118,13 +118,9 @@ path#radio { fill: var(--logo-text); stroke: var(--logo-text); stroke-width: 0.3
 
 /* INPUTS */
 input[type=text], select[type=text], input[type=password], input[type=number] {
-  width: 100%; background: var(--input-fill); color: var(--input-text); border: var(--input-border) 1px solid;
-  padding: 6px 12px; font-size: 20px; font-weight: normal; margin-top: 4px; border-radius: 4px;
-}
+  width: 100%; background: var(--input-fill); color: var(--input-text); border: var(--input-border) 1px solid; padding: 6px 12px; font-size: 20px; font-weight: normal; margin-top: 4px; border-radius: 4px; }
 select[type=text] { background: var(--select-fill); color: var(--select-text); }
 input[type=text]:focus, input[type=password]:focus, input[type=number]:focus { outline: none; }
-/* The tick of a checkbox and the dot of a radio are the lit part of the widget, so both take the control
-   surface colour rather than the switch knob's.  A native control only shows `accent-color` when it is on. */
 input[type=checkbox] { accent-color: var(--control-bg); width: 18px; height: 18px; cursor: pointer; vertical-align: middle; }
 input[type=checkbox]:disabled { cursor: default; opacity: 0.4; }
 input[type=radio] { accent-color: var(--control-bg); cursor: pointer; vertical-align: middle; }
@@ -132,33 +128,26 @@ input[type=radio] { accent-color: var(--control-bg); cursor: pointer; vertical-a
 /* SLIDERS */
 input[type=range]::-webkit-slider-runnable-track { background: transparent !important; }
 input[type=range]::-moz-range-track { background: transparent !important; }
-input[type=range]::-webkit-slider-thumb { width: 0px; -webkit-appearance: none!important; height: 10px; cursor: ew-resize; background-color: 
-                                          transparent!important; border: 0; }
+input[type=range]::-webkit-slider-thumb { width: 0px; -webkit-appearance: none!important; height: 10px; cursor: ew-resize; background-color: transparent!important; border: 0; }
 input[type=range]::-moz-range-thumb { width: 10px; height: 10px; cursor: ew-resize; background-color: transparent!important; border: 0; }
-input[type=range] {
-  overflow: hidden; border: solid 2px var(--meter-outline); border-radius: 13px; height: 25px!important; outline: none; width: 100%; padding: 0; margin: 0;
+input[type=range] { overflow: hidden; border: solid 2px var(--meter-outline); border-radius: 13px; height: 25px!important; outline: none; width: 100%; padding: 0; margin: 0;
   background: linear-gradient(to right, var(--meter-fill) 0%, var(--meter-fill) 0%, var(--meter-track) 0%, var(--meter-track) 100%);
-  -webkit-appearance: none!important; -moz-appearance: none!important; appearance: none!important; 
-}
+  -webkit-appearance: none!important; -moz-appearance: none!important; appearance: none!important; }
 
 /* CHECKBOXES */
 .checkbox { cursor: pointer; line-height: 26px; }
-.checkbox .knob {
-  background: var(--switch-track); display: block; border: var(--switch-thumb) 2px solid; border-radius: 13px;
-  float: left; width: 50px; height: 26px; line-height: 22px; overflow: hidden;  position: relative; 
-}
-.checkbox .knob::before {
-  content: ''; display: inline-block; height: 18px; width: 18px; background: var(--switch-thumb); border-radius: 9px;
-  box-shadow: 0 0 6px #000; margin-top: 2px; margin-left: 2px; 
-}
+.checkbox .knob { background: var(--switch-track); display: block; border: var(--switch-thumb) 2px solid; border-radius: 13px;
+  float: left; width: 50px; height: 26px; line-height: 22px; overflow: hidden;  position: relative; }
+.checkbox .knob::before { content: ''; display: inline-block; height: 18px; width: 18px; background: var(--switch-thumb); border-radius: 9px;
+  box-shadow: 0 0 6px #000; margin-top: 2px; margin-left: 2px; }
 .checkbox .knob::after { content: var(--knob-off, 'Off'); position: absolute; color: var(--switch-off-text); font-size: 10px; font-weight: bold; line-height: 1; left: 22px; top: 50%; transform: translateY(-50%); }
 .checkbox.checked .knob { background: var(--switch-track-on); }
 .checkbox.checked .knob::before{ margin-left: 26px; }
 .checkbox.checked .knob::after{ content: var(--knob-on, 'On'); color: var(--switch-text); left: 5px; font-size: 10px; line-height: 1; top: 50%; transform: translateY(-50%); }
 
 /* PAGE */
-#content { height: 100%; margin: 0 auto; position: relative; max-width: 580px; display: flex; flex-direction: column; padding: 10px 20px 14px 20px; background: var(--panel-background); }
-#content.idx { max-width: 960px; }
+#content { height: 100%; margin: 0 auto; position: relative; max-width: 960px; display: flex; flex-direction: column; align-items: center; padding: 10px 20px 14px 20px; background: var(--panel-background); }
+#content > *:not(#pleditorwrap):not(#playerwrap):not(.fb) { width: 100%; max-width: 580px; }
 #editorwrap { background: var(--panel-background); }
 #content.upd { padding: 30px; min-width: 580px; }
 #playerwrap #modeplaying { display: none; flex-direction: column; }
@@ -169,8 +158,8 @@ input[type=range] {
 /* PLAYER CONTROLS */
 .fb:active, .gb:active { position: relative; top: 2px; }
 .gb { width: 54px; height: 54px; cursor: pointer; border: var(--icons-outline) 2.5px solid; border-radius: 50%; 
-               -webkit-tap-highlight-color:  rgba(255, 255, 255, 0); stroke: var(--icons-outline); display: flex; justify-content: center; align-items: center; 
-               -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  -webkit-tap-highlight-color:  rgba(255, 255, 255, 0); stroke: var(--icons-outline); display: flex; justify-content: center; align-items: center; 
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
 .gb.nb { border-color: transparent; }
 #toggleplaylist.sd-mode { pointer-events: none; }
 #toggleplaylist.sd-mode .gb { pointer-events: auto; }
@@ -215,7 +204,7 @@ input[type=range] {
 #playerwrap.playing #modeplaying { display: inline-block; }
 #playerwrap.playing #modestopped { display: none; }
 #playerwrap.playing #bitinfo { opacity: 1; }
-.formbuttons { display: flex; flex-wrap: wrap; justify-content: space-around; max-width: 100%; width: 100%; margin: 0 auto; margin-top: 20px; }
+.formbuttons { display: flex; flex-wrap: wrap; justify-content: space-around; max-width: 100%; width: 100%; margin: 16px 0px; }
 .fb { padding: 8px 22px; font-size: 16px; border: var(--button-outline) 2px solid; font-weight: normal; border-radius: 20px; cursor: pointer;
       text-align: center; min-width: 100px; margin-left: 8px; margin-right: 8px; color: var(--button-text); background: var(--button-fill);
       touch-action: manipulation; }
@@ -223,13 +212,9 @@ input[type=range] {
 /* A touch screen has no hover, so a button that changes something stays lit for a moment after the press
    (script.js adds and removes the class).  Deliberately outside the hover query: the effect must work there. */
 .fb.pressed { background: var(--button-active-fill); color: var(--button-active-text); text-decoration: none; }
-.fb.done { margin-left: calc(50%); transform: translateX(-50%); margin-top: 20px; margin-bottom: 10px; max-width: 140px; }
-#playlist {
-  position: relative; scroll-behavior: smooth; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); overflow: auto; overflow-y: auto; border: solid 1px var(--list-outline); flex: 1 1 auto; height: 0px; width: 100%;
-  background-color: var(--panel-background);
-  background-image: url('data:image/png; base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAABOAQMAAAAw4lVwAAAABlBMVEUnJycAAADxyujSAAAADklEQVQI12OgLjhATQgAdZgdQbNqrBUAAAAASUVORK5CYII=');
-  background-attachment: local;
-}
+.fb.done { margin: 20px auto 10px auto; max-width: 140px; }
+#playlist { position: relative; scroll-behavior: smooth; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); overflow: auto; overflow-y: auto; border: solid 1px var(--list-outline); flex: 1 1 auto; height: 0px; width: 100%;
+  background-color: var(--panel-background); background-image: repeating-linear-gradient(to bottom, var(--list-bars) 0 39px, var(--panel-background) 39px 78px); background-attachment: local; }
 #playlist li { display: flex; overflow: hidden; background: var(--panel-background); cursor: pointer; }
 #playlist li span.text { flex: 1; font-size: 20px; padding: 8px 0 8px 10px; word-break: break-word; }
 #playlist li span.count { display: flex; flex-direction: column; justify-content: center; padding: 0 10px; text-align: right; font-size: 14px; vertical-align: middle; }
@@ -253,25 +238,22 @@ input[type=range] {
 #pleditorcontent::-webkit-scrollbar { width: 5px; height: 8px; background-color: var(--scrollbar-track); }
 #pleditorcontent::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
 #pleditorcontent { flex: 1 1 auto; overflow-y: scroll; height: 0px; border: var(--list-outline) 2px solid; box-sizing: border-box; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); scrollbar-width: thin;
-  background-image: url('data:image/png; base64,iVBORw0KGgoAAAANSUhEUgAAAAcAAABAAgMAAACrYYWUAAAACVBMVEUnJycAAAAtLS3JOrneAAAAGElEQVQI12NYtYKBZgBoOAiFhtAIAQ0HALK+GReOr3bpAAAAAElFTkSuQmCC');
-  background-attachment: local;   /* stripes scroll with the rows, as they do on #playlist */
-}
+  background-color: var(--panel-background); background-image: repeating-linear-gradient(to bottom, var(--list-bars) 0 32px, var(--panel-background) 32px 64px); background-attachment: local; }
 #pleditorcontent li:nth-child(odd), #pleditorcontent li:nth-child(odd) input, #pleditorcontent li:nth-child(odd) span { background: var(--list-bars); }
 .grabbable { cursor: copy; cursor: -moz-grab; cursor: -webkit-copy; }
 .pleitem { display: flex; background: var(--panel-background); width: 100%; }
 .pleitem span { display: flex; flex-direction: column; justify-content: center; text-align: right; color: var(--editor-cell-text); width: 40px; padding: 0 8px; font-size: 14px; border: var(--editor-grid) 1px solid; }
 .pleitem input { font-family: Times, "Times New Roman", serif; background: var(--panel-background); color: var(--list-names); height: 32px; line-height: 32px; text-indent: 8px;
   font-size: 20px; border: var(--editor-grid) 1px solid; font-weight: normal; margin-top: 4px; border-radius: 0px; outline: none; margin: 0; padding: 1px 2px; width: auto; }
-/* The editor input follows #playlist li span.text at every breakpoint (20 / 16 / 25 / 30), so the two lists read alike */
 .plecheck { width: 30px!important; }
 .plecheck input { line-height: 10px; height: auto; }
-/* Name and URL share the free width as a ratio - 13:7 puts URL at ~35% - so Name takes the rest instead of
-   URL filling everything left of a fixed 300px Name (which was ~50% above the largest breakpoint). */
 .plename { flex: 13 1 0; min-width: 80px; }
 .pleurl { flex: 7 1 0; min-width: 40px; color: var(--list-urls)!important; }
 .pleovol { width: 53px!important; font-size: 16px!important; }
-.pleitem span.pleplay { width: 28px!important; height: 28px; text-indent: -1px; font-size: 12px!important; cursor: pointer; color: var(--editor-cell-text); border: transparent 2px solid; border-radius: 50%; margin: 2px; }
-@media (hover: hover) and (pointer: fine) { /* mouse only */  .pleitem span.pleplay:hover { background: var(--list-active-bg)!important; color: var(--icon-active-glyph); border-color: var(--icons-outline); } }
+.pleitem span.pleplay { width: 32px!important; padding: 0; text-align: center; font-size: 12px!important; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { /* mouse only */
+  .pleitem span.pleplay:hover { background: var(--list-active-bg)!important; color: var(--icon-active-glyph); border-color: var(--icons-outline); }
+}
 .pleitem.active span.pleplay { background: var(--list-active-bg)!important; color: var(--icon-active-glyph); border-color: var(--icons-outline); }
 .pleitem.active input.plename { color: var(--station-name); }
 .pleitem.dragging { opacity: 0.5; filter: grayscale(1); }
@@ -324,9 +306,6 @@ section .reset { position: absolute; cursor: pointer; background-color: var(--pa
 section .reset svg.fill{ fill: var(--panel-border); stroke: none; width: 22px; }
 .inputwrap { flex: 1; position: relative; padding: 0px 1% 0px 1%; }
 .inputwrap.pad { padding-top: 20px; }
-/* For a control that should not span its row: a 25% pad either side leaves half the row for the
-   control itself and keeps it centred, since the wrapper is still flex: 1. Reusable anywhere a
-   full-width select or input looks wrong. */
 .inputwrap.centerpad { padding-left: 25%; padding-right: 25%; }
 .inputwrap.center { display: flex; flex-direction: column; align-items: center; }
 .inputwrap.center .inputtitle { text-align: center; }
@@ -339,7 +318,8 @@ section .reset svg.fill{ fill: var(--panel-border); stroke: none; width: 22px; }
 .searchtitle2 { margin: 0; padding: 7.5 0px 0px 8px; font-size: 13px; font-weight: bold; text-align: right; float: right; display: block; z-index: 1; background: transparent; }
 .searchtitle2 a { cursor: pointer; color: var(--link-quiet); }
 @media (hover: hover) and (pointer: fine) { /* mouse only */ .searchtitle2 a:hover { color: var(--link-text); text-decoration: underline; } }
-#searchcontent, #curatedcontent { display: flex; max-width: 580px; margin: 0 auto; flex-direction: column; align-items: center; padding: 4px; height: 100%; box-sizing: border-box; position: relative; padding-top: 2px; padding-bottom: 2px; background: var(--panel-background); }
+#searchcontent, #curatedcontent { display: flex; max-width: 960px; margin: 0 auto; flex-direction: column; align-items: center; padding: 4px; height: 100%; box-sizing: border-box; position: relative; padding-top: 2px; padding-bottom: 2px; background: var(--panel-background); }
+#searchcontent > *, #curatedcontent > * { width: 100%; max-width: 580px; }
 #searches { display: flex; flex-direction: column; width: 100%; gap: 4px; margin-bottom: 4px; }
 .search-row { display: flex; align-items: center; gap: 2px; }
 .search-row .searchtextinput { flex-grow: 1; }
@@ -368,7 +348,7 @@ table.stations td.preview, td.add { width: 70px; }
 table.stations td.add { text-align: right; }
 table.stations td.name { width: auto; text-align: left; color: var(--station-name); }
 table.stations td.info { width: 85px; }
-table.stations td.info table { width: 100%; border: 1px dotted #707070; }
+table.stations td.info table { width: 100%; border: 1px dotted var(--list-outline); }
 table.stations td.info table td { border: none; }
 table.stations td.info table td.countrycode { text-align: left; }
 table.stations td.info table td.languagecode { text-align: right; }
@@ -433,18 +413,12 @@ table.stations .importantmessage { color: var(--heading-text) !important; font-s
 #settingspopup.ir #settingsbuttonwifi { min-width: 104px; width: 104px; display: inline-block; }
 #settingspopup.ir #settingsbuttonir { min-width: 60px; width: 60px; display: inline-block; margin-left: 0; float: right; }
 .fb.tool { padding: 4px 12px; font-size: 14px; font-weight: normal; min-width: 100px; margin-top: 30px; }
-
-/* A mode switch: entering SD mode verifies the card and may rebuild the whole index, so until the device says the
-   mode is settled every control on the player page is inert and dimmed.  All of them carry `.gb`; the playlist is
-   its own element.  `pointer-events` is what actually stops the press - opacity alone only looks disabled. */
 body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: none; }
 @keyframes spinner { 0% { transform: rotate(0deg);  } 100% { transform: rotate(360deg); } }
 @-webkit-keyframes spinner { 0% { transform: rotate(0deg);  } 100% { transform: rotate(360deg); } }
 
 /* IR RECORDER */
 #irwrap { display: flex; align-items: center; flex: 1; max-width: 480px; margin: 0 auto; }
-/* The remote is a physical object, not part of the theme: every colour below is fixed on purpose and no palette
-   variable may be used inside #irremote. */
 #irremote { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-column-gap: 8px; grid-row-gap: 8px; border-radius: 20px; border: #555555 2px solid; background-color: #111111; box-sizing: border-box; padding: 12px; }
 .irbutton { font-family: Helvatica, Arial, Sans; width: 54px; height: 54px; border-radius: 27px; border: #555555 3px solid; box-sizing: border-box; font-size: 24px; font-weight: bold; color: #e8ece8; background-color: #010101; display: flex; justify-content: center; align-items: center; cursor: pointer; user-select: none; }
 .irbutton svg { width: 20px; fill: #e8ece8;  stroke: none; }
@@ -462,9 +436,6 @@ body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: non
 #irrecordtitle span { background-color: var(--icons-outline); color: var(--panel-background); width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-family: Helvatica, Arial, Sans; font-size: 18px; margin-left: 8px; border: var(--panel-border) 2px solid; }
 #irrecordtitle span svg { fill: var(--panel-background); width: 16px; }
 #irrecordcaption { padding-left: 42px; font-size: 16px; line-height: 21px; min-height: 21px; margin-bottom: 16px; color: var(--caption-text); }
-/* The recorder rows borrow the flat button rather than the remote: the row that is not selected is an unpressed
-   button, the selected row is a pressed one (the `.pressed` lit state, which keeps its ring).  There is no hover
-   rule on purpose - a row reports a state, it is not something you click. */
 .irrecordrow { display: flex; margin-bottom: 20px; position: relative; }
 .irradio { width: 42px; cursor: pointer; display: flex; align-items: center; }
 .irradio span { position: relative; height: 28px; width: 28px; background-color: var(--button-fill); border-radius: 50%; border: var(--button-outline) 2px solid; margin: 4px 0; }
@@ -477,15 +448,13 @@ body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: non
 .irrecordvalue.active { background-color: var(--button-active-fill); color: var(--button-active-text); }
 .irtitle { line-height: 48px; margin: 5px 0; text-align: center; padding-top: 10px; font-weight: bold; font-size: 26px; color: var(--heading-text); width: 100%; }
 #done_ir { display: block; }
-/* The clear button is the one thing in a row you can click, so it is a flat button at rest.  The cross is two CSS
-   bars rather than the old PNG, which let it take the button's label colour instead of a fixed dark grey. */
 .irclear { box-sizing: border-box; width: 22px; height: 22px; background-color: var(--button-fill); border: var(--button-outline) 2px solid; border-radius: 50%; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; }
 .irclear:before, .irclear:after { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 2px; border-radius: 1px; background-color: var(--button-text); }
 .irclear:before { transform: translate(-50%, -50%) rotate(45deg); }
 .irclear:after { transform: translate(-50%, -50%) rotate(-45deg); }
 
 /*  SD Card Manager */
-body.sdman #pleditorwrap { top: 0; background: var(--page-bg); }
+body.sdman #pleditorwrap { top: 0; background: var(--page-bg); padding: 0 5px; }
 body.sdman #pleditor { min-width: 0; max-width: 1100px; margin: 0 auto; background: var(--panel-background); }
 body.sdman #pleditorcontent li.pleitem:not(.sdnotice) { height: 32px; }
 body.sdman .sdpath { text-align: center; color: var(--heading-text); padding: 2px 6px 8px 6px; word-break: break-all; font-size: 15px; }
@@ -501,18 +470,14 @@ body.sdman .sdsize { flex: 0 0 100px; text-align: right; padding: 0 8px; font-si
                      border-left: var(--editor-grid) 1px solid; }
 body.sdman #pleheader .sdname, body.sdman #pleheader .sdsize { font-size: 18px; }
 body.sdman .sdcheck { flex: 0 0 30px; display: flex; align-items: center; justify-content: flex-end; }
-body.sdman #pleditorcontent .sdiconbtn { width: 22px; height: 22px; min-width: 22px; box-sizing: border-box;
-                        border: var(--icons-outline) 2px solid; border-radius: 20px;
-                        display: flex; align-items: center; justify-content: center; cursor: pointer;
-                        color: var(--icons-outline); background: var(--control-bg); text-decoration: none; }
-body.sdman #pleditorcontent .sdiconbtn svg { width: 16px; height: 16px; stroke: var(--icons-outline);
-                        stroke-width: 4px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-body.sdman #pleditorcontent .sdiconbtn svg.fill { fill: var(--icons-outline); stroke: none; }
+body.sdman #pleditorcontent .sdiconbtn { width: 22px; height: 22px; min-width: 22px; box-sizing: border-box; border: var(--editor-grid) 2px solid; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--editor-cell-text); background: transparent; text-decoration: none; }
 @media (hover: hover) and (pointer: fine) { /* mouse only */
-  body.sdman #pleditorcontent .sdiconbtn:hover { background: var(--highlight-fill); border-color: var(--icons-outline); }
-  body.sdman #pleditorcontent .sdiconbtn:hover svg { stroke: var(--icon-active-glyph); }
-  body.sdman #pleditorcontent .sdiconbtn:hover svg.fill { fill: var(--icon-active-glyph); stroke: none; }
+  body.sdman #pleditorcontent .sdiconbtn:hover { background: var(--list-active-bg); color: var(--icon-active-glyph); border-color: var(--icons-outline); }
 }
+body.sdman #pleditorcontent .sdiconbtn svg { width: 16px; height: 16px; stroke: currentColor;
+                        stroke-width: 4px; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+body.sdman #pleditorcontent .sdiconbtn svg.fill { fill: currentColor; stroke: none; }
 body.sdman #pleditorcontent .sdiconbtn.off { opacity: 0.35; cursor: default; }
 body.sdman .pleitem.dir .sdname { font-weight: bold; cursor: pointer; }
 body.sdman .sdnotice { justify-content: center; padding: 0 10px; min-height: 32px; background: transparent; }

@@ -1865,6 +1865,16 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - Links the real stylesheet (`../../data/www/style.css`) and carries **no `data-theme`**, so the page's base is
   the real `:root` and theme 0 is just another slot - it is not the default and its notes say nothing special.
   The loader sets that attribute for one synchronous read and restores it.
+- **The dropdown is the block a save writes; Load only fills the table from it.** Two separate things: `CURRENT` is
+  where the colours on screen came from (set by Load, cleared by Reset), while the *slot* is
+  `parseInt(themePick.value)` - whatever the dropdown names, whether or not Load was pressed. `blockText()` takes the
+  slot's id and `--theme-name`, `allValues()` skips the slot when it reads the other blocks, and `buildFile()`
+  injects `modelDeltas()` into the slot, so retargeting moves the box's header and the save's destination together
+  and never touches the colours. That is what makes "load a palette you like, pick the block to overwrite, Save"
+  work. The box used to hardcode `X` and a placeholder name because it had no way to know which block it was, and
+  `themePick`'s `change` handler only cleared the note; it now repaints the box. The loadnote says where a save
+  would land whenever the slot is not `CURRENT`, that being the one moment it lands somewhere the colours did not
+  come from.
 - **The tool's own chrome is hard-coded on purpose.** The help column, the table, the output block and the sample
   captions are the instrument, not the subject: they read `--tool-*`, a fixed dark palette declared in the harness
   `<style>`. They used to borrow the theme, and theme 6 (black text on a light page) made the editor unreadable
@@ -3912,15 +3922,19 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `--editor-cell-text` / `--link-quiet` / `--section-title-text` / `--switch-off-text`.
   `--info-text` is one role on purpose: bitrate, RSSI, volume and battery share the player's info row.
   **`--control-bg` is the lit part of a checkbox or radio**: the tick of a native `input[type=checkbox]` and the dot
-  of a native `input[type=radio]` (`accent-color`, which a native control shows only while it is on), the disc of the
-  update page's custom radio (`.checkmark`, whose ring and dot are `--switch-thumb`), and the SD manager's round icon
-  buttons. The toggle switches are a different widget and never use it: their groove is `--switch-track` /
-  `--switch-track-on` and the knob is `--switch-thumb`.
+  of a native `input[type=radio]` (`accent-color`, which a native control shows only while it is on), and the disc of
+  the update page's custom radio (`.checkmark`, whose ring and dot are `--switch-thumb`). The toggle switches are a
+  different widget and never use it: their groove is `--switch-track` / `--switch-track-on` and the knob is
+  `--switch-thumb`. The SD manager's round icon buttons used to be its last client; they are now an `--editor-grid`
+  ring with an `--editor-cell-text` glyph (see the preview bullet below).
   Outside the families: `--input-border` (text-field outline), `--list-names` (editor name column),
   `--list-bars` and `--playlist-hover` (fixed list colours),
   `--panel-gradient` (the wash in a settings card) and the logo trio `--logo`, `--logo-text`,
   `--logo-shadow`. `--warning-outline` is the editor
-  warning ring. **The IR remote is not themed at all**: `#irremote`, `.irbutton` and its blue/red keys use
+  warning ring. The bitrate box inside a search result carried a fixed `#707070` dotted ring and now takes
+  `--list-outline`; `#equalizerbg`'s `rgba(0, 0, 0, 0.1)` veil and the validator's `rgb(0, 200, 0)` /
+  `rgb(255, 60, 60)` pass and fail stay literal on purpose, being transparency and a signal rather than theme
+  surfaces. **The IR remote is not themed at all**: `#irremote`, `.irbutton` and its blue/red keys use
   fixed hex values in `style.css` (a real remote looks the same in every theme), so it has no palette roles.
   The rows under it are the opposite case: `#irrecord` is painted entirely from the button roles - at rest
   `--button-fill` / `--button-text` / `--button-outline`, and the `active` row `--button-active-fill` /
@@ -3933,6 +3947,41 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - The theme paints the app column only: `#content`, `#searchcontent`/`#curatedcontent`, `#editorwrap`
   and the SD manager's `#pleditor`. `html`, `body` and `#progress` use `--page-bg`, which no generated theme
   writes, so a light or saturated theme never floods the browser window.
+- **`#playerwrap` paints nothing, on purpose.** It is the 440 px column inside the card, not a second surface;
+  giving it `--panel-background` changed nothing on a dark theme and double-framed the player on a light one.
+- **Every page is one 960 px card with a 580 px column inside it.** `#content` - the shell every fragment is
+  injected into, see `index_html` in `netserver.h` - is 960 wide with `align-items: center`, and
+  `#content > *:not(#pleditorwrap):not(#playerwrap):not(.fb)` caps its direct children at 580 - the first two
+  exclusions keep the 880 px editor and the 440 px player column out, and the third keeps a root-level flat button
+  (the settings Done) on its own `max-width`, which the id in this selector would otherwise override;
+  `#searchcontent`/`#curatedcontent` carry the same pair because they are standalone documents rather than
+  fragments. The player page has always looked like
+  this: `script.js` adds `idx` for it and `#content.idx` was the 960 px rule, now deleted at desktop width while
+  `max-width: 98%` under 1100 px remains, so the player keeps its tablet inset. `#pleditorwrap` is excluded from
+  the cap or the 880 px editor would be clamped to the column. **editor.html is deliberately not in this scheme:**
+  it is a two-column tool, not an app page, and it has no `#content`.
+- **The zebra under a list is a gradient, not a base64 PNG.** `#playlist` and `#pleditorcontent` used to carry
+  fixed images - decoded, two 39 px bands and two 32 px bands of `#272727` / `#2d2d2d` - which could not follow
+  the theme and showed as the wrong colour under a short list and behind the SD manager's
+  `background: transparent` notice rows. Each is now a `repeating-linear-gradient` in `--list-bars` /
+  `--panel-background` with the same periods (the row height of that list at the default font size) and
+  `background-attachment: local`, so the bands still scroll with the rows. The rows' own zebra remains the
+  `nth-child` rule.
+- **The editor's preview is a grid cell; only the SD manager's arrows are round.** `.pleitem span.pleplay` takes the
+  cell's shape from `.pleitem span` - square, full row height, the 1 px `--editor-grid` border - and differs only in
+  being 32 px wide with the glyph centred; that is what keeps the row's horizontal rule unbroken across the column.
+  It was a 28 px circle inset by a 2 px margin behind a transparent border, so the rule visibly stopped there, and a
+  round ring can never draw a cell's straight edge on any theme. The fill on hover and on the playing row carries
+  `!important` because the odd-row zebra paints every span in the row underneath it.
+  `body.sdman #pleditorcontent .sdiconbtn` is the round one - 22 px, ring `--editor-grid`, glyph
+  `--editor-cell-text`, no fill, `--icons-outline` and `--list-active-bg` on hover - and its cells are borderless, so
+  a circle breaks no rule; its strokes are `currentColor`, one colour driving an SVG.
+- **`.fb.done` centres with auto margins**, not the old `margin-left: calc(50%)` plus `translateX(-50%)`: that pair
+  was tuned to a 540 px parent and slid off centre as soon as the card widened to 960. `margin: 20px auto 10px auto`
+  with `max-width: 140px` is centred at any width.
+- **`body.sdman #pleditorwrap` carries no vertical padding.** The wrapper is pinned `top: 0; bottom: 0`, so the base
+  rule's 5 px and 10 px painted two bands of `--page-bg` above and below the panel; `padding: 0 5px` keeps the side
+  gaps and lets the panel meet both window edges.
 - A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
   GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
 - `.fb` is the flat button: `--button-fill` / `--button-text` at rest, `--button-active-fill` /

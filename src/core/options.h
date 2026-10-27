@@ -39,12 +39,12 @@ or examine the examples in builds/trip5 and make your own!
 //   I2S audio buffer:             ~640 KB  (UINT16_MAX * 10, player.init())
 //   VU/FFT Scratch                   8 KB  (vuScratchAlloc())
 //   SD File Manager                 68 KB  (allocated only when SD File Manager runs, asmBegin())
-//   WebUI files cache:            ~120 KB  (actually ~410 KB if using uncompressed files, allocated last, netserver.begin())
+//   WebUI files cache:            ~130 KB  (actually ~420 KB if using uncompressed files, allocated last, netserver.begin())
 // ---------------------------------------
-//   VS1053 & OLED total:          ~489 KB or ~779 KB (uncompressed WebUI files)
-//   I2S & OLED total:             ~836 KB or ~1126 KB
-//   VS1053 & TFT total:           ~717 KB or ~1007 KB
-//   I2S & TFT total:             ~1064 KB or ~1354 KB
+//   VS1053 & OLED total:          ~499 KB or ~789 KB (uncompressed WebUI files)
+//   I2S & OLED total:             ~846 KB or ~1136 KB
+//   VS1053 & TFT total:           ~727 KB or ~1017 KB
+//   I2S & TFT total:             ~1074 KB or ~1364 KB
 // Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
 
 

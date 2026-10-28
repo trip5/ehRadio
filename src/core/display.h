@@ -106,6 +106,7 @@ class Display {
     ScrollWidget *_sstext = nullptr;
     bool _ssFailed = false;
     bool _ssMeterUp = false;
+    uint32_t _ssHoldUntil = 0;
     NumWidget *_nums = nullptr;
     ClockWidget *_clock = nullptr;
     Page *_boot = nullptr;
@@ -144,6 +145,7 @@ class Display {
     uint16_t _ssContentH();
     uint16_t _ssTextTop();
     void _screensaverLine();
+    void _ssHoldLine(uint32_t ms);
     void _screensaverWidgets();
     void _screensaverClockTarget(MoveConfig& mv);
     void _enterScreensaver(displayMode_e mode);

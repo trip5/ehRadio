@@ -296,8 +296,8 @@ bool SDManager::listSD(File &plSDfile, File &plSDindex, const char* dirname, uin
           static bool capWarned = false;
           if (!capWarned) {
             capWarned = true;
-            ERRORLOG("SD index is full at %u files: %s is where indexing stopped, the rest of the card has no ids",
-                     (unsigned)MAX_PLAYLIST_ENTRIES, filePath);
+            WARNINGLOG("SD index is full at %u files: %s is where indexing stopped, the rest of the card has no ids",
+                       (unsigned)MAX_PLAYLIST_ENTRIES, filePath);
           }
           free(filePath);
           continue;

@@ -2622,17 +2622,19 @@ void Audio::loop() {
                 (unsigned)m_audioDataSize, (unsigned)InBuff.bufferFilled());
             m_f_eof = true;               // the m_f_eof block in processLocalFile() does the teardown from here
         }
-        // Every remaining decode error arrives with `gap` at exactly one buffer capacity, and the error line cannot say
-        // WHEN that buffer's worth went missing.  Ten seconds of trace answers it: a gap that jumps at one line and then
-        // holds is a single loss at that moment; a gap that grows line by line is a different mechanism altogether.
-        if(nowMs - m_gapTraceMs >= 10000) {
-            m_gapTraceMs = nowMs;
-            int32_t gap = (int32_t)(m_ringWritten - m_sumBytesDecoded - m_audioDataStart - InBuff.bufferFilled());
-            AUDIO_INFO("track 10s: sum %u/%u ring %u buf %u gap %d rd %u wr %u reader %u",
-                (unsigned)m_sumBytesDecoded, (unsigned)m_audioDataSize, (unsigned)m_ringWritten,
-                (unsigned)InBuff.bufferFilled(), (int)gap, (unsigned)InBuff.getReadPos(),
-                (unsigned)InBuff.getWritePos(), (unsigned)(audiofile.position()));
-        }
+        // Every remaining decode error arrives with `gap` at exactly one buffer capacity and the error line cannot say
+        // when that buffer went missing: a jump then hold is one loss, growth is another mechanism.  Gated at the
+        // source, since this runs on a timer for the life of the device.
+        #ifdef AUDIO_DEBUG
+          if(nowMs - m_gapTraceMs >= 10000) {
+              m_gapTraceMs = nowMs;
+              int32_t gap = (int32_t)(m_ringWritten - m_sumBytesDecoded - m_audioDataStart - InBuff.bufferFilled());
+              AUDIO_INFO("track 10s: sum %u/%u ring %u buf %u gap %d rd %u wr %u reader %u",
+                  (unsigned)m_sumBytesDecoded, (unsigned)m_audioDataSize, (unsigned)m_ringWritten,
+                  (unsigned)InBuff.bufferFilled(), (int)gap, (unsigned)InBuff.getReadPos(),
+                  (unsigned)InBuff.getWritePos(), (unsigned)(audiofile.position()));
+          }
+        #endif
     }
 
     if(m_playlistFormat != FORMAT_M3U8) { 			// normal process

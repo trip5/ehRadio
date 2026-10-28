@@ -70,8 +70,8 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 
 ### Logging chain (serial + telnet)
 - `src/core/logging.h` / `src/core/logging.cpp` define the common log path. Call sites keep the uppercase macros, which
-  now wrap function-backed implementations (`serialLog`, `functionLog`, `bootLog`, `bootLogX`, `errorLog`, `serialLogDot`,
-  `audioLog`) so formatting happens in one backend.
+  now wrap function-backed implementations (`serialLog`, `functionLog`, `bootLog`, `bootLogX`, `errorLog`, `warningLog`,
+  `serialLogDot`, `audioLog`) so formatting happens in one backend.
 - Core macros:
   - `SERIALLOG(...)`: writes one formatted line to both serial and telnet sinks.
   - `SERIALLOGX(...)`: writes one formatted line to both serial and telnet sinks without line-ending (useful after
@@ -82,6 +82,44 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - `ERRORLOG(...)`: error-category wrapper.
   - `SERIALLOGDOT()`: progress-dot helper for long-running loops.
   - `AUDIOLOG(category, ...)`: callback-safe logging wrapper for stack-sensitive audio callback contexts.
+  - `WARNINGLOG(...)`: warning-category wrapper (`[Warning]`), the middle level - see the two-level rule below.
+  - `WARNINGS_LOG` is the switch for that level, and it is a plain flag like every other debug switch here:
+    `#ifdef WARNINGS_LOG` / `#ifndef WARNINGS_LOG`, listed in `options.h` inside the `ALL_DEBUG_LOGS` block. So
+    `[Warning]` lines exist only in a debug build, which is the point: a shipped log carries `[ERROR]` and nothing
+    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h` (or `ALL_DEBUG_LOGS`). Two traps.
+    (1) A flag is on whether it is 1 or 0, so `#define WARNINGS_LOG 0` *enables* it - the way to leave it off is
+    simply not to define it. (2) The test sits in the body of `warningLog()` in `logging.cpp`, not around the macro in
+    `logging.h`: that header is included by translation units that cannot see `options.h`, where the flag would be
+    undefined and warnings would vanish from exactly those files in a debug build too - the trap
+    `ESPFILEUPDATER_VERBOSE` fell into. Declared unconditionally, one signature everywhere, one place to turn it on.
+- **Two levels, and what each one promises the reader.** `[ERROR]` is what is broken and unhandled: data lost, a mount
+  failed, a task could not be created, heap corruption detected. `[Warning]` is what the code already handled: a
+  fallback taken (`SD card not inserted` -> web mode), a retry running (`Recovery restarts spent`), a limit reached
+  (playlist or SD index full), or an event expected on this path (`Main loop stalled` during an ID3v2 tag read, a
+  dropped display request). The test for a site is in its own message text: "failed", "cannot" or "could not" with no
+  fallback behind it is an ERROR; anything self-healing is a Warning. Warnings stay on in every build, because the level
+  only helps if a tester can tell the two apart in the log they paste. Tester rule: a `[Warning]` is worth reporting
+  when it repeats or when the audio misbehaves with it; an `[ERROR]` is always worth reporting.
+  **Demoting a site to `Warning` therefore also takes it out of a normal build's log**, because warnings are a debug
+  switch. That is deliberate for an event the code handled, and wrong for anything the user has to act on - so a
+  demotion has to hold up on both counts: "the code dealt with it" AND "nobody needs to see it in a shipped log".
+- **`[Audio.info]` is not a log stream, and that is why it was never gated.** `AUDIO_INFO()` in the audio libraries is
+  `sprintf()` plus a call to the weak `audio_info()` callback - the library's event channel into the sketch.
+  `AudioHandlers::handleInfo()` is the consumer, and several messages change behaviour there: the codec report sets the
+  bitrate format, `BitRate:` sets the station bitrate and pushes it to the WebUI, `stream ready` clears the connecting
+  placeholder, `skip metadata` restores the station name. The message is therefore never suppressed - only the print, in
+  the handler. Three dispositions: the library's fault lines go through a `kInfoSeverity[]` table (`no decode progress`
+  -> `ERRORLOG`; `mp3 err `, `zero read:`, `ring overrun prevented` -> `WARNINGLOG`); metadata has its own switch
+  (`METADATA_LOG`, a flag, off by default, `[Metadata]` category) covering the ID3 fields in `handleId3Data()`, the ICY title in
+  `handleShowStreamTitle()` - including a title refused as non-printable, which is the answer to "no title on this
+  station" - the ICY station name in `handleShowStation()`, and the raw `StreamTitle=`/`StreamUrl=` copies that arrive
+  through `handleInfo()`; everything else is per-track chatter printed only under `AUDIO_DEBUG`. A new fault line has to
+  be added to that table to be heard.
+- **Two lines are gated at the source as well**, because they run on a timer rather than once per event: the `track 10s`
+  ring arithmetic in `Audio::loop()` sits inside `#ifdef AUDIO_DEBUG` so its sprintf never runs in a quiet build, and
+  the two `[SD]` trace lines (`connecttoFS`, `play pos ... card n/m`) are behind `SD_PLAY_TRACE_MS`, which now defaults
+  to **0** - set it to e.g. 30000 in `myoptions.h` for a soak, since that pair is what says whether the card reader or
+  the decoder stopped. `CONFIG_KEY_DEBUG` does the same for the `[Config.key]` value dumps in `config.h`.
   - `BOOTLOG_TIME` (defaulted in `options.h` under `ALL_DEBUG_LOGS`, set in `myoptions.h` for debug builds) makes every
     `BOOTLOG` line carry the time since boot, zero-padded to five digits, between the 16-character category field and
     the message: `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false
@@ -1109,8 +1147,37 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `_screensaverWidgets()` scales `scrolldelta` by 3/4 where it divides exactly (a multiple of 4) and otherwise
   stretches `scrolltime` by 4/3 - the step is preferred because it keeps the finer motion, but the OLEDs' 1 px step
   (and the TFTs' 2 px) would truncate to 0 or to half the speed, so those take the interval path. The start delay
-  and both buffer sizes are `weatherConf`'s own, unmodified. See `plans/screensaver-panel-ownership.md` and
-  `plans/screensaver-line-scroll.md`.
+  and both buffer sizes are `weatherConf`'s own, unmodified. **The line is one state or the other, never both**:
+  while `player.isRunning()` it is the station name and the two title halves and the weather is deliberately left
+  out (a single-row strip that mixes a forecast into a track name pushes the track off it), and over silence it is
+  `network.weatherBuf` alone - the same split `ssLineHasText()` refuses the strip on. Both transitions re-build it
+  through `config.setTitle()` -> `NEWTITLE` -> `_title()`, so the composition follows the transport with no extra
+  refresh path. **This is the one line that must MOVE**, so `_screensaverLine()` hands its single copy to
+  `ScrollWidget::setTextLooped()` instead of `setText()`: a still row on an otherwise idle panel reads as broken
+  furniture, and padding with blanks was tried and reads as a fault, so the widget repeats the text until it is
+  wider than its span - joined with `_sep`, its own mark, so the seam is indistinguishable from the joins inside
+  one copy and from the mark a scroll cycle prints at its wrap. The measurement is `setText()`'s own
+  (`preTextString()`, then codepoints at `_charWidth`, against `_width`, through `_widthOf()`), so the loop and
+  `_checkIsScrollNeeded()` cannot disagree; the ceiling is `_buffsize - 2`, exactly what `setText()` keeps, because
+  a truncated copy would stop the line scrolling again. Every panel is far inside that budget (the widest, 460 px
+  at text size 1, is 77 characters). The composition above it, `ssRowH()` and `_ssContentH()` are untouched - it
+  is the text's PARTS that size the strip, never their repetition - and every other row in the firmware still
+  calls plain `setText()`. See `plans/screensaver-panel-ownership.md`, `plans/screensaver-line-scroll.md`,
+  `plans/screensaver-line-loop.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+- **A track change blanks the info line for three seconds** (`SS_LINE_HOLD_MS`).  The trigger is `NEWSTATION`
+  handled while `config.isScreensaver`: `_play()` queues it BEFORE `connecttoFS()`, so the hold is already up when
+  `handleBeginSdRead()` clears the title - which is the moment the weather would otherwise take the strip - and a
+  manual skip is excluded because `screenSaverExit()` queues its mode change first, leaving `isScreensaver` false
+  by the time the request is handled.  Without it an SD boundary rewrites the line two or three times as the title
+  is cleared and re-filled (the visible reset) and flashes the forecast over the gap.  `Display::_ssHoldLine()` in
+  `display.cpp` blanks the widget with `setText("")` - the whole span on both draw paths, because `_windowRect()`
+  widens an empty line to the span - and sets `_ssHoldUntil`; `_screensaverLine()` refuses on that deadline, so
+  every writer is covered (`NEWTITLE`, `NEWWEATHER`, `SHOWWEATHER`, and an `SSREBUILD` re-init), and
+  `Display::loop()` is what clears it and repaints once, because the requests that would have painted the line are
+  exactly the ones being refused.  `_switchMode()` clears the deadline in both screensaver branches - a fresh entry
+  is not a track change and leaving takes the page away - while `_enterScreensaver()` deliberately does not, since
+  `SSREBUILD` re-enters through it.  The strip keeps its height while blank, so `_ssContentH()` and the clock's
+  walk floor do not move.  See `plans/screensaver-line-hold.md`.
 - **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
   `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
   both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
@@ -1123,6 +1190,15 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `_screensaverWidgets()` on the one path that locks the clock for the meter, so the two cannot disagree; a
   derived predicate was rejected because the canvas-allocation failure path - where the clock is what the
   screensaver shows - is precisely the case a derived answer gets wrong.
+  **The clock's POSITION is the walk's too.** `_layoutChange()` skips every `moveBack()`/`applyMove()` on the
+  clock while `config.isScreensaver` (`ssOwnsPanel`), because `PSTART`/`PSTOP` arrive during playback as well: an
+  SD EOF track change queues `PSTART` from `_play()`, which deliberately stays in the screensaver, and the old
+  unconditional `moveBack()` there dragged the wandering clock to `clockConf` and parked it until the next
+  `SCREENSAVERMOVE` (`options.h`) step - the reported snap on every track change. Placing the clock is
+  `_enterScreensaver()`'s and `_screensaverClockTarget()`'s business. `_moved` stays true, so the hand-back in
+  `_switchMode(PLAYER)` still restores the conf position; the lock and `hideWeatherIfChanged()` in that function
+  are untouched, because `_clockHidden()` already answers for `config.isScreensaver`.
+  See `plans/screensaver-line-weather-and-clock-snap.md`.
 - **A user action wakes the panel, and the wake is explicit.** The screensaver is only ever left by a
   `NEWMODE, PLAYER`, which is issued from two places: `Controls::screenSaverExit()` - which every panel handler
   (encoder, buttons, IR) runs first, clearing the display queue, restarting the countdown and queueing the mode -
@@ -1784,6 +1860,24 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   are rules, not guesses; the rest are still eyeballed.
 - Name truncation at 31 chars for `_themeNames[][32]`.
 - `-n` sets the starting index; without it the entry is appended after the last one.
+- **`--fix` is `--import`'s mirror and edits in place.** `-i` appends an entry and invents or confirms its name;
+  `-f` replaces the *values* of ONE entry that already exists and takes the name from `_themeNames[index]` instead
+  of asking - `--name` is ignored there and `_themeNames[]` is never written. `replace_theme_entry()` splices
+  `emit_theme_entry()`'s output over the span `parse_entries()` reports, re-terminated with the file's own EOL,
+  because the emitter builds with `\n` and `write_text()` does not translate. The input must hold a single theme: a
+  `Backup All` array is refused, since a fix replaces one slot. `themes.css` is left alone unless the closing
+  `[y/N]` prompt is answered yes, which calls `sync_one_block()` - `build_palettes` → `theme_deltas` →
+  `collapse_families` → `render_block` for that id alone, replacing the block or adding it if themes.css lacks one.
+  That is the one case where re-deriving after a hand edit is right: the entry just corrected is the newer truth.
+- **`parse_entries()` spans begin at the entry's indentation, never at the preceding line terminator.** The pattern
+  `(?m)^\s+\{\s+//` is matched against a *slice* of the file, so `^` can match at a leading newline and `\s+` then
+  swallows it; the start is advanced past any `\r`/`\n` before it is recorded. Every consumer splices with these
+  spans, so this is load-bearing: a span that includes the previous terminator welds two entries into
+  `},    {   // Name` the moment the entry is replaced - which is what `--fix` did before the normalisation, and
+  nothing noticed because the file still compiled and every colour was still right. `mode_delete()` consumes the
+  terminator as a unit (`\r\n` or `\n`), since taking only the `\n` of a CRLF leaves a stray `\r` and eating every
+  terminator in sight welds the neighbours. `mode_audit()` reports any entry whose start is not preceded by a line
+  break, with the line number and whether it shares the line with the `_themes[]` declaration or the entry before.
 
 ## `src/displays/theme_tool.py` - the palette files and the other modes
 - **Three files hold the palette.** `data/www/style.css` keeps `:root` - the hand-authored design, its nine

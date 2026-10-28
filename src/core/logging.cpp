@@ -107,6 +107,18 @@ void errorLog(const char* fmt, ...) {
   va_end(args);
 }
 
+// Without WARNINGS_LOG nothing is formatted or written; the signature is unchanged.
+void warningLog(const char* fmt, ...) {
+  #ifdef WARNINGS_LOG
+    va_list args;
+    va_start(args, fmt);
+    emitLogMessage("Warning", true, fmt, args);
+    va_end(args);
+  #else
+    (void)fmt;
+  #endif
+}
+
 void serialLogDot() {
   Serial.print(".");
 }

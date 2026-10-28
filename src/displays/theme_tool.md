@@ -11,9 +11,11 @@ can be used to feed `theme_tool.py -i`... read below for more information.
 
 [`theme_tool.py`](theme_tool.py) turns theme files into ehRadio's
 [`themes.h`](../src/displays/themes.h) runtime entries **and** into the WebUI palette block that entry belongs
-to in [`themes.css`](../data/www/themes.css). It always appends to the existing `themes.h` — never overwrites —
-and the block is written *deflated*, so the two sides of a theme are one run and one index apart: the entry in
-`_themes[]`, its name in `_themeNames[]`, and the block that names itself with `--theme-name`.
+to in [`themes.css`](../data/www/themes.css). There are two ways in, and they mirror each other: `-i` **adds** a
+theme at the end of `themes.h`, while `-f` **corrects** one that is already there by replacing its values in
+place. Neither ever rewrites another theme's numbers. In both cases the block is written *deflated*, so the two
+sides of a theme are one run and one index apart: the entry in `_themes[]`, its name in `_themeNames[]`, and the
+block that names itself with `--theme-name`.
 
 The WebUI block comes from the display colours through the same feature map the panel themes were designed
 with, with the offset measured from display theme `[0]` — the theme `:root` in `style.css` was designed for —
@@ -34,6 +36,7 @@ Two input formats, told apart by the file itself:
 py theme_tool.py -i mytheme.h --name "My Theme"      # old style: there is no name inside to use
 py theme_tool.py -i "ehRadioTheme-My Neon.json"      # asks whether to use the name inside
 py theme_tool.py -i ehRadioThemes-Backup.json        # a whole backup, asked and numbered per theme
+py theme_tool.py -f "ehRadioTheme-My Neon.json"      # correct that theme's values, keeping its name
 ```
 
 Without `--name` the tool prints the name the file carries and asks whether to use it:
@@ -50,6 +53,31 @@ only ever set on the command line. A theme file with no name inside - every old-
 
 Either way, every colour written is put onto the 565 steps the WebUI editor uses — see
 *565 steps and `--quantise`* below.
+
+## Correcting a theme (`--fix`)
+
+A theme can land on the device with a value that is wrong — a field the browser could not show, a colour mistyped
+in a hand-edited file. `--fix` repairs that in the theme's own slot instead of adding a second one:
+
+```
+py theme_tool.py -f "ehRadioTheme-My Neon.json"        # asks which theme to replace
+py theme_tool.py -f "ehRadioTheme-My Neon.json" -n 4   # slot 4, no question
+```
+
+It lists the themes from `_themeNames[]` and replaces the entry you pick, keeping the name `themes.h` already
+has: nothing is asked about the name, `--name` does not apply, and `_themeNames[]` is not touched. The file must
+hold **one** theme — a `Backup All` array is refused, because a fix replaces a single slot; use `-i` to add them
+all. An entry that already matches the file is left byte for byte alone.
+
+`themes.h` is always written; `themes.css` is not, unless you answer the closing question:
+
+```
+Apply the correction to block [4] of themes.css as well? [y/N]
+```
+
+Yes regenerates just that block from the corrected entry, with the same generator an import uses — the one case
+where re-deriving is right after a hand edit, because the entry is now the newer truth. No leaves the block
+untouched, which is what you want when the block was tuned by hand and the *display* entry was the wrong half.
 
 ## Input format (old yoRadio style)
 

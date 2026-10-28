@@ -6,6 +6,7 @@ USAGE:
     py theme_tool.py                          # audit: structure, names, quantise status
     py theme_tool.py -a | --audit             # the same, spelled out
     py theme_tool.py -i FILE [--name NAME]    # import a theme into themes.h AND themes.css
+    py theme_tool.py -f FILE [-n INDEX]       # replace ONE theme's values, keeping its name
     py theme_tool.py -q | --quantise          # move the colours in themes.h onto the 565 steps
     py theme_tool.py -d [INDEX]               # delete a theme from both files
     py theme_tool.py --inflate                # every block spells its colours out
@@ -30,6 +31,12 @@ MODES:
                             prints the name the file carries and asks whether to use it, because every theme
                             should read as "Name (Creator)"; refusing writes nothing and prints the command that
                             would name it.
+    -f, --fix FILE          The correction path: the file's colours REPLACE the values of one theme that already
+                            exists, chosen from the list (a slot is an index into _themeNames) or given with -n.
+                            The name is not part of the exchange - it stays whatever themes.h has, so nothing is
+                            asked about it and --name does not apply.  themes.h is written; themes.css is not,
+                            unless you answer yes to the closing prompt, which regenerates that one block from
+                            the corrected entry.  The file must hold a single theme: --fix replaces one slot.
     -q, --quantise          themes.h: Rewrite the RGB() values already in themes.h onto the 565 steps.  Cannot change a
                             pixel; a value already on the grid is left alone, so a second run does nothing.
     -d, --delete [INDEX]    Remove a theme from both files.  An index IS a position in themes.h, so every theme
@@ -49,6 +56,8 @@ EXAMPLES:
     py theme_tool.py
     py theme_tool.py -i krzsieksik_theme_gray.h --name "Gray (Krzsiek)"
     py theme_tool.py -i ehRadioThemes-Backup.json
+    py theme_tool.py -f xtheme.json
+    py theme_tool.py -f gray.json -n 3
     py theme_tool.py -q
     py theme_tool.py -d 3
     py theme_tool.py --deflate
@@ -404,7 +413,14 @@ def findall_names(block):
 
 
 def parse_entries(content):
-    """(start, end) of each theme entry in _themes[]."""
+    """(start, end) of each theme entry in _themes[].
+
+    `start` is the first character of the entry's OWN line - its indentation - never the line terminator that ends
+    the entry before it.  The pattern is matched against a slice of `content`, so `^` can match at a leading
+    newline and `\\s+` then swallows it.  The start is advanced past any such terminator before it is recorded,
+    because callers splice with this span: a delete drops the entry and its own line break, a fix replaces the
+    entry in place, and a start that included the previous newline welds two entries onto one line.
+    """
     m = re.search(r'const ThemeData _themes\[\]\s*PROGMEM\s*=\s*\{', content)
     if not m:
         fail("Could not find _themes[] in themes.h.")
@@ -416,6 +432,9 @@ def parse_entries(content):
             break
         em_start = search_start + em.start()
         brace_pos = em_start + em.group().index('{')
+        start = em_start
+        while start < brace_pos and content[start] in '\r\n':
+            start += 1
         depth, i = 1, brace_pos + 1
         while i < len(content) and depth > 0:
             if content[i] == '{':
@@ -430,7 +449,7 @@ def parse_entries(content):
         if comma == -1 or comma > i + 5:
             search_start = em_start + 1
             continue
-        entries.append((em_start, comma + 1))
+        entries.append((start, comma + 1))
         search_start = comma + 1
     return entries
 
@@ -910,6 +929,26 @@ def existing_names(target_path):
     return [n.strip().strip(',').strip('"') for n in m.group(1).strip().split('\n') if n.strip()]
 
 
+def replace_theme_entry(target_path, index, entry_text):
+    """Swap one entry in _themes[] for another, leaving _themeNames alone.
+
+    An index is a position and a fix corrects a theme that already exists, so the name is never part of the write:
+    the name in the entry text is only the comment that keeps the table readable, and _themeNames remains the
+    authority.  Emitted text starts at the entry's own indentation and ends at its comma, which is exactly the span
+    parse_entries() reports, so the splice reproduces the file's shape.
+    """
+    content, eol = read_text(target_path)
+    spans = parse_entries(content)
+    if not 0 <= index < len(spans):
+        print(f"ERROR: themes.h has no entry [{index}]; it has {len(spans)}.")
+        return False
+    start, end = spans[index]
+    # emit_theme_entry() builds its text with \n, while write_text() reproduces the file byte for byte, so the
+    # entry has to be given the file's own ending or a CRLF file would come out mixed.
+    write_text(target_path, content[:start] + entry_text.replace('\n', eol) + content[end:])
+    return True
+
+
 # One RGB(r, g, b) call, with its own spacing captured so the rewrite can put it back exactly: group 1/3/5
 # are the numbers with whatever padding they carry, and 2/4/6 are the separators between and after them.
 RGB_CALL = re.compile(r'RGB\((\s*\d+)(\s*,\s*)(\s*\d+)(\s*,\s*)(\s*\d+)(\s*)\)')
@@ -1325,6 +1364,40 @@ def sync_webui(themes_h_path, first_new_id):
     print(f"\nUpdated: {THEMES_CSS}")
 
 
+def sync_one_block(index):
+    """Re-derive block [index] in themes.css from the corrected themes.h, leaving every other block alone.
+
+    Same chain the import uses for a brand new block - build_palettes, theme_deltas, collapse_families,
+    render_block - but aimed at an id that already exists.  This is the one place where regenerating is right after
+    a hand edit: the block belongs to the entry that was just corrected, so themes.h is the newer truth.
+    """
+    names, themes = read_themes_h(THEMES_H)
+    master_raw, blocks, text, eol = load()
+    hard, _soft = check_sync(names, blocks)
+    if hard:
+        print("\nERROR: themes.h and themes.css do not describe the same set of themes:")
+        for line in hard:
+            print('  ' + line)
+        print("\nHand-edit them until the count and the ids agree, then run this again.")
+        sys.exit(1)
+
+    master_hex = resolve_master(master_raw)
+    families = find_families(master_raw)
+    props = theme_deltas(build_palettes(themes, master_hex)[index], master_hex)
+    collapse_families(props, master_raw, families)
+    block = render_block(index, names[index], props, eol)
+
+    hit = next((b for b in blocks if b['id'] == index), None)
+    if hit:
+        text = apply_edits(text, [(hit['start'], hit['end'], block)])
+    else:
+        text = apply_edits(text, [(len(text), len(text), block + eol)])
+    write_text(THEMES_CSS, text)
+    print(f"  block [{index}] {names[index]!r}: {len(props)} declaration(s), "
+          f"{'replaced' if hit else 'added'}")
+    print(f"Updated: {THEMES_CSS}")
+
+
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
@@ -1408,6 +1481,19 @@ def mode_audit():
     off = [m for m in values if not on_grid(tuple(int(m.group(i)) for i in (1, 3, 5)))]
     print(f"themes.h   {len(values)} RGB() value(s), {len(off)} off the 565 steps")
 
+    # Every entry on its own line.  A write that spliced with a span starting at the previous newline welds two
+    # entries into `},    {   // Name`; the file still parses and the colours are still right, which is exactly why
+    # this has to be reported here - nothing else notices, and the next hand edit has to unpick it.
+    joined = [(i, content.count('\n', 0, start) + 1)
+              for i, (start, _end) in enumerate(parse_entries(content))
+              if start > 0 and content[start - 1] not in '\r\n']
+    if joined:
+        print(f"themes.h   {len(joined)} entr(y/ies) not starting on their own line")
+        for i, line in joined:
+            before = 'the _themes[] declaration' if i == 0 else 'the entry before it'
+            print(f"  ERROR: theme [{i}] begins on line {line}, sharing it with {before}")
+        print("  split that line; a splice that used a span including the previous newline writes this")
+
     if hard:
         print("\nHand-edit themes.h or themes.css until the count and the ids agree, then run this again.")
         sys.exit(1)
@@ -1415,7 +1501,7 @@ def mode_audit():
         print("  -q moves them onto the grid; the packed 565, and so the panel, does not change")
     if soft:
         print("  themes.h is the authority - the next import rewrites those names from it")
-    if not hard and not soft and not off:
+    if not hard and not soft and not off and not joined:
         print("\nAll three agree: same themes, same names, every colour on the grid.")
 
 
@@ -1581,13 +1667,14 @@ def mode_delete(index):
         print("Cancelled. Nothing was changed.")
         return
 
-    # Remove the entry.  parse_entries() runs its ^ against a slice, so for any entry after the first it also
-    # swallows the previous line's newline: normalise that start, then consume the entry's own line terminator,
-    # so the neighbours end up on adjacent lines instead of leaving a blank one behind.
+    # Remove the entry and its own line terminator, so the neighbours end up on adjacent lines instead of leaving a
+    # blank one behind.  parse_entries() reports the span from the entry's indentation, never from the newline
+    # before it, so nothing has to be normalised here; the terminator is consumed as a unit, because taking only
+    # the "\n" of a "\r\n" leaves the "\r" behind and eating every terminator in sight would weld the neighbours.
     entry_start, entry_end = spans[index]
-    if content[entry_start] == '\n':
-        entry_start += 1
-    if entry_end < len(content) and content[entry_end] == '\n':
+    if content.startswith('\r\n', entry_end):
+        entry_end += 2
+    elif content.startswith('\n', entry_end):
         entry_end += 1
     content = content[:entry_start] + content[entry_end:]
     content = re.sub(r'\n{4,}', '\n\n\n', content)
@@ -1684,6 +1771,79 @@ def mode_import(theme_path, name, start_idx):
     sync_webui(THEMES_H, first_new_id)
 
 
+def mode_fix(theme_path, index, name_given=None):
+    """One theme file in, the values of one existing theme replaced - the name in themes.h is kept.
+
+    The correction path rather than the addition path: a theme can land on the device with a value that is wrong (a
+    field the browser could not show, a colour mistyped in a hand-edited file), and the repair belongs in that
+    theme's own slot.  The name is not part of the exchange, so nothing is asked about it and --name is ignored.
+    The entry itself is rebuilt by emit_theme_entry() exactly as an import builds one, then spliced over the entry
+    that is already there.  themes.css is left alone unless the closing prompt is answered yes.
+    """
+    if not os.path.exists(theme_path):
+        fail(f"File not found: {theme_path}")
+
+    # The file says which format it is: an export starts with { or [ once the whitespace is gone, while an
+    # old-style theme file starts with a comment or a #define.
+    with open(theme_path, 'r', encoding='utf-8', errors='replace') as f:
+        head = f.read().lstrip()
+    basename = os.path.basename(theme_path)
+
+    if head[:1] in ('{', '['):
+        results = parse_theme_json(theme_path)
+    else:
+        results, _blocks = parse_theme(theme_path)
+        if not any(r['colors'] for r in results):
+            fail(f"No COLOR_* defines found in {basename}. Is this an old-style theme file?")
+
+    if len(results) > 1:
+        fail(f"{basename} holds {len(results)} themes, and --fix replaces one slot, so it takes a single theme.\n"
+             f"       Use -i to add them all, or export the one theme you mean to correct.")
+
+    content, _ = read_text(THEMES_H)
+    names = parse_names(content)
+    spans = parse_entries(content)
+    if not names:
+        fail("themes.h lists no themes.")
+    if len(names) != len(spans):
+        fail(f"Name/entry count mismatch in themes.h ({len(names)} names, {len(spans)} entries).")
+
+    print(f"\nThemes in themes.h ({len(names)}):\n")
+    for i, name in enumerate(names):
+        print(f"[{i}] {name}")
+
+    if index is None:
+        index = ask_index(f"\nReplace which theme's values? [0-{len(names) - 1}] (blank to cancel): ", len(names))
+        if index is None:
+            print("Cancelled. Nothing was changed.")
+            return
+    elif not 0 <= index < len(names):
+        fail(f"themes.h has no theme [{index}]; it has [0]-[{len(names) - 1}].")
+
+    theme_name = names[index]
+    if name_given:
+        print(f"\nNote: --name does not apply to --fix - the name stays {theme_name!r}, as themes.h has it.")
+
+    entry_text, fields, moved = emit_theme_entry(theme_name, results[0], index)
+    old = content[spans[index][0]:spans[index][1]]
+    if old.replace('\r\n', '\n') == entry_text:
+        print(f"\n[{index}] {theme_name} already matches {basename}: nothing was written.")
+        return
+
+    if not replace_theme_entry(THEMES_H, index, entry_text):
+        sys.exit(1)
+    print(f"\nFixed [{index}] {theme_name}: {fields} field(s) from {basename}")
+    if moved:
+        print(f"  {moved} colour(s) snapped onto the 565 steps")
+    print(f"Updated: {THEMES_H}")
+
+    if ask_yes(f"\nApply the correction to block [{index}] of themes.css as well?", default=False):
+        print("\nWebUI palette (data/www/themes.css):")
+        sync_one_block(index)
+    else:
+        print("\nthemes.css was not touched.")
+
+
 # ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
@@ -1698,6 +1858,8 @@ def main():
                       help='read-only check of both files; this is what a bare run does')
     mode.add_argument('-i', '--import', dest='import_file', metavar='FILE',
                       help='import a theme file into themes.h and themes.css')
+    mode.add_argument('-f', '--fix', dest='fix_file', metavar='FILE',
+                      help='replace the values of one existing theme in themes.h, keeping its name')
     mode.add_argument('-q', '--quantise', '--quantize', dest='quantise', action='store_true',
                       help='move the colours already in themes.h onto the 565 steps')
     mode.add_argument('-d', '--delete', dest='delete', nargs='?', const=-1, type=int, metavar='INDEX',
@@ -1708,13 +1870,16 @@ def main():
                       help='drop what repeats :root and fold families back into one head line')
     mode.add_argument('--deflate-lossy', dest='deflate_lossy', action='store_true',
                       help='the same for near-matches, asking per role')
-    ap.add_argument('--name', help='theme name; without it, the name the file carries must be confirmed')
-    ap.add_argument('-n', '--number', type=int, help='starting index for an import')
+    ap.add_argument('--name', help='theme name for an import; without it, the name the file carries must be confirmed')
+    ap.add_argument('-n', '--number', type=int,
+                    help='slot: where --import appends, or which theme --fix overwrites; without it both ask')
     ap.add_argument('-h', '--help', action='help', help='show this help and exit')
 
     args = ap.parse_args()
 
-    if args.import_file:
+    if args.fix_file:
+        mode_fix(args.fix_file, args.number, args.name)
+    elif args.import_file:
         mode_import(args.import_file, args.name, args.number)
     elif args.quantise:
         mode_quantise()

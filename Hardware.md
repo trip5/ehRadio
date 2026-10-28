@@ -389,8 +389,8 @@ Although some may work, it is well-known that some may be lacking proper resisto
 
 ### SPI SD card module
 
-Although these modules (with a power regulator and a 74VHCT125A buffer) are better-suited when sharing the SPI bus with another device,
-it may become troublesome if you plan on using the SD File Manager to upload files.
+These modules (with a power regulator and a 74VHCT125A buffer) are better-suited when sharing the SPI bus with another device.
+They can be slower than SDIO modules when uploading files in the SD File Manager.
 
 If needing to make this type fit with a case, the excess PCB around the slot may be cut off carefully with a knife, sandpaper, or grinding tool.
 Wear a mask if filing or grinding! Fiberglass is bad for your lungs!
@@ -401,7 +401,7 @@ This type of module with a 74VHCT125A or similar level-shifter can not be used i
 
 ### SDIO SD card module (Only with ESP32-S3)
 
-If using this type of simpler-looking SD card reader using SPI, you may see random, unsolvable issues.
+It is recommended to use an SDIO module in SDMMC mode. If using this type of simpler-looking SD card reader using SPI, you may see random, unsolvable issues.
 
 Do not use this type as SPI if on the same SPI bus as other peripherals.
 The peripherals will interfere with each other and you will hear random pops and clicks.

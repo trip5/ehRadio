@@ -201,7 +201,7 @@ void loop() {
       static const char* const stageNames[5] = {"net/telnet", "rgbled+battery", "controls", "player+saves", "startup"};
       uint8_t worst = 0;
       for (uint8_t i = 1; i < 5; i++) if (staged[i] > staged[worst]) worst = i;
-      ERRORLOG("Main loop stalled %lums, worst stage %s %lums - net %lu, hw %lu, ctl %lu, player %lu, startup %lu",
+      WARNINGLOG("Main loop stalled %lums, worst stage %s %lums - net %lu, hw %lu, ctl %lu, player %lu, startup %lu",
           (unsigned long)(total / 1000UL), stageNames[worst], (unsigned long)(staged[worst] / 1000UL),
           (unsigned long)(staged[0] / 1000UL), (unsigned long)(staged[1] / 1000UL),
           (unsigned long)(staged[2] / 1000UL), (unsigned long)(staged[3] / 1000UL),

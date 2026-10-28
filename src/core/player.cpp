@@ -397,9 +397,13 @@ void Player::_play(uint16_t stationId) {
       FUNCTIONLOG("SD", "nothing to play: station %u has no file (empty card?)", (unsigned)stationId);
       return;
     }
+  #if (SD_PLAY_TRACE_MS > 0)
     uint32_t _t_cfs = millis();
+  #endif
     isConnected=connecttoFS(sdman,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min);
+  #if (SD_PLAY_TRACE_MS > 0)
     FUNCTIONLOG("SD", "connecttoFS: %lums", millis() - _t_cfs);
+  #endif
   } else {
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
   }

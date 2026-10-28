@@ -1146,7 +1146,19 @@ or examine the examples in builds/trip5 and make your own!
 /* ============================== DEBUG ============================== */
 
 /* Enable all the debug logs with #define ALL_DEBUG_LOGS */
+/* Note that turning on all logs can make the serial log very noisy (and every print to serial adds milliseconds of delay to running code! */
+/* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. */
+
 #ifdef ALL_DEBUG_LOGS
+  #ifndef WARNINGS_LOG
+   #define WARNINGS_LOG // This enables showing non-fatal warning-level errors
+  #endif
+  #ifndef CONFIG_KEY_DEBUG
+    #define CONFIG_KEY_DEBUG // This shows every Prefs key and the value written to it
+  #endif
+  #ifndef METADATA_LOG
+    #define METADATA_LOG // This enables showing ID3 and Icy Metadata in the logs - useful to debug titles not being printed by handleShowStreamTitle()
+  #endif
   #ifndef NETSERVER_DEBUG
    #define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
   #endif
@@ -1160,12 +1172,11 @@ or examine the examples in builds/trip5 and make your own!
     #define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
   #endif
   #ifndef AUDIO_DEBUG
-    #define AUDIO_DEBUG // This shows the ID3 frame walk when a file's tags are read
+    #define AUDIO_DEBUG // Per-track chatter from the audio library: tag and file sizes, syncword positions, the 10 s ring arithmetic, the codec/rate report - plus the ID3 frame walk and the library's own diagnostic lines
   #endif
   #ifndef VU_VS1053_LOG
     #define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
   #endif
-  
 #endif
 #ifndef ESPFILEUPDATER_VERBOSE
   #ifdef ALL_DEBUG_LOGS

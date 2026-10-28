@@ -198,6 +198,16 @@ bool AudioHandlers::isPrintable(const char* info) const {
   return true;
 }
 
+/* --- The audio library's event channel --- */
+// AUDIO_INFO() is a callback and several messages change behaviour, so only the PRINT is gated here.
+// Level 2 = ERRORLOG, 1 = WARNINGLOG; anything not listed needs AUDIO_DEBUG or METADATA_LOG to print.
+static const struct { const char* phrase; uint8_t level; } kInfoSeverity[] = {
+  { "no decode progress",     2 },  // the watchdog closed a track that had stopped feeding
+  { "mp3 err ",               1 },  // the resync recovers
+  { "zero read:",             1 },
+  { "ring overrun prevented", 1 },  // a guard fired, the data was kept
+};
+
 void AudioHandlers::handleInfo(const char* info) {
   if (player.lockOutput) return;
 
@@ -205,7 +215,25 @@ void AudioHandlers::handleInfo(const char* info) {
     publishArtworkIfChanged(setArtworkUrl(metadataUrlBuffer));
   }
 
-  if (strcmp(info, "StreamTitle=''") != 0) FUNCTIONLOG("Audio.info", "%s", info);
+  if (strcmp(info, "StreamTitle=''") != 0) {
+    uint8_t level = 0;
+    for (const auto& entry : kInfoSeverity) {
+      if (strncmp(info, entry.phrase, strlen(entry.phrase)) == 0) { level = entry.level; break; }
+    }
+    if (level == 2) {
+      ERRORLOG("%s", info);
+    } else if (level == 1) {
+      WARNINGLOG("%s", info);
+    } else if (strncmp(info, "StreamTitle=", 12) == 0 || strncmp(info, "StreamUrl=", 10) == 0) {
+      #ifdef METADATA_LOG
+        FUNCTIONLOG("Metadata", "%s", info);
+      #endif
+    } else {
+      #ifdef AUDIO_DEBUG
+        FUNCTIONLOG("Audio.info", "%s", info);
+      #endif
+    }
+  }
   
 
   if (strstr(info, "format is mp3") != NULL) { config.setBitrateFormat(BF_MP3); display.putRequest(DBITRATE); }
@@ -231,7 +259,9 @@ void AudioHandlers::handleInfo(const char* info) {
 }
 
 void AudioHandlers::handleBitrate(const char* info) {
-  FUNCTIONLOG("Audio.bitrate", "%s", info);
+  #ifdef AUDIO_DEBUG
+    FUNCTIONLOG("Audio.bitrate", "%s", info);
+  #endif
   config.station.bitrate = atoi(info) / 1000;
   display.putRequest(DBITRATE);
   netserver.requestOnChange(BITRATE, 0);
@@ -240,6 +270,9 @@ void AudioHandlers::handleBitrate(const char* info) {
 void AudioHandlers::handleShowStation(const char* info) {
   if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   bool printable = isPrintable(info) && (strlen(info) > 0);
+  #ifdef METADATA_LOG
+    FUNCTIONLOG("Metadata", "ICY station \"%s\"%s", info ? info : "", printable ? "" : " (not printable)");
+  #endif
   if (player.remoteStationName) {
     config.setStation(printable ? info : config.station.name);
     display.putRequest(NEWSTATION);
@@ -255,6 +288,12 @@ void AudioHandlers::handleShowStreamTitle(const char* info) {
   #ifdef DEBUG_TITLES
     config.setTitle(DEBUG_TITLES);
     return;
+  #endif
+  #ifdef METADATA_LOG
+    // The refusal is the interesting half: a title that arrived and was not printable explains "no title on this
+    // station" without anyone having to guess about encoding.
+    if (!isPrintable(info)) FUNCTIONLOG("Metadata", "ICY title refused as non-printable: %.48s", info ? info : "");
+    else                    FUNCTIONLOG("Metadata", "ICY title \"%s\"", info);
   #endif
   if (!isPrintable(info) || info[0] == '\0') {
     // A stream with nothing to say shows its own name in the first line, and no second line survives it.
@@ -319,7 +358,11 @@ void AudioHandlers::handleBeginSdRead() {
 
 void AudioHandlers::handleId3Data(const char* info) {
   if (player.lockOutput) return;
-  FUNCTIONLOG("Audio.id3", "%s", info);
+  #ifdef METADATA_LOG
+    FUNCTIONLOG("Metadata", "%s", info);
+  #else
+    (void)info;
+  #endif
 }
 
 void AudioHandlers::handleEofMp3(const char* info) {

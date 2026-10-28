@@ -21,6 +21,7 @@ void functionLog(const char* category, const char* fmt, ...) LOG_PRINTF_ATTR(2, 
 void bootLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
 void bootLogX(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
 void errorLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
+void warningLog(const char* fmt, ...) LOG_PRINTF_ATTR(1, 2);
 void serialLogDot();
 void serialLogLf();
 void audioLog(const char* category, const char* fmt, ...) LOG_PRINTF_ATTR(2, 3);
@@ -68,6 +69,11 @@ void configTimeLogReset();
 #define ERRORLOG(fmt, ...) \
   do { \
     errorLog(fmt, ##__VA_ARGS__); \
+  } while (0)
+
+#define WARNINGLOG(fmt, ...) \
+  do { \
+    warningLog(fmt, ##__VA_ARGS__); \
   } while (0)
 
 #define SERIALLOGDOT() \

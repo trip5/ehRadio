@@ -13,8 +13,9 @@
 #define PLERR_LN        64
 #define SET_PLAY_ERROR(...) {char buff[576]; snprintf(buff, sizeof(buff), __VA_ARGS__); setError(buff);}
 
+// Card-file heartbeat and the switch for both [SD] trace lines. 0 = off; set 30000 in myoptions.h for a soak.
 #ifndef SD_PLAY_TRACE_MS
-  #define SD_PLAY_TRACE_MS 30000
+  #define SD_PLAY_TRACE_MS 0
 #endif
 
 enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9 };

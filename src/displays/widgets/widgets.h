@@ -173,8 +173,6 @@ const char* scrollMark();
 class ScrollWidget: public TextWidget {
   public:
     ScrollWidget(){}
-    // The mark this line joins its tail and its head with is no longer the caller's business: scrollMark() owns
-    // the character and the holiday swap in one place (see plans/holiday-icons.md).
     ScrollWidget(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     ~ScrollWidget();
     using Widget::init;
@@ -183,6 +181,7 @@ class ScrollWidget: public TextWidget {
     void setText(const char* txt) override;
     void setText(const char* txt, const char *format) override;
     void repaint() override;      // its own _draw(), not TextWidget's unclipped erase
+    void setTextLooped(const char* txt);
   private:
     char *_sep = nullptr;
     char *_window = nullptr;
@@ -211,6 +210,7 @@ class ScrollWidget: public TextWidget {
     void _refreshMark();               // re-ask while the line is live: a holiday can begin at midnight
     void _spanPainted();               // a scrolling paint owns the whole span, not just its own box
     bool _checkIsScrollNeeded();
+    uint16_t _widthOf(const char* raw);   // the width setText() would measure for this raw string
     bool _checkDelay(int m, uint32_t &tstamp);
     void _clear();
     void _reset();

@@ -454,8 +454,8 @@ void Utility::indexPlaylist() {
       // Stop READING at the ceiling: a row past MAX_PLAYLIST_ENTRIES can never be given an id. Breaking here
       // rather than skipping keeps the index contiguous and stops the parse of a hopeless file.
       if (entries >= MAX_PLAYLIST_ENTRIES) {
-        ERRORLOG("playlist.csv has more than %u stations: the rest are not indexed and cannot be played",
-                 (unsigned)MAX_PLAYLIST_ENTRIES);
+        WARNINGLOG("playlist.csv has more than %u stations: the rest are not indexed and cannot be played",
+                   (unsigned)MAX_PLAYLIST_ENTRIES);
         break;
       }
       index.write((uint8_t*)&pos, 4);
@@ -600,8 +600,8 @@ uint16_t Utility::playlistLength() {
       static bool warned = false;
       if (!warned) {
         warned = true;
-        ERRORLOG("playlist index holds %u entries; only the first %u have ids and can be played",
-                 (unsigned)rows, (unsigned)MAX_PLAYLIST_ENTRIES);
+        WARNINGLOG("playlist index holds %u entries; only the first %u have ids and can be played",
+                   (unsigned)rows, (unsigned)MAX_PLAYLIST_ENTRIES);
       }
       rows = MAX_PLAYLIST_ENTRIES;
     }

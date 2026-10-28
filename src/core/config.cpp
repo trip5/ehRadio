@@ -160,7 +160,7 @@ void Config::changeMode(int newmode) {
     if (!sdman.ready && newmode!=PM_WEB) {
       #if SD_CARD_DETECT_PIN!=255
         if (digitalRead(SD_CARD_DETECT_PIN)==HIGH) {
-          ERRORLOG("SD card not inserted");
+          WARNINGLOG("SD card not inserted");
           netserver.requestOnChange(GETPLAYERMODE, 0);
           sdman.stop();
           return;
@@ -168,7 +168,7 @@ void Config::changeMode(int newmode) {
       #endif
       uint32_t _t_sdstart = millis();
       if (!sdman.start()) {
-        ERRORLOG("SD card not found");
+        WARNINGLOG("SD card not found");
         netserver.requestOnChange(GETPLAYERMODE, 0);
         sdman.stop();
         return;
@@ -326,7 +326,7 @@ void Config::initPlaylistMode() {
             return;  // no SD — nothing more to init
           } else {
             store.play_mode=PM_WEB;
-            ERRORLOG("SD card not inserted.");
+            WARNINGLOG("SD card not inserted.");
             changeMode(PM_WEB);
             _lastStation = store.lastStation;
           }

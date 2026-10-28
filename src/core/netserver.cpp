@@ -317,7 +317,7 @@ void handleSearchPost(AsyncWebServerRequest *request) {
       request->send(200, "text/plain", "DUPLICATE");
     } else { // add it and play it
       if (cs >= MAX_PLAYLIST_ENTRIES) {
-        ERRORLOG("playlist is full (%u stations): not adding \"%s\"", (unsigned)MAX_PLAYLIST_ENTRIES, sName.c_str());
+        WARNINGLOG("playlist is full (%u stations): not adding \"%s\"", (unsigned)MAX_PLAYLIST_ENTRIES, sName.c_str());
         request->send(400, "text/plain", "PLAYLIST FULL");
         return;
       }
@@ -1132,11 +1132,11 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
         jsonFile.close();
         if (lastChar != ']') {
           if (server_retried == true) {
-            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Not retrying.");
+            WARNINGLOG("Search: JSON validation failed. Not retrying.");
             server_retried = false;
             LittleFS.remove(localPath); // Clean up bad file
           } else {
-            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Retrying same server.");
+            WARNINGLOG("Search: JSON validation failed. Retrying same server.");
             server_retried = true;
             --i;
             LittleFS.remove(localPath); // Clean up bad file

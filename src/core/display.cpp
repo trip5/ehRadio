@@ -30,8 +30,9 @@
 #include "battery.h"
 
 extern const char batterytxtFmt[] PROGMEM;
-static constexpr uint32_t DSP_TASK_DELAY = 10;   // ms; minimum sleep between display iterations
+static constexpr uint32_t DSP_TASK_DELAY = 10;  // ms; minimum sleep between display iterations
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
+static constexpr uint32_t SS_LINE_HOLD_MS = 3000;  // ms; How long the screensaver's info line stays blank after a track change
 
 // These three flags are per-layout booleans in LayoutData now, not per-model macros.
 
@@ -841,19 +842,18 @@ void Display::_switchMode(displayMode_e newmode) {
     display.putRequest(DBITRATE);  // refresh bitrate badge when returning to player (may have been cleared while on playlist page)
   }
   if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
+    // A fresh entry is not a track change: the strip comes up with whatever the state is now.  _enterScreensaver()
+    // deliberately does NOT clear this - SSREBUILD re-enters through it, and a settings change during the three
+    // seconds must not cancel the hold.
+    _ssHoldUntil = 0;
     config.isScreensaver = true;
     _enterScreensaver(newmode);
   } else {
+    // This branch is EVERY mode change to something that is not the screensaver
+    _ssHoldUntil = 0;   // the page the line belongs to is gone, so nothing is held
     config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
     config.isScreensaver = false;
-    // This branch is EVERY mode change to something that is not the screensaver, so it is both how the clock is
-    // handed back to the player page after the screensaver and - before this - how an ordinary mode change
-    // unlocked it.  The old line here was an unconditional `_clock->lock(false)` under a comment claiming
-    // _clockHidden() would re-lock it, but nothing on this path applies _clockHidden(): _reinitWidgets() and
-    // _layoutChange() are the only sites that do, and a mode change goes through neither.  So a clock whose
-    // layout yields to the VU (`clockMove = { }`) was unlocked here and then painted by its own per-second
-    // draw() - behind the meter and over the weather line, with nothing in the log to say why.  lockIfChanged()
-    // applies the one definition instead, exactly as those two sites do.
+    
     lockIfChanged(_clock, _clockHidden());
   }
   if (newmode == VOL) {
@@ -961,7 +961,7 @@ void Display::putRequest(displayRequestType_e type, int payload) {
   // battery problem; this line is what tells that story next time (see plans/display-repaint-order.md).
   if (xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) != pdTRUE) {
     _droppedRequests++;
-    ERRORLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);
+    WARNINGLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);
   } else if (type == THEMEPREVIEW) {
     _previewPending = true;
   } else if (type == LAYOUTPREVIEW) {
@@ -1060,24 +1060,26 @@ bool Display::_weatherHidden() {
 }
 
 void Display::_layoutChange(bool played) {
+  // While the screensaver owns the panel the WALK owns the clock's position, and this function must not touch it.
+  const bool ssOwnsPanel = config.isScreensaver;
   if (vuLive() && _vuwidget) {
     if (played) {
       if (_vuwidget) _vuwidget->unlock();
-      applyMove(_clock, *clockMove_ptr);
+      if (!ssOwnsPanel) applyMove(_clock, *clockMove_ptr);
       applyMove(_weather, *weatherMoveVU_ptr);
     } else {
       if (_vuwidget) if (!_vuwidget->locked()) _vuwidget->lock();
-      _clock->moveBack();
+      if (!ssOwnsPanel) _clock->moveBack();
       if (_weather) _weather->moveBack();
     }
   } else {
     if (played) {
-      _clock->moveBack();  // restore clock from VU-shifted position
+      if (!ssOwnsPanel) _clock->moveBack();  // restore clock from VU-shifted position
       applyMove(_weather, *weatherMove_ptr);
       //_clock->moveBack();
     } else {
       if (_weather) _weather->moveBack();
-      _clock->moveBack();
+      if (!ssOwnsPanel) _clock->moveBack();
     }
   }
   // Lock state last, from one definition.  lock() erases for every class that implements _clear() - the
@@ -1139,6 +1141,12 @@ void Display::loop() {
     if (xQueueSend(displayQueue, &deferred, 0) == pdTRUE) _deferredType = NOPE;
   }
   if (displayQueue==NULL || _locked) return;
+  // A held info line comes back on its own.  The requests that would have repainted it were refused, and nothing is
+  // guaranteed to arrive at the deadline, so this tick restores it - once, from the state as it then stands.
+  if (_ssHoldUntil && (int32_t)(millis() - _ssHoldUntil) >= 0) {
+    _ssHoldUntil = 0;
+    if (config.isScreensaver) _screensaverLine();
+  }
   _pager->loop();
   requestParams_t request;
   if (xQueueReceive(displayQueue, &request, DSP_QUEUE_TICKS)) {
@@ -1180,7 +1188,15 @@ void Display::loop() {
             _time(request.payload);
           break;
         case NEWTITLE: _title(); break;
-        case NEWSTATION: _station(); break;
+        case NEWSTATION:
+          // An SD track change is announced by the new track's station name, queued by _play() BEFORE it opens the
+          // file - so this hold is already up when handleBeginSdRead() clears the title, which is the moment the
+          // weather would otherwise take the strip.  Only while the screensaver owns the panel: that is the only
+          // place the line exists, and a manual skip has already left the screensaver by the time this is handled
+          // (screenSaverExit() queues its mode change first), so only an EOF advance is held.
+          if (config.isScreensaver) _ssHoldLine(SS_LINE_HOLD_MS);
+          _station();
+          break;
         case NEXTSTATION: _drawNextStationNum(request.payload); break;
         case DRAWPLAYLIST: _drawPlaylist(); break;
         case DRAWVOL: _volume(); break;
@@ -1465,13 +1481,29 @@ void Display::_title() {
   backlightControls.restart();
 }
 
-// The info line's text: the station name, the two title lines and the weather, joined with the shared scroll mark
-// (scrollMark(): " * ", or the holiday icon).  The
-// first three describe what is playing, so over silence they are skipped and only the weather is left -
-// which is the same rule _ssStripH() refuses the whole strip on.  Every empty part is skipped outright
-// rather than left as a bare separator, which is why they all go through one append.
+// The info line's text, joined with the shared scroll mark (scrollMark(): " * ", or the holiday icon), and it is
+// one state or the other, never both: while something is playing the line describes what is playing - the station
+// name and the two title lines - and the weather is left out, because a single-row strip that mixes a forecast
+// into a track name pushes the track off it.  Over silence there is nothing to describe, so the weather is the
+// whole line.  That is the same split _ssStripH() refuses the strip on: either half being absent leaves nothing
+// to show.  Every empty part is skipped outright rather than left as a bare separator, which is why they all go
+// through one append.
+// Blank the info line and refuse to paint it for a while.  An SD track change clears the title and then re-fills it
+// over two or three requests, so the strip visibly resets, and in the gap the line would show the weather.  So it
+// goes blank once, when the new track starts loading, and stays blank; Display::loop() is what puts it back, because
+// the requests that would have repainted it are exactly the ones being refused.
+void Display::_ssHoldLine(uint32_t ms) {
+  // The whole span, on both draw paths: _windowRect() answers the span when the text is empty, so the framebuffer
+  // path fills the strip rather than nothing, and the non-framebuffer path erases the union with the span the
+  // scrolling paint recorded.
+  if (_sstext) _sstext->setText("");
+  _ssHoldUntil = millis() + ms;
+}
+
 void Display::_screensaverLine() {
   if (!_sstext) return;
+  // A track change blanks the line and holds it: _ssHoldLine() sets the deadline, Display::loop() clears it.
+  if (_ssHoldUntil) return;
   // Two ways the line must stay off: the settings refuse the strip, and the widget was locked for a reason of its
   // own.  A locked widget is still _active and setText() paints on _active alone, so a new metadata string
   // repainted the line while the strip was refused - _ssStripH() is the authoritative test, the lock the backstop.
@@ -1493,9 +1525,15 @@ void Display::_screensaverLine() {
     append(line, sizeof(line), config.station.name);
     append(line, sizeof(line), t1);
     append(line, sizeof(line), t2);
+  } else if (weatherLive() && network.weatherBuf) {
+    // Weather only over silence: playing, the line is the track's, not the forecast's.
+    append(line, sizeof(line), network.weatherBuf);
   }
-  if (weatherLive() && network.weatherBuf) append(line, sizeof(line), network.weatherBuf);
-  _sstext->setText(line);
+  // The screensaver's line is the one that must MOVE: it is the whole bottom row of a panel whose only job here is
+  // to look alive, and a short station name or a one-line forecast would otherwise leave it standing still.  The
+  // widget repeats the text, joined with its own mark, until it is wider than the strip - the width maths, the mark
+  // and the buffer ceiling are all its own, so this stays a one-copy composition.  See plans/screensaver-line-loop.md.
+  _sstext->setTextLooped(line);
 }
 
 // Bring both screensaver widgets in line with the prefs and the active layout.  Called on every entry
@@ -1564,8 +1602,8 @@ void Display::_screensaverWidgets() {
   if (!_ssvu->initScreensaver(box, *bandsConf_ptr, style)) {
     if (!_ssFailed) {
       _ssFailed = true;
-      ERRORLOG("Screensaver: no PSRAM for the VU canvas (%ux%u) - keeping the clock screensaver",
-               (unsigned)box.w, (unsigned)box.h);
+      WARNINGLOG("Screensaver: no PSRAM for the VU canvas (%ux%u) - keeping the clock screensaver",
+                 (unsigned)box.w, (unsigned)box.h);
     }
     if (_clock) _clock->lock(false);
     return;

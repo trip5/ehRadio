@@ -9,6 +9,7 @@
 #endif
 #include <LittleFS.h>
 #include <Preferences.h>
+#include "options.h"
 #include "logging.h"
 #include "../locale/dsplocale.h"
 #include "../displays/widgets/widgetsconfig.h"
@@ -389,15 +390,17 @@ class Config {
       }
       if (needSave) {
         prefs.putBytes(entry->key, value, size);
-        if (strcmp(entry->key, "mqttpass") == 0 || strcmp(entry->key, "weatherkey") == 0) {
-          FUNCTIONLOG("Config.key", "%s: *", entry->key);
-        } else if (size > 4) {
-          FUNCTIONLOG("Config.key", "%s: %s", entry->key, static_cast<const char*>(value));
-        } else {
-          uint32_t rawValue = 0;
-          memcpy(&rawValue, value, size);
-          FUNCTIONLOG("Config.key", "%s: %lu", entry->key, static_cast<unsigned long>(rawValue));
-        }
+        #ifdef CONFIG_KEY_DEBUG
+          if (strcmp(entry->key, "mqttpass") == 0 || strcmp(entry->key, "weatherkey") == 0) {
+            FUNCTIONLOG("Config.key", "%s: *", entry->key);
+          } else if (size > 4) {
+            FUNCTIONLOG("Config.key", "%s: %s", entry->key, static_cast<const char*>(value));
+          } else {
+            uint32_t rawValue = 0;
+            memcpy(&rawValue, value, size);
+            FUNCTIONLOG("Config.key", "%s: %lu", entry->key, static_cast<unsigned long>(rawValue));
+          }
+        #endif
       }
       prefs.end();
       // An NVS commit can block when it has to compact a page, evidence is a long write time

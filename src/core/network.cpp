@@ -85,7 +85,7 @@ static void recoveryReboot(const char* why) {
     static uint32_t lastRefusedMs = 0;
     if (lastRefusedMs == 0 || (millis() - lastRefusedMs) >= 300000UL) {
       lastRefusedMs = millis() ? millis() : 1;
-      ERRORLOG("Recovery restarts spent (%u, %s) - retrying patiently instead of restarting again",
+      WARNINGLOG("Recovery restarts spent (%u, %s) - retrying patiently instead of restarting again",
           (unsigned)recoveryReboots, why);
     }
     return;

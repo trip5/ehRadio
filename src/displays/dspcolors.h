@@ -32,8 +32,8 @@
   #define TFT_FG            0x7F
 
 #else
-  #define BOOT_PRG_COLOR    0xE68B
-  #define BOOT_TXT_COLOR    0xFFFF
+  #define BOOT_PRG_COLOR    65048 // 0xE68B
+  #define BOOT_TXT_COLOR    50719 // 0xFFFF
 #endif
 
 #ifndef TFT_BG

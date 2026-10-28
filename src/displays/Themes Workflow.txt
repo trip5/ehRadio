@@ -13,4 +13,6 @@ This will import the theme from .json (or a yoRadio .h file) into themes.h and t
 
 Then load webui_tool.html into a local web browser and the theme can be edited directly.
 
-When finished, the new themes.css can be exported and can be used to replace the file in /data/www.
+When finished, the new themes.css can be exported, replacing the file in /data/www.
+
+The exported .json files can also be submitted to Trip5 for inclusion in the main codebase.

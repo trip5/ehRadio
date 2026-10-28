@@ -405,6 +405,50 @@ void ScrollWidget::setText(const char* txt, const char *format){
   setText(buf);
 }
 
+// The pixel width setText() would measure for this RAW string: preTextString() first, on a copy - it rewrites in
+// place and never lengthens the string (see TextWidget::setText()), so the candidate's own size is enough - then
+// codepoints at this line's char width.  Mirrors setText()'s formula on purpose: setTextLooped() and
+// _checkIsScrollNeeded() must never disagree about whether a line moves.  A probe that cannot be allocated answers
+// "already too wide", so nothing is added rather than the loop spinning on a measurement it cannot make.
+uint16_t ScrollWidget::_widthOf(const char* raw) {
+  if (!raw || !raw[0]) return 0;
+  const size_t n = strlen(raw) + 1;
+  char* probe = (char*)malloc(n);
+  if (!probe) return (uint16_t)(_width + 1);
+  strlcpy(probe, raw, n);
+  preTextString(probe, displayFont());
+  const uint16_t w = (uint16_t)(utf8_strlen(probe) * _charWidth);
+  free(probe);
+  return w;
+}
+
+// Set the text, repeating it until the line is wider than its span and therefore scrolls.  The screensaver's info
+// line is the caller: a still row on an otherwise idle panel reads as broken furniture, and padding it with blanks
+// was tried and looks like a fault, so the line repeats - "A · B · A · B" - joined with the mark this line already
+// joins its own parts with (_sep, resolved and measured by _setMark()), which is also the mark a scrolling cycle
+// prints at its wrap.  The ceiling is this line's own text buffer: setText() copies through
+// strlcpy(_text, txt, _buffsize - 1) and so keeps _buffsize - 2 characters, and a copy that would be truncated
+// would leave a line that stops scrolling again.  The widest span any panel asks for is MAX_WIDTH at text size 1
+// (460 px on the 480x320 TFT = 77 characters), so in practice the loop ends on the width, not on the buffer.
+// See plans/screensaver-line-loop.md.
+void ScrollWidget::setTextLooped(const char* txt) {
+  // A widget whose init() has not run has no buffers to measure with or write to; setText() bails there itself.
+  if (!txt || !txt[0] || !_text || _buffsize < 3 || !_charWidth || !_width) { setText(txt ? txt : ""); return; }
+  static char buf[WIDGET_BUFF_SIZE];   // one call at a time, on the display task - no heap churn per refresh
+  strlcpy(buf, txt, sizeof(buf));
+  const size_t one  = strlen(buf);              // what actually fits, not what was offered
+  const size_t join = _sep ? strlen(_sep) : 0;
+  const size_t cap  = (size_t)(_buffsize - 2);  // what setText() will keep
+  while (_widthOf(buf) <= _width) {
+    const size_t have = strlen(buf);
+    // The last copy that fits WHOLE: a truncated one would stop the line scrolling again.
+    if (have + join + one > cap || have + join + one >= sizeof(buf)) break;
+    if (join) strlcat(buf, _sep, sizeof(buf));
+    strlcat(buf, txt, sizeof(buf));
+  }
+  setText(buf);
+}
+
 // A scrolling line repaints through its own _draw(), which erases its span while it scrolls and its own text
 // rectangle otherwise, and clips every print.  TextWidget::_paint() cannot serve it: its erase is unclipped and
 // _textwidth here is the WHOLE string, so it uncovers the row - through a neighbour - where _draw() will never

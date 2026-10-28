@@ -56,26 +56,22 @@
   --maintexts:          #c2c2c2;
 }
 :root[data-theme="4"] {
-  --theme-name:         "Golden Wind (András Daradici)";
-  --actives:            #000000;
-  --edges:              #f4faf4;
-  --fills:              #9d5400;
-  --highlights:         #c7c7c7;
-  --icon-active-glyph:  #fab100;
-  --infotexts:          #343534;
-  --input-border:       #f7d77f;
-  --labels:             #666666;
-  --list-names:         #444444;
-  --logo:               #e3e3e3;
-  --logo-shadow:        #bfbfbf;
-  --logo-text:          #9d5400;
-  --maintexts:          #444444;
-  --outlines:           #616461;
-  --panel-gradient:     #d49600;
-  --surfaces:           #fab100;
+  --theme-name:         "Elle (Trip5)";
+  --actives:            #ffffff;
+  --fills:              #f000f0;
+  --highlights:         #ff00ff;
+  --infotexts:          #cccccc;
+  --link-quiet:         #e300e3;
+  --logo:               #ff80ff;
+  --logo-shadow:        #ff00ff;
+  --logo-text:          #ffffff;
+  --meter-track:        #200020;
+  --outlines:           #ff00ff;
+  --panel-gradient:     #200020;
+  --playlist-hover:     #ff00ff;
 }
 :root[data-theme="5"] {
-  --theme-name:         "Colorful I (Levente Daradici)";
+  --theme-name:         "Colorful (Levente Daradici)";
   --actives:            #000000;
   --button-active-fill: #00ff00;
   --edges:              #7a7e7a;
@@ -93,6 +89,22 @@
   --warning-outline:    #fc00fc;
 }
 :root[data-theme="6"] {
+  --theme-name:         "Ocean (Levente Daradici)";
+  --actives:            #000000;
+  --edges:              #e20000;
+  --fills:              #000000;
+  --highlights:         #b4b4b4;
+  --icon-active-glyph:  #00005a;
+  --input-border:       #76002b;
+  --labels:             #00ffff;
+  --list-names:         #ffffff;
+  --logo-text:          #ffffff;
+  --maintexts:          #fbff01;
+  --outlines:           #6064ff;
+  --panel-gradient:     #00004c;
+  --surfaces:           #00005a;
+}
+:root[data-theme="7"] {
   --theme-name:         "White and Black (Levente Daradici)";
   --actives:            #f9fdf9;
   --button-fill:        #ffffff;
@@ -121,46 +133,7 @@
   --surfaces:           #f9fdf9;
   --switch-text:        #ffffff;
 }
-:root[data-theme="7"] {
-  --theme-name:         "Ocean (Levente Daradici)";
-  --actives:            #000000;
-  --edges:              #e20000;
-  --fills:              #000000;
-  --highlights:         #b4b4b4;
-  --icon-active-glyph:  #00005a;
-  --input-border:       #76002b;
-  --labels:             #00ffff;
-  --list-names:         #ffffff;
-  --logo-text:          #ffffff;
-  --maintexts:          #fbff01;
-  --outlines:           #6064ff;
-  --panel-gradient:     #00004c;
-  --surfaces:           #00005a;
-}
 :root[data-theme="8"] {
-  --theme-name:         "Poison (András Daradici)";
-  --actives:            #000000;
-  --edges:              #aa96ba;
-  --fills:              #18002d;
-  --highlights:         #b4b4b4;
-  --icon-active-glyph:  #613181;
-  --input-border:       #87659f;
-  --list-names:         #b4b6b4;
-  --logo:               #e3e3e3;
-  --logo-shadow:        #bfbfbf;
-  --logo-text:          #18002d;
-  --maintexts:          #b4b6b4;
-  --outlines:           #f2f9f2;
-  --panel-gradient:     #522a6e;
-  --surfaces:           #613181;
-}
-:root[data-theme="9"] {
-  --theme-name:         "Monochrome (András Daradici)";
-  --logo:               #e3e3e3;
-  --logo-shadow:        #bfbfbf;
-  --logo-text:          #ffffff;
-}
-:root[data-theme="10"] {
   --theme-name:         "UltraPerfect (András Daradici)";
   --actives:            #000000;
   --edges:              #9b7d7a;
@@ -179,32 +152,30 @@
   --surfaces:           #420000;
   --switch-track-on:    #f70000;
 }
-:root[data-theme="11"] {
-  --theme-name:         "vip-cxema.org";
+:root[data-theme="9"] {
+  --theme-name:         "Golden Wind (András Daradici)";
   --actives:            #000000;
-  --edges:              #007c00;
-  --highlights:         #29a217;
-  --input-border:       #014101;
-  --logo:               #38b71b;
-  --logo-shadow:        #2f9a17;
-  --logo-text:          #1f1f1f;
-  --outlines:           #f2f9f2;
+  --button-outline:     #ffffff;
+  --fills:              #9d5400;
+  --highlights:         #c7c7c7;
+  --icons-outline:      #ffffff;
+  --input-border:       #f7d77f;
+  --link-quiet:         #9d5400;
+  --list-bars:          #9d5400;
+  --list-names:         #ffffff;
+  --logo:               #000000;
+  --logo-shadow:        #bfbfbf;
+  --logo-text:          #9d5400;
+  --main-text:          #9d5400;
+  --maintexts:          #ffffff;
+  --outlines:           #9d5400;
+  --panel-border:       #f4faf4;
+  --panel-gradient:     #d49600;
+  --playlist-hover:     #808080;
+  --scrollbar-thumb:    #f7d77f;
+  --surfaces:           #fab100;
+  --switch-off-text:    #9d5400;
+  --switch-text:        #ffffff;
+  --switch-track-on:    #9d5400;
 }
-:root[data-theme="12"] {
-  --theme-name:         "Elle (Trip5)";
-  --actives:            #ffffff;
-  --control-bg:         #f81c00;
-  --highlights:         #f81c00;
-  --infotexts:          #cccccc;
-  --link-quiet:         #115fff;
-  --link-text:          #f81c00;
-  --list-active-bg:     #115fff;
-  --logo:               #ff80ff;
-  --logo-shadow:        #ff00ff;
-  --logo-text:          #ffffff;
-  --meter-track:        #400040;
-  --playlist-hover:     #ff00ff;
-  --spinner-ring:       #115fff;
-  --switch-track-on:    #115fff;
-  --warning-outline:    #f81c00;
-}
+

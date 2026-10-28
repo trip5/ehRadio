@@ -79,8 +79,8 @@ void Startup::loop() {
                                 LOW_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
       // No task: bring it up here rather than have no WebUI at all.  This is exactly the stall the task exists to
       // avoid, so it is reported rather than silent.
-      ERRORLOG("webBringUp task could not be created (%u bytes, free heap %u) - starting the WebUI on the main loop",
-               (unsigned)WEB_BRINGUP_STACK_BYTES, (unsigned)ESP.getFreeHeap());
+      WARNINGLOG("webBringUp task could not be created (%u bytes, free heap %u) - starting the WebUI on the main loop",
+                 (unsigned)WEB_BRINGUP_STACK_BYTES, (unsigned)ESP.getFreeHeap());
       bringUpWebServer();
     }
   }

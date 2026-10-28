@@ -1394,6 +1394,9 @@ or examine the examples in builds/trip5 and make your own!
     #define CLOCKFONT CHUNKY6PX
   #endif
 #endif
+#ifndef PRETEXT_ALLCAPS
+  #define PRETEXT_ALLCAPS false
+#endif
 #ifndef NUMBERED_PLAYLIST
   #define NUMBERED_PLAYLIST false
 #endif
@@ -1414,18 +1417,14 @@ or examine the examples in builds/trip5 and make your own!
   #define CLOCK_TWELVE false
 #endif
 /* This makes the characters get an LED/VFD background color that makes it look like a real clock (only has an effect on color displays) */
-#ifndef CLOCKGLOW // CLOCKGLOW uses a special character to color COLOR_CLOCK_BG behind the clock for a glow effect
-  #if CLOCKFONT == CHUNKY6 // with CHUNKY6, this effect looks not great
-    #define CLOCKGLOW false
-  #else // All other fonts look great!
-    #define CLOCKGLOW true
-  #endif
+#ifndef CLOCKGLOW
+  #define CLOCKGLOW true
 #endif
 #ifndef VOLUME_PAGE
-  #define VOLUME_PAGE false
+  #define VOLUME_PAGE true
 #endif
-#ifndef PRETEXT_ALLCAPS
-  #define PRETEXT_ALLCAPS false
+#ifndef DIGITSGLOW
+  #define DIGITSGLOW true
 #endif
 #if defined(SCREEN_BRIGHTNESS) && (SCREEN_BRIGHTNESS < 1 || SCREEN_BRIGHTNESS > 100)
   #warning "define warning in myoptions.h: SCREEN_BRIGHTNESS is out of range (1-100), reverting to default 100"

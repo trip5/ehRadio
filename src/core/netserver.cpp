@@ -561,12 +561,12 @@ void NetServer::processQueue() {
                                                            else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            // One row for two widgets, each judged on its own glow colour and its own size index: a theme can
-            // glow the clock and not the digits, or the other way round.
-            if (((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0)
-                 || (config.theme.digitbg != config.theme.background && activeLayout.numConf.textsize != 0))
-                || DBGWUI)                                      act += F("\"group_clockglow\",");
+            if ((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_clockglow\",");
                                                            else act += F("\"hide_group_clockglow\",");
+            if ((config.theme.digitbg != config.theme.background && activeLayout.numConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_digitsglow\",");
+                                                           else act += F("\"hide_group_digitsglow\",");
             if (activeLayout.clockConf.textsize != 0 || DBGWUI) act += F("\"group_smaller\",");
                                                            else act += F("\"hide_group_smaller\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
@@ -623,7 +623,7 @@ void NetServer::processQueue() {
                                   config.store.irtlp,
                                   VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d,\"plpaged\":%d,\"allcaps\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d,\"digitsglow\":%d,\"plpaged\":%d,\"allcaps\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
@@ -644,6 +644,7 @@ void NetServer::processQueue() {
                                   config.store.systemFontId,
                                   config.store.clockFontId,
                                   config.store.clockglow,
+                                  config.store.digitsglow,
                                   config.store.playlistPages,
                                   config.store.pretextALLCAPS);
                                   break;

@@ -175,11 +175,12 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   }
   if (cmdIs(command, "sysfont"))       { uint8_t id = constrain(atoi(value), 0, display.getSystemFontCount() - 1); config.saveValueButWait(&config.store.systemFontId, id, 5000); display.applySystemFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
   if (cmdIs(command, "clockfont"))     { uint8_t id = constrain(atoi(value), 0, display.getClockFontCount() - 1); config.saveValueButWait(&config.store.clockFontId, id, 5000); display.applyClockFont(id); netserver.requestOnChange(GETACTIVE, 0); return true; }
+  if (cmdIs(command, "allcaps"))       { config.saveValueButWait(&config.store.pretextALLCAPS, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
   if (cmdIs(command, "numplaylist"))   { config.saveValueButWait(&config.store.numplaylist, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "playlistpages")) { config.saveValueButWait(&config.store.playlistPages, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
   if (cmdIs(command, "clock12"))       { config.saveValueButWait(&config.store.clock12, static_cast<bool>(atoi(value)), 5000); display.putRequest(CLOCK); return true; }
   if (cmdIs(command, "clockglow"))     { config.saveValueButWait(&config.store.clockglow, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
-  if (cmdIs(command, "allcaps"))       { config.saveValueButWait(&config.store.pretextALLCAPS, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
+  if (cmdIs(command, "digitsglow"))    { config.saveValueButWait(&config.store.digitsglow, static_cast<bool>(atoi(value)), 5000); display.putRequest(APPLYSTATE); return true; }
   if (cmdIs(command, "volumepage"))    { config.saveValueButWait(&config.store.volumepage, static_cast<bool>(atoi(value)), 5000); display.putRequest(NEWMODE, PLAYER); return true; }
   if (cmdIs(command, "bufferbar"))     { config.saveValueButWait(&config.store.bufferbar, static_cast<bool>(atoi(value)), 5000); display.putRequest(SHOWBUFFERBAR); return true; }
   if (cmdIs(command, "vumeter"))       { config.saveValueButWait(&config.store.vumeter, static_cast<bool>(atoi(value)), 5000); display.putRequest(SHOWVUMETER); return true; }

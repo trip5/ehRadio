@@ -786,42 +786,50 @@ void NumWidget::setText(const char* txt) {
 void NumWidget::setText(int val, const char *format){
   char buf[WIDGET_BUFF_SIZE];
   snprintf(buf, sizeof(buf), format, val);
+  // With the glow on, the value is zero-filled to the field's width: the string itself is then the field, so a
+  // one-digit value is not a digit beside a blank glow cell and a centred layout stays centred.  Only plain
+  // digits are padded, so a format with a sign or a suffix is drawn as it is.
+  if (_padwidth > 1 && _glowOn()) {
+    const uint8_t n = (uint8_t)strlen(buf);
+    bool plain = (n > 0 && n < _padwidth);
+    for (uint8_t i = 0; plain && i < n; i++) if (buf[i] < '0' || buf[i] > '9') plain = false;
+    if (plain) {
+      const uint8_t pad = (uint8_t)(_padwidth - n);
+      memmove(buf + pad, buf, (size_t)n + 1);
+      memset(buf, '0', pad);
+    }
+  }
   setText(buf);
 }
 
 void NumWidget::setFieldMax(uint32_t maxval) {
-  if (maxval == _fieldmax) return;
-  _fieldmax = maxval;
-  // The field changed, not the digits: make the next setText() repaint even when the value is the same.
-  if (_oldtext) _oldtext[0] = '\0';
+  // Only the WIDTH is kept, because the value itself is padded on the way in.  A uint16_t total is at most five
+  // digits, which is all _glowField holds, so a larger figure is clamped here rather than truncated later.  No
+  // repaint is forced: a changed width changes the padded string, and setText() sees that on its own.
+  uint8_t w = 1;
+  while (maxval > 9) { maxval /= 10; w++; }
+  _padwidth = (w > sizeof(_glowField) - 1) ? (uint8_t)(sizeof(_glowField) - 1) : w;
 }
 
-// The clock's three glow tests: a clock font to take the glow glyph from, the stored setting, and a backdrop
-// that differs from the glow colour.  A one-bit palette sets digitbg == background, so no such panel can glow.
+// The number's three glow tests: a clock font to take the glow glyph from, the stored Digits Glow setting, and a
+// backdrop that differs from the glow colour.  A one-bit palette sets digitbg == background, so no such panel can glow.
 bool NumWidget::_glowOn(){
-  return _cf.font != nullptr && editorOpt(config.store.clockglow)
+  return _cf.font != nullptr && editorOpt(config.store.digitsglow)
          && config.theme.digitbg != config.theme.background;
 }
 
 void NumWidget::_getBounds() {
-  _digitwidth = _textWidth(_cf, _text);
-  // The field is the cells the widest value needs.  _textwidth becomes the field's width, so _realLeft() places
-  // the reserved box and the ones column never moves as the value grows; without a glow it stays the digits' width.
-  uint8_t cells = 1;
-  for (uint32_t v = _fieldmax; v > 9; v /= 10) cells++;
-  const uint8_t shown = (uint8_t)strlen(_text);   // "%d" only: one byte per digit
-  if (shown > cells) cells = shown;
+  // One width, measured from the string.  The glow glyph carries the digit's own advance, so N glow cells are
+  // exactly N digit cells: there is nothing to reserve, and the digits sit on their glow cells.
+  _textwidth = _textWidth(_cf, _text);
   uint8_t g = 0;
   if (_glowOn() && _text[0]) {
     const char ch = clockFontStyle().glowChar[0];
-    if (cells > sizeof(_glowField) - 1) cells = sizeof(_glowField) - 1;
-    for (; g < cells; g++) _glowField[g] = ch;
-    _textwidth = (uint16_t)(cells * ::_charWidth(_cf, ch));   // the free helper: _charWidth is also a TextWidget member
-  } else {
-    _textwidth = _digitwidth;
+    const uint8_t cells = (uint8_t)strlen(_text);   // "%d" only: one byte per digit
+    const uint8_t fit = (cells > sizeof(_glowField) - 1) ? (uint8_t)(sizeof(_glowField) - 1) : cells;
+    for (; g < fit; g++) _glowField[g] = ch;
   }
   _glowField[g] = '\0';
-  if (_textwidth < _digitwidth) _textwidth = _digitwidth;
 }
 
 void NumWidget::_draw() {
@@ -830,7 +838,7 @@ void NumWidget::_draw() {
   if(!_active) return;
   const uint16_t x = _realLeft();
   if (_glowOn() && _text[0]) {
-    // Glow cells first, then the digits over the right-hand ones.  Both prints use the ONE-argument
+    // Glow cells first, then the digits over them.  Both prints use the ONE-argument
     // setTextColor(), which is transparent: an opaque print paints each glyph's background and would erase
     // the glow's unlit segments - the very thing the effect is.
     dsp.fillRect(x, _config.top - _textheight, _textwidth, (uint16_t)(_textHeight(_cf) + 1), _bgcolor);
@@ -840,7 +848,7 @@ void NumWidget::_draw() {
     dsp.setCursor(x, _config.top);
     dsp.print(_glowField);
     dsp.setTextColor(_fgcolor);
-    dsp.setCursor(x + (_textwidth - _digitwidth), _config.top);
+    dsp.setCursor(x, _config.top);
     dsp.print(_text);
   } else {
     dsp.setTextSize(_cf.font==nullptr?_cf.textPx:1);
@@ -874,6 +882,7 @@ void ProgressWidget::init(WidgetConfig conf, ProgressConfig pconf, uint16_t fgco
   _scrolldelay = 0;    // read by _checkDelay() and not set anywhere else
   _pg = 0;
   _fieldX = 0;
+  _dotColor = fgcolor;   // one colour until setDotColor() asks for a second (see BOOT_DOT_COLOR)
   _oldLead = _oldDots = 0;
   _painted = false;
   _runway = (pconf.width > 2) ? (uint16_t)(pconf.width - 2) : 1;
@@ -899,7 +908,7 @@ void ProgressWidget::_blob(uint16_t& lead, uint16_t& dots) const {
 void ProgressWidget::_dotCell(uint16_t col, bool on) {
   const uint16_t x = (uint16_t)(_fieldX + col * _charWidth);
   if (on) {
-    dsp.setTextColor(_fgcolor, _bgcolor);
+    dsp.setTextColor(_dotColor, _bgcolor);
     dsp.setFont();
     dsp.setTextSize(_config.textsize);
     dsp.setCursor(x, _config.top);
@@ -932,6 +941,11 @@ void ProgressWidget::_draw() {
   _oldleft = _realLeft();
   dsp.fillRect(_realLeft(), _config.top, _textwidth, _textheight, _bgcolor);
   TextWidget::_draw();
+  // The blob is the one part of this line that may be a second colour, and the base paint just printed all of it in
+  // _fgcolor - so re-ink the blob's own cells.  Both paths put a column at _fieldX + c * _charWidth and the icon is
+  // written opaquely, so this is the same pixels in the other ink.  Skipped entirely when the colours agree.
+  if (_dotColor != _fgcolor)
+    for (uint16_t c = lead; c < (uint16_t)(lead + dots); c++) _dotCell(c, true);
   _oldLead = lead;
   _oldDots = dots;
   _painted = true;

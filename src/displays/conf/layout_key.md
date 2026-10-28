@@ -339,6 +339,7 @@ Three details of those two sizes are worth knowing when you lay one out:
 **The glow is off at size 0, and it follows the row everywhere else.** The clock glow paints the cells the digits
 sit in with `clockbg`, and the big number widget (`numConf`) paints its own with `digitbg`; each needs a clock
 font's own glow character, so at size 0 there is none and the "glow" would be a literal `00:00` behind the time.
+The clock and the number are switched separately (Clock Glow and Digits Glow), so one can glow without the other.
 Size 0 therefore draws no glow at all — the time's, the seconds' and the colon's own off colour alike — and the
 WebUI's Clock Glow row is not offered for a widget that size. Where the glow does apply it starts where the digits
 start, so it follows the same per-row alignment as the time and the colon rather than the box's edge.
@@ -436,10 +437,13 @@ Two consequences worth knowing when you place `numConf`:
 - The clock is *not* covered by the digits — `numConf` draws only its own cells, with no background
   fill. A layout that overlaps the clock with the digits will therefore show the clock around them;
   the three number screens hide the clock only where the screen has no ticks of its own to keep them
-  in step (the volume page, the number entry and the SD index screen all do). With Clock Glow ON there
-  *is* a fill: the widget reserves the cells the widest value of that screen can need — `VOLUME_SCALE`
-  for the volume, the playlist total for a station/track number — and clears them, so a one-digit
-  number owns its whole field and erases that much of an overlapping row.
+  in step (the volume page, the number entry and the SD index screen all do). With Digits Glow ON there
+  *is* a fill: the value is zero-filled to the digits that screen's widest value needs — `VOLUME_SCALE`
+  for the volume, the playlist total for a station/track number — and that many cells are cleared, so a
+  one-digit number owns its whole field and erases that much of an overlapping row.
+- Every screen on the dialog page except the volume page hides the footer's widgets entirely: the station
+  entry, the SD index counter, the update and validator progress, and the info/settings/timezone/wifi/lost/
+  sleeping dialogs. The volume page and the volume overlay keep all of them.
 
 ### What you cannot leave out
 

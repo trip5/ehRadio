@@ -261,8 +261,8 @@ void Config::initSDPlaylist(bool force) {
         uint32_t currentCount = sdman.countAudioFiles();
         FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
                     storedCount, magic, currentCount);
-        // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's glow field is
-        // sized from, until the re-index below replaces it with the count the new index actually holds.
+        // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's zero-fill
+        // width is taken from, until the re-index below replaces it with the count the new index holds.
         store.countStation = (uint16_t)currentCount;
         if (magic != 0x1867) {
           FUNCTIONLOG("SD", "Magic mismatch (should be 1867). Re-indexing.");
@@ -475,11 +475,12 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.layoutId, (uint8_t)0);
     saveValue(&store.systemFontId, (uint8_t)DISPLAYFONT);
     saveValue(&store.clockFontId, (uint8_t)CLOCKFONT);
+    saveValue(&store.pretextALLCAPS, (bool)PRETEXT_ALLCAPS);
     saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
     saveValue(&store.playlistPages, (bool)PLAYLIST_MODE_PAGED);
     saveValue(&store.clock12, (bool)CLOCK_TWELVE);
     saveValue(&store.clockglow, (bool)CLOCKGLOW);
-    saveValue(&store.pretextALLCAPS, (bool)PRETEXT_ALLCAPS);
+    saveValue(&store.digitsglow, (bool)DIGITSGLOW);
     saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
     saveValue(&store.vumeter, (bool)SHOW_VU_METER);
@@ -1080,6 +1081,7 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(systemFontId, "sysfont"),
   CONFIG_KEY_ENTRY(clockFontId, "clockfont"),
   CONFIG_KEY_ENTRY(clockglow, "clockglow"),
+  CONFIG_KEY_ENTRY(digitsglow, "digitsglow"),
   CONFIG_KEY_ENTRY(playlistPages, "plpaged"),
   CONFIG_KEY_ENTRY(pretextALLCAPS, "allcaps"),
   CONFIG_KEY_ENTRY(brightness, "bright"),

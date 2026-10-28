@@ -194,6 +194,18 @@ static void hideWeatherIfChanged(Widget* w, bool hide) {
   if (hide) { w->lock(true); w->setActive(false); }
   else      { w->lock(false); w->setActive(true); }   // re-show draws the text setText() kept recording
 }
+
+// The footer's pair is the same hide as the weather's - a lock alone leaves a TextWidget painting from
+// setText() - but the SHOW is unlock() ALONE: _applyFooter() runs before the page switch, whose own pass
+// activates and draws every widget on the page, and drawing here would paint the footer over the dialog page
+// for the instant before that switch.
+static void showOrHideFooterWidget(Widget* w, bool show) {
+  if (!w) return;
+  if (show) { w->unlock(); return; }
+  if (w->locked() && !w->isActive()) return;
+  w->lock(true);
+  w->setActive(false);
+}
 #endif
 
 QueueHandle_t displayQueue;
@@ -375,9 +387,13 @@ uint16_t Display::height() { return dsp.height(); }
 void Display::_bootScreen() {
   _boot = new Page();
   // The dots run between a pinned speaker and the boot glyph - see ProgressWidget::_progress().  startup.icon()
-  // is read here, while the boot screen is built, and the widget keeps the literal for the session.
-  _boot->addWidget(new ProgressWidget(_bootConfig.bootWdtConf, _bootConfig.bootPrgConf, BOOT_PRG_COLOR, 0,
-                                      "\023", startup.icon()));
+  // is read here, while the boot screen is built, and the widget keeps the literal for the session.  The blob takes
+  // BOOT_DOT_COLOR, which defaults to BOOT_PRG_COLOR: the two frame glyphs keep the latter, so a build that sets the
+  // pair differently gets a two-tone line and every other build is unchanged.
+  ProgressWidget* bootDots = new ProgressWidget(_bootConfig.bootWdtConf, _bootConfig.bootPrgConf,
+                                                BOOT_PRG_COLOR, 0, "\023", startup.icon());
+  bootDots->setDotColor(BOOT_DOT_COLOR);
+  _boot->addWidget(bootDots);
   // A ScrollWidget fed from bootstrConf's plain WidgetConfig: text that fits is drawn at the conf's align
   // (so WA_CENTER still rules), a longer string parks at the span's edge and scrolls.  Only the scroll fields are
   // derived.
@@ -705,9 +721,23 @@ void Display::_start() {
   _bootStep = 2;
 }
 
+// Which of the footer's widgets the current screen keeps.  The player page owns the footer and the volume page
+// is the only dialog that borrows all of it on purpose; every other screen on the dialog page - a number, an
+// update, a validator run, a plain dialog - is itself and nothing else.
+uint8_t Display::_footerMask() const {
+  return (_mode == PLAYER || _mode == VOL) ? FW_ALL : 0;
+}
+
+void Display::_applyFooter() {
+  static const uint8_t bit[] = { FW_VOLBAR, FW_BUFBAR, FW_VOLTXT, FW_VOLIP, FW_BATT, FW_RSSI };
+  Widget* const w[]          = { _volbar,   _bufferbar, _voltxt,    _volip,    _battery, _rssi };
+  const uint8_t keep = _footerMask();
+  for (uint8_t i = 0; i < sizeof(w) / sizeof(w[0]); i++) showOrHideFooterWidget(w[i], (keep & bit[i]) != 0);
+}
+
 // The footer IP, written in one place.  It is the user's indicator that the WebUI is up.
 void Display::_footerIp() {
-  if (!_volip) return;
+  if (!_volip || !_footerShown(FW_VOLIP)) return;
   if (!netserver.isListening()) { _volip->setText(""); return; }
   _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
 }
@@ -715,6 +745,10 @@ void Display::_footerIp() {
 void Display::_showDialog(const char *title) {
   dsp.setScrollId(NULL);
   _pager->setPage(pages[PG_DIALOG]);
+  // A dialog has no number, and the widget keeps whatever the last screen left in it - leaving the volume page
+  // for Settings, or the station entry for a LOST dialog, would otherwise draw that value behind the title.
+  // The number screens set theirs immediately after this call, which is what makes it safe for them too.
+  if (_nums) _nums->setText("");
   _meta->setAlign(WA_CENTER);
   _meta->setText(title);
 }
@@ -729,6 +763,8 @@ void Display::_showDialog(const char *title) {
 void Display::_showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage, uint32_t fieldmax) {
   // The shared rows first, in both variants: several layouts put the number on a row the weather, IP, battery or
   // RSSI line normally uses, and those widgets draw themselves on request rather than through the page pass.
+  // The footer is NOT handled here: _applyFooter() settled it when the mode changed, so this only has to leave
+  // those rows alone on a screen that keeps them (the volume page and the overlay).
   if (*shareWeatherIP_ptr && weatherLive() && _weather) {
     // pause weather updates while the number is up, so it cannot overwrite the IP line
     lockIfChanged(_weather, true);
@@ -736,14 +772,14 @@ void Display::_showNumbers(const char* header, int32_t value, const char* fmt, b
   }
   if (*shareBattRSSI_ptr && _battery && _rssi) {
     _battery->setText(""); _battery->setActive(false);
-    _rssi->setActive(rssiInLayout());
+    _rssi->setActive(_footerShown(FW_RSSI) && rssiInLayout());
   }
   if (dialogPage) _showDialog(header);
-  if (_volip) {
+  if (_volip && _footerShown(FW_VOLIP)) {
     if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
     else _footerIp();
   }
-  // The field the glow reserves: the widest value this screen can show, not the one it happens to be showing.
+  // The zero-pad width: the widest value this screen can show, not the one it happens to be showing.
   _nums->setFieldMax(fieldmax);
   if (value < 0) _nums->setText("");
   else _nums->setText(value, fmt);
@@ -764,6 +800,9 @@ void Display::_switchMode(displayMode_e newmode) {
   #endif
   _mode = newmode;
   dsp.setScrollId(NULL);
+  // The footer's visibility is one table keyed off _mode (see _footerMask), and it has to be applied BEFORE the
+  // page switches below: they activate and draw the widgets on the page they show, and a locked widget is skipped.
+  _applyFooter();
   if (newmode == PLAYER) {
     #ifdef USE_SD
       // Tear down the manager's page - and only that page.  The boot and AP screens build the same _boot
@@ -812,6 +851,9 @@ void Display::_switchMode(displayMode_e newmode) {
     // The manager drops the player's state requests while it owns the screen, so widget state is re-derived
     // here, after the page switch, where the draws are wanted again.
     _layoutChange(player.isRunning());
+    // The volume line was cleared on the station and SD screens, and a page switch does not repaint a widget
+    // whose text has not changed - so it is re-rendered here.  Before the IP line, which shares the footer.
+    _updateVolume();
     if (_volip) {
         if (network.status == SDOFFLINE) {
           _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
@@ -864,7 +906,7 @@ void Display::_switchMode(displayMode_e newmode) {
   if (newmode == VALIDATING) { _showDialog(l10n(L10N_LBL_VALIDATING)); _updFirstCall = true; }
   if (newmode == SLEEPING)  _showDialog(l10n(L10N_LBL_SLEEPING));
   // no count yet: SDFILEINDEX fills it in, and countStation is the last known total - the pre-count or the
-  // previous index - so the counter's field is as wide as the card needs for most of the walk.
+  // previous index - so the counter's zero-fill is as wide as the card needs for most of the walk.
   if (newmode == SDCHANGE)  _showNumbers(l10n(L10N_LBL_WAITFORSD), -1, "%d", true, config.store.countStation);
   if (newmode == INFO || newmode == SETTINGS || newmode == TIMEZONE || newmode == WIFI) _showDialog("");
   if (newmode == NUMBERS)   _showNumbers("", -1, "%d", true, config.store.countStation);   // the header and the number arrive per digit
@@ -1205,7 +1247,8 @@ void Display::loop() {
           _applyBitrate();
           break;
         case SHOWBUFFERBAR: if (_bufferbar)  {
-            lockIfChanged(_bufferbar, !bufferbarInLayout() || !editorOpt(config.store.bufferbar));
+            lockIfChanged(_bufferbar, !_footerShown(FW_BUFBAR) || !bufferbarInLayout()
+                                      || !editorOpt(config.store.bufferbar));
             _bufferbar->setValue(normalizeBufferbarValue(player.inBufferFilled(), _bufferbarMax));
           }
           break;
@@ -1224,7 +1267,7 @@ void Display::loop() {
           hideWeatherIfChanged(_weather, _weatherHidden());
           if (!weatherLive()) {
             if (_weather) _weather->setText("");
-            _footerIp();
+            _footerIp();   // it bails on a screen that does not keep the IP line
           } else {
             // weather and IP share a row; suppress weather text and IP together based on mode
             if (*shareWeatherIP_ptr) {
@@ -1290,7 +1333,7 @@ void Display::loop() {
           break;
         }
         case DSPRSSI:
-          if (_rssi) { _setRSSI(request.payload); }
+          if (_rssi && _footerShown(FW_RSSI)) { _setRSSI(request.payload); }
           if (_bufferbar && editorOpt(config.store.bufferbar)) {
             _bufferbar->setValue(normalizeBufferbarValue(player.isRunning() ? player.inBufferFilled() : 0, _bufferbarMax));
           }
@@ -1303,7 +1346,7 @@ void Display::loop() {
         case PSTOP:  _layoutChange(false);  break;
         case DSP_START: _start();  break;
         case NEWIP: {
-          if (_volip) {
+          if (_volip && _footerShown(FW_VOLIP)) {   // a screen without the footer has no IP line to refresh
               if (network.status == SDOFFLINE) {
                 _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
               } else {
@@ -1663,6 +1706,9 @@ void Display::_time(bool redraw) {
 
 void Display::_updateVolume() {
   if(!_voltxt) return;
+  // Only a screen that keeps the footer has a volume line to paint; anywhere else it would land over the number,
+  // the progress bar or a dialog's title.
+  if (!_footerShown(FW_VOLTXT)) return;
 
   uint8_t vol = config.store.volume;
 

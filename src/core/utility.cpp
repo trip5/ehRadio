@@ -492,6 +492,12 @@ void Utility::initPlaylist() {
   if (idx) { idxSize = idx.size(); idx.close(); }
   FUNCTIONLOG("Playlist", "initPlaylist: %u bytes of playlist.csv, %u index entries (%u bytes)",
               (unsigned)csvSize, (unsigned)(idxSize / 4), (unsigned)idxSize);
+  // The index that was just built is the authoritative count for PM_WEB, and it is the width the big number is
+  // zero-filled to: the display task may not open the index, so the store carries the figure.  Clamped the same
+  // way playlistLength() clamps, or a full file would wrap to zero here.
+  uint32_t entries = (uint32_t)(idxSize / 4);
+  if (entries > MAX_PLAYLIST_ENTRIES) entries = MAX_PLAYLIST_ENTRIES;
+  config.setCountStation((uint16_t)entries);
 }
 
 bool Utility::cleanPlaylist() {

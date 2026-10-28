@@ -87,6 +87,7 @@ separate setting, documented below.
 | `clock12` | Toggle 12-hour clock display and refresh clock. |
 | `clockglow` | Enable/disable the clock's glow. Saved, then the whole display is re-initialised. |
 | `volumepage` | Toggle dedicated volume page behavior and refresh player view. |
+| `digitsglow` | Enable/disable the big number's glow (volume, station and SD counter, zero-filled when on). Saved, then the whole display is re-initialised. |
 | `bufferbar` | Enable/disable the buffer bar on the display. |
 | `vumeter` | Enable/disable VU meter and refresh display state. |
 | `vupeaks` | Enable/disable the VU meter peak markers (or XY axis lines). |

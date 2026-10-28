@@ -135,6 +135,16 @@ class Display {
     void _setReturnTicker(uint8_t time_s);
     bool _ownScreen() const;
     bool _drawsOverOwnScreen(displayRequestType_e type) const;
+    // The footer sub-page's widgets, in insertion order, one bit each.  A bitmask rather than six flags because
+    // ONE table decides which screen keeps which, and every reader asks that table the same question.
+    enum FooterWidget_e : uint8_t {
+      FW_VOLBAR = 1u << 0, FW_VOLTXT = 1u << 1, FW_VOLIP = 1u << 2,
+      FW_BATT   = 1u << 3, FW_RSSI   = 1u << 4, FW_BUFBAR = 1u << 5,
+      FW_ALL    = FW_VOLBAR | FW_VOLTXT | FW_VOLIP | FW_BATT | FW_RSSI | FW_BUFBAR
+    };
+    uint8_t _footerMask() const;
+    bool _footerShown(uint8_t bit) const { return (_footerMask() & bit) != 0; }
+    void _applyFooter();
     bool _clockHidden();
     bool _weatherHidden();
     void _switchMode(displayMode_e newmode);

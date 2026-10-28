@@ -420,7 +420,7 @@ void Player::_play(uint16_t stationId) {
     _loadVol(config.store.volume);   // re-apply volume (respects _muted) after connect* — setDefaults() inside it must not win
     if (config.getMode()==PM_SDCARD) {
       config.sdResumePos = 0;
-      config.saveValueButWait(&config.store.lastSdStation, stationId, 5000);  // an NVS write here stalls the loop
+      config.saveValueButWait(&config.store.lastSdStation, stationId, 3000);  // an NVS write here stalls the loop
     } else {
       config.saveLastStationUrl(config.station.url);
     }

@@ -111,8 +111,11 @@ void PlaylistValidator::_restore() {
   player.stopStream();
   if (_muted) { player.setVolume(_savedVol); _muted = false; }
   network.cancelStreamRetry();
-  config.setTitle("");
   if (_savedLast > 0) utility.loadStation(_savedLast);
+  // The same landing every other exit uses - [ready], or the no-SD-card text offline - instead of the empty
+  // title this used to write, which came back to a blank station line.  AFTER loadStation(), because setReady()
+  // tests the station url it has just restored.
+  player.setReady();
   display.clearProgress();   // the bar shares the dialog page with the volume overlay, so blank it
   display.putRequest(NEWMODE, PLAYER);
 }

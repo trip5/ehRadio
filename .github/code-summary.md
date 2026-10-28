@@ -4226,7 +4226,15 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     blob left, the cell it entered), against a whole-line erase plus fourteen glyph writes in the single-path version.
     `_fieldX` records the field's x origin at the last full paint, and `_painted` guards the first tick so a delta can
     never be painted against a picture the widget did not put on the panel; both paths place column `c` at `_realLeft()
-    + (frameChars + c) * _charWidth`, which is why a full paint cannot shift the dots. The reason is the panel rather
+    + (frameChars + c) * _charWidth`, which is why a full paint cannot shift the dots. **The blob can be a second
+    colour**: `_dotColor` starts as the widget's own `fgcolor`, and `setDotColor()` may replace it - the boot screen
+    passes `BOOT_DOT_COLOR` (`dspcolors.h`, guarded and defaulting to `BOOT_PRG_COLOR`, so the line stays one colour
+    unless a build asks otherwise). `_dotCell()` inks the blob with it, and `_draw()`, which printed the whole line in
+    `_fgcolor` through `TextWidget::_draw()`, re-inks just the blob's cells afterwards - only when the two colours
+    differ, at most `barwidth` cells, landing on the same pixels for the reason the sentence above gives. The two frame
+    glyphs never take part, and erasing a cell is a `fillRect()` in `_bgcolor`, so it is colour-free. On a 1-bit panel
+    both values collapse to the same lit pixel; on SSD1322/SSD1327 the second one has to be a driver-palette value.
+    The reason is the panel rather
     than the animation: an SH1106 is a framebuffer whose refresh hides an erase, while an ILI9488 shows every write, so
     the same code flickers on one and not the other. The blob grows in at the speaker, slides right one column per frame
     and has its head eaten at the far end, which is what makes the dots read as vanishing into the boot glyph; the cycle
@@ -4461,28 +4469,44 @@ design record; this is the shape of it.
   templates `_timewidth`/`_secwidth` are read off, so they must not be blanked instead), and printing them would
   paint a literal `00:00` behind the time.  Size 0 therefore has NO glow anywhere, and the WebUI's Clock Glow row
   is offered on the same rule plus that font test, via the `group_clockglow` / `hide_group_clockglow` token in
-  `GETACTIVE` (`netserver.cpp`).  The gate is two independent halves, one per widget: the clock's is
-  `clockbg != background && clockConf.textsize != 0`, the number's is `digitbg != background && numConf.textsize
-  != 0`, and the row shows when either holds.  Each half is an AND, because each is a "hide when", never a second
-  reason to show.  The `theme` command re-sends the
-  token so the row follows a theme switch with the settings page open, and a `layout` switch re-sends it for the
-  same reason (the clock's size index lives in the layout, not in the theme).
-  **The NUMBER widget glows too** (`NumWidget`, `numConf`), on that same stored setting and the same three tests -
-  `NumWidget::_glowOn()` is the number's copy, needing a clock font, the setting and `digitbg != background`.  The
-  digits keep `theme.digit` and the glow behind them is `.digitbg`, its own field since 2026.10.27 (15% of
-  `.digit`; `plans/digitbg-glow.md`), so the clock and the number glow in different colours - which is what the
-  eight themes that draw the number in blue needed, having glowed it in the clock's grey.  A number cannot reserve
-  cells out of nothing, so the
+  `GETACTIVE` (`netserver.cpp`).  Since 2026.10.28 there are **two rows and two tokens**: `group_clockglow` is
+  `clockbg != background && clockConf.textsize != 0`, and `group_digitsglow` is `digitbg != background &&
+  numConf.textsize != 0`.  Each is an AND, because each is a "hide when", never a second reason to show, and
+  neither row is affected by the other setting.  The `theme` command re-sends the
+  tokens so the rows follow a theme switch with the settings page open, and a `layout` switch re-sends them for the
+  same reason (each widget's size index lives in the layout, not in the theme).
+  **The NUMBER widget glows too** (`NumWidget`, `numConf`), on its **own stored setting** `config.store.digitsglow`
+  since 2026.10.28 - `NumWidget::_glowOn()` is the number's copy, needing a clock font, that setting and
+  `digitbg != background`.  The digits keep `theme.digit` and the glow behind them is `.digitbg`, its own field
+  since 2026.10.27 (15% of `.digit`; `plans/digitbg-glow.md`), so the clock and the number can glow in different
+  colours - which is what the eight themes that draw the number in blue needed, having glowed it in the clock's
+  grey.  A number cannot reserve cells out of nothing, so the
   widget is told the WIDEST value its screen can show (`setFieldMax()`): `VOLUME_SCALE` for the volume,
-  `config.store.countStation` for a station/track number and for the SDCHANGE scan counter.  It reserves
-  `max(digits(fieldmax), digits(value))` digit cells - at least one, never a hardcoded two, because any total can
-  itself be a single digit - and prints the value right-aligned inside them, so the ones column does not move from
-  `9` to `10`.  `_textwidth` is that FIELD (what `_realLeft()` places and `setText()` erases) and `_digitwidth` is
-  what is printed.  Both the glow and the digits are printed with the ONE-argument `setTextColor()`, which is
+  `config.store.countStation` for a station/track number and for the SDCHANGE scan counter.  Only the digit COUNT
+  of that figure is kept (`digits(max)`, at least one, never a hardcoded two, because any total can itself be a
+  single digit), and with the glow on the value is **zero-filled to it** - `5` at `VOLUME_SCALE` 42 prints `05` -
+  so the string itself is the field.  One width therefore serves placement, erase and the glow cells
+  (`_textwidth`), and a centred layout stays centred at every value instead of printing a lone digit in the
+  right-hand half of a two-cell box.  There is no reserved box and no second width: the glow glyph carries the
+  digit's own advance, so N glow cells are exactly N digit cells, and both strings print at the same x.  Both are
+  printed with the ONE-argument `setTextColor()`, which is
   transparent: `dsp` on a TFT is the driver, not the framebuffer, so an opaque print would paint each glyph's
   background over the glow.  The scan screen's total is `countStation`, which `initSDPlaylist()` now keeps from the
   `countAudioFiles()` walk that decides whether to re-index (exact whenever that walk ran) and which is otherwise
-  the previous index's count; a fresh card has no total, so its field follows the count.
+  the previous index's count; a fresh card has no total, so its zero-fill follows the count.
+  For a **web playlist** `Utility::initPlaylist()` keeps the same figure from the index it has just sized
+  (`idxSize / 4`, clamped exactly as `playlistLength()` clamps) - the display task may not open the index, so the
+  store carries it.  Without that call the station entry padded to one digit, because `countStation` had only
+  ever been assigned in `initSDPlaylist()`.
+  **The footer is one table per screen** (`Display::_footerMask()`).  `_footer` is a sub-page attached to
+  `PG_PLAYER` and `PG_DIALOG` only, so it is painted on every dialog; `PLAYER` and `VOL` are the modes that keep it
+  (`FW_ALL`), and every other mode - the two number screens, `UPDATING` / `VALIDATING`, `LOST`, `SLEEPING`,
+  `INFO`, `SETTINGS`, `TIMEZONE`, `WIFI` - keeps none of `_volbar`, `_voltxt`, `_volip`, `_battery`, `_rssi`,
+  `_bufferbar`.  `_applyFooter()` runs in `_switchMode()` BEFORE the page switch, hides with the lock-plus-deactivate
+  pair (a `TextWidget` still paints from `setText()` on a lock alone) and shows with `unlock()` alone, because the
+  page pass that follows activates and draws the widget.  Every request that writes a footer widget asks
+  `_footerShown(bit)` first, and `_showDialog()` empties `_nums`, which otherwise kept the last number behind a
+  title.
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,
@@ -4753,8 +4777,10 @@ a normal build pays nothing for either. The `WIDGET_DEBUG` line in `options.h`'s
 - `OLED_GREYSCALE` with `core/options.h`, default `false` selects the driver's grayscale palette (instead of 1-bit
   mono), and is only valid for `SSD1322` (support removed from`SSD1327`)
 
-`dspcolors.h` is deliberately minimal: only `BOOT_PRG_COLOR`, `BOOT_TXT_COLOR`, `TFT_BG`, `TFT_FG`. Panel-specific
-palettes live with their own drivers.
+`dspcolors.h` is deliberately minimal: only `BOOT_PRG_COLOR`, `BOOT_TXT_COLOR`, `BOOT_DOT_COLOR`, `TFT_BG`, `TFT_FG`.
+Panel-specific palettes live with their own drivers. `BOOT_DOT_COLOR` is the one macro in there with an `#ifndef`
+guard: it defaults to `BOOT_PRG_COLOR`, and exists so a build can lift the animated blob off the speaker and boot glyph
+beside it (`ProgressWidget::setDotColor()`), which is the only two-colour boot line the panel supports.
 
 ## Screen Rendering Fixes (Session: SH1106 YO_MONO)
 

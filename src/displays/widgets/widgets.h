@@ -252,16 +252,14 @@ class NumWidget: public TextWidget {
     void init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor, uint16_t buffsize = WIDGET_BUFF_SIZE);
     void setText(const char* txt) override;
     void setText(int val, const char *format) override;
-    // The widest value this field will show.  With the glow on, that many digit cells are reserved, so a
-    // one-digit value keeps its column instead of jumping when it becomes two.  The source owns the figure:
-    // VOLUME_SCALE for the volume, the playlist total for a station/track number, 0 for "no field".
+    // The widest value this screen can show.  With the glow on, the value is zero-filled to that many digits,
+    // so every glow cell has a digit in it.  The source owns the figure: VOLUME_SCALE for the volume, the
+    // playlist total for a station/track number, 0 for "no field".
     void setFieldMax(uint32_t maxval);
   protected:
     ClockFontSel _cf {nullptr, 0, 1};
-    uint32_t _fieldmax = 0;
-    // _textwidth is the FIELD (what is placed and erased), _digitwidth is what is printed inside it.
-    uint16_t _digitwidth = 0;
-    char _glowField[6] = "";   // one glow cell per reserved digit + NUL; a uint16_t total is at most 5
+    uint8_t _padwidth = 1;     // digits of that widest value; 1 pads nothing
+    char _glowField[6] = "";   // one glow cell per printed digit + NUL; a uint16_t total is at most 5
     bool _glowOn();
     void _getBounds();
     void _draw();
@@ -282,6 +280,9 @@ class ProgressWidget: public TextWidget {
     void init(WidgetConfig conf, ProgressConfig pconf, uint16_t fgcolor, uint16_t bgcolor,
               const char* frameLeft = nullptr, const char* frameGlyph = nullptr);
     void loop();
+    // The blob may be a different colour from the two frame glyphs (the boot screen's BOOT_DOT_COLOR).  Set it after
+    // init(): _dotColor starts as the widget's own fgcolor, so a caller that never calls this gets a one-colour line.
+    void setDotColor(uint16_t c) { _dotColor = c; }
   protected:
     // Full paint, and the only path that draws the two static glyphs: activation, layout changes and screensaver
     // restarts come through here, while the animation paints single cells in _progress(). That split keeps a TFT from
@@ -297,6 +298,7 @@ class ProgressWidget: public TextWidget {
     // because a U+00B7 dot is two of them and a character count cuts the line mid-dot.
     uint16_t _runway = 0;
     uint16_t _fieldX = 0;                  // x of the first dot column, recorded by the last full paint
+    uint16_t _dotColor = 0;                // the runway's ink; init() sets it to fgcolor, setDotColor() may change it
     uint16_t _oldLead = 0, _oldDots = 0;   // what the last painted frame showed, for the cell delta
     bool _painted = false;                 // false until _draw() has put a known picture on the panel
     uint8_t _pg;

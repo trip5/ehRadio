@@ -53,6 +53,7 @@ void Player::init() {
     setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT, I2S_DIN, I2S_MCLK);
   #else
     // SPI.begin(); // started in config.init()
+    if (VS_PATCH_ENABLE) display.putRequest(BOOTVSPATCH);
     if (VS1053_RST>0) ResetChip();
     begin(); // chip query + patch load now handled inside begin()
   #endif

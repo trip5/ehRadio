@@ -400,7 +400,7 @@ void Display::_bootScreen() {
   // BOOTSTR_LEN, not the widget default: this line's window is its own budget, sized for a locale label, a
   // 32 character SSID and the icon pair.
   _bootstring = (TextWidget*) &_boot->addWidget(new ScrollWidget(bootScroll, BOOT_TXT_COLOR, 0, BOOTSTR_LEN));
-  _bootstring->setText(RADIOVERSION);
+  _bootstring->setText(""); // empty until player.init happens
   _pager->addPage(_boot);
   _pager->setPage(_boot, true);
   dsp.drawLogo(BOOTLOGOTOP);
@@ -1275,6 +1275,14 @@ void Display::loop() {
         }
         case SCANNINGWIFI: {
           if (_bootstring) _bootstring->setText(l10n(L10N_MSG_SCANNING_WIFI));
+          break;
+        }
+        case BOOTVSPATCH: {
+          if (_bootstring) _bootstring->setText("VS1053");
+          break;
+        }
+        case BOOTVERSION: {
+          if (_bootstring) _bootstring->setText(RADIOVERSION);
           break;
         }
         case SDFILEINDEX: {

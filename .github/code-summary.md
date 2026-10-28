@@ -397,12 +397,14 @@ depending on the selected PlatformIO environment and macro definitions.
   1. serial + LED + RGB + battery init
   2. `config.init()`
   3. `backlightControls.init()`
-  4. `display.init()`
-  5. `player.init()`
-  6. `battery.bootStatus()`
-  7. `network.begin()`
-  8. if no connectivity: start minimal server + controls + display start and return
-  9. if connectivity:
+  4. `display.init()` — the boot page comes up with its message line deliberately EMPTY
+  5. `player.init()` — a VS1053 build raises the `VS1053` cue from inside it, before the chip is touched
+  6. `display.putRequest(BOOTVERSION)` — the version string goes up only now, once, once the audio is up
+  7. `startup.checkLittleFSandVer()` — mount, health check, version marker, theme/layout id re-resolve
+  8. `battery.bootStatus()`
+  9. `network.begin()`
+  10. if no connectivity: start minimal server + controls + display start and return
+  11. if connectivity:
      - `config.initPlaylistMode()`
      - `telnet.begin()` — early on purpose: a listening socket with no task of ours, so it costs nothing
      - controls init
@@ -4152,6 +4154,20 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     sender does the same). The strings live in the generated `src/locale/dsplocale.h`, so a new message needs its key
     added to all 36 `src/locale/display/*.json` files and that header regenerated; measured cost of one new key across
     the 36 locales is **~5 KB of flash**, which is the number to weigh before adding one.
+    **`BOOTVSPATCH` / `BOOTVERSION` are the pair that is deliberately NOT in the locale tables**: the cue sets the
+    line to the literal `"VS1053"` (a chip name needs no translation, and the cue is only ever sent from a VS1053
+    build, so a locale key would still have cost its ~5 KB in every other build), and `BOOTVERSION` puts
+    `RADIOVERSION` up. `_bootScreen()` now starts the line EMPTY, so the version appears exactly once — `setup()`
+    queues `BOOTVERSION` immediately after `player.init()` returns, which is past the reset, the chip query, the
+    patch, the audio-task start and the first balance/tone/volume writes. `Player::init()` queues the cue under
+    `if (VS_PATCH_ENABLE)` inside its VS1053 branch, just before `ResetChip()`/`begin()`. **The restore has to stay
+    on the far side of `player.init()`, never beside `loadUserCode()`**: "patch applied" is logged inside `begin()`,
+    before the writes that can strand a wedged chip, and the `done` line at the end of `player.init()` is what a
+    panel showing `VS1053` is the counterpart of. The cue's paint window is `ResetChip()`'s own `delay(30)` +
+    `delay(100)` and `begin()`'s `delay(170)` — no delay was added for it. **Why it earns a request at all**:
+    `loadUserCode()` issues one `write_register` per plugin word and each waits on DREQ with a 50 ms ceiling, so a
+    chip that refuses the patch (corrupt patch RAM after a fast power cycle, or a patch applied twice) costs
+    `PLUGIN_SIZE` × 50 ms — 8414 words, about seven minutes — which is exactly what a "hung" boot looks like.
   - `TextWidget::setText()` is **virtual** (all three overloads), with `ScrollWidget` and `NumWidget` marking their
     matching overloads `override` so the compiler enforces the match. This matters because a subclass can legitimately
     be held in a `TextWidget*`: the boot line is exactly that case (`Display::_bootstring` is a `TextWidget*` over a
@@ -4168,7 +4184,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - The boot text line (`Display::_bootstring`, built in `Display::_bootScreen()`) is a `ScrollWidget` fed from the
     conf's plain `bootstrConf` `WidgetConfig`, so a string that fits is drawn statically at the conf's align (WA_CENTER
     still rules) and a longer one parks at the span's edge and scrolls. Its window and buffer are derived in code
-    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128, uppercase), and its **scroll cadence is
+    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128), and its **scroll cadence is
     borrowed from the panel's own
     `apSettConf`** — `startscrolldelay`, `scrolldelta` and `scrolltime` only, never that entry's
     `left/top/width/buffsize/fontsize`, which belong to its own line and differ on the round TFT (`left =

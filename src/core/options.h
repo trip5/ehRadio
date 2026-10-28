@@ -342,6 +342,8 @@ or examine the examples in builds/trip5 and make your own!
   #endif
 #endif
 /* Enables flac decoding on true VS1053B boards - will be disabled unless explicitly set true in myoptions.h */
+// Special note: if this is true, there will be "VS1053" on the display just before the version number to show
+// initialization and patching (false and I2S builds have no message)
 #ifndef VS_PATCH_ENABLE
   #define VS_PATCH_ENABLE false /* Enables FLAC playback on VS1053B boards but should be false (the default) for VS1003 and VS1053 (non-B) boards. Some boards sold as VS1053 but actually VS1003 will have 2.5V voltage regulator instead of 1.8V. */
 #endif

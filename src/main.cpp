@@ -72,16 +72,17 @@ void setup() {
   battery.init();
   BOOTTIMELOG("serial & deassert & rgbled & battery");
   config.init();
-  controls.checkButtonsHeldOnBoot();  // check for hold-to-SD before network decision
+  controls.checkButtonsHeldOnBoot(); // check for hold-to-SD before network decision
   backlightControls.init();
   BOOTTIMELOG("config.init & controls & backlight");
   display.init();
   BOOTTIMELOG("display.init");
   const bool offlineBoot = (network.offlineMode || config.store.SDoffline);
-  startup.checkLittleFSandVer();
-  BOOTTIMELOG("checkLittleFSandVer");
   player.init();
   BOOTTIMELOG("player.init");
+  display.putRequest(BOOTVERSION); // follows player.init because of "VS1053" message
+  startup.checkLittleFSandVer();
+  BOOTTIMELOG("checkLittleFSandVer");
   battery.bootStatus();
   BOOTTIMELOG("battery.bootStatus");
   if (offlineBoot) {

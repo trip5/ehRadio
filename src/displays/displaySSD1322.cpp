@@ -31,42 +31,42 @@ void DspCore::initDisplay() {
     #include "tools/oledcolorfix.h"
   #else
     // Ordered to match theme_t in core/config.h
-    config.theme.background  = TFT_BG;
+    config.theme.background  = BLACK;
     config.theme.meta        = GRAY_B;
-    config.theme.metabg      = TFT_BG;
+    config.theme.metabg      = BLACK;
     config.theme.title1      = GRAY_B;
     config.theme.title2      = GRAY_5;
-    config.theme.digit       = TFT_FG;
+    config.theme.digit       = WHITE;
     config.theme.digitbg     = GRAY_1;
     config.theme.div         = GRAY_7;
     config.theme.line        = GRAY_7;
     config.theme.weather     = GRAY_3;
     config.theme.vuaxis      = GRAY_3;
-    config.theme.vupeak      = TFT_FG;
+    config.theme.vupeak      = WHITE;
     config.theme.vumax       = GRAY_3;
     config.theme.vumin       = GRAY_7;
-    config.theme.clock       = TFT_FG;
+    config.theme.clock       = WHITE;
     config.theme.clockbg     = GRAY_1;
     config.theme.seconds     = GRAY_9;
     config.theme.secondsbg   = GRAY_1;
     config.theme.dow         = GRAY_5;
     config.theme.date        = GRAY_7;
-    config.theme.clockss     = TFT_FG;
+    config.theme.clockss     = WHITE;
     config.theme.clockbgss   = GRAY_1;
     config.theme.secondsss   = GRAY_9;
     config.theme.secondsbgss = GRAY_1;
     config.theme.dowss       = GRAY_7;
     config.theme.datess      = GRAY_7;
-    config.theme.textss      = TFT_FG;
-    config.theme.buffer      = TFT_FG;
+    config.theme.textss      = WHITE;
+    config.theme.buffer      = WHITE;
     config.theme.ip          = GRAY_3;
-    config.theme.vol         = TFT_FG;
+    config.theme.vol         = WHITE;
     config.theme.rssi        = GRAY_3;
-    config.theme.battery     = TFT_FG;
-    config.theme.bitrate     = TFT_FG;
+    config.theme.battery     = WHITE;
+    config.theme.bitrate     = WHITE;
     config.theme.volbarout   = GRAY_9;
     config.theme.volbarin    = GRAY_9;
-    config.theme.plcurrent   = TFT_BG;
+    config.theme.plcurrent   = BLACK;
     config.theme.plcurrentbg = GRAY_9;
     playlistColors();
   #endif

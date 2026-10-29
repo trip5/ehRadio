@@ -1189,12 +1189,11 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 /* Print the previous boot's crash at boot */
-#define COREDUMP_SUMMARY_AT_BOOT // BOOTLOG the last core dump's task, PC, backtrace and ELF SHA into the serial log.
-                                 // ESP-IDF writes that dump itself:
-                                 // every partition table here already reserves a "coredump" partition and the prebuilt
-                                 // libraries are built with core-dump-to-flash in ELF format.  Nothing is printed when
-                                 // there is no dump.  Comment this out to leave the dump alone entirely.
-// #define COREDUMP_KEEP_DUMP    // keep the dump in flash after reporting it, for esp-coredump and the Espressif tools
+// BOOTLOG the last core dump's task, PC, backtrace and ELF SHA into the serial log.
+// ESP-IDF writes that dump itself (provided the partition file allocates for it):
+#define COREDUMP_SUMMARY_AT_BOOT
+// #define COREDUMP_KEEP_DUMP // keep the dump in flash after reporting it, for esp-coredump and the Espressif tools
+// If the device crashes once, then this keeps the coredump preserved forever - this will also trigger safe mode until the coredump partition is cleared
 
 #ifndef FS_REQUIRED_FREE_SPACE
   #define FS_REQUIRED_FREE_SPACE 150 // KB that must stay free in LittleFS: netserver aborts search and curated downloads below it

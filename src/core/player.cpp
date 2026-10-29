@@ -261,6 +261,20 @@ void Player::loop() {
   Audio::loop();
   audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
 
+  #if defined(USE_AUDIO_VS1053)
+    // A decoder that answers 0x0000 to every register read is unpowered, held in reset, or has lost MISO.  No software
+    // reset can reach it: softReset() is what begin() already does, and RST is not wired on these modules.  So stop,
+    // instead of walking the playlist at five seconds a track.
+    if (!_decoderDead && chipDeadStrikes() >= VS_CHIP_DEAD_STRIKES) {
+      _decoderDead = true;
+      sendCommand({PR_STOP, 0});
+      noteFatalStream();                     // no ladder, and the arm gate must not re-arm
+      setError("decoder not responding");    // sets the title and logs the reason
+      FUNCTIONLOG("Player", "decoder unresponsive: %u stalled feeds with SCI_MODE 0x0000 - LOST", (unsigned)chipDeadStrikes());
+      display.putRequest(NEWMODE, LOST);
+    }
+  #endif
+
   #ifdef USE_SD
     // A card file that stops feeding prints no audio line at all, so this heartbeat is the record of when it stopped.
     // Re-armed on every entry, which makes the first line of a play land immediately.
@@ -368,6 +382,7 @@ void Player::_play(uint16_t stationId) {
   #endif
   setError("");
   _fatalStream = false;  // a new station clears a previous permanent-error stop
+  _decoderDead = false;  // ...including a dead decoder: this play is the retry
   setDefaults();
   audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
@@ -601,6 +616,9 @@ void Player::prev() {
 }
 
 void Player::next() {
+  // A dead decoder ends the playlist walk.  Only the automatic advance is refused: a hand-picked track is still the
+  // user's attempt at a retry, and it clears the latch in _play().
+  if (_decoderDead && autoAdvance) { autoAdvance = false; return; }
   network.cancelStreamRetry();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
     uint16_t lastStation = config.lastStation();

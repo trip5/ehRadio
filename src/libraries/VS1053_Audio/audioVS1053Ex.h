@@ -429,6 +429,7 @@ public:
     bool     connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
     bool     connecttospeech(const char* speech, const char* lang);
     bool     isRunning() {return m_f_running;}
+    uint8_t  chipDeadStrikes() const { return m_chipDeadStrikes; }  // 0 = answering, see sendBytes()
     bool     pauseResume();
     uint32_t getFileSize();
     uint32_t getFilePos();
@@ -462,6 +463,9 @@ private:
     // decoder and when the last non-zero write happened.  Two stores per feed call, no gate.
     volatile uint32_t m_feedBytes = 0;
     volatile uint32_t m_feedLastMs = 0;
+    // Stalled feeds against a chip that answers 0x0000 in SCI_MODE: not backpressure, nothing driving MISO.  Cleared
+    // on any byte moved and in begin(), never in setDefaults() - the track changes are what prove it.
+    volatile uint8_t  m_chipDeadStrikes = 0;
     // Silent exit counters.  Every one of these exits returns without logging, so a stalled audio task is
     // indistinguishable from a healthy one; these name the exit instead.  Only the printing is gated.
     volatile uint32_t m_dbgStopCalls = 0;

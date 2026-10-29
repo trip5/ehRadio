@@ -322,6 +322,11 @@ size_t Audio::sendBytes(uint8_t* data, size_t len){
     }
     data_mode_off();
     if(bytesDecoded) { m_feedBytes += (uint32_t)bytesDecoded; m_feedLastMs = millis() ? millis() : 1; }
+    // A stalled feed against a chip answering 0x0000 in SCI_MODE is not backpressure: nothing is driving MISO.  The
+    // read happens only on a stall, so a healthy feed pays no extra transaction, and this is outside AUDIO_DEBUG
+    // because it decides behaviour, not what the log says.
+    if(bytesDecoded) { m_chipDeadStrikes = 0; }
+    else if(read_register_nowait(SCI_MODE) == 0 && m_chipDeadStrikes < 255) { ++m_chipDeadStrikes; }
     #ifdef AUDIO_DEBUG
     /* The chip is refusing everything: read its own view of the world rather than guess why.  MODE bit SM_SDINEW says
        the chip is still in new SDI mode, SM_CANCEL that something asked it to end the stream.  read_register_nowait is
@@ -423,6 +428,7 @@ uint16_t Audio::wram_read(uint16_t address){
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::begin(){
 
+    m_chipDeadStrikes = 0;                                  // a fresh init clears any previous verdict
     pinMode(dreq_pin, INPUT_PULLUP);                        // DREQ is an input
     pinMode(cs_pin, OUTPUT);                                // The SCI and SDI signals
     pinMode(dcs_pin, OUTPUT);
@@ -570,6 +576,13 @@ void Audio::stopSong(){
     uint16_t modereg;                                       // Read from mode register
     int i;                                                  // Loop control
 
+    // A chip answering 0x0000 has nothing to drain, and the fillers below push 86,400 bytes at a low DREQ - one
+    // timeout per chunk, which is what blocked the main loop for ~3 s per dead track.  Clearing m_f_running makes the
+    // drain below skip without re-indenting it.
+    if(m_f_running && read_register_nowait(SCI_MODE) == 0) {
+        m_f_running = false;
+        if(audio_info) audio_info("Song stop skipped: decoder not answering");
+    }
     if(m_f_running) {
         // It is important to collect endFillByte while still in normal playback
         m_endFillByte = wram_read(0x1E06) & 0xFF;
@@ -4017,7 +4030,7 @@ void Audio::showID3Tag(const char* tag, const char* value){
     if(!strcmp(tag, "WOAR")) sprintf(m_chbuf, "OfficialArtistWebpage: %s", value);
     if(!strcmp(tag, "XDOR")) sprintf(m_chbuf, "OriginalReleaseTime: %s", value);
 
-    latinToUTF8(m_chbuf, sizeof(m_chbuf));
+    latinToUTF8(m_chbuf, m_chbufSize);
     if(indexOf(m_chbuf, "?xml", 0) > 0) {showstreamtitle(m_chbuf); return;}
     if(m_chbuf[0] != 0){if(audio_id3data) audio_id3data(m_chbuf);}
 }

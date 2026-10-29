@@ -746,6 +746,68 @@ and the decoder reads the 128-byte tag as audio.
 
 ---
 
+## Post-Graft Patch Fixes (2026.10.29)
+
+### `latinToUTF8()` was handed a pointer, so the limit was 4
+
+`readID3Tag()` ended with `latinToUTF8(m_chbuf, sizeof(m_chbuf))`. `m_chbuf` is a `char*`, so `sizeof` is 4 - the
+pointer, not the buffer. The function takes the buffer's *capacity* and refuses a conversion that would not fit, so
+any latin-1 ID3 text longer than three characters stayed latin-1 and reached the display as mojibake. `readMetadata()`
+on the other hand already passed `m_chbufSize`, which is how the mistake was visible.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.cpp:4020` | `sizeof(m_chbuf)` -> `m_chbufSize` |
+
+The remaining `latinToUTF8(..., sizeof(...))` call sites pass local arrays, where `sizeof` is correct. This is a text
+defect, not a memory one: the short limit makes the conversion decline rather than overrun.
+
+### A dead decoder made the player walk the whole playlist, five seconds per track
+
+The chip can stop answering SPI mid-session: every register reads `0x0000`, `DREQ` stays low and no byte moves. It is
+not an init failure - `begin()` reads `SCI_STATUS` and reports `VS chip: VS1053` on both affected boots, and the
+registers only go to zero later under playback. All-zero reads mean nothing is driving MISO: unpowered, held in reset,
+or a broken MISO path. No software recovery exists: `softReset()` is `SM_RESET` and `begin()` already calls it before
+the chip read and the patch load, and calling it at runtime would leave the clock, MODE and the FLAC patch unloaded.
+`RST` is `-1` on these modules, so `ResetChip()` is dead code.
+
+The defect on our side is what happened next: `no decode progress for 5 s` closed the track, the player advanced, and
+the next track died the same way - 74 stops in one reported session - and since the playlist wraps, it never ended.
+
+`sendBytes()` now counts a strike when a feed moves no bytes **and** `SCI_MODE` reads 0, cleared by any byte moved and
+in `begin()`, deliberately never in `setDefaults()` (the track changes are what prove it). At `VS_CHIP_DEAD_STRIKES`
+(3) the player stops, latches `_decoderDead`, refuses the automatic advance in `next()`, sets the error that the title
+shows, and asks for `LOST`. A hand-picked track clears the latch, so one press is one retry.
+
+### Verified on hardware, and why a soft restart strands the chip
+
+2026.10.29, on the bench: with the radio playing SD, a data pin was disturbed by hand and the device went to `LOST`
+immediately - `SCI_MODE` read 0, three strikes, done, in well under the 5 s progress watchdog. The detector works on
+real hardware.
+
+The same session showed why the chip gets stranded at all: **`XRST` is not an independent VS1053 reset on this
+module.** Grounding it reset the whole radio (`rst:0x1 POWERON`), so the pin is tied to the board's reset supervisor.
+That means `esp_restart()` - a software reset, `rst:0xc RTC_SW_CPU_RST` - does not touch the chip: the VS1053 keeps
+running while the ESP32 reboots and comes back mid-stream. Every dead-decoder boot in the logs followed a software
+restart; every cold boot was healthy. There is no pin to pulse, which is why stopping is the only honest response.
+
+A `recoveryReboot()` on the third strike was considered and rejected. With EN untouched, an ESP32 restart does not reset
+the chip either, so it would land in the same LOST twenty seconds later - and LOST is the better answer anyway, because
+it prompts a power toggle, which is the one thing on this board that does reset the VS1053.
+
+The teardown was the other half of the problem. `stopSong()` pushes 86,400 filler bytes *before* it tests `SM_CANCEL`,
+and against a chip answering `0x0000` every chunk waits out the DREQ timeout - seen as `Main loop stalled 3076ms,
+worst stage player+saves`, once per dead track, on the **main** task, because `Player::loop()` calls `Audio::loop()`.
+`stopSong()` now reads `SCI_MODE` first and clears `m_f_running` when it is 0, so the drain is skipped: a dead chip has
+nothing to drain. The `Song stopped correctly after 0 msec` line was the giveaway - that loop exits on its first pass
+when `SM_CANCEL` reads 0, so the seconds were never being spent there.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.cpp` | strike counting, outside `#ifdef AUDIO_DEBUG`; reset in `begin()`; `stopSong()` skips the drain when `SCI_MODE` reads 0 |
+| `audioVS1053Ex.h` | `m_chipDeadStrikes` and a public `chipDeadStrikes()` |
+| `player.h` / `player.cpp` | `VS_CHIP_DEAD_STRIKES`, `_decoderDead`, the LOST latch and the `next()` guard |
+
 ## Future issues to watch for
 
 Not bugs in hand - things a future reader should know are still true, in the order they are likely to bite.

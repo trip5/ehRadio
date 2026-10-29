@@ -349,15 +349,16 @@
 /* --- Debug? --- */
 /* A normal build prints [ERROR] (something is broken) and nothing else.  Everything below, the [Warning] level
    included, is extra detail and is off unless you ask for it. */
-//#define ALL_DEBUG_LOGS        // turns on every switch below at once - very noisy, and every print costs ms
-#define CORE_MONITOR          // CPU core load plus heap, PSRAM and LittleFS, every 5s
-//#define BOOTLOG_TIME          // prefix BOOT lines with the time since power-on
-//#define WIDGET_DEBUG          // widget text and the VU draw cost
-#define AUDIO_DEBUG           // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
-//#define METADATA_LOG          // every ID3 field and each ICY title and station name - the switch for "no title on this station"
-//#define CONFIG_KEY_DEBUG      // every Prefs key and the value written to it
-#define WARNINGS_LOG          // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
+//#define ALL_DEBUG_LOGS         // turns on every switch below at once - very noisy, and every print costs ms
+#define CORE_MONITOR           // CPU core load plus heap, PSRAM and LittleFS, every 5s
+//#define BOOTLOG_TIME           // prefix BOOT lines with the time since power-on
+//#define WIDGET_DEBUG           // widget text and the VU draw cost
+#define AUDIO_DEBUG            // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
+//#define METADATA_LOG           // every ID3 field and each ICY title and station name - the switch for "no title on this station"
+//#define CONFIG_KEY_DEBUG       // every Prefs key and the value written to it
+#define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
 #define SD_PLAY_TRACE_MS 30000 // the two [SD] trace lines (0 = off): the pair that says whether the card or the decoder stopped
+#define COREDUMP_KEEP_DUMP     // prints the 
 
 /* --- Display --- */
 // Display Font:

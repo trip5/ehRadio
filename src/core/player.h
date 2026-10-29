@@ -18,6 +18,10 @@
   #define SD_PLAY_TRACE_MS 0
 #endif
 
+#ifndef VS_CHIP_DEAD_STRIKES
+  #define VS_CHIP_DEAD_STRIKES 3  // stalled feeds against a chip answering 0x0000 before the decoder is declared dead
+#endif
+
 enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9 };
 struct playerRequestParams_t
 {
@@ -65,6 +69,7 @@ class Player: public Audio {
     void clearMute() { _muted = false; }
 
     bool hasError() { return strlen(_plError)>0; }
+    bool decoderDead() const { return _decoderDead; }  // latched: the decoder stopped answering
     plStatus_e status() { return _status; }
     bool isConnecting();  // the title still holds the localized "connecting" placeholder
     const char* validatingLabel();  // the playlist validator's localized indicator string
@@ -73,6 +78,7 @@ class Player: public Audio {
     uint32_t    _resumeFilePos = 0;
     plStatus_e  _status = STOPPED;
     bool        _fatalStream = false;  // 404/410 seen: the arm gate must not start the ladder
+    bool        _decoderDead = false;  // VS1053 answered nothing: latched until the next _play()
     uint16_t    _playingStationId = 0;
     char        _plError[PLERR_LN];
     uint8_t     _muteVol = 30;

@@ -24,10 +24,8 @@
 #elif DSP_MODEL==DSP_SSD1306 || DSP_MODEL==DSP_SSD1305 || DSP_MODEL==DSP_SSD1322
   #define BOOT_PRG_COLOR    WHITE
   #define BOOT_TXT_COLOR    WHITE
-  #define TFT_BG            BLACK
-  #define TFT_FG            WHITE
   #if DSP_MODEL==DSP_SSD1322
-    #define BOOT_DOT_COLOR  GRAY_7
+    #define BOOT_DOT_COLOR  GRAY_9
   #else
     #define BOOT_DOT_COLOR  WHITE
   #endif

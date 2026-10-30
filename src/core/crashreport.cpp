@@ -13,54 +13,95 @@
 
 #ifdef CRASHREPORT_ENABLED
 
-bool crashDumpAvailable() {
-  return esp_core_dump_image_check() == ESP_OK;
+namespace {
+
+typedef void (*crashLine_t)(const char*);
+
+String* textTarget = nullptr;   // set while crashDumpText() runs, so one emitter serves both consumers
+
+void lineToText(const char* s) {
+  if (!textTarget) return;
+  *textTarget += s;
+  *textTarget += '\n';
 }
 
-// One crash, one block of lines. Everything printed is either directly usable (the addresses go straight into
-// addr2line) or needed to place it (the ELF SHA256 says which build, the task name says where). The dump is then
-// erased, or every later boot - clean ones included - would report the same crash again.
-void crashDumpReport() {
+void lineToBoot(const char* s) { BOOTLOG("%s", s); }
+
+/* One formatting path for the boot print and for the file crashlog keeps: every line is composed once here and handed
+   to the caller, so the two can never describe the same crash differently.  Everything printed is either directly
+   usable (the addresses go straight into addr2line) or needed to place it (the ELF SHA256 says which build, the task
+   name says where). */
+void emitReport(crashLine_t line) {
   size_t addr = 0, size = 0;
   if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) return;
 
   esp_core_dump_summary_t* s = (esp_core_dump_summary_t*)malloc(sizeof(esp_core_dump_summary_t));
   if (!s) {
-    BOOTLOG("a core dump of %u bytes is stored at 0x%08x (no RAM to summarise it)", (unsigned)size, (unsigned)addr);
+    char buf[112];
+    snprintf(buf, sizeof(buf), "a core dump of %u bytes is stored at 0x%08x (no RAM to summarise it)",
+             (unsigned)size, (unsigned)addr);
+    line(buf);
     return;
   }
 
-  BOOTLOG("------------------------------------------------------------");
+  char buf[224];
   if (esp_core_dump_get_summary(s) == ESP_OK) {
-    BOOTLOG("PREVIOUS BOOT CRASHED: task '%.15s'  pc 0x%08x  cause %u  vaddr 0x%08x",
-            s->exc_task, (unsigned)s->exc_pc, (unsigned)s->ex_info.exc_cause, (unsigned)s->ex_info.exc_vaddr);
-    BOOTLOG("core dump: %u bytes at 0x%08x, elf sha256 %.64s",
-            (unsigned)size, (unsigned)addr, (const char*)s->app_elf_sha256);
+    snprintf(buf, sizeof(buf), "PREVIOUS BOOT CRASHED: task '%.15s'  pc 0x%08x  cause %u  vaddr 0x%08x",
+             s->exc_task, (unsigned)s->exc_pc, (unsigned)s->ex_info.exc_cause, (unsigned)s->ex_info.exc_vaddr);
+    line(buf);
+    snprintf(buf, sizeof(buf), "core dump: %u bytes at 0x%08x, elf sha256 %.64s",
+             (unsigned)size, (unsigned)addr, (const char*)s->app_elf_sha256);
+    line(buf);
     const uint32_t depth = s->exc_bt_info.depth;
     const uint32_t have  = (uint32_t)(sizeof(s->exc_bt_info.bt) / sizeof(s->exc_bt_info.bt[0]));
-    BOOTLOG("backtrace: %u frame%s%s", (unsigned)depth, (depth == 1) ? "" : "s",
-            s->exc_bt_info.corrupted ? " (flagged corrupt)" : "");
+    snprintf(buf, sizeof(buf), "backtrace: %u frame%s%s", (unsigned)depth, (depth == 1) ? "" : "s",
+             s->exc_bt_info.corrupted ? " (flagged corrupt)" : "");
+    line(buf);
     for (uint32_t i = 0; i < depth && i < have; i++) {
-      BOOTLOG("  #%-2u 0x%08x", (unsigned)i, (unsigned)s->exc_bt_info.bt[i]);
+      snprintf(buf, sizeof(buf), "  #%-2u 0x%08x", (unsigned)i, (unsigned)s->exc_bt_info.bt[i]);
+      line(buf);
     }
-    BOOTLOG("symbolise with the elf built from that sha256: xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <pc>");
+    line("symbolise with the elf built from that sha256: xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <pc>");
   } else {
-    BOOTLOG("a core dump is present (%u bytes at 0x%08x) but its summary could not be read",
-            (unsigned)size, (unsigned)addr);
+    snprintf(buf, sizeof(buf), "a core dump is present (%u bytes at 0x%08x) but its summary could not be read",
+             (unsigned)size, (unsigned)addr);
+    line(buf);
   }
   free(s);
+}
 
-  #ifdef COREDUMP_KEEP_DUMP
-    BOOTLOG("keeping the dump in flash (COREDUMP_KEEP_DUMP) for esp-coredump");
-  #else
-    if (esp_core_dump_image_erase() == ESP_OK) BOOTLOG("core dump erased - this block is now the record of it");
-  #endif
+}  // namespace
+
+bool crashDumpAvailable() {
+  return esp_core_dump_image_check() == ESP_OK;
+}
+
+void crashDumpReport() {
   BOOTLOG("------------------------------------------------------------");
+  emitReport(lineToBoot);
+  // The dump is deliberately NOT erased here: crashlog::archive() writes it to LittleFS and erases it only after that
+  // write succeeds, so a boot that cannot write the file (no clock, no mount) does not throw the evidence away.
+  BOOTLOG("------------------------------------------------------------");
+}
+
+bool crashDumpText(String& out) {
+  if (!crashDumpAvailable()) return false;
+  const size_t before = out.length();
+  textTarget = &out;
+  emitReport(lineToText);
+  textTarget = nullptr;
+  return out.length() > before;
+}
+
+bool crashDumpErase() {
+  return esp_core_dump_image_erase() == ESP_OK;
 }
 
 #else
 
 bool crashDumpAvailable() { return false; }
 void crashDumpReport() {}
+bool crashDumpText(String&) { return false; }
+bool crashDumpErase() { return false; }
 
 #endif  // CRASHREPORT_ENABLED

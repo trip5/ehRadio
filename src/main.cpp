@@ -1,4 +1,5 @@
 #include "core/options.h"
+#include "core/coredump.h"
 #include <Arduino.h>
 #include <DNSServer.h>
 #include <esp_system.h>
@@ -247,32 +248,46 @@ void loop() {
           (unsigned)(dspTaskHandle ? uxTaskGetStackHighWaterMark(dspTaskHandle) : 0),
           (unsigned)(nsTaskHandle  ? uxTaskGetStackHighWaterMark(nsTaskHandle)  : 0));
       // LittleFS + PSRAM info — rate-limited by CORE_MONITOR_ETC_LOOPS
+      // Integrity every cycle, not every fifth: the TLSF assertion that fires inside block_locate_free trips within
+      // seconds of a corruption appearing, so a 25 s window usually misses it.  LittleFS and PSRAM detail stays
+      // rate-limited.
+      const bool heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
+      const bool heapPsramOk = !psramFound() || heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+      const char* heapVerdict =
+            (heapInternalOk && heapPsramOk)  ? " | heap ok"
+          : (!heapInternalOk && !heapPsramOk) ? " | heap CORRUPT (internal+PSRAM)"
+          : !heapInternalOk                   ? " | heap CORRUPT (internal)"
+                                              : " | heap CORRUPT (PSRAM)";
+      // Internal DRAM that can serve a byte: MALLOC_CAP_DEFAULT also matches PSRAM (it reported 7.9 MB), plain INTERNAL
+      // also matches IRAM, which is 32-bit only - so neither reports the heap wifi_malloc allocates from.
+      const uint32_t internal8 = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+      FUNCTIONLOG("Heap", "8bit: %uKB free, %uKB largest | PSRAM: %uKB free, %uKB largest%s",
+          heap_caps_get_free_size(internal8) / 1024,
+          heap_caps_get_largest_free_block(internal8) / 1024,
+          heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
+          heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024,
+          heapVerdict);
+      if (!heapInternalOk || !heapPsramOk) {
+        // One ERROR per boot, plus a note that outlives the panic: the archive prints it above the crashdump text, so
+        // the record says the heap was already broken before the allocation that tripped over it.
+        static bool heapErrorLogged = false;
+        if (!heapErrorLogged) {
+          heapErrorLogged = true;
+          ERRORLOG("heap corruption detected %lus after boot: internal %s, PSRAM %s",
+                   (unsigned long)(millis() / 1000UL),
+                   heapInternalOk ? "ok" : "CORRUPT", heapPsramOk ? "ok" : "CORRUPT");
+        }
+        char heapNote[160];
+        snprintf(heapNote, sizeof(heapNote), "8bit free %uKB largest %uKB, internal %s, PSRAM %s, uptime %lus",
+                 (unsigned)heap_caps_get_free_size(internal8) / 1024,
+                 (unsigned)heap_caps_get_largest_free_block(internal8) / 1024,
+                 heapInternalOk ? "ok" : "CORRUPT", heapPsramOk ? "ok" : "CORRUPT",
+                 (unsigned long)(millis() / 1000UL));
+        coredump::noteHeapCorruption(heapNote);
+      }
       if (++cmEtcCount >= CORE_MONITOR_ETC_LOOPS) {
         cmEtcCount = 0;
         FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes());
-        const bool heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
-        const bool heapPsramOk = !psramFound() || heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
-        const char* heapVerdict =
-              (heapInternalOk && heapPsramOk)  ? " | heap ok"
-            : (!heapInternalOk && !heapPsramOk) ? " | heap CORRUPT (internal+PSRAM)"
-            : !heapInternalOk                   ? " | heap CORRUPT (internal)"
-                                                : " | heap CORRUPT (PSRAM)";
-        if (!heapInternalOk || !heapPsramOk) {
-          // One ERROR per boot on top of the per-tick verdicts: it carries the uptime, which is what a bisect needs.
-          static bool heapErrorLogged = false;
-          if (!heapErrorLogged) {
-            heapErrorLogged = true;
-            ERRORLOG("heap corruption detected %lus after boot: internal %s, PSRAM %s",
-                     (unsigned long)(millis() / 1000UL),
-                     heapInternalOk ? "ok" : "CORRUPT", heapPsramOk ? "ok" : "CORRUPT");
-          }
-        }
-        FUNCTIONLOG("Heap", "Internal: %uKB free, %uKB largest | PSRAM: %uKB free, %uKB largest%s",
-            ESP.getFreeHeap() / 1024,
-            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024,
-            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024,
-            heapVerdict);
         if (psramFound()) {
           size_t psramTotal = ESP.getPsramSize();
           size_t psramUsed  = psramTotal - ESP.getFreePsram();
@@ -300,6 +315,7 @@ void loop() {
      the Ticker armed by sleepForAfter()) are esp_timer callbacks, and display.deepsleep() plus a telnet-capable log line
      do not belong on that task. */
   utility.serviceSleep();
+  coredump::service();   // black box: archive the previous boot's crash once the clock can date it
 }
 
 

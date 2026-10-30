@@ -81,6 +81,7 @@ class SDManager : public SDMAN_FS_BASE {
     uint32_t _freq = SDSPISPEED;   // the clock the card is mounted at, see mountedFreq()
     uint32_t _auBytes = 0;         // allocation unit (cluster) size in bytes, 0 = unknown; see allocationUnit()
     uint32_t _sdFCount = 0;
+    bool     _indexing = false;    // a walk is running; indexSDPlaylist() is single flight because of the temp pair
     uint8_t  _cardGoneStrikes = 0;   // consecutive failed probes, see cardPresentStable()
     uint32_t _probeLastMs = 0;       // when the last raw probe actually ran, for the rate limit
     uint32_t _probeGraceUntil = 0;   // millis() before which nothing should probe

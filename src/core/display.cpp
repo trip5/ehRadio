@@ -32,6 +32,7 @@
 extern const char batterytxtFmt[] PROGMEM;
 static constexpr uint32_t DSP_TASK_DELAY = 10;  // ms; minimum sleep between display iterations
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
+static constexpr uint32_t DSQ_CRITICAL_WAIT = 2000;  // ms; how long SDINDEXSTART/SDINDEXDONE keep retrying a full queue
 static constexpr uint32_t SS_LINE_HOLD_MS = 3000;  // ms; How long the screensaver's info line stays blank after a track change
 
 // These three flags are per-layout booleans in LayoutData now, not per-model macros.
@@ -646,6 +647,19 @@ void Display::sdmanCountdown() {
 }
 #endif
 
+// The IP line's format, from the conf's iptxtFmt with the card pair swapped in where the conf draws its own mark.
+// \030\031 is a SUBSTITUTE for that mark, not decoration, so it only goes where the mark exists: a conf that spells
+// its line without one keeps its own format, and a conf whose format is empty keeps the line blank - that layout has
+// given the row away and nothing here may put text back on it.  sd=true is the line standing in for the card (SD
+// playback mode, and every SDOFFLINE write); false is the address with the WebUI up.  The two spellings cost the
+// same width: \021\022 is the web mode icon in two glyph cells, and \030\031 is the card in two.
+static const char* ipLineFmt(bool sd) {
+  static const char sdFmt[] PROGMEM = "\030\031%s";
+  if (!sd) return iptxtFmt;
+  // Short-circuit matters here: the empty format is one byte long, so [1] is only read once [0] has matched.
+  return (iptxtFmt[0] == '\021' && iptxtFmt[1] == '\022') ? sdFmt : iptxtFmt;
+}
+
 void Display::_start() {
   dsp.setScrollId(NULL);   // the boot page may own the slot, and its widget is about to be deleted
   if (_boot) {
@@ -704,7 +718,7 @@ void Display::_start() {
   if (ipInLayout()) {
     if (_volip) {
       if (network.status == SDOFFLINE) {
-        _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+        _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), ipLineFmt(true));
       } else {
         if (*shareWeatherIP_ptr && weatherLive()) _volip->setText("");
         else _footerIp();
@@ -739,7 +753,7 @@ void Display::_applyFooter() {
 void Display::_footerIp() {
   if (!_volip || !_footerShown(FW_VOLIP)) return;
   if (!netserver.isListening()) { _volip->setText(""); return; }
-  _volip->setText(utility.ipToStr(WiFi.localIP()), iptxtFmt);
+  _volip->setText(utility.ipToStr(WiFi.localIP()), ipLineFmt(config.getMode() == PM_SDCARD));
 }
 
 void Display::_showDialog(const char *title) {
@@ -776,7 +790,7 @@ void Display::_showNumbers(const char* header, int32_t value, const char* fmt, b
   }
   if (dialogPage) _showDialog(header);
   if (_volip && _footerShown(FW_VOLIP)) {
-    if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+    if (network.status == SDOFFLINE) _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), ipLineFmt(true));
     else _footerIp();
   }
   // The zero-pad width: the widest value this screen can show, not the one it happens to be showing.
@@ -793,6 +807,16 @@ void Display::_setReturnTicker(uint8_t time_s) {
 void Display::_switchMode(displayMode_e newmode) {
   if (newmode == CLEAR) { dsp.fillScreen(config.theme.background); _mode = CLEAR; return; }
   if (newmode == VOL && !editorOpt(config.store.volumepage)) return;  // no overlay — skip VOL mode to avoid a needless page switch
+  // A re-index of the card OWNS the panel for the whole walk (SDINDEXSTART .. SDINDEXDONE).  Refused HERE rather than
+  // at each sender, because the walk pumps the player for tens of seconds and several paths legitimately queue a
+  // NEWMODE in that window - a play that finally starts, a card-probe resume, a WiFi reconnect, the 30 s return
+  // ticker.  Any of them used to take the scan screen away mid-walk, and because the walk reports its count only
+  // while the mode is SDCHANGE, the counter stopped with the screen.  SDCHANGE itself must pass or the hold could
+  // never be entered; the release is SDINDEXDONE, which clears the flag before it asks for PLAYER.
+  if (_indexHold && newmode != SDCHANGE) {
+    WARNINGLOG("DISPLAY: mode %d refused, the SD index rebuild owns the screen", (int)newmode);
+    return;
+  }
   if (newmode == _mode || (network.status != CONNECTED && network.status != SDOFFLINE)) return;
   #ifdef USE_SD
     // While the SD card manager owns the screen nothing else may take it:  leave() is what asks for it
@@ -856,7 +880,7 @@ void Display::_switchMode(displayMode_e newmode) {
     _updateVolume();
     if (_volip) {
         if (network.status == SDOFFLINE) {
-          _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+          _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), ipLineFmt(true));
         } else {
           // weather and IP share the same bottom row; hide IP when weather is active
           if (*shareWeatherIP_ptr && weatherLive()) _volip->setText("");
@@ -1001,7 +1025,19 @@ void Display::putRequest(displayRequestType_e type, int payload) {
   // Waiting, then dropping, is the deliberate choice for a saturated queue - but silently dropping hides the
   // cause behind whatever ran last.  A full reset queued six requests into a five-deep queue and looked like a
   // battery problem; this line is what tells that story next time (see plans/display-repaint-order.md).
-  if (xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) != pdTRUE) {
+  bool sent = xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) == pdTRUE;
+  #ifdef USE_SD
+    // The two ends of an index rebuild must not be lost.  A dropped START only costs the scan screen, but a dropped
+    // DONE would leave the panel locked to it: every later mode change refused and the controls inert for the rest of
+    // the run.  So these two wait for the queue instead of dropping - both callers are long operations that already
+    // block for seconds, and neither can run on this task.
+    const uint32_t waitFrom = millis();
+    while (!sent && (type == SDINDEXSTART || type == SDINDEXDONE) && (millis() - waitFrom) < DSQ_CRITICAL_WAIT) {
+      delay(1);
+      sent = xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) == pdTRUE;
+    }
+  #endif
+  if (!sent) {
     _droppedRequests++;
     WARNINGLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);
   } else if (type == THEMEPREVIEW) {
@@ -1328,6 +1364,15 @@ void Display::loop() {
           if (_bootstring) _bootstring->setText(RADIOVERSION);
           break;
         }
+        #ifdef USE_SD
+        // The two ends of a re-index that is not the boot scan: the File Manager's close-time walk.  START is queued
+        // before that walk asks for SDCHANGE, so the hold is up before anything else can ask for the screen, and DONE
+        // releases it AND returns to the player in one display-task action.  That pairing is the whole reason the flag
+        // lives on this task: an out-of-task flag would still be set when this task processed the walk's own final
+        // PLAYER request, and the guard above would then refuse its own exit.
+        case SDINDEXSTART: _indexHold = true; break;
+        case SDINDEXDONE:  _indexHold = false; _switchMode(PLAYER); break;
+        #endif
         case SDFILEINDEX: {
           if (_mode == SDCHANGE) _nums->setText(request.payload, "%d");
           break;
@@ -1348,7 +1393,7 @@ void Display::loop() {
         case NEWIP: {
           if (_volip && _footerShown(FW_VOLIP)) {   // a screen without the footer has no IP line to refresh
               if (network.status == SDOFFLINE) {
-                _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+                _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), ipLineFmt(true));
               } else {
                 // skip IP repaint in PLAYER when weather owns the shared row
                 if (!*shareWeatherIP_ptr || !(_mode == PLAYER && weatherLive()))
@@ -1505,6 +1550,22 @@ static bool splitTitle(char* dst, size_t dstSize, char*& first, char*& second) {
   return true;
 }
 
+// Would the station name only repeat what the two title halves already say?  An untagged SD file's name IS its
+// filename, and title1/title2 are that filename cut at its first " - " (see splitTitle()), so joining them back with
+// the same separator reproduces it exactly.  Extension-stripped and case-insensitive, because one side is a filesystem
+// name and the other came back through the audio library's tag path.  The inverse of splitTitle(), which is why it
+// lives here.  See plans/screensaver-line-duplicate-name.md.
+static bool nameRepeatsTitle(const char* name, const char* t1, const char* t2) {
+  if (!name || !name[0] || !t1 || !t1[0]) return false;
+  char joined[STATION_FIELD_LENGTH];
+  if (t2 && t2[0]) snprintf(joined, sizeof(joined), "%s - %s", t1, t2);
+  else             strlcpy(joined, t1, sizeof(joined));
+  char stripped[STATION_FIELD_LENGTH];
+  strlcpy(stripped, name, sizeof(stripped));
+  stripAudioExtension(stripped);
+  return stripped[0] && strcasecmp(stripped, joined) == 0;
+}
+
 void Display::_titleTexts() {
   char titlebuf[STATION_FIELD_LENGTH];
   char *t1 = nullptr, *t2 = nullptr;
@@ -1532,13 +1593,6 @@ void Display::_title() {
   backlightControls.restart();
 }
 
-// The info line's text, joined with the shared scroll mark (scrollMark(): " * ", or the holiday icon), and it is
-// one state or the other, never both: while something is playing the line describes what is playing - the station
-// name and the two title lines - and the weather is left out, because a single-row strip that mixes a forecast
-// into a track name pushes the track off it.  Over silence there is nothing to describe, so the weather is the
-// whole line.  That is the same split _ssStripH() refuses the strip on: either half being absent leaves nothing
-// to show.  Every empty part is skipped outright rather than left as a bare separator, which is why they all go
-// through one append.
 // Blank the info line and refuse to paint it for a while.  An SD track change clears the title and then re-fills it
 // over two or three requests, so the strip visibly resets, and in the gap the line would show the weather.  So it
 // goes blank once, when the new track starts loading, and stays blank; Display::loop() is what puts it back, because
@@ -1551,6 +1605,13 @@ void Display::_ssHoldLine(uint32_t ms) {
   _ssHoldUntil = millis() + ms;
 }
 
+// The info line's text, joined with the shared scroll mark (scrollMark(): " * ", or the holiday icon), and it is
+// one state or the other, never both: while something is playing the line describes what is playing - the station
+// name and the two title lines - and the weather is left out, because a single-row strip that mixes a forecast
+// into a track name pushes the track off it.  Over silence there is nothing to describe, so the weather is the
+// whole line.  That is the same split _ssStripH() refuses the strip on: either half being absent leaves nothing
+// to show.  Every empty part is skipped outright rather than left as a bare separator, which is why they all go
+// through one append.
 void Display::_screensaverLine() {
   if (!_sstext) return;
   // A track change blanks the line and holds it: _ssHoldLine() sets the deadline, Display::loop() clears it.
@@ -1573,7 +1634,10 @@ void Display::_screensaverLine() {
     char titlebuf[STATION_FIELD_LENGTH];
     char *t1 = nullptr, *t2 = nullptr;
     splitTitle(titlebuf, sizeof(titlebuf), t1, t2);
-    append(line, sizeof(line), config.station.name);
+    // An untagged SD file's "station name" IS the filename these two halves were cut from, so the line would say it
+    // twice.  When the joined halves reproduce the name there is nothing to add, so the meta is left out here only -
+    // the player page keeps showing it.
+    if (!nameRepeatsTitle(config.station.name, t1, t2)) append(line, sizeof(line), config.station.name);
     append(line, sizeof(line), t1);
     append(line, sizeof(line), t2);
   } else if (weatherLive() && network.weatherBuf) {
@@ -2041,7 +2105,7 @@ void Display::_applyState(applyMode_e mode) {
         // here - the same rule _switchMode(PLAYER) and the boot painter follow.
         if (_volip) {
           if (network.status == SDOFFLINE) {
-            _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), "\030\031%s");
+            _volip->setText(utf8_trim15(l10n(L10N_MSG_OFFLINE_15CHAR)), ipLineFmt(true));
           } else if (*shareWeatherIP_ptr && weatherLive()) {
             _volip->setText("");   // the weather owns that shared row
           } else {

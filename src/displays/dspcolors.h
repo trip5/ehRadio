@@ -25,7 +25,7 @@
   #define BOOT_PRG_COLOR    WHITE
   #define BOOT_TXT_COLOR    WHITE
   #if DSP_MODEL==DSP_SSD1322
-    #define BOOT_DOT_COLOR  GRAY_9
+    #define BOOT_DOT_COLOR  GRAY_7
   #else
     #define BOOT_DOT_COLOR  WHITE
   #endif

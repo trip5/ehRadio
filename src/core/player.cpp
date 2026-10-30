@@ -372,6 +372,13 @@ void Player::_play(uint16_t stationId) {
       FUNCTIONLOG("SDFileManager", "play refused, SD File Manager is open");
       return;
     }
+    // ...or while its close-time re-index is walking the card.  The walk is writing the derived pair, and a play
+    // reads the same card underneath it - that contention is what the presence probe reports as a removed card, and
+    // it is also what used to queue NEWMODE PLAYER over the scan screen.
+    if (filemanager.rebuilding()) {
+      FUNCTIONLOG("SDFileManager", "play refused, the SD index is being rebuilt");
+      return;
+    }
   #endif
   if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
   #ifdef USE_SD
@@ -451,15 +458,14 @@ void Player::_play(uint16_t stationId) {
     rgbled.playing();
     backlightControls.restart();
   } else {
-    // Self-healing: if SD file vanished, force re-index so next/prev uses fresh index
+    // Self-healing: if the SD file vanished, the index no longer describes the card, so a re-index is owed.
     #ifdef USE_SD
       if (config.getMode()==PM_SDCARD && !sdman.exists(config.station.url)) {
-        FUNCTIONLOG("SD", "File not found. Re-indexing.");
-        display.putRequest(PSTOP);                   // clear playback screen
-        display.putRequest(NEWMODE, SDCHANGE);       // show on-screen counter
-        config.initSDPlaylist(true);
-        display.putRequest(NEWMODE, PLAYER);         // restore player mode
-        display.putRequest(NEWSTATION);
+        // This used to walk the card right here, on the player task, with no scan screen to show for it - and it
+        // could do it beside the File Manager's own close-time walk, writing the same temp pair.  Now it only marks
+        // the card as changed: FileManager::loop() pays the debt once, on its one visible path.
+        FUNCTIONLOG("SD", "File not found. A re-index is owed.");
+        filemanager.markCardChanged();
       }
     #endif
     ERRORLOG("Error connecting to %s", config.station.url);

@@ -170,6 +170,26 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   is recorded on every crash: `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` with `DATA_FORMAT_ELF=y` is built into the
   framework's prebuilt ESP32-S3 libraries, and every partition table in `builds/partitions/` ends with a 64 KB
   `coredump` partition. `src/core/crashreport.h` / `crashreport.cpp` only read it back.
+- **The crash black box, `src/core/coredump.cpp` / `.h`.** `crashDumpReport()` prints the dump and leaves it in place;
+  `coredump::service()` is called from `loop()`, not `setup()` - a fixed call point in `setup()` always stamped the file
+  `clock unverified`, because SNTP answers after `setup()` has moved on. `service()` archives as soon as the clock is
+  usable, or without one after `CLOCK_WAIT_MS` (45 s), which is also the offline SD case where NTP never comes. It
+  writes `/data/coredump.N` and erases the partition only after that write succeeds; three failed writes give up until
+  the next boot, which then simply reports and retries. Nine files are kept: the numbers only grow, and the tenth write
+  deletes the lowest-numbered first; if that delete fails the write is abandoned rather than letting the ring grow.
+  **A version change clears the ring** (`coredump::clear()`, called from `checkLittleFSandVer()` when the stored
+  `ehradio.ver` differs from `RADIOVERSION`): a crash log is only meaningful against the firmware that produced it. A
+  *pending* dump is not discarded though - it is archived into the fresh ring, with its own `elf sha256` naming the build
+  that crashed. Dev builds reusing one `RADIOVERSION` do not trigger the clear, which is the accepted cost.
+  A file is one header line - the timestamp with `(clock verified)` or `clock unverified`, the reset reason this boot
+  started for, the mode and station the crashed boot was on, and the uptime at archive - then the same lines from
+  `emitReport()` (one emitter in `crashreport.cpp` feeds both, so they cannot drift), then two blank lines. The crashed
+  build is named by the `elf sha256` in the body, not by the header, because a header md5 would be the *current* build.
+  `/coredump` in `handleNotFound` returns every kept file as one `text/plain` stream built by `coredump::buildAllText()`,
+  whose own top line carries `RADIOVERSION`, the firmware name and the app md5 - so netserver never learns a file name.
+  There is no `COREDUMP_KEEP_DUMP` any more: keeping the dump made every boot re-archive the same crash, so nine boots
+  recycled the whole ring with copies of one fault. `esp_core_dump_summary_t` carries no core id (only `exc_tcb`,
+  `exc_task`, `exc_pc`, `exc_bt_info`), so the core is implied by the task name and the boot banner's core layout.
 - `crashDumpAvailable()` is `esp_core_dump_image_check() == ESP_OK`; `crashDumpReport()` calls
   `esp_core_dump_get_summary()` and BOOTLOGs the crashing task, `exc_pc`, the exception cause and vaddr, up to 16
   on-device backtrace PCs, and the crashing app's ELF SHA256 - all either paste-ready for
@@ -1164,8 +1184,16 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   a truncated copy would stop the line scrolling again. Every panel is far inside that budget (the widest, 460 px
   at text size 1, is 77 characters). The composition above it, `ssRowH()` and `_ssContentH()` are untouched - it
   is the text's PARTS that size the strip, never their repetition - and every other row in the firmware still
-  calls plain `setText()`. See `plans/screensaver-panel-ownership.md`, `plans/screensaver-line-scroll.md`,
-  `plans/screensaver-line-loop.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+  calls plain `setText()`. **A part the line would only repeat is left out:** an untagged SD file's "station name"
+  IS its filename, and its two title halves are that filename cut at the first `" - "`, so `nameRepeatsTitle()` in
+  `display.cpp` re-joins the halves and compares them with the name extension-stripped and case-insensitively (one
+  side is a filesystem name, the other came back through the audio library's tag path) - skipping the meta only when
+  they match, so `03 - Song Title.mp3` reads `03 * Song Title`. That skip is the SCREENSAVER's alone: the player
+  page's meta line still shows it. The partial duplicate `handleId3Artist()` creates in SD mode - the name
+  overwritten by the artist tag, i.e. `The Beatles * The Beatles * Something` - is deliberately not covered; the
+  same predicate against `t1` would close it. See `plans/screensaver-panel-ownership.md`,
+  `plans/screensaver-line-scroll.md`, `plans/screensaver-line-loop.md`, `plans/screensaver-line-duplicate-name.md`
+  and `plans/screensaver-line-weather-and-clock-snap.md`.
 - **A track change blanks the info line for three seconds** (`SS_LINE_HOLD_MS`).  The trigger is `NEWSTATION`
   handled while `config.isScreensaver`: `_play()` queues it BEFORE `connecttoFS()`, so the hold is already up when
   `handleBeginSdRead()` clears the title - which is the moment the weather would otherwise take the strip - and a
@@ -1319,6 +1347,17 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `PLAYER`/`SCREENSAVER`: a widget left visible would be painted once by the page pass and then sit frozen for the
   whole wait - including the common case where the index is valid and no counter ever appears. Leaving the mode
   redraws the clock in full, because `_layoutChange()` prints it when a widget comes back from hidden.
+- **A re-index that is not the boot scan owns the panel through a QUEUED hold.** `SDINDEXSTART` / `SDINDEXDONE`
+  (`common.h`) bracket it: the File Manager's close-time walk and `SDManager::trySdRemount()` send START *before* their
+  `NEWMODE SDCHANGE`, and DONE both clears the flag and performs `_switchMode(PLAYER)` in one display-task action.
+  `_switchMode()` refuses every mode except `SDCHANGE` while `_indexHold` is up, naming the refused mode in one
+  `[Warning]`. The flag had to live on the display task rather than in `FileManager`: an out-of-task flag would still
+  be set when this task processed the walk's own final PLAYER request, and the guard would refuse its own exit. This is
+  what stops the scan screen vanishing a split second into a walk - the walk pumps `player.loop()` for its whole
+  duration, so a play that finally starts, a `PR_CHECKSD` resume, `WiFiReconnected()` or the `returnPlayer()` ticker
+  can all queue a `NEWMODE` in that window, and the counter is only sent while the mode is `SDCHANGE`, so the count
+  stopped with the screen. Both requests are exempt from the queue's drop-on-full rule (they retry for
+  `DSQ_CRITICAL_WAIT`), because a dropped DONE would leave every later mode change refused and the controls inert.
 - Main responsibilities:
   - initialize rendering task and widgets
   - mode switching (`PLAYER`, `VOL`, `STATIONS`, `LOST`, `UPDATING`, screensaver)
@@ -2498,11 +2537,20 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   nothing walks the card while the manager is open. They are one object in two files, and dropping only the index is how
   a valid index came to sit beside a truncated playlist, which SD mode then read as an empty card; the index has to go
   too for the rebuild to trigger, because its absence is the test `initSDPlaylist()` runs first. `FileManager::loop()` -
-  which `main.cpp` calls whether or not the mode is open - then does the walk: `SDCHANGE` with the same
-  wait-for-the-mode handshake `changeMode()` uses, a forced `config.initSDPlaylist(true)`, a `PLAYLIST` notification,
-  back to `PLAYER`. A session of a hundred deletes therefore costs one walk instead of a hundred, the walk is visible on
-  the counting screen, and no request handler blocks the AsyncTCP task on it. If the card left the slot in the meantime
-  the bit is simply dropped.
+  which `main.cpp` calls whether or not the mode is open - then does the walk: `SDINDEXSTART` + `SDCHANGE`, a retry and
+  a named `[Warning]` if that handshake does not arrive, a forced `config.initSDPlaylist(true)`, a `PLAYLIST`
+  notification, then `SDINDEXDONE` back to `PLAYER`. A session of a hundred deletes therefore costs one walk instead of
+  a hundred, the walk is visible on the counting screen (see the display section: the hold is what keeps it there), and
+  no request handler blocks the AsyncTCP task on it. If the card left the slot in the meantime the bit is simply
+  dropped.
+- **One walk, one visible path.** `SDManager::indexSDPlaylist()` is single flight: a second caller is refused and logged
+  (`_indexing`, cleared on every exit by a guard object), because two callers exist - this block and the WebUI playlist
+  save at `PLAYLISTSAVED` - and both write the same temp pair, so a mixed swap was possible. `Player::_play()` refuses
+  while `filemanager.rebuilding()`, the way it already refuses while the manager is open: a play reads the card the walk
+  is writing, which is what the presence probe reports as a removed card. And the player's own "File not found"
+  self-heal no longer walks the card on the player task - it could run beside this block, and its own `SDCHANGE` came
+  and went within one pump of `player.loop()` - it now calls `filemanager.markCardChanged()` and lets this block pay the
+  debt on its one visible path.
 - **The walk announces itself, and that announcement is a boolean - the player page never has to guess.**
   `PLAYLISTREADY`
   used to mean only "the list is settled"; it now carries `filemanager.rebuilding()`, so one message covers both ends of
@@ -4494,10 +4542,14 @@ design record; this is the shape of it.
   background over the glow.  The scan screen's total is `countStation`, which `initSDPlaylist()` now keeps from the
   `countAudioFiles()` walk that decides whether to re-index (exact whenever that walk ran) and which is otherwise
   the previous index's count; a fresh card has no total, so its zero-fill follows the count.
-  For a **web playlist** `Utility::initPlaylist()` keeps the same figure from the index it has just sized
-  (`idxSize / 4`, clamped exactly as `playlistLength()` clamps) - the display task may not open the index, so the
-  store carries it.  Without that call the station entry padded to one digit, because `countStation` had only
-  ever been assigned in `initSDPlaylist()`.
+  `countStation` is the one cache of "how many entries can the device browse", so every mode change refreshes
+  it: **`initPlaylistMode()` ends with `setCountStation(cs)`**, where `cs` is already the active mode's length
+  (read at the top, re-read after the SD re-index and after `initPlaylist()`), and
+  **`Utility::initPlaylist()`** refreshes it whenever the web index is rebuilt - boot, a station added, a
+  playlist saved, an import.  Both are needed: the first covers a mode change in either direction, the second
+  covers an index rebuild that never enters `initPlaylistMode()`.  Without them the station entry padded to
+  one digit (no figure at all), and an SD card's total survived into web mode (three digits on a short web
+  playlist).  The display task never opens the index, so the store has to carry it.
   **The footer is one table per screen** (`Display::_footerMask()`).  `_footer` is a sub-page attached to
   `PG_PLAYER` and `PG_DIALOG` only, so it is painted on every dialog; `PLAYER` and `VOL` are the modes that keep it
   (`FW_ALL`), and every other mode - the two number screens, `UPDATING` / `VALIDATING`, `LOST`, `SLEEPING`,
@@ -4507,6 +4559,23 @@ design record; this is the shape of it.
   page pass that follows activates and draws the widget.  Every request that writes a footer widget asks
   `_footerShown(bit)` first, and `_showDialog()` empties `_nums`, which otherwise kept the last number behind a
   title.
+  **The IP line's icon follows the mode, and one helper owns the swap.**  `_volip` is written from the conf's
+  `iptxtFmt` by `Display::_footerIp()` and by the SDOFFLINE writes in `_applyState()`, `_showNumbers()`, the
+  `_switchMode(PLAYER)` return path, `NEWIP` and the layout switch - and the confs disagree on that string.  The
+  ones with a mark carry the two-cell **web-mode pair** `"\021\022"` at its head (`WEBMODE_A` / `WEBMODE_B`, slots 17
+  and 18, drawn to match the WebUI's own mode mark); the single-cell `\037` IP glyph that used to sit there is gone,
+  its `ICON_TABLE` slot is `NULL` and its bitmap is left commented out in `icons.h`.  `displayTFT160x128conf.h` and
+  `displayOLED128x32conf.h` carry `"%s"` with no mark at all, and `displayTFT160x80conf.h` carries `""` because that
+  layout has no IP line.  `ipLineFmt(sd)` in `display.cpp` returns the conf's string untouched, or `"\030\031%s"`
+  when that string begins with `"\021\022"` and `sd` is true - the card pair is a SUBSTITUTE for the conf's mark,
+  never an addition, so a conf without one keeps its own spelling and the empty one keeps the line blank, the
+  offline path included.  The swap is pair for pair: both are two glyph cells and neither carries a space, so it
+  cannot change the line's width, its centring or the rectangle the next paint erases.  `sd` is true for every
+  SDOFFLINE write and for `config.getMode() == PM_SDCARD` in `_footerIp()`, so a card in the footer means "playing
+  from the card".  Because the line is now mode-dependent, `Config::changeMode()` queues `NEWIP` beside its
+  NEWMODE/NEWSTATION/NEWTITLE requests: WEB -> SD passes through the SDCHANGE screen, but SD -> WEB leaves the
+  player screen already up, so `_switchMode()` returns at its same-mode guard and nothing else would rewrite the
+  icon.
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,
@@ -5086,7 +5155,17 @@ Emits to serial + telnet every 5 seconds:
   `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE` and `DSP_TASK_CORE_ID` are assigned. Only defined on a
   dual-core build.
 - **Stack high water marks**: `Main`, `Display`, `Netserver` minima, never reset between windows.
-- **LittleFS, Heap and PSRAM lines**, rate-limited by `CORE_MONITOR_ETC_LOOPS` (default 5 cycles = 25 s).
+- **The `[Heap]` line and its integrity walk run EVERY cycle** (5 s), not every fifth: the TLSF assertion inside
+  `block_locate_free` fires within seconds of a corruption appearing, so a 25-second window usually misses it. The walk
+  is what makes a free-list corruption visible at all - `tlsf_check()` validates the `fl_bitmap`/`sl_bitmap` against the
+  free lists, so `heap ok` means it, but only for the instant it ran. Because the other core is allocating throughout,
+  a single `CORRUPT` is a strong suspicion rather than a proof; the reading that matters is a `CORRUPT` followed by a
+  panic.
+- **A `CORRUPT` reading is stashed in RTC memory** (`coredump::noteHeapCorruption()`), which a panic's
+  `RTC_SW_CPU_RST` does not clear - the same mechanism `recoveryReboots` uses. The next boot's `coredump::archive()`
+  prints it **above** the crashdump text, so the file says the heap was already broken before the allocation that
+  tripped over it, which is the half of the story the dump alone cannot tell.
+- **LittleFS and PSRAM lines** stay rate-limited by `CORE_MONITOR_ETC_LOOPS` (default 5 cycles = 25 s).
 
 - **The monitor does not measure audio.** It counts the display task and the Arduino `loop()`; on the common builds both
   are pinned to core 1, so a `Core layout: core0 (Audio)` line means core 0 carries no counter at all and its load has

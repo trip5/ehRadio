@@ -358,7 +358,6 @@
 //#define CONFIG_KEY_DEBUG       // every Prefs key and the value written to it
 #define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
 #define SD_PLAY_TRACE_MS 30000 // the two [SD] trace lines (0 = off): the pair that says whether the card or the decoder stopped
-#define COREDUMP_KEEP_DUMP     // prints the 
 
 /* --- Display --- */
 // Display Font:

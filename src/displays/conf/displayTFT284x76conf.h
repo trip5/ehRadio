@@ -132,7 +132,7 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]            PROGMEM = "%d";
 const char rssiFmt[]              PROGMEM = "%d%%";
-const char iptxtFmt[]             PROGMEM = "\037 %s";
+const char iptxtFmt[]             PROGMEM = "\021\022%s";
 const char voltxtFmt[]            PROGMEM = "";
 const char batterytxtFmt[]        PROGMEM = "%d%%";
 const char bitrateFmt[]           PROGMEM = "%d kBs";

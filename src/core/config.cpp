@@ -225,6 +225,10 @@ void Config::changeMode(int newmode) {
     display.putRequest(NEWMODE, PLAYER);
     display.putRequest(NEWSTATION);
     display.putRequest(NEWTITLE);
+    // The footer IP line carries the mode in its icon (the card pair in SD playback mode), and only a real page
+    // change re-derives it: WEB -> SD passes through the SDCHANGE count screen, but SD -> WEB leaves the player
+    // screen already up, so _switchMode() returns at its "same mode" guard and nothing rewrites the line.  Ask.
+    display.putRequest(NEWIP, 0);
   #endif //#ifdef USE_SD
 }
 
@@ -370,6 +374,10 @@ void Config::initPlaylistMode() {
     cs = utility.playlistLength();
     CONFIGTIMELOG("PlaylistLength #2");
   }
+  // The cached total the big number zero-fills to and _randomStation() picks from, and it has to describe the
+  // playlist THIS mode browses.  One line here covers boot and every mode change in both directions, whatever
+  // wwwOk decided - which is what kept an SD card's count on a web playlist.
+  setCountStation(cs);
   log_i("%d" ,_lastStation);
   // Validate station number is within range
   if (cs == 0) {

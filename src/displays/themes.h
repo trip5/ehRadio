@@ -313,7 +313,7 @@ const ThemeData _themes[] PROGMEM = {
         .bitrate       = RGB(248, 192, 248),
         .volbarout     = RGB(192,  96, 192),
         .volbarin      = RGB(248, 192, 248),
-        .plcurrent     = RGB(  0,   0,   0),
+        .plcurrent     = RGB(248, 252, 248),
         .plcurrentbg   = RGB(248,   0, 248),
         .playlist      = {RGB(248, 252, 248), RGB(232, 232, 232), RGB(208, 208, 208), RGB(168, 168, 168), RGB(128, 132, 128)},
     },

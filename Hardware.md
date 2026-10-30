@@ -441,8 +441,10 @@ Errors/bugs could happen if you use other codecs or too-high bitrates or other c
 
 ### ID3 Tags
 
+It is recommended to use ID3v2 tags.
+
 ID3v1 tags are at the end of the file so will not appear on the display while the track is playing.
-The display will show a derivation of the file name. It is recommended to use ID3v2 tags.
+The display will show a derivation of the file name.
 
 ### SD Offline Mode
 

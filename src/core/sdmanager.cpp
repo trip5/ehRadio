@@ -328,6 +328,19 @@ bool SDManager::listSD(File &plSDfile, File &plSDindex, const char* dirname, uin
 // the parent of PLAYLIST_SD_PATH and INDEX_SD_PATH, so it cannot drift from them.
 
 void SDManager::indexSDPlaylist() {
+  // ONE walk at a time.  Two callers can ask for this - the File Manager's close-time rebuild and the WebUI playlist
+  // save - and both write PLAYLIST_SD_TMP_PATH and INDEX_SD_TMP_PATH, so a second walk interleaves a second writer
+  // through the same pair and can swap a mixture of the two into place.  The guard is an object so the flag is cleared
+  // on every exit, including the three early returns below.
+  if (_indexing) {
+    WARNINGLOG("SD: an index walk is already running - this one is skipped");
+    return;
+  }
+  struct WalkFlag {
+    bool *f;
+    explicit WalkFlag(bool *b) : f(b) { *f = true; }
+    ~WalkFlag() { *f = false; }
+  } walkFlag(&_indexing);
   _sdFCount = 0;
   _walkEntries = 0;
   _walkDirs = 0;
@@ -464,14 +477,17 @@ uint32_t SDManager::_countAudioFilesRecursive(const char* dirname, uint8_t level
 void SDManager::trySdRemount() {
   if (ready) return;  // already mounted
   FUNCTIONLOG("SD", "Remount attempt...");
+  // This path mounts and may walk the card, so it takes the same hold the File Manager's rebuild takes: the scan
+  // screen owns the panel, and SDINDEXDONE both releases it and returns to the player.
+  display.putRequest(SDINDEXSTART);
   display.putRequest(NEWMODE, SDCHANGE);
   if (start()) {
     config.initSDPlaylist();
     player.setReady();                    // the one implementation of the mode-entry text: see player.h
-    display.putRequest(NEWMODE, PLAYER);
+    display.putRequest(SDINDEXDONE);
     display.putRequest(NEWSTATION);
   } else {
-    display.putRequest(NEWMODE, PLAYER);  // restore from SDCHANGE
+    display.putRequest(SDINDEXDONE);      // releases the hold and restores the player screen
     player.setReady();                    // no card mounted: the same helper, which knows that variant
   }
 }

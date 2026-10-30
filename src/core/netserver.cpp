@@ -1,4 +1,5 @@
 #include "options.h"
+#include "coredump.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPFileUpdater.h>
@@ -1739,6 +1740,12 @@ void handleNotFound(AsyncWebServerRequest * request) {
         return request->requestAuthentication();
       }
   #endif
+  if (request->method() == HTTP_GET && request->url() == "/coredump") {
+    String text;
+    if (coredump::buildAllText(text)) request->send(200, "text/plain", text);
+    else                            request->send(404, "text/plain", "no crash logs");
+    return;
+  }
   // PSRAM cache check: serve static WebUI files from PSRAM (no LittleFS reads)
   if (request->method() == HTTP_GET) {
     String url = request->url();

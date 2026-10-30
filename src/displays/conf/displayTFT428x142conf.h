@@ -209,7 +209,7 @@ const LayoutData _layouts[] PROGMEM = {
 /* STRINGS */
 const char numtxtFmt[]              PROGMEM = "%d";
 const char rssiFmt[]                PROGMEM = "WiFi %d%%";
-const char iptxtFmt[]               PROGMEM = "\010 %s";
+const char iptxtFmt[]               PROGMEM = "\021\022%s";
 const char voltxtFmt[]              PROGMEM = "%d%%";
 const char bitrateFmt[]             PROGMEM = "%d kBs";
 

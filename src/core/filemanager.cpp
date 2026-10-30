@@ -1501,12 +1501,32 @@ void FileManager::loop() {
       _rebuilding = true;
       netserver.requestOnChange(PLAYLISTREADY, 0);
       FUNCTIONLOG("SDFileManager", "Re-indexing the card after a change");
+      // The walk OWNS the panel until SDINDEXDONE, and START is queued FIRST so the hold is up before the mode request
+      // behind it.  Without that hold this screen lasted a split second: the walk pumps the player for its whole
+      // duration, and a play that finally started (or a card-probe resume, a WiFi reconnect, the return ticker) took
+      // the panel back while the walk carried on invisibly - and the counter, which is only sent while the display is
+      // on SDCHANGE, stopped with the screen.
+      display.putRequest(SDINDEXSTART);
       display.putRequest(NEWMODE, SDCHANGE);   // same handshake as changeMode(): show the screen, then wait for it
-      const unsigned long waitStart = millis();
+      unsigned long waitStart = millis();
       while (display.mode() != SDCHANGE && millis() - waitStart < 2000) delay(10);
+      if (display.mode() != SDCHANGE) {
+        // The request was dropped or refused.  Ask once more rather than walking with no counter, and name the
+        // failure if it happens twice - the old code ignored the result and walked silently.
+        WARNINGLOG("SDFileManager: the scan screen did not come up in %lums, asking again",
+                   (unsigned long)(millis() - waitStart));
+        display.putRequest(NEWMODE, SDCHANGE);
+        waitStart = millis();
+        while (display.mode() != SDCHANGE && millis() - waitStart < 2000) delay(10);
+        if (display.mode() != SDCHANGE)
+          FUNCTIONLOG("SDFileManager", "the scan screen never came up (mode %d): this walk runs with no counter",
+                      (int)display.mode());
+      }
       config.initSDPlaylist(true);             // forced: the index file is exactly what the mutations dropped
-      display.putRequest(NEWMODE, PLAYER);
-      // After the mode switch, because a screen we own drops both requests; the re-index above may just have reset
+      // ONE action on the display task: release the hold and go back to the player.  It has to be one, or the guard
+      // would refuse the walk's own exit.
+      display.putRequest(SDINDEXDONE);
+      // Queued after that switch, because a screen we own drops both requests; the re-index above may just have reset
       // station.name/title to the "nothing to play" state.
       display.putRequest(NEWSTATION);
       display.putRequest(NEWTITLE);

@@ -176,20 +176,28 @@ Read more about how it works and get the app [here](https://trip5.github.io/eh-D
 
 ---
 
-## Boot Modes & Icons 
+## Mode Icons 
+
+Most displays will show an icon next to the IP address to show which mode the player is in:
+
+**Web Mode** <img src="images/Icon_Web.png">
+
+**SD Mode** <img src="images/Icon_SD.png">
+
+## Boot Mode Icons 
 
 As part of the boot animation, an icon will appear to reflect certain boot modes.
 
-### Smart Start <img src="images/Booticon_Pause.png">
+### Smart Start <img src="images/Icon_Play.png">
 
 Selectable in the `Settings` of the WebUI, `Smart Start` will automatically play the station stream or SD file which was playing when last powered-off.
 
-### Safe Mode <img src="images/Booticon_Play.png">
+### Safe Mode <img src="images/Icon_Pause.png">
 
-After booting, the device waits 30 seconds after network connection to mark (in NVS) the boot as stable.
+After booting, the device waits a few seconds after all services have finished to mark the boot as stable (in NVS).
 If powering off before this time has elapsed, the next boot will enter "safe mode" - which disables smart start, auto update, and will start in online (not SD) mode.
 
-### SD Offline Mode <img src="images/Booticon_SD.png">
+### SD Offline Mode <img src="images/Icon_SD.png">
 
 To enter a special SD-card only mode (with network functionality disabled), hold down any button (including encoder switches) shortly after powering-up (until the display shows something).
 It is not necessary to hold this button while powering-up, and actually could cause issues if the builder put that button on a strapping pin.

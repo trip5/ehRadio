@@ -12,6 +12,7 @@
 #include "netserver.h"
 #include "player.h"
 #include "utility.h"
+#include "coredump.h"
 #include "../locale/dsplocale.h"
 #include "../displays/themeregistry.h"
 #include "../displays/layoutregistry.h"
@@ -271,6 +272,10 @@ void Startup::checkLittleFSandVer() {
     BOOTLOG("Version mismatch detected (stored: %s, current: %s)", storedVersion.c_str(), RADIOVERSION);
     config.wwwFilesExist = false;
   }
+  // A crash log is only meaningful against the firmware that produced it, so a version change starts the ring empty.
+  // The pending core dump is deliberately NOT discarded: it is archived into the new ring on this boot, and its body
+  // carries the crashed build's own elf sha256, which is what names the build in the first place.
+  if (storedVersion != String(RADIOVERSION)) coredump::clear();
   LITTLEFSTIMELOG("wwwFilesExist branch (verifyLittleFS)");
 
   if (!config.wwwFilesExist || !LittleFS.exists(VERSION_PATH)) {

@@ -179,11 +179,31 @@ static const uint8_t BATTERY__11[] PROGMEM = {
     0b000000,  // ......
 };
 
-// \021 Unused
+// \021 Web Mode A (used in conf files: iptxtFmt)
+static const uint8_t WEBMODE_A[] PROGMEM = {
+    0b000000,  // ......
+    0b010000,  // .@....
+    0b100110,  // @..@@.
+    0b101001,  // @.@..@
+    0b101001,  // @.@..@
+    0b100110,  // @..@@.
+    0b010000,  // .@....
+    0b000000,  // ......
+};
 
-// \022 Unused
+// \022 Web Mode B (used in conf files: iptxtFmt) (also in display.cpp for swapping with SD icon)
+static const uint8_t WEBMODE_B[] PROGMEM = {
+    0b000000,  // ......
+    0b100000,  // @.....
+    0b010000,  // .@....
+    0b010000,  // .@....
+    0b010000,  // .@....
+    0b010000,  // .@....
+    0b100000,  // @.....
+    0b000000,  // ......
+};
 
-// \023 Speaker icon (used in conf files: voltxtFmt)
+// \023 Speaker icon (used in conf files: voltxtFmt) (also in display.cpp for swapping with SD icon)
 static const uint8_t SPEAKER[] PROGMEM = {
     0b000010,  // ....@.
     0b000110,  // ...@@.
@@ -243,27 +263,27 @@ static const uint8_t VOL_100[] PROGMEM = {
     0b000000,  // ......
 };
 
-// \030 SD Card A (used in display.cpp for SD Offline Mode and to show boot mode)
+// \030 SD Card A (used in display.cpp for SD Offline Mode, show boot mode, and swapped with web mode icon in SD Mode)
 static const uint8_t SD_A[] PROGMEM = {
-    0b011111,  // .@@@@@
-    0b011010,  // @@@.@.
-    0b101010,  // @.@.@.
-    0b101111,  // @.@@@@
     0b111111,  // @@@@@@
+    0b111100,  // @@@@..
     0b111111,  // @@@@@@
+    0b111110,  // @@@@@.
+    0b111111,  // @@@@@@
+    0b111110,  // @@@@@.
     0b111111,  // @@@@@@
     0b000000,  // ......
 };
 
-// \031 SD card B (used in display.cpp for SD Offline Mode and to show boot mode)
+// \031 SD card B (used in display.cpp for SD Offline Mode, show boot mode, and swapped with web mode icon in SD Mode)
 static const uint8_t SD_B[] PROGMEM = {
     0b100000,  // @.....
-    0b100000,  // @.....
-    0b100000,  // @.....
-    0b100000,  // @.....
-    0b100000,  // @.....
-    0b100000,  // @.....
-    0b100000,  // @.....
+    0b110000,  // @@....
+    0b110000,  // @@....
+    0b010000,  // .@....
+    0b110000,  // @@....
+    0b010000,  // .@....
+    0b110000,  // @@....
     0b000000,  // ......
 };
 
@@ -315,7 +335,8 @@ static const uint8_t PLAY[] PROGMEM = {
     0b000000,  // ......
 };
 
-// \037 IP address icon (used in conf files: iptxtFmt)
+/*
+// \037 IP address icon (RETIRED: iptxtFmt leads with the two-cell web mode pair \021\022 now)
 static const uint8_t IP[] PROGMEM = {
     0b110000,  // @@....
     0b111111,  // @@@@@@
@@ -326,6 +347,7 @@ static const uint8_t IP[] PROGMEM = {
     0b000011,  // ....@@
     0b000000,  // ......
 };
+*/
 
 // \0?? Blank template
 static const uint8_t BLANK[] PROGMEM = {
@@ -361,8 +383,8 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     BATTERY_11,      // 14: \016
     BATTERY__10,     // 15: \017
     BATTERY__11,     // 16: \020
-    NULL,            // 17: \021
-    NULL,            // 18: \022
+    WEBMODE_A,       // 17: \021
+    WEBMODE_B,       // 18: \022
     SPEAKER,         // 19: \023
     VOL_25,          // 20: \024
     VOL_50,          // 21: \025
@@ -375,5 +397,5 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     PAUSE,           // 28: \034
     PLAY,            // 29: \035
     NULL,            // 30: \036 (DO NOT USE: 0x1E is the spacer character in TextWidget: it gets consumed as a 2px gap before reaching the icon renderer)
-    IP,              // 31: \037
+    NULL,            // 31: \037 (retired IP glyph - free for reuse; the IP line leads with \021\022 now)
 };

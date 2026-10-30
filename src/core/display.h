@@ -118,6 +118,9 @@ class Display {
     #endif
     Ticker _returnTicker;
     bool _locked = false;
+    // An SD re-index owns the panel while this is up (SDINDEXSTART / SDINDEXDONE).  It is written and cleared ONLY by
+    // this task, which is what makes the release impossible to refuse: see the guard in _switchMode().
+    bool _indexHold = false;
     uint8_t _bootStep = 0;
     displayRequestType_e _deferredType = NOPE;
     int _deferredPayload = 0;

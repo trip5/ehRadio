@@ -78,6 +78,11 @@ class Player: public Audio {
     uint32_t    _resumeFilePos = 0;
     plStatus_e  _status = STOPPED;
     bool        _fatalStream = false;  // 404/410 seen: the arm gate must not start the ladder
+    uint8_t     _verdictSeen = 0;      // last audio-library verdict acted on; 0 when none is held
+    bool        _ladderResume = false; // this _play() came from the retry ladder, not from the user
+    uint8_t     _startAttempts = 0;    // consecutive starts that produced no audio; capped in loop()
+    uint32_t    _playingSince = 0;     // millis() of the first buffered audio; 0 while silent
+    uint32_t    _connectMs = 0;        // millis() when this attempt began producing nothing; 0 once data arrives
     bool        _decoderDead = false;  // VS1053 answered nothing: latched until the next _play()
     uint16_t    _playingStationId = 0;
     char        _plError[PLERR_LN];

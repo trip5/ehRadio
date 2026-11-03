@@ -23,6 +23,15 @@
 
 static constexpr uint32_t PLQ_SEND_DELAY = 100; // ms; xQueueSend timeout in player.sendCommand()
 
+// A URL that connects and then never produces audio is not a verdict, so it may retry - but only this many times.
+// STREAM_SETTLE_MS of audio with bytes in the ring is what proves an attempt was not the silent kind.
+static constexpr uint8_t  STREAM_START_MAX_ATTEMPTS = 3;
+static constexpr uint32_t STREAM_SETTLE_MS = 10000;
+// Nothing else notices a connection that is never closed and never delivers: the libraries' only watchdog
+// (streamDetection) runs after the first audio byte, so this deadline is what turns a silent endpoint into a
+// stopped attempt the capped ladder can act on.
+static constexpr uint32_t STREAM_START_DEADLINE_MS = 30000;
+
 Player player;
 QueueHandle_t playerQueue;
 
@@ -261,6 +270,33 @@ void Player::loop() {
   Audio::loop();
   audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
 
+  // The audio library gives up on a URL exactly once and records why. A refusal is a STATION that will not play, not
+  // a system fault: no LOST page and no fatal latch. The library has already stopped the stream, so the arm gate below
+  // counts the attempt like any other and the cap decides when to give up - handle-unsupported-unrecognized.md §16.1.
+  // The verdict is held until the next connection clears it, hence the seen-guard: act once, not once per tick.
+  {
+    const uint8_t why = refuseReason();
+    if (why == STREAM_REFUSE_NONE) {
+      _verdictSeen = STREAM_REFUSE_NONE;
+    } else if (why != _verdictSeen) {
+      _verdictSeen = why;
+      // The playlist validator probes URLs on purpose, so a refusal here is its finding, not a station error.
+      if (playlistValidator.active()) {
+        ;  // consumed: never acted on later, when the validator has moved on
+      } else {
+        // A permanent verdict was reached by reading the FIRST answer, so a retry cannot change it: one attempt, the
+        // message, no ladder. NO_HEAD stays a failed attempt - it is the genuinely ambiguous case (§12.5, §17.1).
+        if (why == STREAM_REFUSE_NO_HEAD) {
+          FUNCTIONLOG("Player", "stream produced no usable head - counted as a failed attempt");
+        } else {
+          noteFatalStream();                  // the message and no re-arm; the page stays where the user is
+          FUNCTIONLOG("Player", "stream refused - not retried");
+        }
+        radioBrowserCancelClick();   // nothing played, so nothing is owed to the station directory (§16.2)
+      }
+    }
+  }
+
   #if defined(USE_AUDIO_VS1053)
     // A decoder that answers 0x0000 to every register read is unpowered, held in reset, or has lost MISO.  No software
     // reset can reach it: softReset() is what begin() already does, and RST is not wired on these modules.  So stop,
@@ -295,6 +331,27 @@ void Player::loop() {
     config.setTitle("");
   }
 
+  // Audio in the ring, for a while, is what makes an attempt a real one. A silent endpoint never gets past a few
+  // trickled bytes, never settles, and so never earns back the retry budget.
+  if (_status == PLAYING && isRunning() && inBufferFilled() > 4096) {
+    _connectMs = 0;
+    if (_playingSince == 0) _playingSince = millis();
+    else if (millis() - _playingSince >= STREAM_SETTLE_MS) _startAttempts = 0;
+  } else {
+    _playingSince = 0;
+    // The validator drives its own connects and owns the indicator, so the deadline stays out of its way.
+    if (_status == PLAYING && isRunning() && config.getMode() == PM_WEB && !playlistValidator.active()) {
+      if (_connectMs == 0) _connectMs = millis();
+      else if (millis() - _connectMs >= STREAM_START_DEADLINE_MS) {
+        _connectMs = 0;
+        FUNCTIONLOG("Player", "no data in %u ms after connect - stopping this attempt", (unsigned)STREAM_START_DEADLINE_MS);
+        stopSong();   // the same transition a dropped stream makes, so the capped arm gate below decides
+      }
+    } else {
+      _connectMs = 0;
+    }
+  }
+
   if (!playlistValidator.active() && !isRunning() && _status==PLAYING) {
     // Name the state whenever the engine goes down under a live PLAYING status.  A clean end of track passes through
     // here too - it clears m_f_running inside Audio::loop() a few statements earlier - so an in-flight EOF advance is
@@ -310,14 +367,22 @@ void Player::loop() {
             (unsigned)config.getMode());
       #endif
     }
-    // Stream died unexpectedly - trigger reconnection if WiFi is still up and this is not a dead URL
+    // Stream died unexpectedly - trigger reconnection if WiFi is still up and this is not a dead URL.
+    // The attempts are capped: a station that answers and says nothing would otherwise loop forever, and the log
+    // shows each cycle also costs a byurl lookup and a pending click.
     if (!_fatalStream && config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
-      FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
-      network.lostPlaying = true;
-      // Launch retry task if not already running.  spawnStreamRetry() checks the create result, so a spawn that
-      // failed on a fragmented heap cannot leave lostPlaying set with no task behind it - which used to close
-      // this gate until a reboot (nothing else clears the flag except a fresh WiFi reconnect event).
-      spawnStreamRetry();
+      if (_startAttempts >= STREAM_START_MAX_ATTEMPTS) {
+        noteFatalStream();                   // the message and no re-arm; the page stays where the user is
+        FUNCTIONLOG("Player", "no audio after %u attempts - giving up on this station", (unsigned)_startAttempts);
+      } else {
+        _startAttempts++;
+        FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
+        network.lostPlaying = true;
+        // Launch retry task if not already running.  spawnStreamRetry() checks the create result, so a spawn that
+        // failed on a fragmented heap cannot leave lostPlaying set with no task behind it - which used to close
+        // this gate until a reboot (nothing else clears the flag except a fresh WiFi reconnect event).
+        spawnStreamRetry();
+      }
     }
     _stop(true);
   }
@@ -345,6 +410,7 @@ bool Player::resumeLastWebSource() {
   if (config.store.lastStationUrl[0] != '\0') {
     uint16_t foundIdx = utility.findStationByUrl(config.store.lastStationUrl);
     if (foundIdx > 0) {
+      _ladderResume = true;   // the ladder's own resume must not reset the attempt budget (§16.3)
       sendCommand({PR_PLAY, foundIdx});
       return true;
     }
@@ -354,6 +420,7 @@ bool Player::resumeLastWebSource() {
   uint16_t stationId = config.lastStation();
   if (stationId == 0) return false;
 
+  _ladderResume = true;
   sendCommand({PR_PLAY, stationId});
   return true;
 }
@@ -389,7 +456,15 @@ void Player::_play(uint16_t stationId) {
   #endif
   setError("");
   _fatalStream = false;  // a new station clears a previous permanent-error stop
+  _verdictSeen = STREAM_REFUSE_NONE;  // ...and the library verdict that went with it
   _decoderDead = false;  // ...including a dead decoder: this play is the retry
+  if (_ladderResume) {
+    _ladderResume = false;   // a ladder resume is not a user play: the attempt budget carries over
+  } else {
+    _startAttempts = 0;      // a user play earns the station the full retry budget again
+  }
+  _playingSince = 0;
+  _connectMs = 0;
   setDefaults();
   audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
@@ -489,6 +564,7 @@ void Player::browseUrl() {
 void Player::playUrl(const char* url) {
   setError("");
   _fatalStream = false;
+  _verdictSeen = STREAM_REFUSE_NONE;
   _muted = false;
   remoteStationName = true;
   audioHandlers.resetMetadata();

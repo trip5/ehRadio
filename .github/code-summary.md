@@ -436,8 +436,9 @@ depending on the selected PlatformIO environment and macro definitions.
      - **`netserver.begin()` deliberately does NOT happen here.** The WebUI is held back until the startup
        services are out of the way, because `begin()` is where the request queue, the listener, mDNS *and* the
        PSRAM WebUI file cache (~120 KB with .gz files; up to ~400 KB if only plain files) are allocated.
-       `Startup::loop()` starts it (see that section); the footer IP is the indicator, because
-       `Display::_footerIp()` draws nothing until `netserver.isListening()`. The AP and SDOFFLINE paths still start
+       `Startup::loop()` starts it (see that section); the footer ADDRESS is the indicator, because
+       `Display::_footerIp()` paints only the conf's mode mark until `netserver.isListening()` and adds the address
+       with the `NEWIP` the bring-up sends. The AP and SDOFFLINE paths still start
        it here — the captive portal is the only way in on a first boot, and offline mode runs no services at all.
      - **The start runs on its own task, not on the loop** (`Startup::bringUpWebServer()`, spawned as
        `webBringUpTask` at `WEB_BRINGUP_TASK_STACK_SIZE` on `NETWORK_CORE`): `begin()` reads every www file into the
@@ -611,7 +612,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   which is exactly when the WebUI is needed to switch back to web radio. `SVC_NONE` is the opposite trap — no WiFi,
   no `UPDATEURL` or the web files missing means no services are coming, so nothing else would ever start the server.
   `begin()` creates a fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the
-  trigger sends `NEWIP` so the footer IP appears with the server rather than at boot.
+  trigger sends `NEWIP` so the footer ADDRESS lands with the server rather than at boot - the mode mark is already on
+  that line by then, which is why the address is the part that means "the WebUI answered".
 - **The trigger only spawns the task; `bringUpWebServer()` does the work.** `begin()` + `startLoopTask()` + the
   `NEWIP` request run on `webBringUpTask` (one-shot, `WEB_BRINGUP_TASK_STACK_SIZE`, `NETWORK_CORE`), because on the
   loop they cost 1763 ms of stall and the audio refill goes with them. `webBringUpActive` covers the gap between
@@ -988,6 +990,29 @@ other way back, since the AP is only re-found on the next disconnect event.
 3/3 before `recoveryReboot()`. The station that failed is saved as the resume target first, so recovery plays the
 station the user chose rather than the previous one. A played-stream ladder probes once per attempt; this entry
 does the same, one probe per failed press.
+
+**A stream verdict is not a slow station.** Both libraries can refuse a URL outright: `setRefuse()` records one
+`streamRefuse_e` verdict (`UNSUPPORTED` - fMP4, encrypted HLS; `NOT_AUDIO` - a page, an API answer, an unknown
+content type; `NO_HEAD` - nothing usable arrived), logs one line naming the detected shape and the URL, and stops.
+`Player::loop()` polls `refuseReason()` once per tick behind a seen-guard. A permanent verdict (`UNSUPPORTED`,
+`NOT_AUDIO`) is **one-shot**: it was reached by reading the first answer, so `noteFatalStream()` runs at once - the
+message, one log line, no ladder, no `LOST` page - and the pending Radio-Browser click is cancelled. Only `NO_HEAD` is
+treated as a failed attempt and counted by the arm gate, because it is the genuinely ambiguous case. Note that
+`AUDIO_ERROR(...)` **is** the `audio_error` callback in both forks, so a library error line would land on the display;
+`AudioHandlers::handleError()` therefore logs and skips `setError` while `refuseReason()` is non-zero, leaving
+"Error connecting" as the only thing the user sees. The sniff itself (`sniffHead()`, positive signatures only,
+which is why an unusual but working stream is never refused) lives in each library at the HLS `firstBytes` block and
+at the plain-stream point where `f_stream` is set - **not** in `readAudioHeader()`, which a live stream never reaches.
+Separately, in `player.cpp`: the arm gate counts consecutive starts that never produced audio (`_startAttempts`,
+reset by 10 s of a ring over 4096 bytes, and **not** reset by the ladder's own `resumeLastWebSource()` - that goes
+through `_play()`, which is why `_ladderResume` exists) and gives up after `STREAM_START_MAX_ATTEMPTS` (3), and
+`STREAM_START_DEADLINE_MS` (30 s) stops an attempt that delivered nothing at all - nothing else watches a connection
+that is never closed, because `streamDetection()` only runs after the first audio byte. Verdicts and the deadline are
+both suppressed while `playlistValidator.active()`: the validator probes URLs on purpose, so a refusal there is its
+finding, never a station error. The validator judges by the same rules: `_sawAudio` (a codec decision plus bytes in
+the ring) is what makes a probe pass, a permanent verdict fails it at once without the retry budget, a probe with no
+evidence waits only to four times `PLAYLIST_VALIDATE_LISTEN_MS`, and `clearRefuse()` empties the verdict between
+probes so nothing outlives the sweep.
 
 **Why the VS1053 build depended on this ladder more than the I2S build.** Both libraries retry a dead stream
 themselves every 5 s (`streamDetection()` -> `connecttohost(m_lastHost)`), but only the VS1053 failure branch
@@ -4576,6 +4601,15 @@ design record; this is the shape of it.
   NEWMODE/NEWSTATION/NEWTITLE requests: WEB -> SD passes through the SDCHANGE screen, but SD -> WEB leaves the
   player screen already up, so `_switchMode()` returns at its same-mode guard and nothing else would rewrite the
   icon.
+  **The mark has to be there before the address exists.**  `_footerIp()` used to blank the line until
+  `netserver.isListening()`, which left the boot mode invisible for as long as the WebUI took to come up.  It now
+  prints the SAME format with an EMPTY argument while the server is not listening: `"\021\022%s"` renders the web
+  mode pair alone (and `"\030\031%s"` the card), two cells, no placeholder and no invented address, and the `"%s"`
+  and `""` confs render nothing - so the mark-less layouts need no third case and behave exactly as they did when
+  the branch cleared the widget.  The gate itself is kept, and the two halves of the line now mean different
+  things: the mark says which mode the device booted into and is there from the first painted frame, while the
+  ADDRESS appearing beside it is what says the WebUI answered - which is why `NEWIP` is still the request that
+  completes the line rather than starts it.
 - **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
   into `_clockFontStyles[]`, so they must never be renumbered.
 - `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,
@@ -4859,21 +4893,39 @@ beside it (`ProgressWidget::setDotColor()`), which is the only two-colour boot l
   base class calls itself from `setActive()` and from the layout show/hide helpers - so `Pager::setPage()` and every
   layout change repaint the clock. Gating `Display::_time()` does NOT cover those: that only handles the tick updates,
   which is why a gate there changed nothing at all.
-- `clockTrustworthy()` (`utility.cpp`, declared in `utility.h`) is asked at the top of `_printClock()`. With
-  `network.timeinfo` now a pure cache (see below) it asks one thing: has anything set the cache? `network.timeinfo.tm_year
+- **The gate is asked by the two callers BEFORE they decide how much to repaint, and it stays inside `_printClock()`
+  as the last line of defence.** The order matters because the decision is one-shot: `draw()` calls `_getTime()`, which
+  spends `_forceflag` on a year change and rewrites `_timebuffer`, so a paint refused *after* that leaves the next one a
+  DELTA paint - and a delta paint draws the seconds and the colon but not the time, the date, the day or the divider.
+  That is what an RTC unit showed at boot before 2026.11.03: `refreshClock()` filled the cache from the chip and queued
+  `CLOCK` while the system clock was still unset, so the force decision was spent on a paint the gate then refused, and
+  the panel showed a live seconds column sitting over the hours until the next minute boundary forced a full paint. A
+  no-RTC unit never showed it, because there the cache stays zeroed until `doSync()` fills it and only then queues
+  `CLOCK`, so the first paint is already trustworthy. `_linesleft` is derived in `_getTimeBounds()` for the same reason:
+  it is pure geometry, and leaving it to the force branch left the seconds' x indeterminate for any delta paint that came
+  first.
+- `clockTrustworthy()` (`utility.cpp`, declared in `utility.h`) is asked by both callers of `_printClock()`. With
+  `network.timeinfo` a pure cache (see below) it asks one thing: has anything set the cache? `network.timeinfo.tm_year
   + 1900 <= 1901` is the zeroed struct, which is what the no-RTC radio showed as `00:00` until the first `doSync()` (1901
-  rather than a modern floor, so a device that never syncs can never cross it). **There is no RTC-agreement test any
-  more**: the cache is copied from the system clock whenever that is set, so an RTC in another zone can no longer reach
-  the glass - the chip only fills the cache while the system clock is unset, which is the one case with nothing to agree
-  with.
+  rather than a modern floor, so a device that never syncs can never cross it). **The RTC chip is trusted on ANY status,
+  `SDOFFLINE` or not** (2026.11.03): a unit with a battery-backed chip is expected to know the time at boot rather than
+  wait for SNTP, and the chip holds LOCAL time as plain fields - `RTC::setTime()` writes `tm_hour`/`min`/`sec` straight
+  into the `DateTime` and `doSync()` hands it the local struct - so no timezone is needed to print it. The cost, accepted:
+  a STALE chip (a timezone or DST change while powered off) shows its old local time until the first successful sync,
+  which rewrites the chip. **There is no RTC-agreement test any more**: the cache is copied from the system clock
+  whenever that is set, so the chip can no longer overrule it.
+- **A chip that has STOPPED feeds nothing.** `RTC::getTime()` returns without touching the caller's struct when
+  `isRunning()` is false; it used to do `tinfo->tm_sec++` + `mktime()` there, which invented a time from one it had not
+  read and free-ran `network.timeinfo` on every tick. A dead-battery boot therefore leaves the cache zeroed and the year
+  test keeps the clock blank - the same picture as before, without the garbage.
 - **"Is the system clock set" and "what is its local time" are one read**, `systemLocalTime()` (`utility.cpp`, declared in
   `utility.h`): the one-year-epoch floor (`now > 31536000`, far above any uptime, far below any real date), the
-  `time(NULL)` and the `localtime_r()`. Both `clockTrustworthy()` and `refreshClock()` ask it instead of each doing that
-  read themselves. `localtime()` only becomes local once `configTzTime()` has run, which happens at the WiFi-connect
-  event. When the system clock is unset the chip is trusted only when `network.status == SDOFFLINE` (the chip is the only
-  source there will ever be); online it is blocked until SNTP and `doSync()` have spoken.
+  `time(NULL)` and the `localtime_r()`. `refreshClock()` asks it; `clockTrustworthy()` no longer does, because trusting
+  the chip made that branch unable to change the answer. `localtime()` only becomes local once `configTzTime()` has run,
+  which happens at the WiFi-connect event - that governs reading the SYSTEM clock, not printing the chip.
 - The first genuine paint needs no help from the gate: `ticks()` (RTC) and `doSync()` (network) both request `CLOCK` the
-  moment they have something to show, and `_getTime()` reports a change because `_timebuffer` starts at `"00:00"`.
+  moment they have something to show, and the first paint the gate allows is a FORCE paint - `_forceflag` is only spent
+  by a paint that actually happens, because neither caller reaches `_getTime()` while the gate is shut.
 
 ### One producer for network.timeinfo: refreshClock() (network.cpp, utility.cpp)
 - **`refreshClock()` (`network.cpp`) is the single place `network.timeinfo` is made current and the only place `ticks()`
@@ -5245,6 +5297,41 @@ libraries embedded directly in the repository, mostly inherited from yoRadio and
   CANCEL bit when stop is called during init with no song playing.
   `VS_PATCH_ENABLE` forced `false` on this hardware — FLAC patches produce audio silence on this VS1053 variant.
 - `ES8311_Audio/` — ES8311 codec driver (written for ehRadio by kasperaitis)
+
+### I2S AAC decode: the facts that decide whether a stream keeps up (2026-11-03)
+
+- **Decode cost is per profile, and that is the whole story.** AAC-LC uses roughly two thirds of the audio task's
+  wall time and keeps up easily; HE-AAC v2 (SBR + PS) used ~98% and could not, which is heard as slow playback and
+  stutter. Any "I2S audio is slow" report starts by checking which profile the stream chose.
+- **`FIXED_POINT` is OFF in `aac_decoder/libfaad/neaacdec.h`.** FAAD's float paths run the FFT and QMF on the S3's
+  hardware FPU, and that is what makes HE-AAC v2 keep up. Turning it back on restores the deficit.
+- **`neaacdec.cpp` must keep `#pragma GCC optimize("Os")` while `FIXED_POINT` is off.** This toolchain's Xtensa GCC
+  8.4 hits an internal compiler error (float constant load, postreload) in FAAD's float path at both `-O2` and `-O1`.
+  `-Os` is the only level that compiles. The pragma is per-file, so the rest of the project's flags are unaffected.
+  Revert the pragma only together with `FIXED_POINT`.
+- **`FIXED_POINT` off also re-enables `MAIN_DEC`**, because the fixed-point block is what undefines it.
+- **The decoder owns its own core.** `playAudioData()`/`playChunk()` run on `AUDIO_CORE` 0; the Main task only refills
+  the input ring. A Main stall therefore costs nothing unless the ring drains - so Main-loop stalls are not evidence
+  about audio health.
+- **`AUDIO_TASK_PRIORITY` is 6** (library default was 2), which puts the decoder above AsyncTCP (4) but below lwIP
+  (18) on core 0. At 2, every playlist GET and socket log line preempted it.
+- **The three IIR filter chains are skipped when their coefficients are identity.** With a flat equaliser they
+  otherwise run 5 float multiplies, 4 adds, 8 loads and 8 stores per channel per sample pair to compute `y = 1 * x`.
+- **Playlist polling has a floor of one poll per segment**, because one segment per poll is what sustains playback.
+  The wait is `M3U8_NO_SEGMENT_WAIT_MS` (500 ms) scaled 1-4x by consecutive empty answers. A fill-based gate on the
+  poll cannot work.
+- **The `no_host_timer` pause at the top of the m3u8 branch of `Audio::loop()` is load-bearing.** Scoping it to the
+  poll made `frames/s` collapse and starved the DMA - that was measured, not assumed. Its comparison is not
+  wrap-safe; leave it.
+- **Segment identity is `EXT-X-MEDIA-SEQUENCE` plus the entry index** (`m_m3u8BaseSeq`, `m_m3u8EntryIdx`,
+  `m_lastM3u8Seq`, `m_m3u8SeqValid`), never a URL substring. `m_lastM3U8host` is the variant's media playlist;
+  `m_lastHost` is the master. A retry must use the former and must never call `connecttohost()`, which is a full
+  session reset (frees buffers, clears the ring, rebuilds the decoder).
+- **Instruments to keep while in doubt**: the `i2s:` line every 10 s (`frames/s`, `decode`/`write` ms, `short`,
+  worst audio-task `gap`, `sil` runs, ring), `lost N seq` on the occupancy line, and a `join:` line per segment
+  boundary. `frames/s` is only meaningful against the clock printed on the same line. `sil` counts runs of 480
+  consecutive all-zero frames, i.e. 20 ms at 24 kHz.
+- **Global `-O2` buys nothing here**: decode time was unchanged and flash grew ~180 KB.
 
 ### Touchscreen library
 - `FT6336_Touchscreen/` — FT6336 capacitive touch driver (written for ehRadio by kasperaitis)

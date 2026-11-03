@@ -34,10 +34,13 @@ void PlaylistValidator::loop() {
 
   if (_state == PLV_CONNECT) {
     if (!utility.loadStation(_index) || config.station.url[0] == '\0') { _next(false); return; }
+    player.clearRefuse();                     // a verdict never survives from one probe to the next
     const bool ok = player.connecttohost(config.station.url);
     _attempt++;
     if (ok) {
       _listenUntil = millis() + PLAYLIST_VALIDATE_LISTEN_MS;
+      _hardUntil = millis() + 4 * PLAYLIST_VALIDATE_LISTEN_MS;  // §15.2: only the ambiguous case waits
+      _sawAudio = false;
       _state = PLV_LISTEN;
     } else if (_attempt >= PLAYLIST_VALIDATE_ATTEMPTS) {
       _next(false);
@@ -46,15 +49,35 @@ void PlaylistValidator::loop() {
   }
 
   if (_state == PLV_LISTEN) {
-    const bool died = !player.isRunning();
-    const bool elapsed = (int32_t)(millis() - _listenUntil) >= 0;
+    // Evidence, not the clock: a codec decided and bytes in the ring is what a station that plays looks like.
+    if (!_sawAudio && player.codecDecided() && player.inBufferFilled() > 0) _sawAudio = true;
+
+    // A verdict is the library saying this URL cannot play. A permanent one fails at once - retrying it would be
+    // three handshakes against a server that already answered.
+    const uint8_t why = player.refuseReason();
+    if (why == STREAM_REFUSE_UNSUPPORTED || why == STREAM_REFUSE_NOT_AUDIO) {
+      player.stopStream();
+      FUNCTIONLOG("Playlist", "validator: refused, failing this station");
+      _next(false);
+      return;
+    }
+
+    const bool died = !player.isRunning() || why == STREAM_REFUSE_NO_HEAD;
     if (died) {
       _attempt++;
       if (_attempt >= PLAYLIST_VALIDATE_ATTEMPTS) { player.stopStream(); _next(false); }
       else _state = PLV_CONNECT;              // the stream dropped at once; try it again
       return;
     }
-    if (elapsed) { player.stopStream(); _next(true); }
+    if ((int32_t)(millis() - _listenUntil) >= 0) {
+      if (_sawAudio) { player.stopStream(); _next(true); }
+      else if ((int32_t)(millis() - _hardUntil) >= 0) {
+        // Connected, sent nothing usable: the shape that used to pass a dead endpoint after one second.
+        player.stopStream();
+        FUNCTIONLOG("Playlist", "validator: connected but no audio, failing this station");
+        _next(false);
+      }
+    }
   }
 }
 
@@ -74,6 +97,7 @@ void PlaylistValidator::_begin() {
   display.putRequest(NEWMODE, VALIDATING);
   _index = 1;
   _attempt = 0;
+  _sawAudio = false;
   _label[0] = '\0';
   _state = PLV_CONNECT;
   _post(PLV_MSG_START, 0, PLV_RESULT_NONE);
@@ -87,6 +111,7 @@ void PlaylistValidator::_next(bool pass) {
   display.updateProgress(_label, (float)_index / (float)_total);
   _index++;
   _attempt = 0;
+  _sawAudio = false;
   if (_index > _total) { _finish(); return; }
   _state = PLV_CONNECT;
 }
@@ -109,6 +134,7 @@ void PlaylistValidator::_abort(bool reportDone) {
 // drop the indicator and put the user's station back so the panel and the WebUI agree afterwards.
 void PlaylistValidator::_restore() {
   player.stopStream();
+  player.clearRefuse();   // the last probe's verdict must not outlive the sweep (handle-unsupported-unrecognized.md §15.4)
   if (_muted) { player.setVolume(_savedVol); _muted = false; }
   network.cancelStreamRetry();
   if (_savedLast > 0) utility.loadStation(_savedLast);

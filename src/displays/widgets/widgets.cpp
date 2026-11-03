@@ -1188,6 +1188,10 @@ void ClockWidget::_getTimeBounds() {
   for (const char* p = _glow; *p && *p != ':'; ++p) {
     _dotsleft += _charWidth(_cf, (unsigned char)*p);
   }
+  // The divider's column, and with it the seconds' x on the sizes that keep one.  Derived here as well as in the
+  // force branch of _printClock() because it is pure geometry: left to the force branch alone it is indeterminate
+  // until a full paint has run, and a delta paint before that puts the seconds over the hours.
+  _linesleft = _left()+_timewidth+_space;
 }
 
 Adafruit_GFX& ClockWidget::getRealDsp(){
@@ -1200,9 +1204,9 @@ Adafruit_GFX& ClockWidget::getRealDsp(){
 void ClockWidget::_printClock(bool force){
   // The one place the time reaches the screen, whichever caller arrived: the tick-driven draw(), the forced _draw()
   // that Pager::setPage() and the layout helpers use, and the screensaver. Nothing is printed until the device has a
-  // time it can stand behind (clockTrustworthy() in utility.cpp) - a zeroed timeinfo prints 00:00 and a chip in another
-  // zone prints a plausible-looking wrong time. The first genuine paint needs no help: ticks() and doSync() both
-  // request CLOCK the moment they have something to show.
+  // time it can stand behind (clockTrustworthy() in utility.cpp). Both callers ask that question BEFORE deciding how
+  // much to repaint, and this test stays as the last line of defence: the decision is one-shot, so a paint refused
+  // after it was taken leaves the next one a delta paint, with no time, date or divider in it.
   if (!clockTrustworthy()) return;
   auto& gfx = getRealDsp();
   gfx.setTextSize(_cf.font==nullptr?_cf.textPx:1);
@@ -1439,11 +1443,13 @@ void ClockWidget::_clearClock(bool push){
 
 void ClockWidget::draw(){
   if(!_active || _locked) return;
+  if (!clockTrustworthy()) return;   // see _printClock(): a refused paint must not spend the force decision
   _printClock(_getTime());
 }
 
 void ClockWidget::_draw(){
   if(!_active || _locked) return;
+  if (!clockTrustworthy()) return;   // the same gate draw() states
   _printClock(true);
 }
 

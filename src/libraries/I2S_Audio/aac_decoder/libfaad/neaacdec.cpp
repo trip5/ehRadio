@@ -1,3 +1,7 @@
+// Must stay while FIXED_POINT is off: this toolchain's Xtensa GCC 8.4 internal-compiler-errors in FAAD's float path
+// at -O2 and -O1, and -Os is the only level that compiles. Per-file, so the rest of the build is unaffected.
+#pragma GCC optimize("Os")
+
 /*
 ** FAAD2 - Freeware Advanced Audio (AAC) Decoder including SBR decoding
 ** Copyright (C) 2003-2005 M. Bakker, Nero AG, http://www.nero.com
@@ -14866,7 +14870,9 @@ void hf_generation(sbr_info* sbr, qmf_t Xlow[MAX_NTSRHFG][64], qmf_t Xhigh[MAX_N
     complex_t* alpha_1 = (complex_t*)faad_malloc(64 * sizeof(complex_t));
     #ifdef SBR_LOW_POWER
     // real_t rxx[64];
-    real_t* rxx = faad_malloc(64 * sizeof(real_t));
+    // Cast needed: this file is compiled as C++, where faad_malloc()'s void* will not implicitly convert.  The
+    // SBR_LOW_POWER path had never been compiled in this tree before it was enabled on 2026.11.03.
+    real_t* rxx = (real_t*)faad_malloc(64 * sizeof(real_t));
     #endif
         uint8_t offset = sbr->tHFAdj;
     uint8_t     first = sbr->t_E[ch][0];

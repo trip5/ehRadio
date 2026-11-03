@@ -349,6 +349,19 @@ static const uint8_t IP[] PROGMEM = {
 };
 */
 
+// \037 Mute icon (used in... conf files: voltxtFmt)
+static const uint8_t MUTE[] PROGMEM = {
+    0b100010,  // @...@.
+    0b010110,  // .@.@@.
+    0b101110,  // @.@@@.
+    0b110110,  // @@.@@.
+    0b111010,  // @@@.@.
+    0b000101,  // ...@.@
+    0b000010,  // ....@.
+    0b000000,  // ......
+};
+
+/*
 // \0?? Blank template
 static const uint8_t BLANK[] PROGMEM = {
     0b000000,  // ......
@@ -360,6 +373,7 @@ static const uint8_t BLANK[] PROGMEM = {
     0b000000,  // ......
     0b000000,  // ......
 };
+*/
 
 // ==========================================================================
 // Icon lookup table: map byte value (1-31) to icon bitmap pointer.
@@ -397,5 +411,5 @@ static const uint8_t* const ICON_TABLE[] PROGMEM = {
     PAUSE,           // 28: \034
     PLAY,            // 29: \035
     NULL,            // 30: \036 (DO NOT USE: 0x1E is the spacer character in TextWidget: it gets consumed as a 2px gap before reaching the icon renderer)
-    NULL,            // 31: \037 (retired IP glyph - free for reuse; the IP line leads with \021\022 now)
+    MUTE,            // 31: \037
 };

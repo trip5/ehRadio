@@ -45,6 +45,8 @@ class PlaylistValidator {
     uint16_t _total = 0;
     uint8_t  _attempt = 0;    // probes spent on the current station
     uint32_t _listenUntil = 0;
+    uint32_t _hardUntil = 0;  // ceiling for a probe with no evidence yet; see handle-unsupported-unrecognized.md §15.2
+    bool     _sawAudio = false; // codec decided and bytes in the ring: what a station that plays looks like
     uint8_t  _savedVol = 0;
     uint16_t _savedLast = 0;
     bool     _muted = false;

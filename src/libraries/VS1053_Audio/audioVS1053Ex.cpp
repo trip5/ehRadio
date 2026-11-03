@@ -17,6 +17,7 @@
 #include "../../core/config.h"
 #include "../../core/logging.h"
 #include "audioVS1053Ex.h"
+#include "../../core/heapq.h"
 
 /* The next three only affect VS1053 builds: the addon reports its level in dB through SCI_AICTRL3,
    where every other source reports a linear amplitude.  See plans/vu-vs1053-attack.md */
@@ -83,24 +84,35 @@ uint16_t AudioBuffer::getMaxBlockSize(){
 }
 
 size_t AudioBuffer::freeSpace() {
-    if(m_readPtr >= m_writePtr) {
+    // readPtr == writePtr is an EMPTY buffer, so every byte is free.  Computing 0 here is what "no room at all" would
+    // look like, and reading the subtraction 0 - 1 as a huge number is what the code relied on before.  Say it plainly.
+    if(m_readPtr == m_writePtr) {
+        m_freeSpace = m_buffSize;
+    } else if(m_readPtr > m_writePtr) {
         m_freeSpace = (m_readPtr - m_writePtr);
     } else {
         m_freeSpace = (m_endPtr - m_writePtr) + (m_readPtr - m_buffer);
     }
     if(m_f_start)
         m_freeSpace = m_buffSize;
-    return m_freeSpace - 1;
+    return m_freeSpace ? m_freeSpace - 1 : 0;
 }
 
 size_t AudioBuffer::writeSpace() {
-    if(m_readPtr >= m_writePtr) {
+    if(m_readPtr == m_writePtr) {
+        // Empty buffer: the whole ring is free.  This used to be (readPtr - writePtr - 1), which is 0 - 1 and only
+        // looked like room because it underflowed to a huge number - and clamping that to 0 stopped playback dead.
+        m_writeSpace = m_buffSize - 1;
+    } else if(m_readPtr > m_writePtr) {
         m_writeSpace = (m_readPtr - m_writePtr - 1); // readPtr must not be overtaken
     } else {
         if(getReadPos() == 0)
             m_writeSpace = (m_endPtr - m_writePtr - 1);
         else
             m_writeSpace = (m_endPtr - m_writePtr);
+        // Only here can a pointer past m_endPtr turn the subtraction negative - "room 4294967060" in the log, i.e. -236
+        // reported as four gigabytes, which a caller then writes through into the PSRAM heap.
+        if(m_writeSpace > m_buffSize) m_writeSpace = 0;
     }
     if(m_f_start)
         m_writeSpace = m_buffSize - 1;
@@ -117,15 +129,33 @@ size_t AudioBuffer::bufferFilled() {
 }
 
 void AudioBuffer::bytesWritten(size_t bw) {
+    // The only place m_writePtr moves, and the only thing that can put it outside the buffer: a bw larger than the buffer
+    // throws it past m_endPtr, the wrap test below only fires on an exact match, and every later bufferFilled() then
+    // reports nonsense.  That is the "write pointer outside buffer" the field guard caught on 2026.10.30, after hours of
+    // runtime.  Refuse the length and say so, so the caller that supplied it is on record.
+    if(m_buffSize && bw > m_buffSize) {
+        ERRORLOG("bytesWritten(%u) exceeds the %u-byte buffer - ignored", (unsigned)bw, (unsigned)m_buffSize);
+        return;
+    }
+    const size_t span = (size_t)(m_endPtr - m_buffer);
     m_writePtr += bw;
-    if(m_writePtr == m_endPtr) {
-        m_writePtr = m_buffer;
+    if(m_writePtr >= m_endPtr) {
+        // Wrapping on an exact match only is what let the pointer sit past m_endPtr for ever: a bw smaller than the
+        // buffer but larger than the room left goes straight through it.
+        m_writePtr -= span;
+        if(m_writePtr < m_buffer || m_writePtr >= m_endPtr) m_writePtr = m_buffer;
     }
     if(bw && m_f_start)
         m_f_start = false;
 }
 
 void AudioBuffer::bytesWasRead(size_t br) {
+    // Same hazard on the read side: br past the buffer maps to a read pointer outside it, and the wrap below cannot
+    // recover because it only subtracts m_endPtr once.
+    if(m_buffSize && br > m_buffSize) {
+        ERRORLOG("bytesWasRead(%u) exceeds the %u-byte buffer - ignored", (unsigned)br, (unsigned)m_buffSize);
+        return;
+    }
     m_readPtr += br;
     if(m_readPtr >= m_endPtr) {
         size_t tmp = m_readPtr - m_endPtr;
@@ -604,7 +634,12 @@ void Audio::stopSong(){
             }
             delay(10);
         }
-        if(audio_info) audio_info("Song stopped incorrectly!");
+        // SM_CANCEL did not clear inside 200 x 10 ms - which is also the ~2.1 s player stall seen at every track change,
+        // and the same event as a track audibly ending early.  Record what the chip and the buffer were doing, because
+        // "incorrectly" here covers both a genuine failure and a normal end of file that simply outran the drain.
+        sprintf(m_chbuf, "Song stopped incorrectly: SM_CANCEL still set after %d x10ms, MODE 0x%04X, buf %u, datamode %u",
+                i, (unsigned)modereg, (unsigned)InBuff.bufferFilled(), (unsigned)getDatamode());
+        if(audio_info) audio_info(m_chbuf);
         // [Maleksm graft] force-clear SM_CANCEL even after failed drain
         write_register(SCI_MODE, _BV (SM_SDINEW) | _BV(SM_LINE1));
         printDetails("after song stopped incorrectly");
@@ -723,7 +758,8 @@ void Audio::showstreamtitle(const char* ml) {
             }
 
             char *title = NULL;
-            title = (char*)malloc(titleLen + artistLen + 4);
+            title = (char*)heapq::take("id3title", titleLen + artistLen + 4);
+            if(!title) return;
             memcpy(title, ml + idx4, titleLen); title[titleLen] = '\0';
 
             char *artist = NULL;
@@ -741,7 +777,7 @@ void Audio::showstreamtitle(const char* ml) {
                     m_streamTitleHash = hash;
                     if(audio_showstreamtitle) audio_showstreamtitle(title);
                 }
-                free(title);
+                heapq::give("id3title", title);
                 title = NULL;
             }
             if(artist) {
@@ -810,6 +846,39 @@ static const uint32_t M3U8_NO_SEGMENT_WAIT_MS = 2000;
 void Audio::loop(){
 
     if(!m_f_running) return;
+
+    /* Bitrate for streams that never send an icy-br header.  The decoder already holds the value in HDAT0, and
+       getAudioCurrentTime() is the routine that reads it through the same l3id3/l3id012 tables SD playback has always
+       used.  Its return value is a playback position, which means nothing for a stream - getFilePos() is 0 with no open
+       file - so only its side effect matters: it fills m_avr_bitrate and reports it through audio_bitrate().
+       Retried on a slow tick until it succeeds, because the registers are empty until a few frames have decoded, and
+       never when the server supplied a value of its own. */
+    if(!m_brEstimated && !m_brFromHeader) {
+        static uint32_t s_lastBrTry = 0;
+        const uint32_t nowBr = millis();
+        if(m_f_stream_ready && m_sumBytesDecoded >= 16384 && (uint32_t)(nowBr - s_lastBrTry) >= 2000) {
+            s_lastBrTry = nowBr;
+            getAudioCurrentTime();
+            m_brEstimated = (m_avr_bitrate != 0);
+        }
+    }
+
+    /* Bookkeeping guard: the PSRAM collapse of 8.47 surfaced here first as a filled length larger than the whole buffer,
+       so one consistency check a second is enough to catch it before the allocator does.  Reported once per boot. */
+    {
+        static uint32_t s_lastCheck = 0;
+        static bool     s_reported  = false;
+        const uint32_t nowMs = millis();
+        if(!s_reported && (uint32_t)(nowMs - s_lastCheck) >= 1000) {
+            s_lastCheck = nowMs;
+            const char* fault = InBuff.invariantFault();
+            if(fault) {
+                s_reported = true;
+                ERRORLOG("inBuffer bookkeeping corrupt: %s (filled %u, datamode %u)",
+                         fault, (unsigned)InBuff.bufferFilled(), (unsigned)getDatamode());
+            }
+        }
+    }
 
     /* No-progress watchdog.  A local track whose decoder has stopped taking data sits silent for ever: m_sumBytesDecoded
        stops short of m_audioDataSize, so no end-of-file is declared and nothing advances the playlist.  Five seconds is
@@ -1115,6 +1184,13 @@ void Audio::processWebStream() {
             InBuff.bytesWritten(bytesAddedToBuffer);
         }
 
+        // The head is inspected only until the stream starts. Same helper and same verdict as the I2S fork:
+        // positive signatures only, so an unusual but working stream is never refused here.
+        if(!f_stream && InBuff.bufferFilled() >= 8) {
+            const char* shape = nullptr;
+            const uint8_t verdict = sniffHead(InBuff.getReadPtr(), InBuff.bufferFilled(), &shape);
+            if(verdict != STREAM_REFUSE_NONE) { setRefuse(verdict, shape); return; }
+        }
         if(InBuff.bufferFilled() > maxFrameSize && !f_stream) {  // waiting for buffer filled
             f_stream = true;  // ready to play the audio data
             m_f_stream_ready = true; // [Maleksm graft] signal FreeRTOS task
@@ -1296,7 +1372,7 @@ void Audio::processWebStreamHLS() {
         m_f_firstCall = false;
         m_f_m3u8data = true;
         firstBytes = true;
-        ID3Buff = (uint8_t*)malloc(ID3BuffSize);
+        ID3Buff = (uint8_t*)heapq::take("id3buf", ID3BuffSize);
         m_controlCounter = 0;
     }
 
@@ -1312,6 +1388,13 @@ void Audio::processWebStreamHLS() {
             if(ID3WritePtr < ID3BuffSize){
                 ID3WritePtr += _client->readBytes(&ID3Buff[ID3WritePtr], ID3BuffSize - ID3WritePtr);
                 return;
+            }
+            // The whole segment head is in ID3Buff here and nothing has been decoded from it: the one place the
+            // payload can be identified. An ID3 tag cannot match these signatures, so it passes untouched.
+            {
+                const char* shape = nullptr;
+                const uint8_t verdict = sniffHead(ID3Buff, ID3WritePtr, &shape);
+                if(verdict != STREAM_REFUSE_NONE) { setRefuse(verdict, shape); return; }
             }
             if(m_controlCounter < 100){
                 int res = read_ID3_Header(&ID3Buff[ID3ReadPtr], ID3BuffSize - ID3ReadPtr);
@@ -1332,7 +1415,7 @@ void Audio::processWebStreamHLS() {
                 memcpy(InBuff.getWritePtr(), &ID3Buff[ws + ID3ReadPtr], ID3BuffSize - (ID3ReadPtr + ws));
                 InBuff.bytesWritten(ID3BuffSize - (ID3ReadPtr + ws));
             }
-            if(ID3Buff) free(ID3Buff);
+            if(ID3Buff) heapq::give("id3buf", ID3Buff);
             byteCounter += ID3BuffSize;
             ID3Buff = NULL;
             firstBytes = false;
@@ -1826,12 +1909,32 @@ const char* Audio::parsePlaylist_M3U8() {
 
     uint8_t lines = m_playlistContent.size();
     bool f_begin = false;
+    // A body whose first non-empty line is not #EXTM3U is not a playlist at all: an HTML error page, a captive
+    // portal, a JSON answer. Nothing below would run (f_begin stays false) and the player would retry it forever.
+    for(uint16_t i = 0; i < (uint16_t)lines; i++) {
+        if(strlen(m_playlistContent[i]) == 0) continue;
+        if(!startsWith(m_playlistContent[i], "#EXTM3U")) {
+            setRefuse(STREAM_REFUSE_NOT_AUDIO, "not an m3u8 playlist");
+            return NULL;
+        }
+        break;
+    }
     const char* ret;
     if(lines){
         for(uint16_t i = 0; i < lines; i++) {
             if(strlen(m_playlistContent[i]) == 0) continue;                    // empty line
             if(startsWith(m_playlistContent[i], "#EXTM3U")) {f_begin = true;  continue;} // what we expected
             if(!f_begin) continue;
+
+            // Conclusive, and the whole reason this gate exists: an fMP4 chunklist announces its init segment here.
+            if(startsWith(m_playlistContent[i], "#EXT-X-MAP:")) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "fragmented MP4 playlist (EXT-X-MAP)");
+                return NULL;
+            }
+            if(startsWith(m_playlistContent[i], "#EXT-X-KEY:") && indexOf(m_playlistContent[i], "METHOD=NONE") < 0) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "encrypted HLS playlist (EXT-X-KEY)");
+                return NULL;
+            }
 
             if(startsWith(m_playlistContent[i], "#EXT-X-STREAM-INF:")){
                 uint8_t codec = CODEC_NONE;
@@ -1976,6 +2079,12 @@ const char* Audio::parsePlaylist_M3U8() {
                 m_playlistURL.shrink_to_fit();
         }
         if(m_f_Log) log_i("now playing %s", m_playlistBuff);
+        // An fMP4 segment cannot be decoded, and it reaches here even with no #EXT-X-MAP in the window, so this is
+        // not a duplicate of the tag check above. Refuse before the segment is fetched.
+        if(indexOf(m_playlistBuff, ".m4s") > 0 || indexOf(m_playlistBuff, ".cmfv") > 0 || endsWith(m_playlistBuff, ".mp4")) {
+            setRefuse(STREAM_REFUSE_UNSUPPORTED, "fragmented MP4 segment");
+            return NULL;
+        }
         if(endsWith(m_playlistBuff, "ts")) m_f_ts = true;
         if(indexOf(m_playlistBuff, ".ts?") > 0) m_f_ts = true;
         return m_playlistBuff;
@@ -2091,7 +2200,8 @@ const char* Audio::m3u8redirection(uint8_t* codec){
         // http://livees.com/chunklist022.m3u8
 
 
-        tmp = (char*)malloc(strlen(m_lastHost) + strlen(m_playlistContent[choosenLine]));
+        tmp = (char*)heapq::take("m3u8", strlen(m_lastHost) + strlen(m_playlistContent[choosenLine]) + 2);
+        if(!tmp) return nullptr;
         strcpy(tmp, m_lastHost);
         int idx1 = lastIndexOf(tmp, "/");
         strcpy(tmp + idx1 + 1, m_playlistContent[choosenLine]);
@@ -2100,8 +2210,9 @@ const char* Audio::m3u8redirection(uint8_t* codec){
 
     if(startsWith(m_playlistContent[choosenLine], "../")){
         // ../../2093120-b/RISMI/stream01/streamPlaylist.m3u8
-        if(tmp) { free(tmp); tmp = NULL;}
-        tmp = (char*)malloc(strlen(m_lastHost) + strlen(m_playlistContent[choosenLine]));
+        if(tmp) { heapq::give("m3u8", tmp); tmp = NULL;}
+        tmp = (char*)heapq::take("m3u8", strlen(m_lastHost) + strlen(m_playlistContent[choosenLine]) + 3);
+        if(!tmp) return nullptr;
         strcpy(tmp, m_lastHost);
         int idx1 = lastIndexOf(tmp, "/");
         tmp[idx1] = '\0';
@@ -2123,7 +2234,7 @@ const char* Audio::m3u8redirection(uint8_t* codec){
     if(m_lastM3U8host){free(m_lastM3U8host); m_lastM3U8host = NULL;}
     m_lastM3U8host = strdup(tmp);
     if(tmp) {
-        free(tmp);
+        heapq::give("m3u8", tmp);
         tmp = NULL;
     }
     AUDIO_INFO("redirect to %s", m_playlistContent[choosenLine]);
@@ -2336,17 +2447,21 @@ bool Audio::latinToUTF8(char* buff, size_t bufflen, bool UTF8check) {
     char* iso8859_1 = x_strdup(buff);
     if(!iso8859_1){log_e("oom"); return false;}
 
+    // The bound is checked BEFORE each write, not after.  The old order wrote buff[out] and only then tested out, so the
+    // last write of a full buffer landed on index bufflen - one byte past the end of m_chbuf's 4096-byte PSRAM block, and
+    // therefore into the next block's TLSF header.  That is what corrupted the PSRAM free list and then panicked inside
+    // x_strdup on the very next track.  Valid indices are 0..bufflen-1, and the terminator needs one too.
     while(iso8859_1[in] != '\0'){
         if(iso8859_1[in] < 0x80){
+            if(out + 1 >= bufflen) goto exit;          // one byte plus the terminator
             buff[out] = iso8859_1[in];
             out++;
             in++;
-            if(out > bufflen) goto exit;
         }
         else{
+            if(out + 2 >= bufflen) goto exit;          // two bytes plus the terminator
             buff[out] = (0xC0 | iso8859_1[in] >> 6);
             out++;
-            if(out + 1 > bufflen) goto exit;
             buff[out] = (0x80 | (iso8859_1[in] & 0x3F));
             out++;
             in++;
@@ -2357,6 +2472,8 @@ bool Audio::latinToUTF8(char* buff, size_t bufflen, bool UTF8check) {
     return true;
 
 exit:
+    // Terminate what was converted, so a truncated result is a shorter string rather than a half-rewritten one.
+    buff[out] = '\0';
     if(iso8859_1) {free(iso8859_1); iso8859_1 = NULL;}
     return false;
 }
@@ -2446,7 +2563,12 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             int idx = indexOf(rhl + 13, ";");
             if(idx >0) rhl[13 + idx] = '\0';
             if(parseContentType(rhl + 13)) ct_seen = true;
-            else goto exit;
+            else {
+                // A content type we have no case for is not audio we can play. Latch it so the player refuses the
+                // URL instead of reconnecting; m_f_timeout is clear on this path, so `exit` does not re-connect.
+                setRefuse(STREAM_REFUSE_NOT_AUDIO, "unknown content type");
+                goto exit;
+            }
         }
 
         else if(startsWith(rhl, "location:")) {
@@ -2527,6 +2649,7 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             int32_t br = atoi(c_bitRate); // Found bitrate tag, read the bitrate in Kbit
             br = br * 1000;
             m_bitrate= br;
+            m_brFromHeader = true;   // the server's own number wins; the estimate below must not replace it
             sprintf(m_chbuf, "%ld", br);
             if(audio_bitrate) audio_bitrate(m_chbuf);
         }
@@ -2607,11 +2730,41 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             if(m_f_Log) {log_i("now parse playlist");}
         }
         else{
-            AUDIO_INFO("unknown content found at: %s", m_lastHost);
-            AUDIO_ERROR("unknown content found at: %s", m_lastHost);
+            // Parsed, but no codec and no playlist format came out of it: the URL is not a stream (a web page, an
+            // API answer). Latching this is what stops the radiomast-style reconnect loop.
+            setRefuse(STREAM_REFUSE_NOT_AUDIO, "unknown content, no codec and no playlist");
             goto exit;
         }
         return true;
+}
+//---------------------------------------------------------------------------------------------------------------------
+// The only place a stream is given up on. One verdict, one line; Player::loop() polls refuseReason() and
+// cancels the retry ladder, so nothing else may set m_refuseReason. See handle-unsupported-unrecognized.md.
+void Audio::setRefuse(uint8_t reason, const char* shape) {
+    if(m_refuseReason != STREAM_REFUSE_NONE) return;                    // first verdict wins
+    m_refuseReason = reason;
+    AUDIO_ERROR("refusing %s: %s", shape, m_lastHost ? m_lastHost : "");
+    stopSong();
+}
+//--------------------------------------------------------------------------------------------------
+// One peek decides whether the first bytes are something this firmware must not decode. Positive signatures only:
+// an unrecognised head is left alone, because refusing an unusual but working stream is the worse error and the
+// attempt cap in Player::loop() already ends a stream that never produces audio.
+uint8_t Audio::sniffHead(const uint8_t* p, size_t n, const char** shape) {
+    if(!p || n < 8) return STREAM_REFUSE_NONE;
+    if(!memcmp(p + 4, "ftyp", 4) || !memcmp(p + 4, "styp", 4) || !memcmp(p + 4, "moof", 4) ||
+       !memcmp(p + 4, "mdat", 4) || !memcmp(p + 4, "moov", 4)) {
+        *shape = "fragmented MP4 (MPEG-4 box)";
+        return STREAM_REFUSE_UNSUPPORTED;
+    }
+    if(p[0] == '<')                 { *shape = "a web page or XML"; return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == '{' || p[0] == '[')  { *shape = "a JSON answer";     return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == '%' && !memcmp(p + 1, "PDF", 3))                 { *shape = "a PDF";         return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 'P' && p[1] == 'K' && p[2] == 0x03 && p[3] == 0x04) { *shape = "a zip archive"; return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 0x89 && !memcmp(p + 1, "PNG", 3))                { *shape = "a PNG image";   return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF)            { *shape = "a JPEG image";  return STREAM_REFUSE_NOT_AUDIO; }
+    if(!memcmp(p, "GIF8", 4))                                   { *shape = "a GIF image";   return STREAM_REFUSE_NOT_AUDIO; }
+    return STREAM_REFUSE_NONE;
 }
 //---------------------------------------------------------------------------------------------------------------------
 bool Audio::parseContentType(char* ct) {
@@ -2800,6 +2953,11 @@ void Audio::setDefaults(){
     m_playlistFormat = FORMAT_NONE;
     m_localBitrateSend = false;
     m_audioFileDuration = 0;
+    /* A new connection must not inherit the previous stream's bitrate.  Without these three lines the first estimate
+       of a stream compares against a stale value, marks itself "unchanged" and reports nothing at all. */
+    m_avr_bitrate = 0;
+    m_brFromHeader = false;
+    m_brEstimated = false;
     /* Per-track state the graft dropped.  The ID3 walk does `m_audioDataStart += id3Size`, so without this reset every
        track inherits the ID3 sizes of all the tracks before it; m_audioDataSize is then short by that amount and the
        track is declared finished early, leaving its tail in the ring buffer unplayed. */
@@ -3122,6 +3280,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
 
     AUDIO_INFO("Connect to new host: \"%s\"", l_host);
     setDefaults();  // no need to stop clients if connection is established (default is true)
+    m_refuseReason = STREAM_REFUSE_NONE;   // a new connection is a new verdict
 
     if(startsWith(l_host, "https")) m_f_ssl = true;
     else                            m_f_ssl = false;
@@ -3657,6 +3816,16 @@ int Audio::read_ID3_Header(uint8_t *data, size_t len) {
         sprintf(m_chbuf, "ID3 version: 2.%i", ID3version);
         if(!m_f_m3u8data) if(audio_info) audio_info(m_chbuf);
 
+        /* Opt-in since the investigation closed: this fires on every ID3 header, which is twice per HLS segment, and
+           it is the highest-frequency line in a stream log.  It earned its place - it proved all three buffers live in
+           PSRAM and never move - so it is switched off rather than deleted.  Define HEAPMAP_LOG to bring it back. */
+        #ifdef HEAPMAP_LOG
+        FUNCTIONLOG("HeapMap", "chbuf %p %u %s | ibuff %p %u %s | lastHost %p %s | quarantined %u",
+            m_chbuf, (unsigned)m_chbufSize, heapq::poolName(m_chbuf),
+            m_ibuff, (unsigned)m_ibuffSize, heapq::poolName(m_ibuff),
+            m_lastHost, heapq::poolName(m_lastHost), (unsigned)heapq::held());
+        #endif
+
         if(ID3version == 2){
             m_controlCounter = 10;
         }
@@ -4075,7 +4244,8 @@ uint32_t Audio::getAudioCurrentTime(){
         m_avr_bitrate = l3id012[SCIStatus>>12] * 1000;
       }
       m_localBitrateSend = prev_bitrate==m_avr_bitrate;
-      if(m_avr_bitrate==0) return 0;
+      // Zero it as well as returning: a caller that retries must be able to tell "no value yet" from "a value".
+      if(m_avr_bitrate < 8000 || m_avr_bitrate > 640000) { m_avr_bitrate = 0; return 0; }
       sprintf(brbuf, "%lu", m_avr_bitrate);
       if(audio_bitrate && !m_localBitrateSend) audio_bitrate(brbuf);
       m_localBitrateSend = true;
@@ -4088,7 +4258,9 @@ uint32_t Audio::getAudioCurrentTime(){
     SCIStatus=read_register(SCI_HDAT0);
     m_avr_bitrate = SCIStatus * 8;
     m_localBitrateSend = prev_bitrate==m_avr_bitrate;
-    if(m_avr_bitrate==0) return 0;
+    // The AAC conversion here (HDAT0 * 8) has no documented basis, so the range check is the guard against publishing
+    // a nonsense number; zeroing it lets the caller retry rather than latch a bad value.
+    if(m_avr_bitrate < 8000 || m_avr_bitrate > 640000) { m_avr_bitrate = 0; return 0; }
     sprintf(brbuf, "%lu", m_avr_bitrate);
     if(audio_bitrate && !m_localBitrateSend) audio_bitrate(brbuf);
     m_localBitrateSend = true;

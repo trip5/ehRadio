@@ -236,13 +236,13 @@ void AudioHandlers::handleInfo(const char* info) {
   }
   
 
-  if (strstr(info, "format is mp3") != NULL) { config.setBitrateFormat(BF_MP3); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is aac") != NULL) { config.setBitrateFormat(BF_AAC); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is flac") != NULL) { config.setBitrateFormat(BF_FLAC); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is wav") != NULL) { config.setBitrateFormat(BF_WAV); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is ogg") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is vorbis") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is opus") != NULL) { config.setBitrateFormat(BF_OPU); display.putRequest(DBITRATE); }
+  if (strstr(info, "format is mp3") != NULL) { config.setBitrateFormat(BF_MP3); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is aac") != NULL) { config.setBitrateFormat(BF_AAC); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is flac") != NULL) { config.setBitrateFormat(BF_FLAC); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is wav") != NULL) { config.setBitrateFormat(BF_WAV); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is ogg") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is vorbis") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is opus") != NULL) { config.setBitrateFormat(BF_OPU); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
   if (strstr(info, "skip metadata") != NULL) config.setTitle(config.station.name);
   // Belt and braces only: the connecting placeholder is owned by Player::loop(), which clears it from player state
   // because this message is not emitted on every library route (an HLS playlist stream never sends it). Kept because on
@@ -316,6 +316,9 @@ void AudioHandlers::handleShowStreamTitle(const char* info) {
 
 void AudioHandlers::handleError(const char* info) {
   if (playlistValidator.active()) return;   // a failed probe is expected, not an error to display
+  // AUDIO_ERROR expands to this callback, so a refusal's own line would become the title. Keep it a log line: the
+  // user is told once, in words that are true, by noteFatalStream(). See handle-unsupported-unrecognized.md §17.2.
+  if (player.refuseReason() != STREAM_REFUSE_NONE) { ERRORLOG("%s", info); return; }
   player.setError(info);
 }
 

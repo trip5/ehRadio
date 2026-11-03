@@ -35,6 +35,47 @@
   #include "soc/io_mux_reg.h"
 #endif
 //****************************************************************************************
+/* Read-ahead targets for web streams, in bytes of InBuff occupancy.
+   These are NOT the buffer's capacity - that is m_buffSizePSRAM (UINT16_MAX * 10, about 640 KB), which is far
+   larger than any segment.  These thresholds are what the stream paths use as "enough buffered to stop reading
+   ahead", so they decide how much audio stands between a stalled network read and silence on the DAC.
+
+   At 128 kbit/s (16 KB/s) the HLS target below is about 2.5 s of audio.  A blocking HTTP response-header read of
+   ~100 ms per segment is harmless at that depth and only becomes audible when the buffer is nearly empty at the
+   moment the read blocks.  Raise these to trade live latency for immunity; override with -D from the build flags. */
+#ifndef HLS_BUFFER_TARGET_BYTES
+  // HLS: keep reading ahead until this much is buffered.  This is the number that decides how much audio stands
+  // between a stalled read and silence on the DAC, and it is the ONLY reason the ring's depth is ever small - the
+  // ring itself has room for ~630 KB.  Measured behaviour at 40000: occupancy sat at ~56 KB and crept down, because
+  // the gate stopped the read the moment it was satisfied.  HLS playlists advertise two to three segments ahead, so
+  // there is no reason to sit that shallow.  At 128 kbit/s, 200000 is about 12 s; at 320 kbit/s, about 5 s.  Raise
+  // it for immunity from network stalls, lower it for less latency behind the live edge.
+  #define HLS_BUFFER_TARGET_BYTES 200000
+#endif
+#ifndef WEBSTREAM_BUFFER_TARGET_BYTES
+  #define WEBSTREAM_BUFFER_TARGET_BYTES 60000  // plain ICY/HTTP stream: same idea, its own figure
+#endif
+#ifndef HLS_BUFFER_LOW_BYTES
+  #define HLS_BUFFER_LOW_BYTES 8000            // below this the read has under half a second to hide behind
+#endif
+#ifndef HLS_BUFFER_LOG_MS
+  #define HLS_BUFFER_LOG_MS 10000              // one occupancy line per this many ms, never more
+#endif
+#ifndef HLS_PLAYLIST_MIN_INTERVAL_MS
+  // Minimum gap between playlist fetches when the window has nothing new to offer.  An empty queue is the NORMAL
+  // steady state while the live edge has not advanced, not an error: without a floor here the player answers it with
+  // an immediate reconnect, parses, finds nothing again, and hammers the station - which is exactly what it did once
+  // the sequence watermark started honestly reporting "nothing new".
+  #define HLS_PLAYLIST_MIN_INTERVAL_MS 3000
+#endif
+#ifndef AUDIO_TASK_PRIORITY
+  // Above AsyncTCP (4), below lwIP (18). The library default of 2 let UI and log traffic preempt the decoder.
+  #define AUDIO_TASK_PRIORITY 6
+#endif
+// No HLS_PLAYLIST_POLL_FILL here: a fill-based gate on the poll was tried on 2026.11.03 and removed the same day.
+// It could not work - the ring settles at 117-119 KB so the threshold was always met, and in principle one poll per
+// segment is the floor because one segment per poll is what sustains playback.  Recorded in plan section 18.
+//****************************************************************************************
 AudioBuffer::AudioBuffer(size_t maxBlockSize) {
     if(maxBlockSize) m_resBuffSizeRAM = maxBlockSize;
     if(maxBlockSize) m_maxBlockSize = maxBlockSize;
@@ -209,7 +250,13 @@ Audio::Audio(bool internalDAC /* = false */, uint8_t channelEnabled /* = I2S_SLO
 #if ESP_IDF_VERSION_MAJOR == 5
     m_i2s_chan_cfg.id            = (i2s_port_t)m_i2s_num;  // I2S_NUM_AUTO, I2S_NUM_0, I2S_NUM_1
     m_i2s_chan_cfg.role          = I2S_ROLE_MASTER;        // I2S controller master role, bclk and lrc signal will be set to output
-    m_i2s_chan_cfg.dma_desc_num  = 32;                     // number of DMA buffer
+    // 64 x 256 frames = 16384 frames, which is 682 ms at 24000 Hz and 341 ms at 48000 Hz.  The audio task runs on
+    // core 0 at priority 6, BELOW lwIP (18) and the WiFi driver (23), so a burst of network work - a playlist poll, a
+    // WebUI request - deschedules it outright rather than merely sharing.  At 32 descriptors such a burst only had to
+    // last 341 ms to empty the DMA and put silence on the wire, which is exactly the audible stop heard on every
+    // playlist poll once the decode deficit was removed and the DMA started running full (2026.11.03).  Doubling the
+    // depth means the same burst has to last 682 ms instead.  Cost is 64 KB of internal RAM for the descriptors.
+    m_i2s_chan_cfg.dma_desc_num  = 64;                     // number of DMA buffers
     m_i2s_chan_cfg.dma_frame_num = 256;                // I2S frame number in one DMA buffer.
     m_i2s_chan_cfg.auto_clear    = true;                   // i2s will always send zero automatically if no data to send
     i2s_new_channel(&m_i2s_chan_cfg, &m_i2s_tx_handle, NULL);
@@ -656,6 +703,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
         h_host[pos_colon] = '\0'; 							// Host without portnumber
     }
     setDefaults();
+    m_refuseReason = STREAM_REFUSE_NONE;                          // a new connection is a new verdict
     rqh = x_ps_calloc(lenHost + strlen(authorization) + 330, 1); // http request header
     if(!rqh) {AUDIO_INFO("out of memory"); stopSong(); goto exit;}
 
@@ -786,7 +834,10 @@ bool Audio::httpPrint(const char* host) {
         hostwoext[pos_colon] = '\0'; 		// Host without portnumber
     }
 
-    AUDIO_INFO("connect to: \"%s\"", host);
+    // A playlist poll is not a connection to the stream.  It happens 2-3 times per segment and was the bulk of the
+    // per-segment log flood, and its outcome is already reported by the "hls: nothing new" and "hls: buf now" lines.
+    // The first connection to a station is logged by connecttohost() and is unaffected.
+    if(indexOf(host, ".m3u8") < 0) AUDIO_INFO("connect to: \"%s\"", host);
 
     char rqh[strlen(h_host) + 330]; 		// http request header
     rqh[0] = '\0';
@@ -1845,8 +1896,13 @@ int Audio::read_ID3_Header(uint8_t* data, size_t len) {
             if(remainingHeaderBytes > s_lastRemaining) s_frames = 0;   // a new tag header was parsed
             s_lastRemaining = remainingHeaderBytes;
             if(s_frames < 12 || framesize > remainingHeaderBytes) {
-                AUDIO_INFO("id3 frame %.4s size %u rem %u", frameid,
-                    (unsigned)framesize, (unsigned)remainingHeaderBytes);
+                // Five of these per segment - the single largest contributor to the per-segment log flood, and only
+                // useful when the tag layout itself is what is being debugged.  Off by default; define
+                // AUDIO_ID3_LOG to bring the dump back.
+                #ifdef AUDIO_ID3_LOG
+                  AUDIO_INFO("id3 frame %.4s size %u rem %u", frameid,
+                      (unsigned)framesize, (unsigned)remainingHeaderBytes);
+                #endif
             }
             if(s_frames < 255) s_frames++;
         }
@@ -2500,6 +2556,18 @@ void Audio::playChunk() {
     esp_err_t err = ESP_OK;
     int i= 0;
 
+    // The three IIR chains have NO pass-through early-out: each runs 5 float multiplies, 4 adds, 8 loads, 8 stores
+    // and a float-to-int16 conversion, per channel, on EVERY sample pair.  With a flat equaliser the coefficients are
+    // identity (a0 = 1, everything else 0), so all of it computes y = 1 * x.  setTone() is the only writer and it is
+    // called once at startup from player.cpp, so testing the coefficients once per chunk is enough.  Evaluated before
+    // the `goto i2swrite` below, which is why it lives up here with the other declarations.
+    const bool f_filtersActive = !(m_filter[0].a0 == 1 && m_filter[0].a1 == 0 && m_filter[0].a2 == 0 &&
+                                   m_filter[0].b1 == 0 && m_filter[0].b2 == 0 &&
+                                   m_filter[1].a0 == 1 && m_filter[1].a1 == 0 && m_filter[1].a2 == 0 &&
+                                   m_filter[1].b1 == 0 && m_filter[1].b2 == 0 &&
+                                   m_filter[2].a0 == 1 && m_filter[2].a1 == 0 && m_filter[2].a2 == 0 &&
+                                   m_filter[2].b1 == 0 && m_filter[2].b2 == 0);
+
     if(count > 0) goto i2swrite;
 
     if(getChannels() == 1){
@@ -2523,6 +2591,25 @@ void Audio::playChunk() {
         }
         computeVUlevel(*sample);
 
+        // ---- silence-run detector -------------------------------------------------------------------------
+        // Real audio contains individual zero samples but never a long unbroken run of them.  480 frames at 24000 Hz
+        // is 20 ms of digital silence, which music cannot produce.  This separates the two remaining explanations for
+        // an audible stop: "the DAC ran dry" is already excluded (frames/s equals the clock exactly and the write
+        // blocks 30% of the time), so if these runs appear in step with the polls then the ZEROS ARE BEING WRITTEN by
+        // us - a zeroed or stale output buffer, or the decoder returning no samples - and the search moves entirely
+        // into the data path where no amount of scheduling work would have found it.
+        {
+            static uint32_t sSilRun = 0;
+            if((*sample)[LEFTCHANNEL] == 0 && (*sample)[RIGHTCHANNEL] == 0) {
+                sSilRun++;
+                if(sSilRun > m_silMaxRun) m_silMaxRun = sSilRun;
+                if(sSilRun == 480) m_silRuns++;        // counted once per run, on the frame that crosses 20 ms
+            }
+            else {
+                sSilRun = 0;
+            }
+        }
+
         //---------- Filterchain, can commented out if not used-------------
         {
             if(m_corr > 1) {
@@ -2530,9 +2617,11 @@ void Audio::playChunk() {
                 s2[LEFTCHANNEL] /= m_corr;
                 s2[RIGHTCHANNEL] /= m_corr;
             }
-            IIR_filterChain0(*sample);
-            IIR_filterChain1(*sample);
-            IIR_filterChain2(*sample);
+            if(f_filtersActive) {
+                IIR_filterChain0(*sample);
+                IIR_filterChain1(*sample);
+                IIR_filterChain2(*sample);
+            }
         }
         //------------------------------------------------------------------
         Gain(*sample);
@@ -2561,17 +2650,58 @@ i2swrite:
 
     validSamples = m_validSamples;
 
+    // Where the audio task's time actually goes.  A write that blocks means the DMA is full and we are AHEAD of the
+    // DAC; a write that never blocks while frames/s is short means the DAC is starving and the time is being lost in
+    // the decoder.  With the byte count below that separates "decoder too slow" from "write blocking" without
+    // another guess.  `short` counts writes that accepted fewer bytes than they offered.
+    const size_t   wrWant = (size_t)validSamples * (size_t)sampleSize;
+    const uint32_t wrT0   = micros();
 #if(ESP_IDF_VERSION_MAJOR == 5)
     err = i2s_channel_write(m_i2s_tx_handle, (int16_t*)m_outBuff + count, validSamples * sampleSize, &i2s_bytesConsumed, 10);
 #else
     err = i2s_write((i2s_port_t)m_i2s_num, (int16_t*)m_outBuff + count, validSamples * sampleSize, &i2s_bytesConsumed, 10);
 #endif
+    m_i2sWriteUs += (uint32_t)(micros() - wrT0);
+    if(i2s_bytesConsumed < wrWant) m_i2sWriteShort++;
 
     if( ! (err == ESP_OK || err == ESP_ERR_TIMEOUT)) goto exit;
+
+    // ---- what actually reached the DAC ---------------------------------------------------------------
+    // Frames the I2S peripheral accepted, counted on the audio task.  When the clock is 48000 then 48000 frames/s
+    // is the ONLY healthy value: it proves the decoder's output frame count matches what the peripheral consumes.
+    // Any shortfall is silence the DMA had to insert, and the ratio to the clock names the cause.  A shortfall at
+    // 44100/48000 = 0.9188 reads as ~44100 frames/s against a 48000 Hz clock, which is a RATE MISMATCH and not a
+    // CPU shortage - it is constant, load-independent, and evenly spaced, which is the reported symptom exactly.
+    if(i2s_bytesConsumed) {
+        m_i2sFramesOut += (uint32_t)(i2s_bytesConsumed / (size_t)sampleSize);
+        static uint32_t sFramesMs = 0;
+        const uint32_t nowMs = millis();
+        if(sFramesMs == 0) { sFramesMs = nowMs; }
+        else if((uint32_t)(nowMs - sFramesMs) >= 10000) {
+            const uint32_t span = (uint32_t)(nowMs - sFramesMs);
+            AUDIO_INFO("i2s: %u frames/s (decoder %u Hz, clock %u Hz) decode %u ms, write %u ms of %u, short %u, gap %u ms, sil %u runs (max %u ms), buf %u",
+                    (unsigned)((uint64_t)m_i2sFramesOut * 1000ULL / span),
+                    (unsigned)getSampleRate(), (unsigned)m_i2sAppliedRate,
+                    (unsigned)(m_decodeUs / 1000U), (unsigned)(m_i2sWriteUs / 1000U), (unsigned)span,
+                    (unsigned)m_i2sWriteShort, (unsigned)(m_audioGapMaxUs / 1000U),
+                    (unsigned)m_silRuns,
+                    (unsigned)((uint64_t)m_silMaxRun * 1000ULL / (getSampleRate() ? getSampleRate() : 24000)),
+                    (unsigned)InBuff.bufferFilled());
+            m_i2sFramesOut  = 0;
+            m_i2sWriteUs    = 0;
+            m_i2sWriteShort = 0;
+            m_decodeUs      = 0;
+            m_audioGapMaxUs = 0;
+            m_silRuns       = 0;
+            m_silMaxRun     = 0;
+            sFramesMs = nowMs;
+        }
+    }
+
     m_validSamples -= i2s_bytesConsumed / sampleSize;
     count += i2s_bytesConsumed / 2;
     if(m_validSamples < 0) { m_validSamples = 0; }
-    if(m_validSamples == 0) { count = 0; }
+    if(m_validSamples == 0) { count = 0; m_f_samplesDrained = true; } // pending frames did get written (join probe)
 
 // ---- statistics, bytes written to I2S (every 10s)
     // static int cnt = 0;
@@ -2595,7 +2725,16 @@ exit:
 }
 //****************************************************************************************
 // The manifest only advances on a segment boundary, so a poll that finds nothing new waits for one.
-static const uint32_t M3U8_NO_SEGMENT_WAIT_MS = 2000;
+//
+// That wait must be SHORTER than the playlist's own roll-off.  It was 2000 ms against a window that rolls every
+// ~1.8 s, so whenever a poll slipped the window's head had already moved past us and the entry in between was never
+// handed to us at all - not dropped later, never seen.  Measured 2026.11.03: 3 of 41 sequence numbers absent, 7.3%,
+// which is exactly 10 s of audio taking 10.8 s to play, with no rate error anywhere (consumption stayed at the
+// declared bitrate and the ring stayed flat).  The cost of polling faster is one GET on a keep-alive socket, measured
+// at 30-100 ms of Main time, which the audio path cannot notice: it runs on the other core behind a ~20 segment ring.
+#ifndef M3U8_NO_SEGMENT_WAIT_MS
+  #define M3U8_NO_SEGMENT_WAIT_MS 500
+#endif
 
 // A decoder that stops consuming the buffer ends no track by itself: the tail rule in processLocalFile() needs the
 // reader at EOF, and playAudioData() sets m_f_eof only when it decides the data is finished.  With the file still open
@@ -2664,6 +2803,8 @@ void Audio::loop() {
     }
     else { // m3u8 datastream only
         const char* host = NULL;
+        // This whole-loop pause is load-bearing - do not scope it to the poll (measured regression). The millis
+        // comparison is not wrap-safe but is left alone on purpose. See i2s-frankenstein-surgery-notes.md.
         static uint32_t no_host_timer = millis();
         if(no_host_timer > millis()) {return;}
         switch(m_dataMode) {
@@ -2680,15 +2821,25 @@ void Audio::loop() {
             case AUDIO_PLAYLISTINIT: readPlayListData(); break;
             case AUDIO_PLAYLISTDATA:
                 host = parsePlaylist_M3U8();
-                // No new segment in the manifest yet: wait for one instead of re-fetching it in a spin.  This is
-                // armed on every empty answer, which the old one-shot pause (armed only at exactly the second
-                // empty answer, so never again) could not do.
-                if(!host) {no_host_timer = millis() + M3U8_NO_SEGMENT_WAIT_MS;}
+                // No new segment in the manifest yet: wait for one instead of re-fetching it in a spin.  The wait
+                // GROWS with every consecutive empty answer.  A flat 500 ms poll costs 5-6 GETs per 1.8 s segment,
+                // and each one wakes AsyncTCP on the audio core (see AUDIO_TASK_PRIORITY) - the poll was measurably
+                // making the very stutter it was added to remove.  500 ms is kept for the first look so a segment
+                // that has just appeared is picked up promptly; the back-off applies only while merely waiting:
+                // 500, 1000, 1500, then 2000 ms.
+                if(!host) {
+                    const uint8_t idle = (m_m3u8IdlePolls > 3) ? 3 : m_m3u8IdlePolls;
+                    no_host_timer = millis() + M3U8_NO_SEGMENT_WAIT_MS * (1 + idle);
+                }
                 if(host) { 								// host contains the next playlist URL
                     httpPrint(host);
                     m_dataMode = HTTP_RESPONSE_HEADER;
                 }
                 else { // host == NULL means connect to m3u8 URL
+                    // REVERTED 2026.11.03: a fill-based gate was tried here and it provably never engaged - the ring
+                    // settles at 117-119 KB, below any threshold that could have helped, so the condition was always
+                    // true.  It also cannot help in principle: ONE POLL PER SEGMENT IS THE FLOOR, because one segment
+                    // per poll is what sustains playback at ~3 KB/s.  Asking for fewer polls than that stops the audio.
                     if(m_lastM3U8host) {httpPrint(m_lastM3U8host);}
                     else               {httpPrint(m_lastHost);} 		// if url has no first redirection
                     m_dataMode = HTTP_RESPONSE_HEADER; 	// we have a new playlist now
@@ -2925,24 +3076,52 @@ const char* Audio::parsePlaylist_M3U8() {
 
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return NULL;} // guard
     static uint64_t xMedSeq = 0;
-    static boolean  f_mediaSeq_found = false;
+    // Per-window, NOT static.  As a static it was cleared only on a new stream, while m_m3u8EntryIdx is cleared at the
+    // top of every parse - so any window arriving without #EXT-X-MEDIA-SEQUENCE would have paired a STALE base with a
+    // fresh index and mis-numbered every segment in it, silently dropping some and skipping others.
+    boolean         f_mediaSeq_found = false;
     boolean         f_EXTINF_found = false;
     boolean         f_seqResync = false; 		// the window's live sequence is rebuilt once per parse, at most
     char            llasc[21]; 			// uint64_t max = 18,446,744,073,709,551,615  thats 20 chars + \0
     if(m_f_firstM3U8call) {
         m_f_firstM3U8call = false;
         xMedSeq = 0;
-        f_mediaSeq_found = false;
+        // New station: forget the watermark so the first window is taken whole, and clear the loss tally so the figure
+        // reported with the buffer occupancy always belongs to THIS stream.
+        m_hlsLostSeq   = 0;
+        m_lastM3u8Seq  = 0;
+        m_m3u8SeqValid = false;
     }
 
     uint8_t     lines = m_playlistContent.size();
     bool        f_begin = false;
+    // A body whose first non-empty line is not #EXTM3U is not a playlist at all: an HTML error page, a captive
+    // portal, a JSON answer. Nothing below would run (f_begin stays false) and the player would retry it forever.
+    for(uint16_t i = 0; i < (uint16_t)lines; i++) {
+        if(strlen(m_playlistContent[i]) == 0) continue;
+        if(!startsWith(m_playlistContent[i], "#EXTM3U")) {
+            setRefuse(STREAM_REFUSE_NOT_AUDIO, "not an m3u8 playlist");
+            return NULL;
+        }
+        break;
+    }
     const char* ret;
+    m_m3u8EntryIdx = 0;   // this parse counts #EXTINF entries from the window base
     if(lines) {
         for(uint16_t i = 0; i < lines; i++) {
             if(strlen(m_playlistContent[i]) == 0) continue; 		// empty line
             if(startsWith(m_playlistContent[i], "#EXTM3U")) { f_begin = true; continue; } // what we expected
             if(!f_begin) continue;
+
+            // Conclusive, and the whole reason this gate exists: an fMP4 chunklist announces its init segment here.
+            if(startsWith(m_playlistContent[i], "#EXT-X-MAP:")) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "fragmented MP4 playlist (EXT-X-MAP)");
+                return NULL;
+            }
+            if(startsWith(m_playlistContent[i], "#EXT-X-KEY:") && indexOf(m_playlistContent[i], "METHOD=NONE") < 0) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "encrypted HLS playlist (EXT-X-KEY)");
+                return NULL;
+            }
 
             if(startsWith(m_playlistContent[i], "#EXT-X-STREAM-INF:")) {
                 uint8_t codec = CODEC_NONE;
@@ -2958,24 +3137,22 @@ const char* Audio::parsePlaylist_M3U8() {
             }
             if(m_codec == CODEC_NONE) m_codec = CODEC_AAC; // if we have no redirection
 
-            // "#EXT-X-DISCONTINUITY-SEQUENCE: // not used, 0: seek for continuity numbers, is sometimes not set
-            // "#EXT-X-MEDIA-SEQUENCE:"        // not used, is unreliable
             if(startsWith(m_playlistContent[i], "#EXT-X-VERSION:")) continue;
             if(startsWith(m_playlistContent[i], "#EXT-X-ALLOW-CACHE:")) continue;
             if(startsWith(m_playlistContent[i], "##")) continue;
             if(startsWith(m_playlistContent[i], "#EXT-X-INDEPENDENT-SEGMENTS")) continue;
             if(startsWith(m_playlistContent[i], "#EXT-X-PROGRAM-DATE-TIME:")) continue;
-            if(startsWith(m_playlistContent[i], "#") && !startsWith(m_playlistContent[i], "#EXTINF")) continue; // skip unrecognized directives (e.g. #ENCODER:, #EXT-X-MEDIA-SEQUENCE:, etc.)
-
-            if(!f_mediaSeq_found) {
-                xMedSeq = m3u8_findMediaSeqInURL();
-                if(xMedSeq == UINT64_MAX) {
-                    log_e("X MEDIA SEQUENCE NUMBER not found");
-                    stopSong();
-                    return NULL;
-                }
-                else f_mediaSeq_found = true;
+            // EXT-X-MEDIA-SEQUENCE is the field designed to identify segments.  The previous revision skipped this
+            // line and instead guessed identity by searching each segment URL for the decimal form of a drifting
+            // counter - which stops matching as soon as playback passes the start of the window, and whose one-shot
+            // resync then reset the counter to 0.  That is exactly how the field saw 887, 887, 888, 888, then 892.
+            if(startsWith(m_playlistContent[i], "#EXT-X-MEDIA-SEQUENCE:")) {
+                m_m3u8BaseSeq  = strtoull(m_playlistContent[i] + strlen("#EXT-X-MEDIA-SEQUENCE:"), NULL, 10);
+                m_m3u8EntryIdx = 0;
+                f_mediaSeq_found = true;
+                continue;
             }
+            if(startsWith(m_playlistContent[i], "#") && !startsWith(m_playlistContent[i], "#EXTINF")) continue; // other unrecognized directives
 
             if(startsWith(m_playlistContent[i], "#EXTINF")) {
                 f_EXTINF_found = true;
@@ -3024,30 +3201,31 @@ const char* Audio::parsePlaylist_M3U8() {
                 else { tmp = strdup(m_playlistContent[i]); }
 
                 if(f_mediaSeq_found) {
-                    lltoa(xMedSeq, llasc, 10);
-                    if(indexOf(tmp, llasc) > 0) {
+                    // Identity by INDEX, not by text.  The window base came from EXT-X-MEDIA-SEQUENCE and this is the
+                    // n-th #EXTINF in the window, so its sequence is base + n.  At or below the watermark means it has
+                    // already been played and must never be queued again; above it means it is new.  Nothing here can
+                    // produce a duplicate, and a gap can only be logged, never invented.
+                    const uint64_t segSeq = m_m3u8BaseSeq + m_m3u8EntryIdx;
+                    m_m3u8EntryIdx++;
+                    if(!m_m3u8SeqValid) {                       // first pick for this stream: take the window from its start
                         m_playlistURL.insert(m_playlistURL.begin(), strdup(tmp));
-                        xMedSeq++;
+                        m_lastM3u8Seq  = segSeq;
+                        m_m3u8SeqValid = true;
                     }
-                    else{
-                        lltoa(xMedSeq + 1, llasc, 10);
-                        if(indexOf(tmp, llasc) > 0) {
-                            m_playlistURL.insert(m_playlistURL.begin(), strdup(tmp));
-                            log_w("mediaseq %llu skipped", xMedSeq);
-                            xMedSeq+= 2;
+                    else if(segSeq > m_lastM3u8Seq) {
+                        if(segSeq > m_lastM3u8Seq + 1) {
+                            // A sequence number that was never handed to us, counted so the loss rate is a number and
+                            // not an impression.  It is heard ~20 segments later, so it cannot be correlated by ear.
+                            m_hlsLostSeq += (uint32_t)(segSeq - m_lastM3u8Seq - 1);
+                            AUDIO_INFO("hls: skipped %llu segment(s): %llu -> %llu, total lost %u",
+                                    (unsigned long long)(segSeq - m_lastM3u8Seq - 1),
+                                    (unsigned long long)m_lastM3u8Seq, (unsigned long long)segSeq,
+                                    (unsigned)m_hlsLostSeq);
                         }
-                        else if(!f_seqResync) {
-                            // Neither probe matched: xMedSeq is out of step with the live window, and nothing later
-                            // repairs it - the resync runs after the playlist has been cleared and xMedSeq is a
-                            // function static.  Rebuild the state a fresh connect builds, then take this window
-                            // from its own beginning.
-                            f_seqResync = true;
-                            log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
-                            f_mediaSeq_found = false;
-                            xMedSeq = 0;
-                            m_hashQueue.clear();
-                        }
+                        m_playlistURL.insert(m_playlistURL.begin(), strdup(tmp));
+                        m_lastM3u8Seq = segSeq;
                     }
+                    // else: already played - dropped, which is the whole point
                 }
                 else { 							// without mediaSeqNr, with hash
                     uint32_t hash = simpleHash(tmp);
@@ -3080,6 +3258,8 @@ const char* Audio::parsePlaylist_M3U8() {
     }
 
     if(m_playlistURL.size() > 0) {
+        m_lastM3u8FetchMs = millis();          // a useful window arrived; do not penalise the next fetch
+        m_m3u8IdlePolls  = 0;                  // segments are flowing again: poll quickly on the next empty answer
         x_ps_free(&m_playlistBuff);
 
         if(m_playlistURL[m_playlistURL.size() - 1]) {
@@ -3089,43 +3269,34 @@ const char* Audio::parsePlaylist_M3U8() {
             m_playlistURL.shrink_to_fit();
         }
         if(m_f_Log) log_i("now playing %s", m_playlistBuff);
+        // An fMP4 segment cannot be decoded, and it reaches here even with no #EXT-X-MAP in the window, so this is
+        // not a duplicate of the tag check above. Refuse before the segment is fetched.
+        if(indexOf(m_playlistBuff, ".m4s") > 0 || indexOf(m_playlistBuff, ".cmfv") > 0 || endsWith(m_playlistBuff, ".mp4")) {
+            setRefuse(STREAM_REFUSE_UNSUPPORTED, "fragmented MP4 segment");
+            return NULL;
+        }
         if(endsWith(m_playlistBuff, "ts")) m_f_ts = true;
         if(indexOf(m_playlistBuff, ".ts?") > 0) m_f_ts = true;
         return m_playlistBuff;
     }
     else {
-        if(f_EXTINF_found) {
-            if(f_mediaSeq_found) {
-                if(m_playlistContent.size() == 0) return NULL;
-                uint64_t mediaSeq = m3u8_findMediaSeqInURL();
-                if(xMedSeq == 0 || xMedSeq == UINT64_MAX) {
-                    log_e("xMediaSequence not found"); connecttohost(m_lastHost); }
-                if(mediaSeq < xMedSeq) {
-                    uint64_t diff = xMedSeq - mediaSeq;
-                    if(diff < 10) { ; }
-                    else {
-                        if(m_playlistContent.size() > 0) {
-                            for(int j = 0; j < lines; j++) {
-                                if(m_f_Log) log_i("lines %i, %s", lines, m_playlistContent[j]);
-                            }
-                        }
-                        else { ; }
-
-                        if(m_playlistURL.size() > 0) {
-                            for(int j = 0; j < m_playlistURL.size(); j++) {
-                                if(m_f_Log) log_i("m_playlistURL lines %i, %s", j, m_playlistURL[j]);
-                            }
-                        }
-                        else { ; }
-
-                        if(m_playlistURL.size() == 0) { connecttohost(m_lastHost); }
-                    }
-                }
-                else {
-                    if(mediaSeq != UINT64_MAX) { log_e("err, %u packets lost from %u, to %u", mediaSeq - xMedSeq, xMedSeq, mediaSeq); }
-                    xMedSeq = mediaSeq;
-                }
-            } // f_medSeq_found
+        // Nothing in this window is new.  That is the NORMAL steady state while the live edge has not moved on, and it
+        // is not an error, so nothing is repaired from here.  The retry belongs to loop(), which answers a NULL return
+        // with httpPrint(m_lastM3U8host) after M3U8_NO_SEGMENT_WAIT_MS - a GET on the same keep-alive socket that
+        // frees no buffer and rebuilds no decoder.
+        //
+        // This branch used to answer the same situation with connecttohost(), which is a full session reset, not a
+        // retry: the ring was cleared (observed "hls: buf now 55792, min 55792 of 630774") and the AAC decoder was
+        // rebuilt ("AACDecoder has been initialized"), which is audible as seconds of silence after seconds of audio.
+        // It was also a duplicate of the retry the caller already performs, so the two together hammered the playlist.
+        // A parser finding no new segment must never call a session primitive.
+        if(m_m3u8IdlePolls < 200) m_m3u8IdlePolls++;                  // drives the back-off in loop()
+        if(!f_EXTINF_found) return NULL;                              // not a segment window at all
+        const uint32_t sinceMs = (uint32_t)(millis() - m_lastM3u8FetchMs);
+        if(sinceMs >= HLS_PLAYLIST_MIN_INTERVAL_MS) {                 // diagnostic only, cannot affect playback
+            m_lastM3u8FetchMs = millis();
+            AUDIO_INFO("hls: nothing new, buffer %u of %u - waiting for the next segment",
+                    (unsigned)InBuff.bufferFilled(), (unsigned)HLS_BUFFER_TARGET_BYTES);
         }
     }
 //    playAudioData(); // avoid audio gap
@@ -3143,16 +3314,25 @@ const char* Audio::m3u8redirection(uint8_t* codec) {
     // 32/playlist.m3u8?hlssid=7562d0e101b84aeea0fa35f8b963a174
 
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return NULL;} // guard
+    // ORDER IS THE PREFERENCE ORDER: the loop below takes the LOWEST matching index.  It is therefore sorted by
+    // DECODE COST on this core, not by nominal quality, because decode cost is what decides whether a stream can play
+    // at all.  Measured 2026.11.03 on the ESP32-S3 at 240 MHz, clock 48000 Hz:
+    //   plain AAC-LC (mp4a.40.2)  -> sendBytes 66-73% of wall time, 48011 frames/s = exact real time
+    //   HE-AAC v2  (mp4a.40.29)   -> sendBytes 97.9% of wall time,  44366 frames/s, i.e. 8% of frames never produced
+    // So v2 is roughly half again as expensive as LC, and v1 (SBR without PS) sits between them.  The previous order
+    // put v2 ABOVE v1, which cost Parametric Stereo on every station offering both for a quality-per-bit argument this
+    // CPU cannot afford to honour - at 98% duty there is no headroom left to trade.  xHE-AAC is last because it is the
+    // most expensive and least likely to be supported.
     const char codecString[9][11]={
         "mp4a.40.34", // mp3 stream
         "mp4a.40.01", // AAC Main
-        "mp4a.40.2",  // MPEG-4 AAC LC
+        "mp4a.40.2",  // MPEG-4 AAC LC                                        <- cheapest, preferred
         "mp4a.40.02", // MPEG-4 AAC LC, leading 0 for Aud-OTI compatibility
-        "mp4a.40.29", // MPEG-4 HE-AAC v2 (AAC LC + SBR + PS)
-        "mp4a.40.42", // xHE-AAC
-        "mp4a.40.5",  // MPEG-4 HE-AAC v1 (AAC LC + SBR)
-        "mp4a.40.05", // MPEG-4 HE-AAC v1 (AAC LC + SBR), leading 0 for Aud-OTI compatibility
         "mp4a.67",    // MPEG-2 AAC LC
+        "mp4a.40.5",  // MPEG-4 HE-AAC v1 (AAC LC + SBR)
+        "mp4a.40.05", // MPEG-4 HE-AAC v1, leading 0 for Aud-OTI compatibility
+        "mp4a.40.29", // MPEG-4 HE-AAC v2 (AAC LC + SBR + PS)                 <- most expensive short of xHE
+        "mp4a.40.42", // xHE-AAC
     };
 
     uint16_t choosenLine = 0;
@@ -3163,7 +3343,10 @@ const char* Audio::m3u8redirection(uint8_t* codec) {
         int16_t posCodec = indexOf(m_playlistContent[i], "CODECS=\"mp4a");
         if(posCodec > 0){
             bool found = false;
-            for(uint8_t j = 0; j < sizeof(codecString); j++){
+            // sizeof(codecString) is the BYTE size (99), not the element count, so the original bound walked 90
+            // entries past the end of a 9-element array reading whatever followed it.  Harmless only because an
+            // out-of-range index can never beat a valid one for the `j < cS` test; still an out-of-bounds read.
+            for(uint8_t j = 0; j < sizeof(codecString) / sizeof(codecString[0]); j++){
                 if(indexOf(m_playlistContent[i], codecString[j]) > 0){
                     if(j < cS){cS = j; choosenLine = i;}
                     found = true;
@@ -3576,6 +3759,15 @@ void Audio::processWebStream() {
         }
     }
 
+    // The head is inspected only until the stream starts. Same helper as the HLS path: a container we cannot decode,
+    // or a page where a stream should be, is refused before a decoder exists. Runs every pass until m_f_stream and
+    // is idempotent - setRefuse() keeps the first verdict.
+    if(!m_f_stream && InBuff.bufferFilled() >= 8) {
+        const char* shape = nullptr;
+        const uint8_t verdict = sniffHead(InBuff.getReadPtr(), InBuff.bufferFilled(), &shape);
+        if(verdict != STREAM_REFUSE_NONE) { setRefuse(verdict, shape); return; }
+    }
+
     // start audio decoding - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(InBuff.bufferFilled() > maxFrameSize && !m_f_stream) { // waiting for buffer filled
         if(m_codec == CODEC_OGG) { 					// log_i("determine correct codec here");
@@ -3785,7 +3977,7 @@ nextRound:
     }
     if(f_chunkFinished) {
         if(m_f_psramFound) {
-            if(InBuff.bufferFilled() < 60000) {
+            if(InBuff.bufferFilled() < WEBSTREAM_BUFFER_TARGET_BYTES) {
                 f_chunkFinished = false;
                 m_f_continue = true;
             }
@@ -3831,6 +4023,21 @@ void Audio::processWebStreamHLS() {
 
     // first call, set some values to default - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_f_firstCall) { 						// runs only ont time per connection, prepare for start
+        // ---- join instrument --------------------------------------------------------------------------------
+        // What the PREVIOUS segment left behind.  A non-zero m_validSamples means a partial frame was still sitting
+        // in the output buffer when the segment ended; a growing skip count means the decoder had to walk to the next
+        // sync word through the seam.  Either is the signature of a dropped tail at the join, which is audible as a
+        // click and invisible to the silence detector because the samples are real, merely discontinuous.  On the
+        // VS1053 build the same station is clean, so the seam is ours to explain, not the stream's.
+        {
+            static uint32_t sPrevNotDecoded = 0;
+            // Per-join probe: `valid` = frames pending at the seam, `drained` = whether they actually got written.
+            AUDIO_INFO("join: valid %u, drained %u, skipped %u, ring %u", (unsigned)m_validSamples,
+                    (unsigned)(m_f_samplesDrained ? 1 : 0),
+                    (unsigned)(m_bytesNotDecoded - sPrevNotDecoded), (unsigned)InBuff.bufferFilled());
+            sPrevNotDecoded = m_bytesNotDecoded;
+            m_f_samplesDrained = false;         // re-armed here; playChunk sets it when the pending frames run out
+        }
         m_f_firstCall = false;
         m_f_m3u8data = true;
         f_chunkFinished = false;
@@ -3855,8 +4062,18 @@ void Audio::processWebStreamHLS() {
 
         if(firstBytes) {
             if(ID3WritePtr < ID3BuffSize) {
+                // The "asked / got / ms" instrument lived here and answered its question: asked 4096, got 4096, 8-20 ms
+                // every time, so this is one read that completes and not a blocking wait for the whole count.  The
+                // call stays, the line is gone - it printed once per segment for no remaining purpose.
                 ID3WritePtr += _client->readBytes(&ID3Buff[ID3WritePtr], ID3BuffSize - ID3WritePtr);
                 return;
+            }
+            // The whole segment head is in ID3Buff here and nothing has been decoded from it: the one place the
+            // payload can be identified. An ID3 tag cannot match these signatures, so it passes untouched.
+            {
+                const char* shape = nullptr;
+                const uint8_t verdict = sniffHead(ID3Buff, ID3WritePtr, &shape);
+                if(verdict != STREAM_REFUSE_NONE) { setRefuse(verdict, shape); return; }
             }
             if(m_controlCounter < 100) {
                 int res = read_ID3_Header(&ID3Buff[ID3ReadPtr], ID3BuffSize - ID3ReadPtr);
@@ -3866,19 +4083,29 @@ void Audio::processWebStreamHLS() {
             }
             if(m_controlCounter != 100) return;
 
+            // Copy only what was ACTUALLY READ, not the full 4096.  The old code used ID3BuffSize throughout, which
+            // mattered twice over if a read ever returned short: it would copy uninitialised tail bytes into the
+            // audio ring (the decoder then walks garbage looking for a sync word) and it would add bytes to
+            // byteCounter that were never received, so the segment would be declared finished that many bytes early
+            // and its real tail discarded.  Measured as "got 4096" every time when instrumented, so this is a
+            // correctness fix rather than a proven cause - but the two failure modes above are exactly the shape of
+            // a click at the seam, so it has to be right before the seam can be blamed on anything else.
+            const uint16_t id3Audio = (ID3WritePtr > ID3ReadPtr) ? (uint16_t)(ID3WritePtr - ID3ReadPtr) : 0;
             size_t ws = InBuff.writeSpace();
-            if(ws >= ID3BuffSize - ID3ReadPtr) {
-                memcpy(InBuff.getWritePtr(), &ID3Buff[ID3ReadPtr], ID3BuffSize - ID3ReadPtr);
-                InBuff.bytesWritten(ID3BuffSize - ID3ReadPtr);
+            if(ws >= id3Audio) {
+                if(id3Audio) {
+                    memcpy(InBuff.getWritePtr(), &ID3Buff[ID3ReadPtr], id3Audio);
+                    InBuff.bytesWritten(id3Audio);
+                }
             }
             else {
                 memcpy(InBuff.getWritePtr(), &ID3Buff[ID3ReadPtr], ws);
                 InBuff.bytesWritten(ws);
-                memcpy(InBuff.getWritePtr(), &ID3Buff[ws + ID3ReadPtr], ID3BuffSize - (ID3ReadPtr + ws));
-                InBuff.bytesWritten(ID3BuffSize - (ID3ReadPtr + ws));
+                memcpy(InBuff.getWritePtr(), &ID3Buff[ws + ID3ReadPtr], id3Audio - ws);
+                InBuff.bytesWritten(id3Audio - ws);
             }
             x_ps_free(&ID3Buff);
-            byteCounter += ID3BuffSize;
+            byteCounter += ID3WritePtr;            // bytes actually received, not the requested size
             ID3Buff = NULL;
             firstBytes = false;
         }
@@ -3901,7 +4128,32 @@ void Audio::processWebStreamHLS() {
 
     if(f_chunkFinished) {
         if(m_f_psramFound) {
-            if(InBuff.bufferFilled() < 40000) { f_chunkFinished = false; m_f_continue = true; }
+            // f_chunkFinished is set when byteCounter == chunkSize, and HLS arrives by chunked transfer encoding, so
+            // this block runs many times per SEGMENT.  Two things follow: the occupancy line must be rate limited
+            // (it was one line per chunk, which flooded the log), and nothing that counts segments may live here.
+            //
+            // The instantaneous figure is noise - what matters is the MINIMUM over a window, because that is the
+            // moment the next blocking read has least audio to hide behind.  So: one line every HLS_BUFFER_LOG_MS
+            // carrying the window minimum, plus a single alarm if the ring ever gets genuinely close to empty.
+            static uint32_t sHlsLogMs   = 0;
+            static size_t   sHlsMinFill = (size_t)-1;
+            static bool     sHlsWarned  = false;
+            const size_t    hlsFill     = InBuff.bufferFilled();
+            if(hlsFill < sHlsMinFill) sHlsMinFill = hlsFill;
+            const uint32_t nowMs = millis();
+            if(sHlsLogMs == 0 || (uint32_t)(nowMs - sHlsLogMs) >= HLS_BUFFER_LOG_MS) {
+                AUDIO_INFO("hls: buf now %u, min %u of %u bytes, lost %u seq", (unsigned)hlsFill,
+                        (unsigned)((sHlsMinFill == (size_t)-1) ? hlsFill : sHlsMinFill),
+                        (unsigned)InBuff.getBufsize(), (unsigned)m_hlsLostSeq);
+                sHlsLogMs   = nowMs;
+                sHlsMinFill = (size_t)-1;
+            }
+            if(!sHlsWarned && hlsFill < HLS_BUFFER_LOW_BYTES) {
+                AUDIO_INFO("hls: buffer near empty: %u bytes, gate %u", (unsigned)hlsFill,
+                        (unsigned)HLS_BUFFER_TARGET_BYTES);
+                sHlsWarned = true;
+            }
+            if(hlsFill < HLS_BUFFER_TARGET_BYTES) { f_chunkFinished = false; m_f_continue = true; }
         }
         else {
             f_chunkFinished = false;
@@ -3925,10 +4177,21 @@ void Audio::processWebStreamHLS() {
 //****************************************************************************************
 void Audio::playAudioData() {
 
+    // A rate the decoder reported is applied HERE, on the audio task: this task owns the DMA, and reconfigI2S() does
+    // a stop/start that must not race a decoder callback or run against a handle that setSampleRate()'s callers may
+    // not have created yet.  Because setSampleRate() only marks a change when the value truly differs, this runs once
+    // per genuine rate change - normally once per stream - rather than once per song.
+    if(m_f_ratePending) {
+        m_f_ratePending = false;
+        reconfigI2S();
+        AUDIO_INFO("i2s: clock locked to %u Hz", (unsigned)m_i2sAppliedRate);
+    }
+
     if(!m_f_stream) return; // guard
 
     bool lastFrame = false;
     uint32_t bytesToDecode = 0;
+    uint32_t decT0 = 0;             // decode timer, declared here because the gotos below jump over later declarations
 
     /* Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
        setDefaults(), so the latch happened to be correct here, but depending on that re-arm is what the VS1053 graft
@@ -3955,7 +4218,12 @@ void Audio::playAudioData() {
     }
     if(!lastFrame) if(InBuff.bufferFilled() < InBuff.getMaxBlockSize()) goto exit;;
 
+    // Time inside the decoder for this window.  Read with the write time in the same report: if decode is near the
+    // whole window then the decoder is the bottleneck outright; if it is small and the write blocks, the DMA is the
+    // limit; if both are small and frames/s is still short, the loss is somewhere neither counter can see.
+    decT0 = micros();
     bytesDecoded = sendBytes(InBuff.getReadPtr(), InBuff.getMaxBlockSize());
+    m_decodeUs += (uint32_t)(micros() - decT0);
     if(!m_f_running) return;
 
     if(bytesDecoded < 0) { // no syncword found or decode error, try next chunk
@@ -4079,7 +4347,9 @@ bool Audio::parseHttpResponseHeader() { 		// this is the response to a GET / req
             if(idx > 0) rhl[13 + idx] = '\0';
             if(parseContentType(rhl + 13)) ct_seen = true;
             else{
-                AUDIO_ERROR("unknown contentType %s", rhl + 13);
+                // A content type we have no case for is not audio we can play. Latch it so the player refuses the
+                // URL instead of reconnecting: m_f_timeout is clear on this path, so `exit` does not re-connect.
+                setRefuse(STREAM_REFUSE_NOT_AUDIO, "unknown content type");
                 goto exit;
             }
         }
@@ -4248,7 +4518,9 @@ lastToDo:
         if(m_f_Log) { log_i("now parse playlist"); }
     }
     else {
-        AUDIO_ERROR("unknown content found at: %s", m_lastHost);
+        // Parsed, but no codec and no playlist format came out of it: the URL is not a stream (a web page, an API
+        // answer). Latching this is what stops the radiomast-style reconnect loop.
+        setRefuse(STREAM_REFUSE_NOT_AUDIO, "unknown content, no codec and no playlist");
         goto exit;
     }
     return true;
@@ -4342,6 +4614,35 @@ bool Audio::initializeDecoder(uint8_t codec) {
 exit:
     stopSong();
     return false;
+}
+//****************************************************************************************
+// The only place a stream is given up on. One verdict, one line; Player::loop() polls refuseReason() and
+// cancels the retry ladder, so nothing else may set m_refuseReason. See handle-unsupported-unrecognized.md.
+void Audio::setRefuse(uint8_t reason, const char* shape) {
+    if(m_refuseReason != STREAM_REFUSE_NONE) return;                    // first verdict wins
+    m_refuseReason = reason;
+    AUDIO_ERROR("refusing %s: %s", shape, m_lastHost ? m_lastHost : "");
+    stopSong();
+}
+//****************************************************************************************
+// One peek decides whether the first bytes are something this firmware must not decode. Positive signatures only:
+// an unrecognised head is left alone, because refusing an unusual but working stream is the worse error and the
+// attempt cap in Player::loop() already ends a stream that never produces audio.
+uint8_t Audio::sniffHead(const uint8_t* p, size_t n, const char** shape) {
+    if(!p || n < 8) return STREAM_REFUSE_NONE;
+    if(!memcmp(p + 4, "ftyp", 4) || !memcmp(p + 4, "styp", 4) || !memcmp(p + 4, "moof", 4) ||
+       !memcmp(p + 4, "mdat", 4) || !memcmp(p + 4, "moov", 4)) {
+        *shape = "fragmented MP4 (MPEG-4 box)";
+        return STREAM_REFUSE_UNSUPPORTED;
+    }
+    if(p[0] == '<')                 { *shape = "a web page or XML"; return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == '{' || p[0] == '[')  { *shape = "a JSON answer";     return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == '%' && !memcmp(p + 1, "PDF", 3))                 { *shape = "a PDF";        return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 'P' && p[1] == 'K' && p[2] == 0x03 && p[3] == 0x04) { *shape = "a zip archive"; return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 0x89 && !memcmp(p + 1, "PNG", 3))                { *shape = "a PNG image";  return STREAM_REFUSE_NOT_AUDIO; }
+    if(p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF)            { *shape = "a JPEG image"; return STREAM_REFUSE_NOT_AUDIO; }
+    if(!memcmp(p, "GIF8", 4))                                   { *shape = "a GIF image";  return STREAM_REFUSE_NOT_AUDIO; }
+    return STREAM_REFUSE_NONE;
 }
 //****************************************************************************************
 // clang-format off
@@ -4782,6 +5083,13 @@ void Audio::setDecoderItems() {
         AUDIO_INFO("Num of channels must be 1 or 2, found %i", getChannels());
         stopSong();
     }
+    // What the decoder says the stream is, next to the clock rate this is about to program.  These two must agree:
+    // a 48 kHz stream clocked at 44.1 kHz plays at 91.9%, which sounds like "10 seconds of audio takes 11 seconds"
+    // rather than like a glitch, and no amount of buffering, priority or logging work can touch it.  Printed at every
+    // codec setup, so a per-segment re-init shows up as repeated lines.
+    AUDIO_INFO("decoder: %u Hz, %u ch, %u bits -> I2S clock %u Hz",
+            (unsigned)getSampleRate(), (unsigned)getChannels(), (unsigned)getBitsPerSample(),
+            (unsigned)((getBitsPerSample() == 8 && getChannels() == 2) ? getSampleRate() * 2 : getSampleRate()));
     reconfigI2S();
     showCodecParams();
 }
@@ -5364,8 +5672,14 @@ bool Audio::audioFileSeek(const float speed) {
 }
 //****************************************************************************************
 bool Audio::setSampleRate(uint32_t sampRate) {
-    if(!sampRate) sampRate = 44100; // fuse, if there is no value -> set default #209
-    m_sampleRate = sampRate;
+    // A rate is only ever replaced by a rate.  The previous fuse here turned a not-yet-known 0 into 44100, which
+    // OVERWROTE a known-good 48000 every time a new song set the codec up before the AAC header had been parsed -
+    // and because reconfigI2S() then programmed the clock from that value, the audio sped up and slowed down between
+    // songs.  Zero means "not known yet", not 44.1 kHz: ignore it and keep what the stream last told us.
+    if(!sampRate) return false;
+    if(sampRate == m_sampleRate) return true;
+    m_sampleRate   = sampRate;
+    m_f_ratePending = true;   // applied by the audio task, which owns the DMA
     return true;
 }
 //****************************************************************************************
@@ -5410,6 +5724,10 @@ void Audio::reconfigI2S(){
     m_i2s_config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
     i2s_set_clk((i2s_port_t)m_i2s_num, m_sampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
 #endif
+    // Record what the peripheral is actually running at, so a repeated request for the same rate is not applied
+    // again and the log can state a fact rather than an intention.
+    m_i2sAppliedRate = (getBitsPerSample() == 8 && getChannels() == 2) ? getSampleRate() * 2 : getSampleRate();
+    m_f_ratePending  = false;   // this IS the apply, so there is nothing left pending
     memset(m_filterBuff, 0, sizeof(m_filterBuff)); // Clear FilterBuffer
     IIR_calculateCoefficients(m_gain0, m_gain1, m_gain2); // must be recalculated after each samplerate change
     return;
@@ -6980,7 +7298,7 @@ void Audio::startAudioTask() {
         "PeriodicTask",         /* Name of the task */
         AUDIO_STACK_SIZE,       /* Stack size in words */
         this,                   /* Task input parameter */
-        2,                      /* Priority of the task */
+        AUDIO_TASK_PRIORITY,    /* Priority of the task */
         xAudioStack,            /* Task stack */
         &xAudioTaskBuffer,      /* Memory for the task's control block */
         m_audioTaskCoreId       /* Core where the task should run */
@@ -7015,6 +7333,16 @@ void Audio::audioTask() {
 }
 //****************************************************************************************
 void Audio::performAudioTask() {
+    // Worst gap between passes of the audio task.  This is the number that decides which of two very different faults
+    // is being heard: a gap longer than the DMA depth (dma_desc_num * dma_frame_num frames, 682 ms at 24000 Hz) means
+    // the task was descheduled and the DAC ran dry; a small gap means the task was running normally and the silence
+    // came from the DATA rather than from scheduling.  Measured on the audio task itself, so no race.
+    {
+        static uint32_t sLastPassUs = 0;
+        const uint32_t nowUs = micros();
+        if(sLastPassUs && (nowUs - sLastPassUs) > m_audioGapMaxUs) m_audioGapMaxUs = nowUs - sLastPassUs;
+        sLastPassUs = nowUs;
+    }
     if(!m_f_running) return;
     if(!m_f_stream) return;
     if(m_codec == CODEC_NONE) return; // wait for codec is  set

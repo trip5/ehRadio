@@ -471,6 +471,144 @@ seeds), `playAudioData()` (first-sync rule, ID3v1 range, per-pass `f_isFile`), `
 `setDecoderItems()` (label); `Audio.h` - `m_stallSum`, `m_stallMs`, `m_f_firstSync`; `mp3_decoder/mp3_decoder.cpp` -
 `MP3FindSyncWord()` (layer check, resync guard) and the `MP3GetLayer()` / `MP3GetVersion()` comments.
 
+## Post-Graft Patch Fixes (2026-11-03)
+
+Started from "HLS/AAC stutters and plays slow on I2S only". Ended with the decoder keeping up for the first time.
+Listed as outcomes: what fixed it, then what was tried and failed. Everything below was measured, not reasoned.
+
+### What fixed it
+
+1. **Sample-rate lock.** `setSampleRate()` substituted `44100` whenever it was handed `0`, so a new song's codec
+   setup overwrote a known-good `48000` and nothing re-applied it - the warble. It now ignores `0`, records a
+   *pending* rate, and `playAudioData()` applies it on the audio task via `reconfigI2S()`. `reconfigI2S()` stores
+   `m_i2sAppliedRate` and clears the flag.
+2. **Segment identity from the media sequence, not the URL.** The old accept loop guessed identity by searching each
+   segment URL for the decimal form of a drifting counter, with a one-shot resync that reset it to `0` - which is how
+   the field saw 887 twice, 888 twice, then 892. Now `EXT-X-MEDIA-SEQUENCE` is parsed properly and identity is
+   `base + entry index`, with a persisted watermark (`m_m3u8BaseSeq`, `m_m3u8EntryIdx`, `m_lastM3u8Seq`,
+   `m_m3u8SeqValid`). Also fixed `f_mediaSeq_found`, which was `static` and never cleared per window, so a window
+   without the tag paired a stale base with a fresh index.
+3. **A playlist retry must never be a session reset.** The nothing-new branch called `connecttohost()`, which frees
+   buffers, clears the input ring and rebuilds the decoder - audible as seconds of silence after seconds of audio. It
+   was also a duplicate: `Audio::loop()` already re-requests the media playlist through `httpPrint()`. The call was
+   deleted and the parser now only logs.
+4. **Audio task priority 6** (`AUDIO_TASK_PRIORITY`, was the library default 2). On `AUDIO_CORE` 0 that put the
+   decoder *below* AsyncTCP (4), so every playlist GET, WebUI request and socket log line preempted it. 6 keeps it
+   above AsyncTCP and below lwIP (18), so the network stack still wins.
+5. **IIR filter chains bypassed when the coefficients are identity.** Three chains, each 5 float multiplies + 4 adds
+   + 8 loads + 8 stores per channel per sample pair, all computing `y = 1 * x` with a flat equaliser. They run only
+   when `setTone()` has actually changed the coefficients. This was worth several percent of the audio core.
+6. **Float decode.** `FIXED_POINT` disabled in `aac_decoder/libfaad/neaacdec.h`, so FAAD uses its float paths and the
+   S3's hardware FPU for the FFT and QMF. This is the change that finally closed the gap - `frames/s` reached the
+   clock. Side effect: `MAIN_DEC` is no longer undefined (the fixed-point block is what undid it).
+7. **`#pragma GCC optimize("Os")` on `neaacdec.cpp`.** Required, not cosmetic - see the maintenance note below.
+8. **The instruments.** An `i2s:` line per 10 s carrying `frames/s`, `decode` and `write` ms, `short` writes, worst
+   audio-task `gap`, silence runs, and ring occupancy; plus `lost N seq` on the occupancy line and a `join:` line per
+   segment boundary. Every conclusion above came from these. Keep them while there is any doubt.
+9. **ID3 preload accounting.** The preload copy used `ID3BuffSize` (the *requested* 4096) for both the memcpy length
+   and the byte counter, so a short read would copy uninitialised bytes into the audio ring and end the segment early.
+   Both now use `ID3WritePtr`, the bytes actually read. The `id3 preload` timing line was removed once it had answered
+   its question (one completing read, 8-20 ms).
+10. **Playlist poll back-off.** The pause is `M3U8_NO_SEGMENT_WAIT_MS` (500 ms) multiplied by the count of consecutive
+    empty answers, up to 2000 ms, reset when a window yields a segment. A flat 500 ms cost 5-6 GETs per segment. Note
+    one poll per segment is the floor - see `code-summary.md`.
+11. **HLS read-ahead target raised to 200000** (`HLS_BUFFER_TARGET_BYTES`), with the other buffer/interval values made
+    `#ifndef` overridable.
+12. **Log volume trimmed.** `connect to:` is no longer printed for any `.m3u8` URL, and the five per-segment `id3
+    frame` lines are behind `AUDIO_ID3_LOG`. Per segment the flood went from about ten lines to three.
+
+### Dead ends, all measured
+
+- **Global `-O2`**: decode time unchanged; +181 KB flash. The decoder does not respond to optimisation level.
+- **`AAC_NO_SBR`** (drop SBR and PS): gave ~23% idle CPU and `frames/s` exactly at the 24000 core rate, but the
+  silence detector then showed whole 1024-sample AAC frames of digital silence being written, repeatedly. Reverted.
+- **`SBR_LOW_POWER`**: corrupts the heap on the first HE-AAC frames (bad tail, `multi_heap_free` assert, store fault
+  in `PeriodicTask`). The branch is complete but had never been compiled in this tree. Do not retry blind.
+- **Dropping PS only** was not pursued: the user will not accept mono.
+- **Deeper I2S DMA** (`dma_desc_num` 32 to 64): the worst audio-task gap measured 47-70 ms against a 682 ms DMA, so
+  starvation was never the mechanism. Left in place as harmless headroom.
+- **Fill-based gate on the playlist poll** (`HLS_PLAYLIST_POLL_FILL`): never engaged, because the ring settles below
+  any workable threshold; and one poll per segment is the floor anyway.
+- **Scoping the manifest pause out of `Audio::loop()`**: made it much worse - `frames/s` collapsed, the write stopped
+  blocking (DMA starved) and the ring overfilled past its target. The whole-loop pause is load-bearing; do not touch it.
+- **Refetching the *master* playlist** on a retry: new variant session each time, sequence numbering restarts, decoder
+  rebuilt, segment replays. Always retry the media playlist (`m_lastM3U8host`).
+- **`readBytes()` blocking on the ID3 preload**: refuted by instrumenting it - one completing read, every time.
+- **Display load as the cause**: `DSP_TASK_DELAY` at default, 50 and 200 gave the same `frames/s`, and
+  `DSP_TASK_CORE_ID` is 1, so the display task was never on the audio core.
+- **Enlarging the input ring**: it is already ~640 KB in PSRAM; the working depth is set by the read-ahead gate.
+- **`connecttohost()` as a playlist retry**, listed under fixes, is the same class of error as the master refetch.
+
+### Maintenance notes
+
+- **`neaacdec.cpp` carries `#pragma GCC optimize("Os")` and must keep it while `FIXED_POINT` is off.** The Xtensa
+  GCC 8.4 in this toolchain dies with an internal compiler error (`insn does not satisfy its constraints`, postreload,
+  on a float constant load) at both `-O2` and `-O1` in FAAD's float path. `-Os` is the only level that compiles.
+  Revert the pragma only when reverting to fixed point.
+- **Revert `FIXED_POINT` as a pair with the pragma.** One without the other is either a broken build or a decoder
+  silently pinned to `-Os`.
+- **`FIXED_POINT` off also re-enables `MAIN_DEC`.** If a MAIN-profile stream ever appears, that is why it is accepted.
+- **`no_host_timer > millis()` in the m3u8 branch is not wrap-safe** across the millis rollover. Left alone
+  deliberately: that line is holding the segment pipeline up, and it is the kind of "obvious improvement" that cost a
+  build here.
+- **Comments belong here, not in the library files.** The switch sites in `neaacdec.h` and `Audio.cpp` carry a short
+  pointer only; the reasoning lives in this file.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `setSampleRate()`, `reconfigI2S()`, `playAudioData()`,
+`playChunk()`, `parsePlaylist_M3U8()`, `m3u8redirection()`, `processWebStreamHLS()`, the m3u8 branch of `loop()`,
+`startAudioTask()`; `Audio.h` - the segment watermark, rate-lock and instrument members;
+`aac_decoder/libfaad/neaacdec.h` - `FIXED_POINT` off, `SBR_LOW_POWER` and `AAC_NO_SBR` left off with their reasons;
+`aac_decoder/libfaad/neaacdec.cpp` - the `optimize` pragma, and a `void*` cast in an `SBR_LOW_POWER` path that had
+never been compiled.
+
+## Post-Graft Patch Fixes (2026.11.03)
+
+Streams that must not be played. Written from `plans/handle-unsupported-unrecognized.md`; the plan holds the evidence
+and the rejected options, this holds what the code now does.
+
+### What the library now refuses
+
+1. **A verdict channel.** `streamRefuse_e` (`NONE`/`UNSUPPORTED`/`NOT_AUDIO`/`NO_HEAD`), one member `m_refuseReason`,
+   one setter `setRefuse(reason, shape)` that logs the shape and the URL and stops the stream, and a public
+   `refuseReason()` getter that `Player::loop()` polls once per tick. The setter is the only writer and the first
+   verdict wins for the life of the connection.
+   - The clear is in `connecttohost()` beside `setDefaults()`, **not** in `stopSong()`/`setDefaults()`:
+     `setDefaults()` calls `stopSong()`, so a clear there would erase the verdict the setter had just written.
+2. **The head sniff, `sniffHead()`.** Eight bytes, no advance: MPEG-4 boxes at offset 4 (`ftyp`/`styp`/`moof`/
+   `mdat`/`moov`) are `UNSUPPORTED`; markup, JSON, PDF, zip, PNG, JPEG and GIF are `NOT_AUDIO`. **Positive signatures
+   only** - an unrecognised head is deliberately not refused, because refusing an unusual-but-working stream is the
+   worse error and the capped ladder in `Player::loop()` already ends a stream that never produces audio. An ID3 tag
+   cannot match any signature, so it passes untouched.
+   - HLS: in `processWebStreamHLS()`'s `firstBytes` block, after the 4096-byte preload and before
+     `read_ID3_Header()`, where the whole segment head is already in `ID3Buff`.
+   - Plain stream: in `processWebStream()` immediately before `m_f_stream` is set, using `InBuff.getReadPtr()` with a
+     `bufferFilled() >= 8` test. `readAudioHeader()` is *not* the seam - it is never called on a live stream.
+3. **The playlist gate in `parsePlaylist_M3U8()`.** `#EXT-X-MAP` (the fMP4 initialiser) and `#EXT-X-KEY` with a
+   method other than `NONE` are conclusive; so is a body whose first non-empty line is not `#EXTM3U`, and a chosen
+   segment URL containing `.m4s`/`.cmfv` or ending `.mp4`. All of it sits above `m_codec = CODEC_AAC`, which is where
+   the default-to-AAC assumption was made.
+4. **Header-time latches.** `unknown contentType` and `unknown content found` call `setRefuse(...)` before
+   `goto exit`. `m_f_timeout` is clear on both paths, so `exit` does not reach the library's own reconnect and the
+   verdict survives to be polled.
+
+`CT_TXT` still adopts `m_expectedCodec` - which is set from the URL extension - and that is how an HTML body served
+for a `.aac` URL used to be decoded as AAC. It is now caught by the body sniff instead of by reordering the
+content-type table: fewer moving parts, and the bytes stay the authority.
+
+### Added for the playlist validator (2026.11.03)
+
+Two inline getters were added after the rest of this patch, and only for the validator - nothing in the library uses
+them. `PlaylistValidator` drives this same audio object to probe every station in the list, so it needs to do two
+things the player never does: empty a verdict between probes (a refusal left latched would outlive the sweep, and
+`Player::loop()` would then raise a station error on the station it had just restored), and ask whether a codec was
+decided, which is how a probe earns a PASS instead of merely staying connected. `CODEC_NONE` is scoped to this header,
+so core cannot compare the codec directly - hence the named predicate rather than an exposed enum.
+
+| file | change |
+|---|---|
+| `Audio.h` | `streamRefuse_e`, `m_refuseReason`, `refuseReason()`, `setRefuse()`, `sniffHead()`, plus `clearRefuse()` and `codecDecided()` for the validator |
+| `Audio.cpp` | both definitions, the clear in `connecttohost()`, the HLS and plain-stream seams, the playlist gate, the two header-time latches |
+
 ## Future issues to watch for
 
 - **Two `mp3 err -6` per hour** in the most recent 2-hour soak, both on tracks whose ID3v2 walk mis-sized a frame, so the

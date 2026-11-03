@@ -154,6 +154,24 @@ public:
     uint32_t getReadPos();                      // read position relative to the beginning
     void     resetBuffer();                     // restore defaults
 
+    // The 8.47 collapse announced itself as bookkeeping that cannot be true - a filled length larger than the whole
+    // buffer - so check the fields rather than trying to police the memory around them.  Returns NULL when consistent.
+    const char* invariantFault() const {
+        if(!m_buffer) return NULL;
+        const uintptr_t base = (uintptr_t)m_buffer;
+        const uintptr_t end  = base + m_buffSize;
+        if(m_writePtr && ((uintptr_t)m_writePtr < base || (uintptr_t)m_writePtr > end)) return "write pointer outside buffer";
+        if(m_readPtr  && ((uintptr_t)m_readPtr  < base || (uintptr_t)m_readPtr  > end)) return "read pointer outside buffer";
+        if(m_endPtr != m_buffer + m_buffSize) return "end pointer no longer matches the buffer end";
+        // bufferFilled() RECOMPUTES m_dataLength from the pointers every call, so the cached field proves nothing -
+        // checking it was why this guard stayed silent while the monitor printed 2818KB in a 295903-byte buffer.
+        const size_t filled = (m_writePtr >= m_readPtr)
+                            ? (size_t)(m_writePtr - m_readPtr)
+                            : (size_t)((m_endPtr - m_readPtr) + (m_writePtr - m_buffer));
+        if(m_buffSize && filled > m_buffSize) return "filled length exceeds buffer size";
+        return NULL;
+    }
+
 protected:
     const size_t m_buffSizePSRAM    = 300000;   // most webstreams limit the advance to 100...300Kbytes
     //const size_t m_buffSizeRAM      = 1600 * 10;
@@ -183,6 +201,15 @@ static StaticTask_t __attribute__((unused)) xAudioTaskBuffer;
 static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 
 struct Audio;
+
+// A permanent verdict on a stream, set only by Audio::setRefuse().  Keep the order and the values identical in both
+// forks - core matches on these names, never on numbers.  See plans/handle-unsupported-unrecognized.md.
+enum streamRefuse_e : uint8_t {
+    STREAM_REFUSE_NONE = 0,     // nothing to refuse
+    STREAM_REFUSE_UNSUPPORTED,  // recognised container or codec we cannot decode (fMP4, encrypted HLS, ...)
+    STREAM_REFUSE_NOT_AUDIO,    // a page, an API, an image, an unknown content type: not a stream at all
+    STREAM_REFUSE_NO_HEAD       // the probe never got its eight bytes: stop, but the ladder may retry (capped)
+};
 
 class Audio : private AudioBuffer{
 
@@ -281,6 +308,11 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     size_t          m_audioDataSize = 0;            //
     uint32_t        m_avr_bitrate = 0;
     bool            m_localBitrateSend = true;
+    /* Per-stream bitrate estimate.  A stream that never sends an icy-br header has no other route to a number on this
+       board: this library has no showCodecParams() to ask the chip, and the one routine that can read the value out of
+       the decoder, getAudioCurrentTime(), has SD-only callers.  m_brFromHeader keeps the server's own value final. */
+    volatile bool   m_brFromHeader = false;         // an icy-br: header supplied the bitrate - do not overwrite it
+    volatile bool   m_brEstimated  = false;         // an estimate has succeeded for this connection
     uint32_t        m_audioDataStart = 0;           // in bytes
     int             m_id3Size=0;                    // length id3 tag
     bool            m_f_ssl=false;
@@ -319,6 +351,7 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     bool            m_f_running = false;
     bool            m_f_ogg=false;                  // Set if oggstream
     bool            m_f_stream_ready=false;         // Set after connecttohost and first streamdata are available
+    uint8_t         m_refuseReason = STREAM_REFUSE_NONE;  // see setRefuse()
     // [Maleksm graft] variables needed by task-coordinated playAudioData()
     bool            m_f_stream = false;             // stream ready for output?
     bool            m_f_eof = false;                // end of file reached
@@ -391,6 +424,8 @@ protected:
     bool     STfromEXTINF(char* str);
     size_t   process_m3u8_ID3_Header(uint8_t* packet);
     bool     parseContentType(char* ct);
+    void     setRefuse(uint8_t reason, const char* shape);
+    uint8_t  sniffHead(const uint8_t* p, size_t n, const char** shape);
     bool     latinToUTF8(char* buff, size_t bufflen, bool UTF8check = true);
     bool     parseHttpResponseHeader();
     void     UTF8toASCII(char* str);
@@ -429,6 +464,8 @@ public:
     bool     connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
     bool     connecttospeech(const char* speech, const char* lang);
     bool     isRunning() {return m_f_running;}
+    uint8_t  refuseReason() {return m_refuseReason;}   // non-zero: a verdict for Player::loop() to act on
+    void     clearRefuse() {m_refuseReason = STREAM_REFUSE_NONE;}   // consumed between validator probes
     uint8_t  chipDeadStrikes() const { return m_chipDeadStrikes; }  // 0 = answering, see sendBytes()
     bool     pauseResume();
     uint32_t getFileSize();
@@ -441,6 +478,7 @@ public:
     size_t   bufferFree();
     void     loadUserCode();
     int getCodec() {return m_codec;}
+    bool codecDecided() {return m_codec != CODEC_NONE;}   // the library understood the payload
     const char *getCodecname() {return codecname[m_codec];}
     size_t   inBufferFilled(){ return bufferFilled(); }
     size_t   inBufferFree(){ return bufferFree(); }

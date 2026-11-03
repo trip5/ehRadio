@@ -534,7 +534,7 @@
         </section>
 
         <a name="mqtt"></a>
-        <section id="group_mqtt">
+        <section id="group_mqtt" class="group_system hidden">
           <div class="title"><span data-i18n="ttl_mqtt">MQTT</span></div>
           <div class="reset" data-name="mqtt" title="reset"></div>
           <div class="flex-row">
@@ -546,7 +546,7 @@
           <!-- Collapsed by options.js while "Enable MQTT" is off (see setupMqttToggle); the title,
                the enable toggle and the Apply Changes button stay visible. Starts hidden so the
                fields never flash before the stored state arrives over the WebSocket. -->
-          <div id="mqttsettings" class="hidden">
+          <div class="hidden" id="mqttsettings">
             <div class="flex-row">
               <div class="inputwrap">
                 <span class="inputtitle" data-i18n="lbl_host">Host</span>

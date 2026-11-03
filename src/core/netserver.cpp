@@ -1453,7 +1453,14 @@ void radioBrowserSendClick(const char* stationUrl) {
     clickDelayStart = millis();
     clickDelayActive = true;
     FUNCTIONLOG("RB Click", "Starting %ds delay for: %s", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
-  #endif //#ifdef RADIO_BROWSER_SEND_CLICKS
+  #endif
+}
+
+void radioBrowserCancelClick() {
+  #ifdef RADIO_BROWSER_SEND_CLICKS
+    if (clickDelayActive) FUNCTIONLOG("RB Click", "Canceled - the station never played");
+    clickDelayActive = false;
+  #endif
 }
 
 #ifdef RADIO_BROWSER_SEND_CLICKS
@@ -1514,6 +1521,12 @@ void processRadioBrowserClick() {
       return; // still held
     }
     clickDelayActive = false;
+    // A click is owed only to a station that actually played. Checked here rather than at scheduling time because a
+    // stream can connect, look healthy and then refuse (§16.2).
+    if (!player.isRunning() || !player.codecDecided() || player.inBufferFilled() == 0) {
+      FUNCTIONLOG("RB Click", "Canceled - the station never played");
+      return;
+    }
     if (!heapCanAffordTls(rbClickTlsMinBlock)) {
       // Dropped, not held: a statistic is not worth waiting on a fragmented heap
       FUNCTIONLOG("RB Click", "dropping click - no %u-byte contiguous block (free %u, largest %u)",

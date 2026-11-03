@@ -30,7 +30,21 @@
 #include "battery.h"
 
 extern const char batterytxtFmt[] PROGMEM;
-static constexpr uint32_t DSP_TASK_DELAY = 10;  // ms; minimum sleep between display iterations
+// ms; minimum sleep between display iterations.  Overridable from myoptions.h.
+// The work inside one display iteration is roughly fixed, so this delay decides how often that work is repeated and
+// therefore what fraction of core1 the display task consumes.  On a board where a software decoder has to keep up
+// with a live stream, that fraction is exactly what the decoder is short of - so this is the cheapest lever available
+// for giving the decoder headroom, at the cost of frame rate.
+#ifndef DSP_TASK_DELAY
+  #define DSP_TASK_DELAY 10
+#endif
+// Zero would spin the task, and a very large value would stall the panel.  Same shape as the range checks in
+// options.h: revert an out-of-range override rather than failing the build.
+#if DSP_TASK_DELAY < 1 || DSP_TASK_DELAY > 200
+  #warning "define warning in myoptions.h: DSP_TASK_DELAY is out of range (1-200), reverting to default 10"
+  #undef DSP_TASK_DELAY
+  #define DSP_TASK_DELAY 10
+#endif
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
 static constexpr uint32_t DSQ_CRITICAL_WAIT = 2000;  // ms; how long SDINDEXSTART/SDINDEXDONE keep retrying a full queue
 static constexpr uint32_t SS_LINE_HOLD_MS = 3000;  // ms; How long the screensaver's info line stays blank after a track change
@@ -219,6 +233,7 @@ QueueHandle_t displayQueue;
   volatile uint32_t cmFillCount     = 0;
   volatile uint32_t cmPushCount     = 0;
   volatile uint8_t  cmDspCore       = 255;  // recorded by the task itself; 255 = not yet run
+  volatile uint32_t cmMaxDspWorkUs  = 0;    // longest single display.loop() call; reset by the monitor on print
 #endif
 
 TaskHandle_t dspTaskHandle = NULL;
@@ -227,7 +242,17 @@ static void loopDspTask(void * pvParameters) {
   while(true) {
     #ifndef DUMMYDISPLAY
       if (displayQueue==NULL) break;
+      // Time the WORK, not the loop.  The "ms/loop" figure in the Core Monitor is elapsed/loopCount, i.e. the period
+      // including the vTaskDelay below, so it hides a long redraw behind a healthy-looking average.  This measures
+      // one queue request's handler end to end, which is the duration that can hold core1 against the main loop.
+      // It is the display's counterpart to Max Main Loop Time, so the two can be compared directly.
+      #ifdef CORE_MONITOR
+        const uint32_t dspWorkStart = micros();
+      #endif
       display.loop();
+      #ifdef CORE_MONITOR
+        cmNoteDspWork(micros() - dspWorkStart);
+      #endif
     #endif
     // The task reports its own core, so the Core Monitor can never name the wrong core.
     cmCountDspLoop((uint8_t)xPortGetCoreID());
@@ -749,11 +774,18 @@ void Display::_applyFooter() {
   for (uint8_t i = 0; i < sizeof(w) / sizeof(w[0]); i++) showOrHideFooterWidget(w[i], (keep & bit[i]) != 0);
 }
 
-// The footer IP, written in one place.  It is the user's indicator that the WebUI is up.
+// The footer IP, written in one place.  The ADDRESS is the user's indicator that the WebUI is up; the mark in front
+// of it is the only place the boot mode is legible, so the mark is drawn from the first painted frame.
 void Display::_footerIp() {
   if (!_volip || !_footerShown(FW_VOLIP)) return;
-  if (!netserver.isListening()) { _volip->setText(""); return; }
-  _volip->setText(utility.ipToStr(WiFi.localIP()), ipLineFmt(config.getMode() == PM_SDCARD));
+  const char *fmt = ipLineFmt(config.getMode() == PM_SDCARD);
+  // Before the server listens there is no address to show, but the mode still has to be readable - so print the SAME
+  // format with an empty argument: the conf's mark alone, two cells, no placeholder and no invented address.  A conf
+  // that spells its line as "%s", or has no line at all (""), prints nothing here exactly as it did when this branch
+  // blanked the widget, so those layouts need no third case.  The gate itself stays: an address on screen is what
+  // says the WebUI answered.
+  if (!netserver.isListening()) { _volip->setText("", fmt); return; }
+  _volip->setText(utility.ipToStr(WiFi.localIP()), fmt);
 }
 
 void Display::_showDialog(const char *title) {

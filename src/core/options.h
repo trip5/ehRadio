@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.08.19"
+#define RADIOVERSION "2026.10.30"
 
 /*******************************************************
  
@@ -1149,6 +1149,8 @@ or examine the examples in builds/trip5 and make your own!
 
 /* Enable all the debug logs with #define ALL_DEBUG_LOGS */
 /* Note that turning on all logs can make the serial log very noisy (and every print to serial adds milliseconds of delay to running code! */
+/* So it is highly recommended to NEVER use ALL_DEBUG_LOGS or any debug includes in a "final" build! */
+/* Even when serial monitor is not connected,*/
 /* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. */
 
 #ifdef ALL_DEBUG_LOGS
@@ -1180,6 +1182,13 @@ or examine the examples in builds/trip5 and make your own!
     #define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
   #endif
 #endif
+
+/* The [HeapMap] line: which pool TextId3 buffers really live in, plus the quarantine count, printed on every ID3
+   header (twice per HLS segment).  It is what proved all three buffers are PSRAM and never move, so it is kept but
+   switched off - uncomment in myoptions.h to bring it back.  Deliberately NOT part of ALL_DEBUG_LOGS: it is far too
+   frequent to enable by accident. */
+//#define HEAPMAP_LOG
+
 #ifndef ESPFILEUPDATER_VERBOSE
   #ifdef ALL_DEBUG_LOGS
     #define ESPFILEUPDATER_VERBOSE true // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
@@ -1199,7 +1208,7 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 #ifndef BOOTLOG_TX_TIMEOUT_MS
-  #define BOOTLOG_TX_TIMEOUT_MS 5 // ms one log write may wait for the USB CDC host before giving up (the core's default is 100, and HWCDC burns that timeout per write, 1ms at a time, before declaring the host gone)
+  #define BOOTLOG_TX_TIMEOUT_MS 5 // ms: one log write may wait for the USB CDC host before giving up (the core's default is 100, and HWCDC burns that timeout per write, 1ms at a time, before declaring the host gone)
 #endif
 #ifndef CORE_MONITOR_ETC_LOOPS
   #define CORE_MONITOR_ETC_LOOPS 5 // Show LittleFS + PSRAM info every N core monitor cycles (default: 5, every 25s)

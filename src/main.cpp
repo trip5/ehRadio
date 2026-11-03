@@ -1,4 +1,5 @@
 #include "core/options.h"
+#include "core/heapq.h"
 #include "core/coredump.h"
 #include <Arduino.h>
 #include <DNSServer.h>
@@ -29,7 +30,10 @@
 SET_LOOP_TASK_STACK_SIZE(LOOP_TASK_STACK_SIZE * 1024);
 
 // ms an iteration of loop() may take before it reports which stage blocked (moved out of options.h).
-static constexpr uint32_t MAIN_LOOP_STALL_MS = 500;
+#ifndef MAIN_LOOP_STALL
+  #define MAIN_LOOP_STALL 500 // ms: measure all Main Loop stalls above this number (<30 becomes very noisy); WARNINGS_LOG must be on to observe this
+#endif
+static constexpr uint32_t MAIN_LOOP_STALL_MS = MAIN_LOOP_STALL * 1000;
 
 size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
 
@@ -160,7 +164,17 @@ void setup() {
 
 void loop() {
   #ifdef CORE_MONITOR
-    cmLoopStart = micros();
+    // Total iteration length, measured to the next start: the difference against the stage sum is this monitor's own
+    // cost, which is invisible to the stage timers and to Max Main Loop Time alike.
+    static uint32_t cmPrevStart = 0;
+    static uint32_t cmMaxIter   = 0;
+    const uint32_t cmNow = micros();
+    if (cmPrevStart) {
+      const uint32_t iterUs = cmNow - cmPrevStart;
+      if (iterUs > cmMaxIter) cmMaxIter = iterUs;
+    }
+    cmPrevStart = cmNow;
+    cmLoopStart = cmNow;
   #endif
   // Stage attribution, always on: an iteration over MAIN_LOOP_STALL_MS names the blocking stage, which is
   // the whole diagnosis (this is what found the stream connect in the player stage).
@@ -181,8 +195,14 @@ void loop() {
   controls.loop();
   const uint32_t tStage3 = micros();
 
+  uint32_t tStage4a = tStage3;
   if (network.status == CONNECTED || network.status == SDOFFLINE) {
     player.loop();
+    tStage4a = micros();
+    // A track change is the only window the corruption has ever appeared in, so on a slow player stage look at the heap
+    // the moment control comes back: it is either already broken here, or the writer is in the saves below.
+    if ((tStage4a - tStage3) > 500000UL && !heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true))
+      ERRORLOG("heap corrupt when player.loop() returned, after %lums", (unsigned long)((tStage4a - tStage3) / 1000UL));
     config.processDeferredSaves();
   }
   const uint32_t tStage4 = micros();
@@ -193,21 +213,22 @@ void loop() {
   {
     const uint32_t total = tStage5 - tStage0;
     if (total > ((uint32_t)MAIN_LOOP_STALL_MS * 1000UL)) {
-      const uint32_t staged[5] = {
+      const uint32_t staged[6] = {
         tStage1 - tStage0,   // net: improv or telnet
         tStage2 - tStage1,   // rgbled + battery
         tStage3 - tStage2,   // controls
-        tStage4 - tStage3,   // player + deferred saves
+        tStage4a - tStage3,  // player
+        tStage4 - tStage4a,  // deferred config saves
         tStage5 - tStage4,   // startup
       };
-      static const char* const stageNames[5] = {"net/telnet", "rgbled+battery", "controls", "player+saves", "startup"};
+      static const char* const stageNames[6] = {"net/telnet", "rgbled+battery", "controls", "player", "saves", "startup"};
       uint8_t worst = 0;
-      for (uint8_t i = 1; i < 5; i++) if (staged[i] > staged[worst]) worst = i;
-      WARNINGLOG("Main loop stalled %lums, worst stage %s %lums - net %lu, hw %lu, ctl %lu, player %lu, startup %lu",
+      for (uint8_t i = 1; i < 6; i++) if (staged[i] > staged[worst]) worst = i;
+      WARNINGLOG("Main loop stalled %lums, worst stage %s %lums - net %lu, hw %lu, ctl %lu, player %lu, saves %lu, startup %lu",
           (unsigned long)(total / 1000UL), stageNames[worst], (unsigned long)(staged[worst] / 1000UL),
           (unsigned long)(staged[0] / 1000UL), (unsigned long)(staged[1] / 1000UL),
           (unsigned long)(staged[2] / 1000UL), (unsigned long)(staged[3] / 1000UL),
-          (unsigned long)(staged[4] / 1000UL));
+          (unsigned long)(staged[4] / 1000UL), (unsigned long)(staged[5] / 1000UL));
     }
   }
 
@@ -220,21 +241,30 @@ void loop() {
       // end of it, so a fixed "/5" inflated every figure by 5-7%.
       const uint32_t elapsed = (uint32_t)(millis() - cmLastPrint);
       const float perSec = 1000.0f / (float)(elapsed ? elapsed : 1);
-      uint32_t d = cmDspLoopCount;  cmDspLoopCount = 0;
-      uint32_t m = cmMainCount;     cmMainCount = 0;
-      uint32_t mx = cmMaxMainLoop;  cmMaxMainLoop = 0;
-      uint32_t gl = cmGlyphCount;   cmGlyphCount = 0;
-      uint32_t pc = cmPreTextCalls; cmPreTextCalls = 0;
-      uint32_t ph = cmPreTextHits;  cmPreTextHits = 0;
-      uint32_t fi = cmFillCount;    cmFillCount = 0;
-      uint32_t pu = cmPushCount;    cmPushCount = 0;
+      uint32_t d = cmDspLoopCount;   cmDspLoopCount = 0;
+      uint32_t m = cmMainCount;      cmMainCount = 0;
+      uint32_t mx = cmMaxMainLoop;   cmMaxMainLoop = 0;
+      uint32_t dw = cmMaxDspWorkUs;  cmMaxDspWorkUs = 0;
+      uint32_t gl = cmGlyphCount;    cmGlyphCount = 0;
+      uint32_t pc = cmPreTextCalls;  cmPreTextCalls = 0;
+      uint32_t ph = cmPreTextHits;   cmPreTextHits = 0;
+      uint32_t fi = cmFillCount;     cmFillCount = 0;
+      uint32_t pu = cmPushCount;     cmPushCount = 0;
       // Both figures are per TASK, labelled with the core each one runs on: field 1 the display task, field 2 this loop.
-      FUNCTIONLOG("Core.monitor", "DspTask(core%u) loops/s: %u (%.2fms/loop), Main(core%u) loops/s: %u (%.2fms/loop), Max Main Loop Time: %.3fms, Free Heap: %u",
+      // The two maxima answer different questions.  Max Main Loop Time is this loop's worst iteration.  Max Dsp Work
+      // is the display's worst single display.loop() call - one queue request's handler, excluding its vTaskDelay.
+      // Comparing them separates "the drawing held the core" from "this loop blocked on something of its own": if Max
+      // Dsp Work is close to Max Main Loop Time, the display was the blocker; if it is small, it was not.  The
+      // per-loop ms figures cannot tell you either way, because they are periods and average the peaks away.
+      // Both maxima are WALL-CLOCK.  When the two tasks share a priority, each figure includes the slices the other
+      // one took, so Max Dsp Work rises simply from being interleaved.  Compare the two; read neither as CPU time.
+      FUNCTIONLOG("Core.monitor", "DspTask(core%u) loops/s: %u (%.2fms/loop), Main(core%u) loops/s: %u (%.2fms/loop), Max Main Loop Time: %.3fms, Max Dsp Work: %.3fms, Max Iteration: %.3fms, Free Heap: %u",
           (unsigned)cmDspCore,
           (unsigned)(d * perSec), d ? (float)elapsed / (float)d : 0.0f,
           (unsigned)xPortGetCoreID(),
           (unsigned)(m * perSec), m ? (float)elapsed / (float)m : 0.0f,
-          mx / 1000.0f, (unsigned)ESP.getFreeHeap());
+          mx / 1000.0f, dw / 1000.0f, cmMaxIter / 1000.0f, (unsigned)ESP.getFreeHeap());
+      cmMaxIter = 0;
       // What the display task did with the time: work units per second, and the preText hit rate.
       FUNCTIONLOG("Core.monitor", "DspTask work/s: glyphs %u, fills %u, preText %u (hit %u%%), fb flushes %u (%.2f/loop)",
           (unsigned)(gl * perSec), (unsigned)(fi * perSec), (unsigned)(pc * perSec),
@@ -247,25 +277,40 @@ void loop() {
           (unsigned)uxTaskGetStackHighWaterMark(NULL),
           (unsigned)(dspTaskHandle ? uxTaskGetStackHighWaterMark(dspTaskHandle) : 0),
           (unsigned)(nsTaskHandle  ? uxTaskGetStackHighWaterMark(nsTaskHandle)  : 0));
-      // LittleFS + PSRAM info — rate-limited by CORE_MONITOR_ETC_LOOPS
-      // Integrity every cycle, not every fifth: the TLSF assertion that fires inside block_locate_free trips within
-      // seconds of a corruption appearing, so a 25 s window usually misses it.  LittleFS and PSRAM detail stays
-      // rate-limited.
-      const bool heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
-      const bool heapPsramOk = !psramFound() || heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+      // Every heap figure costs a full pool walk: get_free_size, get_largest_free_block and check_integrity all funnel
+      // into tlsf_walk_pool - ESP.getPsramSize included - and a walk of a corrupt heap *panics*.  Three builds running,
+      // this monitor died in the act of reporting a corruption instead of describing it.  So every figure below is
+      // refreshed once a minute and printed from cache, and the only per-print check left is heapq::verify(), which
+      // walks nothing.  Losing up to a minute of detection is worth a run that survives to produce evidence.
+      heapq::verify();
+      const uint32_t internal8 = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+      static uint16_t heapTick = 120;    // start due; then one walk every 120 prints (about ten minutes)
+      static bool    heapInternalOk = true;
+      static bool    heapPsramOk = true;
+      static size_t  i8Free = 0, i8Largest = 0, pFree = 0, pLargest = 0;
+      bool heapWalkedNow = false;
+      if (++heapTick >= 120) {
+        heapTick = 0;
+        heapWalkedNow = true;
+        heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
+        i8Free = heap_caps_get_free_size(internal8);
+        i8Largest = heap_caps_get_largest_free_block(internal8);
+        pFree = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        pLargest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+        heapPsramOk = !psramFound() || heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+      }
+      const bool psramImpossible = heapWalkedNow && psramFound() && pFree > (1024UL * 1024UL) && pLargest == 0;
       const char* heapVerdict =
-            (heapInternalOk && heapPsramOk)  ? " | heap ok"
+            psramImpossible ? " | heap CORRUPT (PSRAM free but no largest block)"
+          : (heapInternalOk && heapPsramOk) ? (heapWalkedNow ? " | heap ok" : " | heap ok (refreshed every 10 min)")
           : (!heapInternalOk && !heapPsramOk) ? " | heap CORRUPT (internal+PSRAM)"
           : !heapInternalOk                   ? " | heap CORRUPT (internal)"
                                               : " | heap CORRUPT (PSRAM)";
-      // Internal DRAM that can serve a byte: MALLOC_CAP_DEFAULT also matches PSRAM (it reported 7.9 MB), plain INTERNAL
-      // also matches IRAM, which is 32-bit only - so neither reports the heap wifi_malloc allocates from.
-      const uint32_t internal8 = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+      // internal8 is internal DRAM that can serve a byte: MALLOC_CAP_DEFAULT also matches PSRAM, plain INTERNAL also
+      // matches IRAM, which is 32-bit only - so neither reports the heap wifi_malloc allocates from.
       FUNCTIONLOG("Heap", "8bit: %uKB free, %uKB largest | PSRAM: %uKB free, %uKB largest%s",
-          heap_caps_get_free_size(internal8) / 1024,
-          heap_caps_get_largest_free_block(internal8) / 1024,
-          heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
-          heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024,
+          (unsigned)(i8Free / 1024), (unsigned)(i8Largest / 1024),
+          (unsigned)(pFree / 1024), (unsigned)(pLargest / 1024),
           heapVerdict);
       if (!heapInternalOk || !heapPsramOk) {
         // One ERROR per boot, plus a note that outlives the panic: the archive prints it above the crashdump text, so
@@ -279,19 +324,24 @@ void loop() {
         }
         char heapNote[160];
         snprintf(heapNote, sizeof(heapNote), "8bit free %uKB largest %uKB, internal %s, PSRAM %s, uptime %lus",
-                 (unsigned)heap_caps_get_free_size(internal8) / 1024,
-                 (unsigned)heap_caps_get_largest_free_block(internal8) / 1024,
+                 (unsigned)(i8Free / 1024),
+                 (unsigned)(i8Largest / 1024),
                  heapInternalOk ? "ok" : "CORRUPT", heapPsramOk ? "ok" : "CORRUPT",
                  (unsigned long)(millis() / 1000UL));
         coredump::noteHeapCorruption(heapNote);
       }
-      if (++cmEtcCount >= CORE_MONITOR_ETC_LOOPS) {
-        cmEtcCount = 0;
-        FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes());
+      // Gated on the same slow tick as the heap refresh: the LittleFS query here is what made Max Iteration spike to
+      // ~590 ms every fifth print, the largest recurring stall on this loop, and none of it changes in under a minute.
+      if (heapWalkedNow) {
+        const uint32_t etcStart = micros();
+        FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes, took %lums", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes(), (unsigned long)((micros() - etcStart) / 1000UL));
         if (psramFound()) {
-          size_t psramTotal = ESP.getPsramSize();
-          size_t psramUsed  = psramTotal - ESP.getFreePsram();
-          size_t audioFill  = player.inBufferFilled();
+          // All three of these walk the PSRAM pool - ESP.getPsramSize() included, which reads like a constant and is
+          // not - so they come from the cache the [Heap] line refills, rather than walking again here every fifth pass.
+          static const size_t psramTotalCached = ESP.getPsramSize();
+          const size_t psramTotal = psramTotalCached;
+          const size_t psramUsed  = psramTotal - pFree;
+          const size_t audioFill  = player.inBufferFilled();
           FUNCTIONLOG("PSRAM", "Used: %uKB / %uKB: Framebuffer: %uKB, VU FFT: %uKB, WebUI Cache: %uKB, Audio buffered: %uKB, Contiguous Free: %uKB",
               psramUsed / 1024,
               psramTotal / 1024,
@@ -299,10 +349,9 @@ void loop() {
               vuPsramBytes / 1024,
               netserver.getFileCache().totalBytes() / 1024,
               audioFill / 1024,
-              heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
+              pLargest / 1024);
         }
       }
-      SERIALLOGLF();   // blank line, so consecutive reports are separable at a glance
       cmLastPrint = millis();
     }
   #endif

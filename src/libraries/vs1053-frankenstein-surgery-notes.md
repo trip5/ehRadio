@@ -808,6 +808,39 @@ when `SM_CANCEL` reads 0, so the seconds were never being spent there.
 | `audioVS1053Ex.h` | `m_chipDeadStrikes` and a public `chipDeadStrikes()` |
 | `player.h` / `player.cpp` | `VS_CHIP_DEAD_STRIKES`, `_decoderDead`, the LOST latch and the `next()` guard |
 
+## Post-Graft Patch Fixes (2026.11.03)
+
+Streams that must not be played, mirrored from the I2S fork so the two behave identically. The plan
+(`plans/handle-unsupported-unrecognized.md`) holds the evidence; this holds what the code now does.
+
+- **A verdict channel.** `streamRefuse_e` (`NONE`/`UNSUPPORTED`/`NOT_AUDIO`/`NO_HEAD`), `m_refuseReason`, one setter
+  `setRefuse(reason, shape)` that logs the shape and the URL and stops, and a public `refuseReason()` that
+  `Player::loop()` polls. Cleared in `connecttohost()` beside `setDefaults()` - never in `stopSong()`/`setDefaults()`,
+  which calls `stopSong()` and would erase the verdict just written.
+- **`sniffHead()`**, positive signatures only: MPEG-4 boxes at offset 4 are `UNSUPPORTED`; markup, JSON, PDF, zip,
+  PNG, JPEG, GIF are `NOT_AUDIO`. Applied in two places - `processWebStreamHLS()`'s `firstBytes` block (the segment
+  head is already in the `heapq`-allocated `ID3Buff`) and `processWebStream()` immediately before `f_stream` is set.
+  An unrecognised head is not refused: the attempt cap in `Player::loop()` ends a stream that never produces audio,
+  and refusing an unusual-but-working stream would be the worse error.
+- **The playlist gate** in `parsePlaylist_M3U8()`: `#EXT-X-MAP`, `#EXT-X-KEY` with a method other than `NONE`, a body
+  whose first non-empty line is not `#EXTM3U`, and a segment URL containing `.m4s`/`.cmfv` or ending `.mp4`. All
+  above the `m_codec = CODEC_AAC` default at what the plan lists as line 1913.
+- **Header-time latches** at `parseContentType()` returning false and at `unknown content found`. The latter used to
+  print both `AUDIO_INFO` and `AUDIO_ERROR` for one event; it now prints the single verdict line instead.
+
+### Added for the playlist validator (2026.11.03)
+
+Two inline getters, added after the rest of this patch and unused by the library itself. The validator probes every
+station through this same audio object, so it needs to empty a verdict between probes (a latched refusal would outlive
+the sweep and `Player::loop()` would raise it on the station it had just restored) and to ask whether a codec was
+decided, which is what turns "still connected" into a real PASS. `CODEC_NONE` is scoped to this header, so core
+cannot compare the codec - hence the named predicate.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.h` | `streamRefuse_e`, `m_refuseReason`, `refuseReason()`, `setRefuse()`, `sniffHead()`, plus `clearRefuse()` and `codecDecided()` for the validator |
+| `audioVS1053Ex.cpp` | both definitions, the clear in `connecttohost()`, the two seams, the playlist gate, the two header-time latches |
+
 ## Future issues to watch for
 
 Not bugs in hand - things a future reader should know are still true, in the order they are likely to bite.

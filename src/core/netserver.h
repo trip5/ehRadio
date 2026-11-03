@@ -176,6 +176,7 @@ void vTaskFetchCuratedIndex(void *pvParameters);
 void vTaskFetchCuratedPlaylist(void *pvParameters);
 void launchPlaybackTask(const String& url, const String& name);
 void radioBrowserSendClick(const char* stationUrl);
+void radioBrowserCancelClick();
 void processRadioBrowserClick();
 void checkForOnlineUpdate();
 void startOnlineUpdate();

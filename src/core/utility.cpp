@@ -27,20 +27,17 @@ bool systemLocalTime(struct tm& out) {
 }
 
 bool clockTrustworthy() {
-  // The clock may only print a time the device can stand behind.  network.timeinfo is now a pure cache filled by
-  // refreshClock(), so the only question left is whether it holds anything real:
-  //   1. Nothing has set it yet - a zeroed struct is year 1900, so 1901 or less IS the "never set" state and the
-  //      zeroed struct is its own marker; the no-RTC radio showed 00:00 here until the first doSync().
-  //   2. With the system clock unset there is nothing to check against, and localtime() has no timezone to apply
-  //      either (configTzTime() only runs at the WiFi-connect event).  Offline the RTC chip is the only source there
-  //      will ever be, so it is trusted; online it is not, because SNTP and doSync() have not spoken yet.
-  // No agreement test is needed any more: refreshClock() copies the system clock whenever it is set, so an RTC in
-  // another zone can no longer reach the glass; the chip only fills the cache while the system clock is unset, which
-  // is exactly the "nothing to agree with" case handled below.  The chip is kept honest by doSync()'s rtc.setTime().
-  if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
-  struct tm sysTm;
-  if (systemLocalTime(sysTm)) return true;                     // the system clock is authoritative once set
-  return network.status == SDOFFLINE;                          // no system clock: trust the chip only offline
+  // The clock may only print a time the device can stand behind, and the only test left is whether anything real
+  // ever set the cache: a zeroed struct is year 1900, which is the "never set" marker itself.  Whatever passes came
+  // from the system clock once SNTP set it, or from the RTC chip when it has not - the chip is the ONLY other writer
+  // - and both are trusted on any status, so a chip shows the time at boot instead of waiting for SNTP.  doSync()
+  // rewrites the chip on its first successful sync, which is what corrects a stale one.
+  return network.timeinfo.tm_year + 1900 > 1901;
+  // Below (instead of above) waits until SNTP lands to trust the clock
+  //if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
+  //struct tm sysTm;
+  //if (systemLocalTime(sysTm)) return true;                     // the system clock is authoritative once set
+  //return network.status == SDOFFLINE;                          // no system clock: trust the chip only offline
 }
 
 namespace {

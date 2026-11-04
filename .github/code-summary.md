@@ -1186,8 +1186,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   the same recorded answer: its gate is `config.isScreensaver && !_ssMeterUp`, **not** the `screensaverVU` option,
   so the clock walks whenever it is what the screensaver shows - VU-on with nothing playing included, which is the
   case that shipped parked - and never while the meter owns the panel. `_ssContentH()` is the panel less the line's
-  strip - one text row plus 1% of the panel height, rounded
-  up, above and below it - and that figure is the floor the walking clock is clamped to. `_sstext` is created and
+  strip - one text row, plus `ssGap()` (1% of the panel height, rounded up) above it and `ssBottomGap()` below
+  (`max(ssGap(), TFT_BORDER)`, because the whole screensaver page keeps the bezel border from the glass and the line
+  was the last thing that did not) - and that figure is the floor the walking clock is clamped to. The gap ABOVE
+  stays proportional on purpose: it separates the line from the meter or the clock, which is spacing rather than a
+  bezel, so the strip is only as tall as it needs to be; a panel whose border is 1 or 2 keeps its old strip exactly.
+  `_sstext` is created and
   re-init'd like any other scroll line, so it carries the shared mark at its wrap, and `_screensaverLine()` joins the
   line's own parts with that same helper - the two cannot differ, and the character lives in one file (see the
   widgets.cpp note below). **The line runs at three quarters of the weather row's speed**:
@@ -1199,16 +1203,17 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   out (a single-row strip that mixes a forecast into a track name pushes the track off it), and over silence it is
   `network.weatherBuf` alone - the same split `ssLineHasText()` refuses the strip on. Both transitions re-build it
   through `config.setTitle()` -> `NEWTITLE` -> `_title()`, so the composition follows the transport with no extra
-  refresh path. **This is the one line that must MOVE**, so `_screensaverLine()` hands its single copy to
-  `ScrollWidget::setTextLooped()` instead of `setText()`: a still row on an otherwise idle panel reads as broken
-  furniture, and padding with blanks was tried and reads as a fault, so the widget repeats the text until it is
-  wider than its span - joined with `_sep`, its own mark, so the seam is indistinguishable from the joins inside
-  one copy and from the mark a scroll cycle prints at its wrap. The measurement is `setText()`'s own
-  (`preTextString()`, then codepoints at `_charWidth`, against `_width`, through `_widthOf()`), so the loop and
-  `_checkIsScrollNeeded()` cannot disagree; the ceiling is `_buffsize - 2`, exactly what `setText()` keeps, because
-  a truncated copy would stop the line scrolling again. Every panel is far inside that budget (the widest, 460 px
-  at text size 1, is 77 characters). The composition above it, `ssRowH()` and `_ssContentH()` are untouched - it
-  is the text's PARTS that size the strip, never their repetition - and every other row in the firmware still
+  refresh path. **It is CENTRED, and scrolls only when it cannot fit.** `_screensaverWidgets()` gives the strip the
+  player page's own box - `offset = TFT_BORDER`, `width = dsp.width() - TFT_BORDER * 2` - and `align = WA_CENTER`,
+  which `TextWidget::_realLeft()` already answers for any widget with a span, so the centring needed no widget code
+  at all. The inset is what makes it true: `ScrollWidget::init()` caps the width at `MAX_WIDTH`
+  (`DSP_WIDTH - 2*TFT_BORDER`), so `offset = 0` with the panel's full width would centre the text `TFT_BORDER` LEFT
+  of the panel's centre. A line that fits is drawn once and sits still; only a line wider than the span scrolls, at
+  the three-quarter speed above, and only then does its mark appear at the wrap. A former
+  `ScrollWidget::setTextLooped()` repeated short lines until they overflowed so that everything moved; it is gone,
+  and `plans/screensaver-line-loop.md` is superseded by `plans/screensaver-line-centre.md`. The composition above
+  it, `ssRowH()` and `_ssContentH()` are untouched, so the strip's height and the clock's walk floor do not move -
+  it is the text's PARTS that size the strip. Every other row in the firmware still
   calls plain `setText()`. **A part the line would only repeat is left out:** an untagged SD file's "station name"
   IS its filename, and its two title halves are that filename cut at the first `" - "`, so `nameRepeatsTitle()` in
   `display.cpp` re-joins the halves and compares them with the name extension-stripped and case-insensitively (one
@@ -1217,14 +1222,19 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   page's meta line still shows it. The partial duplicate `handleId3Artist()` creates in SD mode - the name
   overwritten by the artist tag, i.e. `The Beatles * The Beatles * Something` - is deliberately not covered; the
   same predicate against `t1` would close it. See `plans/screensaver-panel-ownership.md`,
-  `plans/screensaver-line-scroll.md`, `plans/screensaver-line-loop.md`, `plans/screensaver-line-duplicate-name.md`
-  and `plans/screensaver-line-weather-and-clock-snap.md`.
-- **A track change blanks the info line for three seconds** (`SS_LINE_HOLD_MS`).  The trigger is `NEWSTATION`
-  handled while `config.isScreensaver`: `_play()` queues it BEFORE `connecttoFS()`, so the hold is already up when
-  `handleBeginSdRead()` clears the title - which is the moment the weather would otherwise take the strip - and a
-  manual skip is excluded because `screenSaverExit()` queues its mode change first, leaving `isScreensaver` false
-  by the time the request is handled.  Without it an SD boundary rewrites the line two or three times as the title
-  is cleared and re-filled (the visible reset) and flashes the forecast over the gap.  `Display::_ssHoldLine()` in
+  `plans/screensaver-line-scroll.md`, `plans/screensaver-line-centre.md`,
+  `plans/screensaver-line-duplicate-name.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+- **A track change blanks the info line for one second** (`SS_LINE_HOLD_MS`, 1000 ms).  The trigger is the
+  `SSHOLD` request, queued at the TOP of `Player::_play()` - after its guards, before `setDefaults()`,
+  `loadStation()` and the title write - and handled in `Display::loop()` under `if (config.isScreensaver)`.  It has
+  to be ahead of that title write: the write is the first thing that repaints the line, and over the gap
+  `player.isRunning()` (the audio engine's `m_f_running`, which let go at EOF) is false, so the line would be
+  repainted with the WEATHER.  An earlier version triggered on `NEWSTATION`, which `_play()` queues *after* the
+  title, and that is exactly why the forecast still flashed at the start of the pause after EOF.  The
+  `isScreensaver` gate keeps the request inert wherever the strip does not exist, and excludes a manual skip for
+  free: `screenSaverExit()` queues its `NEWMODE, PLAYER` first, so the device is awake by the time `SSHOLD` is
+  handled.  Without the hold an SD boundary rewrites the line two or three times as the title is cleared and
+  re-filled (the visible reset) and flashes the forecast over the gap.  `Display::_ssHoldLine()` in
   `display.cpp` blanks the widget with `setText("")` - the whole span on both draw paths, because `_windowRect()`
   widens an empty line to the span - and sets `_ssHoldUntil`; `_screensaverLine()` refuses on that deadline, so
   every writer is covered (`NEWTITLE`, `NEWWEATHER`, `SHOWWEATHER`, and an `SSREBUILD` re-init), and
@@ -4779,7 +4789,71 @@ whole box, and the dirty rectangle, `_prevMeas*` / `_prevPk*` / `_prevStyle` / `
 `VU_BAR_PERCENT`, the gap between them is `VU_BAR_GAP_PERCENT`, and the remainder is placement, split evenly above
 and below by the centring — the shipped shape is `25 + 20 + 10 + 20 + 25`. Both Bars and Digital LED go through this
 path (`case VU_STYLE_DIGITAL_LED: _drawBars(true);`). Above the pixel budget the bar and the gap scale by one
-factor, so that shape draws literally only where the budget does not bite.
+factor, so that shape draws literally only where the budget does not bite. **The gap row is inside the budget**: the
+box is `2 * barH + gapH` tall (`hmax = budget / w` caps that sum), and the canvas is allocated at that full height
+(`_ch = _bands.width * 2 + _bands.space`, `vuCanvasBuffer(cw, ch)` at 2 bytes per pixel), so the empty row between the
+channels costs exactly as much PSRAM as a bar row of the same height would. The margins *outside* the box (`box.top`)
+are not counted, because nothing is allocated for them.
+
+**The screensaver's meter honours `TFT_BORDER`, and the border is taken ONCE.** `resolveScreensaverBox()` computes
+`in = TFT_BORDER` (0 where the panel is no wider than two borders) and `w = areaW - 2*in` at the top, and every style
+below works against `w`: the bar family returns `box.w = w, box.left = in`, and everything else is placed at
+`in + (w - box.w)/2`. The budget is divided by `w` rather than the panel's width, because the inset is width the canvas
+no longer occupies — that is also why the 480x320's bars gained 2 px per channel when the inset arrived. Wherever the
+budget engages, the placement is arithmetically the old one (`in + (w - box.w)/2 == (areaW - box.w)/2` for the same
+`box.w`), so only what used to be flush to the glass moved: the bar family on every panel, and any style that is under
+budget. The HEIGHT is never inset — the content area already excludes the info line's strip, so insetting it again
+would only push the meter off the panel's centre. `vuResolveBox()` is untouched: the player page's box is the layout's
+own. See [`plans/screensaver-vu-inset.md`](../plans/screensaver-vu-inset.md).
+
+**The bar family has its own pixel ALLOWANCE.** `BARS_ALLOWANCE` (0.75 on the TFT build, 1 on the OLED one, declared
+beside `VU_BAR_PERCENT`/`VU_BAR_GAP_PERCENT`) scales the budget for these two styles alone before the height cap is
+taken (`hmax = barBudget / w`); `budget` itself is untouched, so Lissajous and the trace styles keep the whole
+rectangle. That is a FRAME-RATE control, not just a memory one: two full-width rows cost a full-canvas erase plus a
+full blit every frame, so the box *area* is the frame cost - on the 480x360 the 0.75 allowance takes the box from
+460x85 (39,100 px, ~41 ms, ~8 FPS) to 460x61 (28,060 px, ~30 ms, ~11 FPS). See
+[`plans/screensaver-vu-bars-allowance.md`](../plans/screensaver-vu-bars-allowance.md).
+
+**The screensaver's segment GAP and COUNT are its own, and they are PER STYLE** - decided in `initScreensaver()` on the
+copy of `bandsConf` it already makes, and drawn by `_drawBarsTiled()` behind the per-instance `_ssTiling` flag, so the
+player page's `_drawBars()` loop is the historical one, verbatim. The two bar painters read differently, so
+`VU_STYLE_BARS` gets `max(layoutBands.vspace, 1 x vuPeakThickness(box.w))` - gap equal to the marker, which then FILLS
+a gap - and a **square-or-taller** block (`thk >= w`), while `VU_STYLE_DIGITAL_LED` gets `2 x` (air either side of the
+snapped marker) and **1:1.5-or-taller** (`2*thk >= 3*w`). `vuPeakThickness()` is `ceil(len *
+VU_PEAK_THICKNESS_MILLI/1000)`, one helper shared with the marker itself. The count comes from `ssSegmentCount(...)`:
+start at the layout's `perheight`, add 2 segments at a time, and stop at the first count meeting the style's ratio - or
+at the **hard cap of 16**, which a layout asking for more is clamped down to. Only "shape met" or "cap" ends the walk,
+so a poor candidate can never be chosen (12 into 460 is 40 long against 25 tall for Bars and is stepped over to 16);
+and because the walk only ever makes blocks SHORTER, a panel whose layout already yields tall enough blocks keeps its
+count - the 320x240 stays at 10 for both styles. On the 480x360 with the 0.75 allowance: Bars = 16 blocks of ~22x25
+with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps. See `plans/screensaver-vu-two-bar-styles.md`. Because the
+chosen count rarely divides the span, the
+tiling is exact: the `per - 2` min segments are uniform at `len/per` or `len/per + 1` - whichever needs the **smaller**
+correction at the tip, ties to the thinner tip - and the two tip segments take the rest, the outer one on the floor, so
+the remainder never becomes background at the loud end. The last segment is drawn with no trailing gap, which puts its
+ink on the border column (and, with peaks on, under the marker). The direction choice is what keeps this sane at an
+exact division, where the "+1" direction would shave `per - 2` off the tip pair. The snap helpers still use one `step`
+(the min pitch): a pitch varying by 1 can put a block edge a pixel off a snapped boundary, which is invisible. See
+[`plans/screensaver-vu-segments.md`](../plans/screensaver-vu-segments.md).
+
+**What the meter draws is `dimension * vuLeft / vuThreshold`** - the live reading as a fraction of the meter's
+REFERENCE - and `get_VUlevel()` returns the length CLEARED from each bar, 8 bits a channel, so **0 means "nothing
+cleared", i.e. a FULL bar**, and `dimension` means empty. Three consequences, all load-bearing:
+- **"Nothing to show" answers EMPTY, not 0.** `config.vuThreshold` is zeroed by `Config::setTitle()` on every title
+  change and by `_play()` on every start; returning 0 there lit both bars to maximum at every track boundary, and that
+  is the "the VU never goes to zero between tracks" report. Both libraries now return `(dimension << 8) | dimension`
+  when the source is not wanted, and clamp the reference to 1 (it is also `map()`'s divisor) so silence maps to
+  `dimension`.
+- **The reference releases in real time.** `Config::vuRefTrack(left, right)` in `config.h` raises `vuThreshold` to the
+  reading at once, then falls by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6% per 250 ms, ~22%/s, a 2.8 s
+  half-life), never below the live reading - so compressed material can empty, while the per-call decay that once
+  pinned the bar cannot recur. One implementation, called by both `computeVUlevel()`s, so the rule does not fork with
+  the libraries.
+- **The interface is 8 bits a channel, so `dimension` cannot exceed 255.** `_levels()` asks for 255 units and scales to
+  the bar's own length (1.8 px a step on the 460 px screensaver bar). Passing `len` directly broke every bar longer
+  than 255 px: the screensaver's rested about 55% lit at silence and went non-monotonic above it.
+- Both sample styles' display gain is `256 / vuThreshold`, so the waveform and the spectrum follow the same release and
+  brighten through a quiet passage; accepted. See `plans/vu-level-reference-and-255-ceiling.md`.
 
 **Two kinds of layout, one drawing rule.** The **bar family** (styles 0-1) draws two strips where `bandsConf` says they
 are, so the orientation (`vuConf.align`) and the boombox bit (`bb`, which is exactly `align == WA_CENTER`) both matter to

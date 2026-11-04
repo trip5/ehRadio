@@ -454,6 +454,13 @@ void Player::_play(uint16_t stationId) {
     }
     _shuffleWalkOwns = false;
   #endif
+  // A new track is starting: blank the screensaver's info line before anything about it is published.  This has to
+  // be here, AHEAD of the title write further down, because that write is the first thing that repaints the line -
+  // and over the gap nothing is playing (player.isRunning() is the audio engine's flag, and it let go at EOF), so
+  // the line would be repainted with the WEATHER.  The handler gates on config.isScreensaver, which also excludes a
+  // manual skip: screenSaverExit() queues its mode change before this request, so the device is awake by then.
+  // See plans/screensaver-line-hold.md.
+  display.putRequest(SSHOLD);
   setError("");
   _fatalStream = false;  // a new station clears a previous permanent-error stop
   _verdictSeen = STREAM_REFUSE_NONE;  // ...and the library verdict that went with it

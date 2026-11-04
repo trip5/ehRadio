@@ -86,6 +86,10 @@ class VuWidget: public Widget {
     // off, or a conf asking for WA_CENTER would draw its shape into a box the layout never described.  False on
     // the player's own widget, which follows vuConf.align.
     bool _forceRotate = false;
+    // The screensaver's bar family tiles its span exactly, and its segment count comes from initScreensaver() rather
+    // than from the layout.  Only that instance sets this, so the player page keeps the historical loop in
+    // _drawBars() untouched.  See plans/screensaver-vu-segments.md.
+    bool _ssTiling = false;
     // The layout's verdict from vuResolveBox(): false means the box does not fit the panel, so this instance
     // takes no canvas and paints nothing.  The screensaver's own meter always fits, so it is true there.
     bool _drawable = true;
@@ -129,6 +133,7 @@ class VuWidget: public Widget {
     uint8_t _bandCount(uint16_t span, uint16_t *barW, uint16_t *gap) const;
     void _synthBands(uint8_t *out, uint8_t n, uint16_t lvl);
     void _drawBars(bool led);
+    void _drawBarsTiled(uint16_t len);   // the screensaver's exact tiling - see plans/screensaver-vu-segments.md
     void _drawHistory();
     void _drawSpectrumReflect();
     void _drawSpectrumMirror();

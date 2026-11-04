@@ -5,7 +5,7 @@
 #ifndef displayTFT220x176conf_h
 #define displayTFT220x176conf_h
 
-#define TFT_BORDER    4
+#define TFT_BORDER      4
 #define MAX_WIDTH       DSP_WIDTH-TFT_BORDER*2
 #define BOOTLOGOTOP     28
 

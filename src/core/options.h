@@ -962,6 +962,16 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef VU_FADE_MS
   #define VU_FADE_MS 1000 // ms for a VU bar to fall from full to empty
 #endif
+// The meter's REFERENCE (the loudest reading since the last stop or title change).  It rises at once and then releases:
+// every VU_REF_DECAY_MS it falls by VU_REF_DECAY_PCT of itself, never below the live reading - 6% per 250 ms is about
+// 22%/s, a 2.8 s half-life.  Time-based on purpose: the old per-call decay chased the signal and pinned the bar at full.
+// Raise the percent (or lower the interval) for a quicker release, in which quiet passages read higher.
+#ifndef VU_REF_DECAY_MS
+  #define VU_REF_DECAY_MS 250
+#endif
+#ifndef VU_REF_DECAY_PCT
+  #define VU_REF_DECAY_PCT 6
+#endif
 #ifndef VU_PEAK_FREEZE_MS
   #define VU_PEAK_FREEZE_MS 1000 // ms the peak marker stays frozen after the level starts falling
 #endif

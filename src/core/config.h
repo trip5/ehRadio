@@ -301,6 +301,7 @@ class Config {
     volatile uint32_t sdResumePos = 0;
     volatile bool     wwwFilesExist = false;
     volatile uint16_t vuThreshold = 0;
+    uint32_t          _vuRefMs = 0;              // the reference's release clock; see vuRefTrack()
     volatile uint16_t screensaverTicks = 0;
     volatile uint16_t screensaverPlayingTicks = 0;
     volatile uint16_t sleepTicks = 0;   // seconds the screensaver has been up, for the sleep timer
@@ -354,6 +355,26 @@ class Config {
     bool vuSourceWanted() const {
       const bool ss = isScreensaver;
       return (store.vumeter && !ss) || (ss && store.screensaverVU);
+    }
+    // The meter's REFERENCE: the loudest reading since the last stop or title change, with a time-based release.  A
+    // reading raises it at once; every VU_REF_DECAY_MS it falls by VU_REF_DECAY_PCT of itself, but never below the live
+    // reading - so a sustained loud passage keeps it near the signal (the bar stays up) while a few seconds of quieter
+    // material bring it down far enough for the bar to empty.  Time-based deliberately: the old VS1053 decay counted
+    // `computeVUlevel()` calls, which made it chase the signal and pin the bar at full.  ONE implementation, called by
+    // both audio libraries' computeVUlevel(), so the rule cannot fork with them.
+    // See plans/vu-level-reference-and-255-ceiling.md.
+    void vuRefTrack(uint16_t left, uint16_t right) {
+      const uint16_t live = (left > right) ? left : right;
+      if (live > vuThreshold) vuThreshold = live;            // attack: instant, unthrottled
+      const uint32_t now = millis();
+      if (_vuRefMs == 0) { _vuRefMs = now ? now : 1; return; }  // first reading arms the clock
+      if ((uint32_t)(now - _vuRefMs) < VU_REF_DECAY_MS) return;
+      _vuRefMs = now;
+      const uint16_t ref = vuThreshold;
+      if (ref <= live) return;                                // nothing to release
+      const uint16_t step = (uint16_t)(((uint32_t)ref * VU_REF_DECAY_PCT) / 100u);
+      const uint16_t next = (step == 0) ? (uint16_t)(ref - 1) : (uint16_t)(ref - step);  // always make progress
+      vuThreshold = (next > live) ? next : live;              // never undershoot the live reading
     }
     FS* SDPLFS() { return _SDplaylistFS; }
     void syncSDFS();  // update _SDplaylistFS after external play_mode changes (e.g. button hold)

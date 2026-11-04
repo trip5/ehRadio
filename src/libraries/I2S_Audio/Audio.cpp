@@ -5840,9 +5840,12 @@ void Audio::computeVUlevel(int16_t sample[2]) {
     if(f_vu) {
         f_vu = false;
         vuLeft = (avg(sampleArray[LEFTCHANNEL][3]));
-        if(vuLeft>config.vuThreshold)  config.vuThreshold = vuLeft;
         vuRight = (avg(sampleArray[RIGHTCHANNEL][3]));
-        if(vuRight>config.vuThreshold) config.vuThreshold = vuRight;
+        /* The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the VS1053
+           path: Config::vuRefTrack().  It used to be the two lines here, which raised the high-water mark and never
+           let it go, so the bar stayed pinned on compressed material.  See
+           plans/vu-level-reference-and-255-ceiling.md. */
+        config.vuRefTrack(vuLeft, vuRight);
         /* Publish the window on the same tick as the level, so the two never describe different
            audio.  Costs one 2 KB rotation per 512 samples, which is a fraction of a percent of this
            task. */
@@ -5852,9 +5855,16 @@ void Audio::computeVUlevel(int16_t sample[2]) {
 }
 //****************************************************************************************
 uint16_t Audio::get_VUlevel(uint16_t dimension){
-  if(!config.vuSourceWanted() || config.vuThreshold==0) return 0;
-  uint8_t L = map(vuLeft, config.vuThreshold, 0, 0, dimension);
-  uint8_t R = map(vuRight, config.vuThreshold, 0, 0, dimension);
+  /* The return packs the length CLEARED from the loud end of each bar, 8 bits a channel - so 0 means "nothing cleared",
+     i.e. a FULL bar, and `dimension` means empty.  "Nothing to show" must therefore answer EMPTY, not 0:
+     config.vuThreshold is zeroed by Config::setTitle() on every title change and by _play() on every start, and the
+     old `return 0` here lit both bars to maximum across every track boundary and then let them drain back.  This is
+     the shape the VS1053 path already uses: clamp the reference (it is also map()'s divisor) and let silence map to
+     `dimension`.  See plans/vu-level-reference-and-255-ceiling.md. */
+  if(!config.vuSourceWanted()) return (uint16_t)(((uint16_t)dimension << 8) | dimension);
+  const uint16_t ref = config.vuThreshold ? config.vuThreshold : 1;
+  uint8_t L = (uint8_t)map(vuLeft, ref, 0, 0, dimension);
+  uint8_t R = (uint8_t)map(vuRight, ref, 0, 0, dimension);
   return (L << 8) | R;
 /*
     // avg 0 ... 127

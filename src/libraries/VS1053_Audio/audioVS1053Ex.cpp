@@ -3059,9 +3059,11 @@ void Audio::computeVUlevel() {
   vuLeft  = vuDbToAmp(dbL);
   vuRight = vuDbToAmp(dbR);
 
-  // Peak hold, rising only - see the note above for why it no longer decays
-  if(vuLeft  > config.vuThreshold) config.vuThreshold = vuLeft;
-  if(vuRight > config.vuThreshold) config.vuThreshold = vuRight;
+  /* The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the I2S path:
+     Config::vuRefTrack().  Rising-only was the old rule, and it is what pinned the bar on compressed material: the
+     reference never let go of the track's peak, so a quiet bar was never a large fraction of it.  See
+     plans/vu-level-reference-and-255-ceiling.md. */
+  config.vuRefTrack(vuLeft, vuRight);
 
 #if VU_VS1053_LOG
   /* VU diagnostics, once a second.  Two questions:
@@ -3158,8 +3160,10 @@ void Audio::computeVUlevel() {
 }
 
 uint16_t Audio::get_VUlevel(uint16_t dimension){
-  if(!VS_PATCH_ENABLE) return 0;
-  if(!_vuInitalized || !config.vuSourceWanted()) return 0;
+  if(!VS_PATCH_ENABLE || !_vuInitalized) return 0;
+  /* 0 means "nothing cleared", i.e. a FULL bar in this convention, so "nothing to show" answers EMPTY instead - the
+     same repair the I2S path needed, see plans/vu-level-reference-and-255-ceiling.md. */
+  if(!config.vuSourceWanted()) return (uint16_t)(((uint16_t)dimension << 8) | dimension);
   /* This read asserts the chip's SCI select, and the audio task may be holding SDI low mid-chunk; both asserted at
      once is undefined on this chip and leaves the decoder refusing data for the rest of the boot.  So the read takes
      the feeder's own mutex - mutex_audioTask, the one performAudioTask() holds around playAudioData() - and skips the

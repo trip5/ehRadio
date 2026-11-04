@@ -352,8 +352,8 @@
 //#define ALL_DEBUG_LOGS         // turns on every switch below at once - very noisy, and every print costs ms
 //#define CORE_MONITOR           // CPU core load plus heap, PSRAM and LittleFS, every 5s
 //#define BOOTLOG_TIME           // prefix BOOT lines with the time since power-on
-//#define WIDGET_DEBUG           // widget text and the VU draw cost
-#define AUDIO_DEBUG            // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
+#define WIDGET_DEBUG           // widget text and the VU draw cost
+//#define AUDIO_DEBUG            // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
 //#define METADATA_LOG           // every ID3 field and each ICY title and station name - the switch for "no title on this station"
 //#define CONFIG_KEY_DEBUG       // every Prefs key and the value written to it
 #define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value

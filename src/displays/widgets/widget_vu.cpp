@@ -109,13 +109,47 @@ bool VuWidget::ready() {
   #endif
 }
 
+// The peak marker's thickness in px: a fraction of the level-axis length, rounded up, never below 1.  One formula
+// because two readers now depend on it - the marker itself in _drawBars(), and the screensaver's segment gap, which is
+// widened to match it.  See plans/screensaver-vu-segments.md.
+static inline uint16_t vuPeakThickness(uint16_t len) {
+  const uint16_t t = (uint16_t)(((uint32_t)len * VU_PEAK_THICKNESS_MILLI + 999u) / 1000u);
+  return t ? t : 1;
+}
+
+// The segment count the screensaver's bar family should draw.  A block is `len/per - gap` long (`w`) and `thk` tall, and
+// each style states the SHAPE it must reach as a ratio: the walk stops at the first count with `thk * den >= w * num` -
+// `1/1` for Bars (square or taller) and `3/2` for Digital LED (1:1.5 or taller) - or at a HARD CAP of 16, and a layout
+// asking for more than 16 is clamped down to it.  Only "shape met" or "cap" ends the walk, so a candidate the style
+// does not want can never be CHOSEN; and because the walk only ever makes blocks SHORTER, a layout whose blocks are
+// already tall enough is left exactly as it drew them (the "larger displays fight this" case).  One predicate family,
+// two thresholds.  See plans/screensaver-vu-two-bar-styles.md.
+static uint8_t ssSegmentCount(uint16_t len, uint16_t thk, uint8_t gap, uint8_t layoutPer, uint8_t num, uint8_t den) {
+  uint16_t per = layoutPer ? layoutPer : 3;
+  if (per > 16) per = 16;                       // the hard cap, applied to the layout's own count
+  if (per < 2)  per = 2;
+  if (per > len) per = len;                     // never more segments than pixels
+  uint8_t best = (uint8_t)per;
+  for (uint16_t cur = per; ; cur = (uint16_t)(cur + 2)) {
+    if (cur > len) cur = len;
+    const uint16_t pitch = (uint16_t)(len / cur);
+    const uint16_t w = (pitch > gap) ? (uint16_t)(pitch - gap) : 1;
+    best = (uint8_t)cur;
+    if ((uint32_t)thk * den >= (uint32_t)w * num) break;  // the style's shape is reached
+    if (cur >= 16 || cur >= len) break;                   // the cap, or as many as the pixels allow
+  }
+  return best;
+}
+
 // The screensaver's meter, from a box resolveScreensaverBox() has already sized and placed.  The box is
 // described to the painters in the same terms a layout uses: _draw() resolves rotate mode as
 // _cw = bands.height and _ch = bands.width * 2 + bands.space, so a box of w x h is bands.height = w with
 // bands.width = (h - space) / 2.  The bar family instead wants its two channels as whole rows with the gap
 // between them, which is that identity read the other way round: bands.width = barH, bands.space = gapH,
-// and the box is exactly 2 * barH + gapH tall.  vspace and perheight - the gap between segments and the
-// count of them inside a bar - stay the layout's own.
+// and the box is exactly 2 * barH + gapH tall.  vspace and perheight are the ONE place the bar family does
+// NOT follow the layout: the segment gap is widened to at least the peak marker's thickness, and the count
+// comes from the block's shape (ssSegmentCount()) - both on this copy, so only the screensaver's meter
+// changes.  See plans/screensaver-vu-segments.md.
 //
 // The palette comes from the live theme rather than from any stored conf, because this widget is not
 // derived from the layout in any way: it is the theme's VU colours over an area the layout never saw.
@@ -129,6 +163,18 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
     // space is a byte in the master, so a gap wider than 255 px could not be described.  No panel's can be:
     // the budget caps the box long before that.
     b.space = (box.gapH > 255) ? 255 : (uint8_t)box.gapH;
+    // The gap and the block shape are per STYLE, because the two bar painters read differently: Bars is a smooth level,
+    // so its gap is exactly one marker - the marker then FILLS a gap - while Digital LED freezes whole segments and
+    // gets two markers of air, with a stricter shape to match.  Both only ever WIDEN the layout's spacing.
+    const bool led = (style == VU_STYLE_DIGITAL_LED);
+    const uint16_t segGap = (uint16_t)((led ? 2u : 1u) * vuPeakThickness(box.w));
+    b.vspace = (segGap > layoutBands.vspace) ? (uint8_t)((segGap > 255) ? 255 : segGap) : layoutBands.vspace;
+    // ...and the count follows the block's SHAPE rather than the layout's number: square-or-taller for Bars (1/1),
+    // 1:1.5-or-taller for Digital LED (3/2).  See ssSegmentCount() and plans/screensaver-vu-two-bar-styles.md.
+    b.perheight = ssSegmentCount(box.w, b.width, b.vspace, layoutBands.perheight,
+                                 led ? 3 : 1, led ? 2 : 1);
+    // This instance tiles its span exactly (the chosen count rarely divides it) and is the only one that does.
+    _ssTiling = true;
   } else {
     b.space = layoutBands.space;
     b.width = (box.h > (uint16_t)b.space) ? (uint16_t)((box.h - b.space) / 2) : 1;
@@ -145,35 +191,56 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
   return ready();
 }
 
-// The screensaver's box for a style.  Three rules, and each one only engages where the area can afford it:
+// The screensaver's box for a style.  ONE inset applies to every style, before anything else: the info line is inset
+// by TFT_BORDER and the walking clock is clamped to that same border on all four sides.  So the usable width is `w`
+// below and every box is placed at `in + (w - box.w)/2` - which, wherever the budget engages, is arithmetically the
+// old centring (`in + (w - box.w)/2` and `(areaW - box.w)/2` are the same number for the same box.w), so only the flush
+// cases actually move.
+//
+// Then three rules, and each one only engages where the area can afford it:
 //
 //   bars       the two channels are rows - VU_BAR_PERCENT each, VU_BAR_GAP_PERCENT between them, and the
 //              remainder above and below left as placement rather than painted rows - so the box is
 //              2 * bar + gap and it is centred.  A box over the budget scales the bar and the gap
 //              together, which keeps the shape and buys bigger bars than trimming the bar alone would.
+//              This family's cap is its OWN: BARS_ALLOWANCE scales the budget for the bars alone, because
+//              two full-width rows cost a full erase and a full blit every frame - so that allowance is a
+//              frame-rate control, not just a memory one.  The other styles keep the whole budget.
 //   Lissajous  a square, because the figure is an X-Y plot and reads wrong in a rectangle.  Its budget is
 //              VU_MAX_HEIGHT squared, deliberately smaller than the rectangle's.
 //   the rest   the budget rectangle, VU_MAX_WIDTH x VU_MAX_HEIGHT at most, centred.
 //
-// Below the budget the area comes back untouched, which is what keeps a small panel and an OLED as they were.
+// Below the budget the usable width comes back untouched, which is what keeps a small panel and an OLED as they
+// were - less the border, the one thing this function now always takes.  The HEIGHT is never inset: the content area
+// already excludes the info line's strip, so insetting it again would only push the meter off the panel's centre.
 
 // The bar family's shape, as percentages of the content height - Bars (VU_STYLE_BARS) and Digital LED
 // (VU_STYLE_DIGITAL_LED) are one painter over one box.  Each channel takes VU_BAR_PERCENT and the gap
-// between them VU_BAR_GAP_PERCENT; the remainder is placement, split evenly above and below by the
-// centring.  The shipped shape is 25 + 20 + 10 + 20 + 25.
-#define VU_BAR_PERCENT      20
-#define VU_BAR_GAP_PERCENT  10
+// between them VU_BAR_GAP_PERCENT; the remainder is placement, split evenly above and below by the centring.
+// Ratios (empty + bar + gap + bar + empty) 28 + 18 + 8 + 18 + 28
+#define VU_BAR_PERCENT      18
+#define VU_BAR_GAP_PERCENT  8
+#define BARS_ALLOWANCE      0.75 // special limiter because the bars are so intensive
 
 VuBox VuWidget::resolveScreensaverBox(uint16_t areaW, uint16_t areaH, uint8_t style) {
   VuBox box;
   if (!areaW || !areaH) return box;
+  // The border, taken once (see above).  A panel no wider than two borders keeps its full width instead of
+  // collapsing: `in` is 0 there.
+  const uint16_t in = (areaW > (uint16_t)(TFT_BORDER * 2)) ? (uint16_t)TFT_BORDER : 0;
+  const uint16_t w  = (uint16_t)(areaW - 2 * in);
   const uint32_t budget = (uint32_t)VU_MAX_WIDTH * VU_MAX_HEIGHT;
   if (style == VU_STYLE_BARS || style == VU_STYLE_DIGITAL_LED) {
     uint16_t gap = (uint16_t)(areaH * VU_BAR_GAP_PERCENT / 100u);
     uint16_t bar = (uint16_t)(areaH * VU_BAR_PERCENT / 100u);
     if (!gap) gap = 1;
     uint32_t h = (uint32_t)2 * bar + gap;
-    const uint32_t hmax = budget / areaW;
+    // The bar family's OWN allowance: this fraction is a frame-rate control, because the box AREA is what every frame
+    // erases and blits - and it applies to these two styles alone.  The trace styles below keep the whole budget.
+    // See plans/screensaver-vu-bars-allowance.md.
+    const uint32_t barBudget = (uint32_t)((double)budget * BARS_ALLOWANCE);
+    // Divided by the box's own width, not the panel's: the inset is width the canvas no longer occupies.
+    const uint32_t hmax = barBudget / w;
     if (hmax && h > hmax) {
       bar = (uint16_t)((uint32_t)bar * hmax / h);
       gap = (uint16_t)((uint32_t)gap * hmax / h);
@@ -183,24 +250,24 @@ VuBox VuWidget::resolveScreensaverBox(uint16_t areaW, uint16_t areaH, uint8_t st
     }
     if (bar >= 2) {
       box.bars = true; box.barH = bar; box.gapH = gap;
-      box.w = areaW; box.h = (uint16_t)h; box.left = 0;
+      box.w = w; box.h = (uint16_t)h; box.left = in;
       box.top = (uint16_t)((areaH - (uint16_t)h) / 2);
       return box;
     }
-    // Too short for two rows: the rectangle below is what the style gets, drawn in the whole area.
+    // Too short for two rows: the rectangle below is what the style gets, drawn in the inset area.
   }
-  if (style == VU_STYLE_LISSAJOUS && (uint32_t)areaW * areaH > (uint32_t)VU_MAX_HEIGHT * VU_MAX_HEIGHT) {
-    uint16_t side = (areaW < areaH) ? areaW : areaH;
+  if (style == VU_STYLE_LISSAJOUS && (uint32_t)w * areaH > (uint32_t)VU_MAX_HEIGHT * VU_MAX_HEIGHT) {
+    uint16_t side = (w < areaH) ? w : areaH;
     if (side > VU_MAX_WIDTH) side = VU_MAX_WIDTH;
     if (side > VU_MAX_HEIGHT) side = VU_MAX_HEIGHT;
     box.w = side; box.h = side;
-  } else if ((uint32_t)areaW * areaH > budget) {
-    box.w = (areaW < VU_MAX_WIDTH) ? areaW : VU_MAX_WIDTH;
+  } else if ((uint32_t)w * areaH > budget) {
+    box.w = (w < VU_MAX_WIDTH) ? w : VU_MAX_WIDTH;
     box.h = (areaH < VU_MAX_HEIGHT) ? areaH : VU_MAX_HEIGHT;
   } else {
-    box.w = areaW; box.h = areaH;
+    box.w = w; box.h = areaH;
   }
-  box.left = (uint16_t)((areaW - box.w) / 2);
+  box.left = (uint16_t)(in + (uint16_t)((w - box.w) / 2));
   box.top  = (uint16_t)((areaH - box.h) / 2);
   return box;
 }
@@ -415,8 +482,7 @@ void VuWidget::_drawBars(bool led){
   // Peak marker geometry, resolved once because both the clears and the marker themselves draw with it.
   // peakThk reserves the outermost pixels of the widget, which keeps the marker inside the .bandsConf
   // footprint.
-  const uint16_t peakThk = ((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) > 0
-                         ? (uint16_t)((len * VU_PEAK_THICKNESS_MILLI + 999) / 1000) : 1;
+  const uint16_t peakThk = vuPeakThickness(len);
   uint16_t pkL = 0, pkR = 0;
   if (_vupeak()) {
     // Collapse the 0xFFFF sentinel and clamp BEFORE snapping: a snap can move a marker down to the quiet end, and a
@@ -439,6 +505,10 @@ void VuWidget::_drawBars(bool led){
     }
   }
 
+  // The layout's own walk: a fixed pitch, with the last segment clamped.  The screensaver's instance takes the exact
+  // tiling instead, computed by initScreensaver() - see _drawBarsTiled().
+  if (_ssTiling) _drawBarsTiled(len);
+  else
   for (int i = 0; i < len; i += step) {
     // Clamp the last segment to len. The loop bound only guarantees a segment STARTS before len, and anything drawn
     // past the box can never be erased - the fills and _clear() all stop at len. Clamp, not skip, so the bar tip still
@@ -483,6 +553,53 @@ void VuWidget::_drawBars(bool led){
       _fillLocal(0, pkL - peakThk, _bands.width, peakThk, _vupeakcolor);
       _fillLocal(thk + _bands.space, pkR - peakThk, _bands.width, peakThk, _vupeakcolor);
     }
+  }
+}
+
+// The screensaver's exact tiling: the segments span `len` to the last pixel, and the remainder the layout's own loop
+// would leave as background at the loud end is absorbed by the two tip segments, so the min segments stay uniform -
+// which is the point of the exercise ("the vu min segments should always look even").  The DIRECTION of that
+// correction is whichever costs less: the min segments at `len/per` with the tip pair longer, or at `len/per + 1` with
+// the tip pair shorter, ties going to the shorter tip.  That choice is what keeps the rule sane at an exact division,
+// where the "+1" direction would shave `per - 2` off the tip pair - 8 px at 10 segments, a visible step exactly where
+// nothing needed correcting.  The LAST segment is drawn with no trailing gap, so its ink ends on the border column, and
+// with peaks on the marker (thickness == gap) then sits over those columns.  See plans/screensaver-vu-segments.md.
+void VuWidget::_drawBarsTiled(uint16_t len) {
+  uint16_t per = _bands.perheight ? _bands.perheight : 2;
+  if (per > len) per = len;                     // never more segments than pixels
+  if (per < 2) per = 2;
+  const uint16_t gap   = _bands.vspace;
+  const uint16_t base  = (uint16_t)(len / per);
+  const uint16_t rem   = (uint16_t)(len % per);
+  const bool     minUp = (uint16_t)(per - rem) <= rem;         // ties -> the thinner tip
+  const uint16_t minPitch = minUp ? (uint16_t)(base + 1) : base;
+  // The two tip segments take whatever the min segments leave.
+  const uint32_t tipTotal   = (uint32_t)len - (uint32_t)(per - 2) * minPitch;
+  const uint16_t outerPitch = (uint16_t)(tipTotal / 2);        // the one AT the border takes the floor
+  const uint16_t innerPitch = (uint16_t)(tipTotal - outerPitch);
+  // The max-colour band is the last three pitches, as in the layout's loop, measured against the min pitch.
+  uint32_t zone = (uint32_t)minPitch * 3;
+  if (zone > len) zone = len;
+  const uint16_t maxFrom = (uint16_t)(len - (uint16_t)zone);
+  uint16_t pos = 0;
+  for (uint16_t idx = 0; idx < per; idx++) {
+    const uint16_t pitch = (idx + 2 < per) ? minPitch : ((idx + 2 == per) ? innerPitch : outerPitch);
+    // No trailing gap on the last one: that is what puts its ink on the border column.
+    uint16_t hh = (idx + 1 == per) ? pitch : ((pitch > gap) ? (uint16_t)(pitch - gap) : 1);
+    if ((uint32_t)pos + hh > len) hh = (uint16_t)(len - pos);
+    if (!hh) break;
+    uint16_t colorL, colorR;
+    if (_rotate) {
+      colorL = colorR = (pos > maxFrom) ? _vumaxcolor : _vumincolor;
+    } else if (_config.align) {
+      colorL = (pos > minPitch) ? _vumincolor : _vumaxcolor;
+      colorR = (pos > maxFrom) ? _vumaxcolor : _vumincolor;
+    } else {
+      colorL = colorR = (pos < (uint16_t)zone) ? _vumaxcolor : _vumincolor;
+    }
+    _drawBand(pos, 0, hh, colorL);
+    _drawBand(pos, 1, hh, colorR);
+    pos = (uint16_t)(pos + pitch);
   }
 }
 
@@ -972,9 +1089,16 @@ static uint16_t vuFadeUp(uint16_t cur, uint16_t limit, uint16_t speed, uint32_t 
 
 void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
   static uint16_t mL = 0, mR = 0;
-  uint16_t vulevel = player.get_VUlevel(len);
-  uint8_t L = (vulevel >> 8) & 0xFF;
-  uint8_t R = vulevel & 0xFF;
+  // The level interface packs 8 bits a channel, so it can only describe 0..255 - ask for 255 UNITS and scale to this
+  // bar's own length.  Asking for `len` instead is only right up to 255 px: the screensaver's bar is 460, so a cleared
+  // length of 300 used to arrive as 44 and silence (460) as 204, which left that bar resting about 55% lit at silence
+  // and non-monotonic in between.  255 steps over 460 px is 1.8 px a step - finer than the eye.  Rounded to nearest so
+  // both ends map exactly.  See plans/vu-level-reference-and-255-ceiling.md.
+  uint16_t vulevel = player.get_VUlevel(255);
+  const uint16_t unitsL = (vulevel >> 8) & 0xFF;
+  const uint16_t unitsR = vulevel & 0xFF;
+  const uint16_t L = (uint16_t)(((uint32_t)unitsL * len + 127u) / 255u);
+  const uint16_t R = (uint16_t)(((uint32_t)unitsR * len + 127u) / 255u);
 
   // Time base. Counting the fade in display ticks made the same number behave differently on every panel and bar
   // length. dt is clamped so a long stall (a page switch, an OTA write) cannot make the bar jump.
@@ -993,8 +1117,8 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
   bool played = player.isRunning();
   if (first) {
     // First frame after init or unlock: adopt the live level rather than sweeping in.
-    mL = played ? (uint16_t)L : len;
-    mR = played ? (uint16_t)R : len;
+    mL = played ? L : len;
+    mR = played ? R : len;
     _accL = _accR = 0;
   } else if (played) {
     // Attack stays instant and unthrottled - a louder reading snaps the bar out at once. Only the receding (quieter)

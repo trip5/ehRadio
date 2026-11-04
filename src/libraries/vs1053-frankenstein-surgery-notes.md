@@ -878,3 +878,28 @@ worse than no copy at all — the graft-time one was removed on 2026-09-27, leav
 record. The upstream folders stay because they are the only local copies of code that is not ours.
 
 Someday these files may be needed again...
+
+## Post-Graft Patch Fixes (2026.11.04)
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`. Full reasoning
+in `plans/vu-level-reference-and-255-ceiling.md`.
+
+1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** Its return packs the length *cleared* from the
+   loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - a fully lit bar. The early
+   `if(!_vuInitalized || !config.vuSourceWanted()) return 0;` therefore lit both bars to **maximum** whenever the
+   source was not wanted, and the same happened through the reference clamp's other half on every title change (which
+   is when `Config::setTitle()` zeroes `vuThreshold`). It now answers EMPTY - `(dimension << 8) | dimension` - for the
+   not-wanted case; the zero-reference case was already right here (clamped to 1, so silence maps to `dimension`).
+   Both paths now agree.
+2. **The reference releases again, but in real time.** The "Peak hold, rising only" pair is one call to
+   `Config::vuRefTrack(vuLeft, vuRight)`: raise at once, then fall by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6%
+   per 250 ms, ~22%/s, a 2.8 s half-life), never below the live reading. This supersedes the earlier
+   "Removing the decay makes the reference the loudest reading since the last stop or title change" decision - the
+   decay is back, but the failure that motivated its removal (the per-`computeVUlevel()`-call decay chasing the signal
+   and pinning the bar near full) cannot recur: the interval is timed off `millis()` and the reference can never fall
+   below the reading it is being compared against. The rule lives in `config.h`, so the I2S path shares it.
+
+**Side effect, accepted:** the synthesized spectrum scales by `256 / config.vuThreshold`, so it now normalises to the
+last few seconds too and brightens through a quiet passage - the same normalisation the bars get. Also worth knowing:
+`VU_VS1053_DB_FULL` still cancels out of the bar length, and the reference's *release* is now the only thing that
+decides how quickly quiet material empties.

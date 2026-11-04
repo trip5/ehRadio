@@ -181,7 +181,6 @@ class ScrollWidget: public TextWidget {
     void setText(const char* txt) override;
     void setText(const char* txt, const char *format) override;
     void repaint() override;      // its own _draw(), not TextWidget's unclipped erase
-    void setTextLooped(const char* txt);
   private:
     char *_sep = nullptr;
     char *_window = nullptr;
@@ -210,7 +209,6 @@ class ScrollWidget: public TextWidget {
     void _refreshMark();               // re-ask while the line is live: a holiday can begin at midnight
     void _spanPainted();               // a scrolling paint owns the whole span, not just its own box
     bool _checkIsScrollNeeded();
-    uint16_t _widthOf(const char* raw);   // the width setText() would measure for this raw string
     bool _checkDelay(int m, uint32_t &tstamp);
     void _clear();
     void _reset();

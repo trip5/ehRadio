@@ -5,7 +5,7 @@
 #ifndef displayTFT480x320conf_h
 #define displayTFT480x320conf_h
 
-#define TFT_BORDER    10
+#define TFT_BORDER      10
 #define MAX_WIDTH       DSP_WIDTH-TFT_BORDER*2
 
 #if defined(BIG_BOOT_LOGO) || BIG_BOOT_LOGO // true

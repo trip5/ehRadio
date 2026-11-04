@@ -47,7 +47,10 @@ extern const char batterytxtFmt[] PROGMEM;
 #endif
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
 static constexpr uint32_t DSQ_CRITICAL_WAIT = 2000;  // ms; how long SDINDEXSTART/SDINDEXDONE keep retrying a full queue
-static constexpr uint32_t SS_LINE_HOLD_MS = 3000;  // ms; How long the screensaver's info line stays blank after a track change
+// ms; how long the screensaver's info line stays blank after a track change starts.  The request that starts the
+// hold is queued by _play() AHEAD of its title write, so the window only has to cover loadStation() plus the card
+// open and the tag read - a few hundred milliseconds.  See plans/screensaver-line-hold.md.
+static constexpr uint32_t SS_LINE_HOLD_MS = 1000;
 
 // These three flags are per-layout booleans in LayoutData now, not per-model macros.
 
@@ -296,11 +299,17 @@ static inline void applyMove(Widget* w, const MoveConfig& m) {
 }
 
 // ---- The screensaver's info line: the strip it occupies -------------------------------------------
-// The line is a widget no layout provides.  It borrows metaConf's text size and scroll speed, but its
-// width is the screen and its place is a strip along the bottom edge: one text row, with a clear gap of
-// a hundredth of the panel height (rounded up) both below it and above it, so the clock or the meter
-// never sits flush against it and the text never touches the panel edge.
+// The line is a widget no layout provides.  It borrows metaConf's text size and scroll speed, but its width is the
+// screen and its place is a strip along the bottom edge: one text row, with a hundredth of the panel height (rounded
+// up) between it and whatever the meter or the clock draws above it, so neither sits flush against the other.
 static inline uint16_t ssGap()  { return (uint16_t)((dsp.height() + 99) / 100); }
+// The margin UNDER the text is the bezel border where that is larger, because the rest of the screensaver page keeps
+// TFT_BORDER from the glass - the clock's walk is clamped to it on all four sides, the meter's box is inset by it - and
+// the line was the one thing that came closer.  The gap ABOVE stays ssGap(): that separates the line from the meter or
+// the clock, which is spacing rather than a bezel, and keeping it proportional keeps the strip as thin as it is.  A
+// panel whose border is 1 or 2 keeps its old strip exactly, because ssGap() already wins there.
+// See plans/screensaver-line-bottom-margin.md.
+static inline uint16_t ssBottomGap() { return max(ssGap(), (uint16_t)TFT_BORDER); }
 // The line's text size, from the first layout row that states one: the weather line (the row the strip shares
 // its look with), then title1, then the playlist, and metaConf last - meta is mandatory, so the chain resolves
 // on any laid-out display.  The bare 1 is only for a caller running before the layout is applied.
@@ -324,7 +333,7 @@ uint16_t Display::_ssStripH() {
   // Nothing to show is no strip at all: the clock then wanders over the whole panel rather than around a
   // caption that would be empty.
   if (!config.store.screensaverText || !ssLineHasText()) return 0;
-  const uint32_t strip = (uint32_t)ssRowH() + 2u * (uint32_t)ssGap();
+  const uint32_t strip = (uint32_t)ssRowH() + (uint32_t)ssGap() + (uint32_t)ssBottomGap();
   // Refused outright on a panel where the strip would leave the clock or the meter nothing: the line is
   // decoration, and a 32 px OLED has no room for a bottom row at all.
   if ((uint32_t)dsp.height() <= strip + 16u) return 0;
@@ -338,7 +347,7 @@ uint16_t Display::_ssContentH() {
 
 uint16_t Display::_ssTextTop() {
   if (!_ssStripH()) return 0;
-  return (uint16_t)(dsp.height() - ssGap() - ssRowH());
+  return (uint16_t)(dsp.height() - ssBottomGap() - ssRowH());
 }
 
 // Every layout's geometry is built on the 6x8 metric class (CHARWIDTH/CHARHEIGHT), so a system font that
@@ -1266,6 +1275,12 @@ void Display::loop() {
     #endif
     switch (request.type) {
         case NEWMODE: _switchMode((displayMode_e)request.payload); break;
+        // A new track is loading: blank the info line and hold it.  Queued by _play() ahead of the title write that
+        // would otherwise repaint the line - over the gap nothing is playing, so that paint would be the WEATHER.
+        // Only while the screensaver owns the panel, which is the only place the line exists.
+        case SSHOLD:
+          if (config.isScreensaver) _ssHoldLine(SS_LINE_HOLD_MS);
+          break;
         // A screensaver setting changed while the screensaver is on screen.  Deliberately not a mode change,
         // so it does not go through _switchMode() and its two guards: the widgets are re-derived from the
         // prefs and the page is repainted where it stands.
@@ -1298,15 +1313,7 @@ void Display::loop() {
             _time(request.payload);
           break;
         case NEWTITLE: _title(); break;
-        case NEWSTATION:
-          // An SD track change is announced by the new track's station name, queued by _play() BEFORE it opens the
-          // file - so this hold is already up when handleBeginSdRead() clears the title, which is the moment the
-          // weather would otherwise take the strip.  Only while the screensaver owns the panel: that is the only
-          // place the line exists, and a manual skip has already left the screensaver by the time this is handled
-          // (screenSaverExit() queues its mode change first), so only an EOF advance is held.
-          if (config.isScreensaver) _ssHoldLine(SS_LINE_HOLD_MS);
-          _station();
-          break;
+        case NEWSTATION: _station(); break;
         case NEXTSTATION: _drawNextStationNum(request.payload); break;
         case DRAWPLAYLIST: _drawPlaylist(); break;
         case DRAWVOL: _volume(); break;
@@ -1676,11 +1683,12 @@ void Display::_screensaverLine() {
     // Weather only over silence: playing, the line is the track's, not the forecast's.
     append(line, sizeof(line), network.weatherBuf);
   }
-  // The screensaver's line is the one that must MOVE: it is the whole bottom row of a panel whose only job here is
-  // to look alive, and a short station name or a one-line forecast would otherwise leave it standing still.  The
-  // widget repeats the text, joined with its own mark, until it is wider than the strip - the width maths, the mark
-  // and the buffer ceiling are all its own, so this stays a one-copy composition.  See plans/screensaver-line-loop.md.
-  _sstext->setTextLooped(line);
+  // One copy, always: the widget decides what happens next, and its rule is the honest one - a line that fits the
+  // strip is drawn once and centred (conf.widget.align is WA_CENTER), and only a line wider than the strip scrolls,
+  // at the three-quarter speed _screensaverWidgets() sets.  An earlier version repeated the text until it
+  // overflowed so that every line moved; that made short lines marquees for no reason.  See
+  // plans/screensaver-line-centre.md.
+  _sstext->setText(line);
 }
 
 // Bring both screensaver widgets in line with the prefs and the active layout.  Called on every entry
@@ -1692,10 +1700,16 @@ void Display::_screensaverWidgets() {
   // --- the info line ---
   if (_ssStripH()) {
     ScrollConfig conf = *weatherConf_ptr;
-    conf.widget.offset = 0;
+    // The strip is the weather row's own box, inset like the player page's row and CENTRED, so a line that fits
+    // sits still in the middle of the panel and only a wider line scrolls across it.  The inset is not cosmetic:
+    // ScrollWidget::init() caps the width at MAX_WIDTH (DSP_WIDTH - 2*TFT_BORDER), so offset 0 with the panel's
+    // full width would centre the text TFT_BORDER to the LEFT of the panel's centre.  With the offset stated, the
+    // span starts where the panel's does and its centre IS the panel's centre.
+    conf.widget.offset = TFT_BORDER;
     conf.widget.top = _ssTextTop();
     conf.widget.textsize = ssTextSize();
-    conf.width = dsp.width();
+    conf.widget.align = WA_CENTER;
+    conf.width = dsp.width() - TFT_BORDER * 2;
     // Three quarters of the weather row's speed.  scrolldelta is pixels per step and scrolltime the ms between
     // steps, so speed = delta/time and either one can carry the reduction; the step is preferred because it keeps
     // the finer motion, but only where it divides exactly - a 1 px step (every OLED row) or the TFTs' 2 px scaled
@@ -1809,14 +1823,15 @@ void Display::_updateVolume() {
   uint8_t vol = config.store.volume;
 
   // 2-glyph: speaker + volume waves
-  // \023 = speaker (always)
+  // \023 = speaker (always execept when muted) \037 = muted speaker
   // Volume 0 → space (no waves). >0 → 1-4 waves via \024-\027.
   static const char waveGlyphs[4] = { '\024', '\025', '\026', '\027' };
 
   char buf[16];
-  buf[0] = '\023';             // speaker
+  if (vol == 0) buf[0] = '\037'; // muted speaker
+    else buf[0] = '\023'; // speaker
   if (vol == 0) {
-    buf[1] = ' ';              // silence: no waves
+    buf[1] = ' '; // silence: no waves
   } else {
     int level = (vol * 4) / (VOLUME_SCALE + 1);  // 0-3
     if (level > 3) level = 3;

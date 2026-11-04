@@ -625,3 +625,26 @@ so core cannot compare the codec directly - hence the named predicate rather tha
   is legitimate - read its numbers as "was the counter short at that moment", never as a fault by itself.
 - **When migrating upstream**, diff `setDefaults()` against the ancestor's first - the reset that goes missing there is
   the one that hurts - then compare against Maleksm v0.9.720m for the decoder abstraction and the VU meter.
+
+## Post-Graft Patch Fixes (2026.11.04)
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`. Full reasoning in
+`plans/vu-level-reference-and-255-ceiling.md`.
+
+1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** The return packs the length *cleared* from the
+   loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - i.e. a fully lit bar. The old
+   `if(!config.vuSourceWanted() || config.vuThreshold==0) return 0;` therefore lit both bars to **maximum** every time
+   the reference was zeroed: `Config::setTitle()` does that on every title change and `_play()` on every start, so the
+   bars snapped full at each track boundary and then drained back over `VU_FADE_MS`. It now answers EMPTY -
+   `(dimension << 8) | dimension` - when the source is not wanted, and clamps the reference to 1 (it is also `map()`'s
+   divisor) so silence maps to `dimension`, which is exactly what the VS1053 path already did.
+2. **The reference releases again, but in real time.** The two `if(vuLeft > config.vuThreshold) ...` lines - a
+   high-water mark that never came down while playing - are now one call to `Config::vuRefTrack(vuLeft, vuRight)`:
+   raise at once, then fall by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6% per 250 ms, ~22%/s, a 2.8 s half-life),
+   never below the live reading. This supersedes the earlier "removing the decay makes the reference the loudest
+   reading since the last stop" decision: the decay is back, but it is timed off `millis()` rather than the call rate
+   and it cannot undershoot the signal, which is what made the old per-call decay pin the bar at full. The rule lives
+   in `config.h` so this path and the VS1053 one share it instead of forking it.
+
+**Side effect, accepted:** the sample styles scale by `256 / config.vuThreshold`, so the waveform and the spectrum now
+normalise to the last few seconds too and brighten through a quiet passage - the same normalisation the bars get.

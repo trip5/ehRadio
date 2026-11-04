@@ -1,5 +1,7 @@
 #include "../../core/options.h"
 #if DSP_MODEL!=DSP_DUMMY
+#include <cstddef>
+#include <iterator>
 #include "../dspcore.h"
 #include "pages.h"
 #include "widgets.h"
@@ -53,8 +55,32 @@ Page::~Page() {
   // what about deleting _pages ???
 }
 
+// The panel has ONE scroll slot (dsp.setScrollId()), and this is where it is handed out.  While it is free, the first
+// widget that wants it - asked with the side-effect-free scrollWanted() - takes the turn, and the walk starts AFTER
+// the widget served last, so the lines take turns instead of racing: no line can take two turns in a row while another
+// wants one, the page's widget order no longer decides who scrolls, and a conf's `startscrolldelay` of 0 (every
+// weatherConf writes one) stops meaning "always".  The owner then keeps the slot for its whole sweep and steps in its
+// own loop() below.  A page with a single scrolling line is unaffected: it is the only candidate, so it is served at
+// every handover.  See plans/scroll-turn-fairness.md.
 void Page::loop() {
-  if(_active) for (const auto& w : _widgets) w->loop();
+  if (!_active) return;
+  if (!_widgets.empty() && dsp.getScrollId() == NULL) {
+    const size_t n = _widgets.size();
+    const size_t start = (_lastScroll < n) ? ((_lastScroll + 1) % n) : 0;
+    auto it = _widgets.begin();
+    std::advance(it, (std::ptrdiff_t)start);
+    for (size_t k = 0; k < n; k++) {
+      if (it == _widgets.end()) it = _widgets.begin();
+      Widget* w = *it;
+      if (w->scrollWanted()) {
+        _lastScroll = (start + k) % n;
+        w->scrollTurn();
+        break;
+      }
+      ++it;
+    }
+  }
+  for (const auto& w : _widgets) w->loop();
 }
 
 Widget& Page::addWidget(Widget* widget) {

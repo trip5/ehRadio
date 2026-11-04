@@ -274,6 +274,12 @@ DspCore dsp;
 
 Page *pages[] = { new Page(), new Page(), new Page(), new Page() };
 
+// The buffer for the two widgets that are handed a COMPOSED string rather than a single field: the weather row and the
+// screensaver's info line.  network.weatherBuf is WEATHER_STRING_L bytes INCLUDING its terminator and a ScrollWidget
+// keeps _buffsize - 2 bytes, so +2 is what makes the longest forecast fit exactly.  Everything else takes
+// WIDGET_BUFF_SIZE (172, the metadata field size).  See plans/widget-text-buffer-sizes.md.
+static constexpr uint16_t COMPOSED_LINE_BUFF = WEATHER_STRING_L + 2;
+
 static uint32_t normalizeBufferbarValue(uint32_t rawValue, uint32_t maxValue) {
   // Raw audio buffer fill vs the KB threshold where the bar looks "full"
   if (maxValue == 0) return 0;
@@ -507,7 +513,9 @@ void Display::_buildPager() {
     _battery = new TextWidget(*batteryConf_ptr, config.theme.battery, config.theme.background, 10);
   }
   if (presentOf(*weatherConf_ptr)) {
-    _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background);
+    // COMPOSED_LINE_BUFF, not the default: this widget is handed network.weatherBuf whole, which is built up to 511
+    // bytes.  See plans/widget-text-buffer-sizes.md.
+    _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background, COMPOSED_LINE_BUFF);
   }
 
   if (_volbar)   _footer->addWidget(_volbar);
@@ -1532,7 +1540,7 @@ void Display::_updateBattery() {
 // The editor's Temporary-On filler: about one panel width of " ~]" (plus a little) appended to a managed line, so
 // it always overflows its window and scrolls while the switch is set and the stream is playing.  The layout cannot
 // be edited from the panel, so this is how the three text widgets' widths are made visible on it.  The widget
-// truncates to WIDGET_BUFF_SIZE (140) regardless, so over-filling is harmless and under-filling would not scroll.
+// truncates to its own buffer size regardless, so over-filling is harmless and under-filling would not scroll.
 static void editorFiller(char* dst, size_t room, const char* src) {
   strlcpy(dst, src, room);
   if (!widgetsEditorForceOn || !player.isRunning()) return;
@@ -1661,7 +1669,8 @@ void Display::_screensaverLine() {
   if (!_ssStripH() || _sstext->locked()) return;
   // One buffer for the display task's own use rather than a heap copy per refresh: the worst case is the
   // station name and the title (two station fields) plus the 512-byte weather string, plus three marks of up to
-  // four bytes each.
+  // four bytes each.  It has to stay at least as large as the widget's own buffer (COMPOSED_LINE_BUFF), or the
+  // truncation would happen here instead of in setText().
   static char line[STATION_FIELD_LENGTH * 2 + WEATHER_STRING_L + 16];
   line[0] = '\0';
   auto append = [](char* dst, size_t room, const char* part) {
@@ -1726,10 +1735,11 @@ void Display::_screensaverWidgets() {
     // always black - the clock does the same while isScreensaver.  With the theme's colour the line laid a
     // coloured band over the black the rest of the panel shows.
     if (!_sstext) {
-      _sstext = new ScrollWidget(conf, config.theme.textss, 0);
+      _sstext = new ScrollWidget(conf, config.theme.textss, 0, COMPOSED_LINE_BUFF);
       pages[PG_SCREENSAVER]->addWidget(_sstext);
     } else {
-      _sstext->init(conf, config.theme.textss, 0);
+      // The size must be passed again: init() re-mallocs both string buffers at the size it is given.
+      _sstext->init(conf, config.theme.textss, 0, COMPOSED_LINE_BUFF);
     }
     _sstext->lock(false);
     _screensaverLine();
@@ -1928,10 +1938,12 @@ void Display::_reinitWidgets() {
   } else hideByLayout(_vuwidget);
   if (weatherInLayout()) {
     if (!_weather) {
-      _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background);
+      _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background, COMPOSED_LINE_BUFF);
       pages[PG_PLAYER]->addWidget(_weather);
     } else {
-      _weather->init(*weatherConf_ptr, config.theme.weather, config.theme.background);
+      // The size has to be repeated here, exactly as the footer widgets do: init() re-mallocs both string buffers at
+      // the size it is given, so omitting it would drop this widget back to WIDGET_BUFF_SIZE on every layout apply.
+      _weather->init(*weatherConf_ptr, config.theme.weather, config.theme.background, COMPOSED_LINE_BUFF);
       showByLayout(_weather);
     }
   } else hideByLayout(_weather);

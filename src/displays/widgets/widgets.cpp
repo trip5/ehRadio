@@ -413,10 +413,42 @@ void ScrollWidget::repaint() {
   _draw();
 }
 
+// The gates a line has to pass before it can scroll at all.  One place, so the poll (scrollWanted()) and the step
+// (scrollTurn()) cannot disagree about them.  `_active` is in the list because a line that is not on the visible page
+// has no business holding the slot: _calcX() claims it whether or not anything is drawn, so a line that is inactive
+// but unlocked could otherwise own the panel's one scroll slot invisibly.
+bool ScrollWidget::_scrollReady() const {
+  return _present && _active && !_locked && _doscroll && _config.textsize != 0;
+}
+
+// Could this line use the slot now?  Asked on every pass by Page::loop() for every widget it holds, BEFORE one of them
+// is chosen, so it must be free of side effects - that is the whole reason _checkDelay() is not reused here: it
+// refreshes the stamp it tests.  The delay is the one loop() has always used: the start delay while the line is parked
+// at the beginning of a sweep, the step interval while it is mid-sweep.
+bool ScrollWidget::scrollWanted() const {
+  if (!_scrollReady()) return false;
+  const uint16_t fbl = _fb->ready() ? 0 : _config.offset;
+  const uint16_t wait = (_x == fbl) ? _startscrolldelay : _scrolltime;
+  return (uint32_t)(millis() - _scrolldelay) > wait;
+}
+
+// Take the turn: one step, and the slot stays ours until _calcX() ends the sweep.  Only Page::loop() calls this, and
+// only while the slot is free, which is what makes the ownership fair: the page serves the lines in turn instead of
+// letting whichever line happens to be due first in widget order take the slot again and again.
+// See plans/scroll-turn-fairness.md.
+void ScrollWidget::scrollTurn() {
+  if (!_scrollReady() || dsp.getScrollId() != NULL) return;
+  _scrolldelay = millis();
+  _calcX();
+  if (_active) _draw();
+}
+
 void ScrollWidget::loop() {
   if(_locked) return;
   _refreshMark();
-  if (!_doscroll || _config.textsize == 0 || (dsp.getScrollId() != NULL && dsp.getScrollId() != this)) return;
+  // Only the OWNER steps here.  A line that wants the slot waits for Page::loop() to hand it over, so two lines can
+  // never race for it and a line that has just finished a sweep cannot take it back before the others get a turn.
+  if (!_doscroll || _config.textsize == 0 || dsp.getScrollId() != this) return;
   uint16_t fbl = _fb->ready()?0:_config.offset;
   if (_checkDelay(_x == fbl ? _startscrolldelay : _scrolltime, _scrolldelay)) {
     _calcX();

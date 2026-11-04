@@ -6,9 +6,15 @@
 #define CHARWIDTH   6
 #define CHARHEIGHT  8
 
-// Widget text buffers: one size for every scrolling line and text widget
-// Every conf used to carry this as ScrollConfig.buffsize and every one of them wrote 140...
-#define WIDGET_BUFF_SIZE 140
+// Widget text buffers.  The default is the length of the metadata FIELDS rather than a round number:
+// STATION_FIELD_LENGTH is 170 (169 bytes plus its terminator), a TextWidget keeps _buffsize - 1 bytes and a
+// ScrollWidget _buffsize - 2, so 172 is what lets a station name, title1 or title2 arrive whole - at 140 a long one
+// was silently cut.  The two widgets that are handed COMPOSED strings take their own size instead, the weather row
+// and the screensaver's info line, both COMPOSED_LINE_BUFF in display.cpp, because network.weatherBuf is built up to
+// 511 bytes.  See plans/widget-text-buffer-sizes.md.
+// Every conf used to carry this as ScrollConfig.buffsize and every one of them wrote 140; that value predates the
+// 170-byte fields and is where this one came from.
+#define WIDGET_BUFF_SIZE 172
 
 class psFrameBuffer;
 
@@ -17,6 +23,12 @@ class Widget{
     Widget(){ _active   = false; }
     virtual ~Widget(){}
     virtual void loop(){}
+    // The panel has ONE scroll slot (`dsp.setScrollId()`) and only a Page may hand it out - see Page::loop().  A line
+    // that scrolls answers both of these; every other widget keeps these defaults, which is what lets the page's poll
+    // be a plain virtual call on any widget it holds.  `scrollWanted()` must be free of side effects: it is asked on
+    // every pass, on every widget, before one of them is chosen.  See plans/scroll-turn-fairness.md.
+    virtual bool scrollWanted() const { return false; }
+    virtual void scrollTurn() {}
     virtual void init(WidgetConfig conf, uint16_t fgcolor, uint16_t bgcolor){
       _config = conf;
       _fgcolor  = fgcolor;
@@ -181,6 +193,10 @@ class ScrollWidget: public TextWidget {
     void setText(const char* txt) override;
     void setText(const char* txt, const char *format) override;
     void repaint() override;      // its own _draw(), not TextWidget's unclipped erase
+    // The scroll slot, handed out by Page::loop() in round-robin order: `scrollWanted()` says whether this line could
+    // use it now, `scrollTurn()` takes it and makes one step (and keeps it until the sweep ends - see _calcX()).
+    bool scrollWanted() const override;
+    void scrollTurn() override;
   private:
     char *_sep = nullptr;
     char *_window = nullptr;
@@ -199,6 +215,9 @@ class ScrollWidget: public TextWidget {
     // neighbour that shares the row (the codec badge, in the reported case).
     uint16_t _winx = 0, _winw = 0;   // the framebuffer window currently made
   private:
+    // Is this line in a state to scroll at all?  The gates loop() has always used, in one place so the poll and the
+    // step cannot disagree about them.
+    bool _scrollReady() const;
     void _windowRect(uint16_t& x, uint16_t& w);
     void _syncWindow(bool force = false);
     void _setTextParams();

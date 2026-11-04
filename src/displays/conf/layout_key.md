@@ -97,8 +97,14 @@ meter's orientation, see §6 — and a `MoveConfig` has no `align` at all, so a 
 left edge and a top. This cell was called `left`, which was true for the first row only (round 9).
 
 `ScrollConfig` — a line of text that can scroll. `{ { offset, top, fontsize, align }, width,
-scrolldelay, scrolldelta, scrolltime }`. The text buffer is not a conf field: it is `WIDGET_BUFF_SIZE`
-in [`options.h`](../../core/options.h), one size for every conf and every widget.
+scrolldelay, scrolldelta, scrolltime }`. The text buffer is not a conf field: it is `WIDGET_BUFF_SIZE` in
+[`widgets.h`](../widgets/widgets.h), one size for every conf, with two exceptions - the weather row and the
+screensaver's info line take `COMPOSED_LINE_BUFF` sizes of their own, because they are handed composed strings.
+See [`plans/widget-text-buffer-sizes.md`](../../../plans/widget-text-buffer-sizes.md).
+`scrolldelay` is a wait, not a priority: it is how long the line parks before its first move and again after each
+wrap, and when several lines overflow they take the panel's single scroll slot in turn - round-robin, starting after
+the line served last. Writing `0` there makes the line ready at once; it does not make it win.
+See [`plans/scroll-turn-fairness.md`](../../../plans/scroll-turn-fairness.md).
 
 `FillConfig` — a rectangle, solid or as a frame. `{ { offset, top, 0, 0 }, width, height, outlined }`: a fill
 reads neither `fontsize` nor `align`, so both of those cells are written `0`, and the header says so. With

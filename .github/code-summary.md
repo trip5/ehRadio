@@ -1224,6 +1224,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   same predicate against `t1` would close it. See `plans/screensaver-panel-ownership.md`,
   `plans/screensaver-line-scroll.md`, `plans/screensaver-line-centre.md`,
   `plans/screensaver-line-duplicate-name.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+- **The line's buffer is `COMPOSED_LINE_BUFF`** (`WEATHER_STRING_L + 2`, 514 bytes), passed to `_sstext` twice -
+  at construction and again in the `init()` of the else branch, because `init()` re-mallocs both string buffers at
+  the size it is given. The weather row takes the same size, for the same reason and in the same two places plus its
+  own `_layoutChange()` re-init. This is what lets the composed line (name + title, or the forecast) arrive whole:
+  the default widget buffer is `WIDGET_BUFF_SIZE` (172) and everything used to be 140, i.e. 138 bytes in a
+  `ScrollWidget`, which silently cut both. See `plans/widget-text-buffer-sizes.md`.
 - **A track change blanks the info line for one second** (`SS_LINE_HOLD_MS`, 1000 ms).  The trigger is the
   `SSHOLD` request, queued at the TOP of `Player::_play()` - after its guards, before `setDefaults()`,
   `loadStation()` and the title write - and handled in `Display::loop()` under `if (config.isScreensaver)`.  It has
@@ -4296,6 +4302,18 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     its window can do it. Fixed in `~ScrollWidget()`, which releases the slot when it owns it, plus an explicit
     `dsp.setScrollId(NULL)` at each of the three page swaps so the idiom stays visible where `_showDialog()` and
     `_switchMode()` already spell it. See `plans/boot-scroll-id-dangle.md`.
+  - **The slot is handed out by the page in round-robin, not claimed by whichever line is due first.** `Page::loop()`
+    polls every widget with `scrollWanted()` - side-effect free, so it does not refresh the stamp it tests - while the
+    slot is free, takes the first one **after the widget served last**, and calls its `scrollTurn()`, which makes one
+    step and takes the slot. The owner then keeps stepping in its own `loop()`, which claims nothing: `loop()` is now
+    "step if I own it", and only the page hands the slot out. Consequences: no line can take two turns in a row while
+    another wants one; the page's widget ORDER no longer decides who scrolls (a title 2 appended late in the layout
+    path used to sit after the weather row and was therefore never reached first); and a conf's `startscrolldelay`
+    of 0 - which every `weatherConf` in the tree writes, against `SCROLLDELAY` for every other line - no longer means
+    "always". `_scrollReady()` folds the gates (`_present`, `_active`, `!_locked`, `_doscroll`, textsize) so the poll
+    and the step cannot disagree; `_active` is in it because `_calcX()` claims the slot whether or not anything is
+    drawn, so an inactive-but-unlocked line used to be able to own the slot invisibly. This is the "the weather line
+    scrolls constantly and title 2 never gets a turn" report. See `plans/scroll-turn-fairness.md`.
   - `ProgressWidget` is the boot screen's animated dots line, with exactly one instantiation (`Display::_bootScreen()`),
     so its behaviour is the boot screen's. The line is `speaker + runway + boot glyph`, hard against both glyphs, and
     `ProgressConfig` is `{ frame interval ms, line character width, blob elements }` — every conf carries that header
@@ -4754,10 +4772,13 @@ must test — never a coordinate, since `{0,0}` is a legitimate position:
 | `VUBandsConfig` | `width`, `height`, `space`, `vspace`, `perheight` | any cell non-zero |
 
 `ScrollConfig` used to carry `buffsize` and `uppercase`, and its guard used to be `buffsize > 0`; both members are
-gone. The buffer is `WIDGET_BUFF_SIZE` in `options.h` (every conf passed the same 140, and the widget's own
-`init()` default is that macro, with the boot line passing `BOOTSTR_LEN` instead), and `uppercase` never did
-anything at all - `PRETEXT_ALLCAPS` is the switch that works. `conf_tool.py` strips the old pair out of a conf
-file (`trim_scroll_conf()`).
+gone. The buffer is `WIDGET_BUFF_SIZE` in `widgets.h` (every conf passed the same 140; the widget's own `init()`
+default is that macro, now **172** = `STATION_FIELD_LENGTH` + 2, which is what a 169-byte station name or title needs
+because a `ScrollWidget` keeps `_buffsize - 2` bytes), with the boot line passing `BOOTSTR_LEN` instead and the
+weather row and the screensaver's info line passing `COMPOSED_LINE_BUFF` (`WEATHER_STRING_L` + 2) for the 511-byte
+forecast. A widget's size is repeated at every `init()`, not just at construction: `init()` re-mallocs.
+`uppercase` never did anything at all - `PRETEXT_ALLCAPS` is the switch that works. `conf_tool.py` strips the old
+pair out of a conf file (`trim_scroll_conf()`). See `plans/widget-text-buffer-sizes.md`.
 
 **The guard is one rule, in one place.** `presentOf()` in `widgetsconfig.h` - every cell zero means absent -
 replaced five per-type `present()` overloads and the `zeroed()` patch the clock and the digits needed while the

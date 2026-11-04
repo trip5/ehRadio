@@ -150,9 +150,32 @@ def read_lines(path=ICONS_H):
     return text.split(EOL)
 
 
+def separate_arrays(lines):
+    """One blank line between an array's closing `};` and whatever follows it.
+
+    Applied on every write rather than only on insertion, so a seeded array and a
+    hand-pasted one end up laid out the same, and a file that lost a blank line
+    somewhere gets it back.  Blanks are only ever ADDED: the runs of two above the
+    header block are the author's, and the generated tables already carry their own.
+    """
+    out = []
+    for i, line in enumerate(lines):
+        out.append(line)
+        if line.strip() != '};' or i + 1 >= len(lines):
+            continue
+        nxt = lines[i + 1].strip()
+        # Only a real neighbour: a `//` line or the next declaration.  A `};` inside a
+        # commented-out block is followed by `*/`, and a blank there would sit inside the
+        # comment; the generated block's last `};` is followed by the END marker.
+        if (nxt.startswith('//') or nxt.startswith('static')) \
+                and not nxt.startswith(END_MARK):
+            out.append('')
+    return out
+
+
 def write_lines(lines, path=ICONS_H):
     with open(path, 'w', encoding='utf-8', newline='') as f:
-        f.write(EOL.join(lines) + EOL)
+        f.write(EOL.join(separate_arrays(lines)) + EOL)
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,10 @@ class Page {
     std::list<Widget*> _widgets;
     std::list<Page*> _pages;
     bool _active;
+    // The widget INDEX served the panel's scroll slot most recently, so the next turn starts after it.  `(size_t)-1`
+    // means "none yet", and an index the list has since outgrown (a widget was removed) simply starts the walk at the
+    // head again.  This is what turns the slot from a race into a queue - see plans/scroll-turn-fairness.md.
+    size_t _lastScroll = (size_t)-1;
   public:
     //Page();
     ~Page();

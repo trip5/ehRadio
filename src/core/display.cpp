@@ -1468,13 +1468,13 @@ static uint8_t rssiPercent(int rssi) {
 }
 
 void Display::_setRSSI(int rssi) {
+  if (!_rssi) return;   // no rssiConf in this layout: before any branch can reach it
   #if SD_CS!=255
     if (network.status == SDOFFLINE) {
       _rssi->setText(config.store.sdshuffle ? "\032\033" : "  ");
       return;
     }
   #endif
-  if (!_rssi) return;
   if (*rssiDigit_ptr) {
     _rssi->setText(rssiPercent(rssi), rssiFmt);
     return;

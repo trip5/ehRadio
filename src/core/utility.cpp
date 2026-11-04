@@ -27,17 +27,11 @@ bool systemLocalTime(struct tm& out) {
 }
 
 bool clockTrustworthy() {
-  // The clock may only print a time the device can stand behind, and the only test left is whether anything real
-  // ever set the cache: a zeroed struct is year 1900, which is the "never set" marker itself.  Whatever passes came
-  // from the system clock once SNTP set it, or from the RTC chip when it has not - the chip is the ONLY other writer
-  // - and both are trusted on any status, so a chip shows the time at boot instead of waiting for SNTP.  doSync()
-  // rewrites the chip on its first successful sync, which is what corrects a stale one.
-  return network.timeinfo.tm_year + 1900 > 1901;
-  // Below (instead of above) waits until SNTP lands to trust the clock
-  //if (network.timeinfo.tm_year + 1900 <= 1901) return false;   // nothing has set it: year 1900, the zeroed struct
-  //struct tm sysTm;
-  //if (systemLocalTime(sysTm)) return true;                     // the system clock is authoritative once set
-  //return network.status == SDOFFLINE;                          // no system clock: trust the chip only offline
+  // The clock may only print a time the device can stand behind - waits until SNTP lands to trust the clock, otherwise the time bounces around...
+  if (network.timeinfo.tm_year + 1900 <= 1901) return false; // nothing has set it: year 1900, the zeroed struct
+  struct tm sysTm;
+  if (systemLocalTime(sysTm)) return true; // the system clock is authoritative once set
+  return network.status == SDOFFLINE; // no system clock: trust the chip only offline
 }
 
 namespace {

@@ -373,7 +373,7 @@
 //#define NIXIE_TUBE
 
 // Other:
-//#define EVERYDAY_IS_CANADA_DAY
+#define EVERYDAY_IS_CANADA_DAY
 //#define DEEP_SLEEP_DISABLE
 
 #endif // myoptions_h

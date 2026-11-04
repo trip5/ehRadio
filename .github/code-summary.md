@@ -4646,8 +4646,43 @@ behaviors:
 - **Dispatch:** When `gfxFont != NULL && gfxFont != &DisplayFont` (a special clock font is active), delegates to
   `Adafruit_GFX::write()` which uses the font's native `drawChar`. This check now runs **before** `preText()`, so the
   resolver is never asked about a font other than the one that will draw the glyph.
-- **Icon rendering:** Codepoints `0x01-0x1F` map to `ICON_TABLE[]`; rendered with `startWrite()`/`endWrite()` wrapping
-  (needed for Adafruit SPI TFT drivers).
+- **Icon rendering:** codepoints `0x01-0x1F` map through `iconAt(cp, textsize)` to a bitmap, rendered with
+  `startWrite()`/`endWrite()` wrapping (needed for Adafruit SPI TFT drivers). A mark is always one cell,
+  `6*textsize` by `8*textsize` px - exactly the rectangle `TextWidget::_paint()` erases - so the ladder below
+  leaves centring, erasing and the scroll cycle untouched.
+  - **Two data shapes in `icons.h`.** Scale 1 is `static const uint8_t NAME[]`: 8 rows, 6 significant bits,
+    leftmost pixel = bit `0x20`. A hand-drawn variant is `static const uint32_t NAME_<N>[]`: `8*N` rows of
+    `6*N` bits, leftmost = bit `6*N-1`. `6*N` has to fit the row, so N <= 5.
+  - **One ladder, both renderers.** The scale drawn is the largest existing `k <= min(textsize, 5)` that
+    DIVIDES the textsize - the request itself first, so a mark drawn for that size is drawn 1:1 - else 1 with
+    `ps = textsize`. Excluding the exact match is not a detail: at textsize 2 the only candidate left is 1, and
+    every seeded scale-2 variant becomes unreachable at the size it was drawn for. `ps` must be an integer, so
+    a scale-3 mark is ignored at textsize 4 rather than padded into a 24 px cell - one stroke weight beside
+    another reads worse than the blow-up. Anything above 5 lands on scale 1 with `ps = textsize`; the device
+    never clamps `textsize` (`layoutSanitize()` only lifts a present widget's 0 to 1), and the editor's
+    `max 4` is not enforced.
+  - **The icon scale is `textsize`** - the `fontsize` field of a widget entry - and never `_superfont`, which
+    is the clock size index (`ClockFontSel::_cf.index`, 0..4 selecting the 15/35/52/70 px clock fonts).
+  - **`iconBits()` is a switch, not an array of table pointers**, because `uint8_t* const*` does not convert to
+    `void* const*`. Scale-1 rows are read with `pgm_read_byte` and variants with `pgm_read_dword`, identically
+    in both `_writeGlyph()` copies; `commongfx` paints clear bits in `textbgcolor` when it differs from
+    `textcolor`, `psframebuffer` never paints background because its buffer holds it.
+  - **`ICON_TABLE` and `ICON_TABLE_2`..`ICON_TABLE_5` are all emitted**, NULL where a mark has no variant, so
+    the lookup needs no `#if` and a new scale cannot leave the header unbuildable. A NULL slot falls through to
+    the normal glyph handling exactly as before (`\011`, `\012`, `\036`).
+  - **`src/displays/icons_tool.py`, beside the header, owns the arrays' shape and never their pixels:**
+    `-x NAME N`, `--force`,
+    `--list`, `--check`, `--fix`, `--stats`. It is selective and seed-only - no bulk pass, and an existing
+    variant is left as found unless `--force`, so hand-tuning survives every run. `--check` fails on a row
+    count that is not `8*N`, a row wider than `6*N`, a `uint8_t` declaration above scale 1, a table slot that
+    disagrees with its codepoint, and a pixel comment that disagrees with its own row value. `--fix` rewrites
+    the COMMENT from the value and prints every change: the report is the only thing that can say whether the
+    comment or the drawing was wrong, so it is never a quiet rewrite. The header is committed, like
+    `pretext_fold.h`, and the pixel comments cost no flash - the preprocessor strips them. See
+    `plans/icon-size-variants.md`.
+  - **These arrays are `static` in a header, so each TU that emits `_writeGlyph()` keeps its own copy** -
+    measured in the linker map as two copies in a PSFBUFFER TFT env and three in an OLED env. That is
+    pre-existing behaviour of the scale-1 bitmaps, accepted at ~64-370 B per array copy.
 - **Font glyph rendering:** Similarly wrapped in `startWrite()`/`endWrite()`. The inner loop iterates all `width` bitmap
   columns but only renders columns where `(xOffset + xx) < xAdvance` — prevents glyph bleed beyond the cell boundary
   (fixes colon/digit overlap on SH1106 YO_MONO). Bleed columns have their bits consumed from the bitmap stream but are

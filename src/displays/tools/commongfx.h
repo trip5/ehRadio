@@ -148,25 +148,30 @@ class DspCore: public yoDisplay {
       // Must precede \n / \r checks so that \015 (0x0D = CR)
       // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
-        const uint8_t* const *table = ICON_TABLE;
         if (cp < 32) {
-          const uint8_t* icon = (const uint8_t*)pgm_read_ptr(&table[cp]);
-          if (icon) {
+          // The cell is 6*textsize wide by 8*textsize tall whatever mark is picked:
+          // iconAt() only returns a scale that divides textsize, so ps is an integer.
+          const IconSel sel = (textsize_x == textsize_y) ? iconAt((uint8_t)cp, textsize_x)
+                                                        : IconSel{ iconBits((uint8_t)cp, 1), 1 };
+          if (sel.bits) {
+            const uint8_t k = sel.scale;
+            const uint8_t psx = textsize_x / k, psy = textsize_y / k;
+            const uint8_t w = 6 * k, h = 8 * k;
+            const uint8_t *bits = (const uint8_t *)sel.bits;
             startWrite();
             int16_t renderY = cursor_y + (int16_t)pgm_read_byte(&f->yAdvance) * textsize_y;
-            for (uint8_t row = 0; row < 8; row++) {
-              uint8_t line = pgm_read_byte(icon + row);
-              for (uint8_t col = 0; col < 6; col++) {
-                if (line & (0x20 >> col)) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    writePixel(cursor_x + col, renderY - 8 + row, textcolor);
-                  else
-                    writeFillRect(cursor_x + col * textsize_x, renderY + (int16_t)(row - 8) * textsize_y, textsize_x, textsize_y, textcolor);
+            for (uint8_t row = 0; row < h; row++) {
+              const uint32_t line = (k == 1) ? pgm_read_byte(bits + row)
+                                             : pgm_read_dword(bits + row * 4);
+              for (uint8_t col = 0; col < w; col++) {
+                const int16_t x = cursor_x + (int16_t)col * psx;
+                const int16_t y = renderY + (int16_t)((int16_t)row - h) * psy;
+                if (line & (1UL << (w - 1 - col))) {
+                  if (psx == 1 && psy == 1) writePixel(x, y, textcolor);
+                  else writeFillRect(x, y, psx, psy, textcolor);
                 } else if (textbgcolor != textcolor) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    writePixel(cursor_x + col, renderY - 8 + row, textbgcolor);
-                  else
-                    writeFillRect(cursor_x + col * textsize_x, renderY + (int16_t)(row - 8) * textsize_y, textsize_x, textsize_y, textbgcolor);
+                  if (psx == 1 && psy == 1) writePixel(x, y, textbgcolor);
+                  else writeFillRect(x, y, psx, psy, textbgcolor);
                 }
               }
             }

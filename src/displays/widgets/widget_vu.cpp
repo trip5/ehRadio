@@ -146,10 +146,11 @@ static uint8_t ssSegmentCount(uint16_t len, uint16_t thk, uint8_t gap, uint8_t l
 // _cw = bands.height and _ch = bands.width * 2 + bands.space, so a box of w x h is bands.height = w with
 // bands.width = (h - space) / 2.  The bar family instead wants its two channels as whole rows with the gap
 // between them, which is that identity read the other way round: bands.width = barH, bands.space = gapH,
-// and the box is exactly 2 * barH + gapH tall.  vspace and perheight are the ONE place the bar family does
-// NOT follow the layout: the segment gap is widened to at least the peak marker's thickness, and the count
-// comes from the block's shape (ssSegmentCount()) - both on this copy, so only the screensaver's meter
-// changes.  See plans/screensaver-vu-segments.md.
+// and the box is exactly 2 * barH + gapH tall.  vspace, perheight and the level axis are the ONE place the
+// bar family does NOT follow the layout: the segment gap is widened to at least the peak marker's thickness,
+// the count comes from the block's shape (ssSegmentCount()), and the axis is then SNAPPED to an exact
+// multiple of that count so every block is identical and none is trimmed - all on this copy, so only the
+// screensaver's meter changes.  See plans/screensaver-vu-equal-segments.md.
 //
 // The palette comes from the live theme rather than from any stored conf, because this widget is not
 // derived from the layout in any way: it is the theme's VU colours over an area the layout never saw.
@@ -158,6 +159,7 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
   _styleOverride = style;     // pinned, so this instance ignores config.store.vustyle
   VUBandsConfig b = layoutBands;
   b.height = box.w;           // the level axis is the box's width
+  uint16_t left = box.left;   // moved only when the axis below is snapped shorter
   if (box.bars) {
     b.width = box.barH;
     // space is a byte in the master, so a gap wider than 255 px could not be described.  No panel's can be:
@@ -173,8 +175,17 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
     // 1:1.5-or-taller for Digital LED (3/2).  See ssSegmentCount() and plans/screensaver-vu-two-bar-styles.md.
     b.perheight = ssSegmentCount(box.w, b.width, b.vspace, layoutBands.perheight,
                                  led ? 3 : 1, led ? 2 : 1);
-    // This instance tiles its span exactly (the chosen count rarely divides it) and is the only one that does.
-    _ssTiling = true;
+    // The count rarely divides the box, and the old answer - shorten the two tip segments and draw the last one without
+    // its gap - is exactly what looked wrong on a 5-9 px block.  So the AXIS is snapped down to an exact multiple of the
+    // count instead: `step` is then the pitch ssSegmentCount() judged (`box.w / per`), so every block is the same length,
+    // the painter's trailing clamp can never fire, and - because len is a multiple of step - the LED grid (vuSnapLit)
+    // and the peak markers land in the gaps instead of cutting the tip block.  The pixels given up are fewer than `per`,
+    // and re-centring the box hands them back as equal margin at both ends.  The shared painter is not touched at all,
+    // which is what keeps the player page identical.  See plans/screensaver-vu-equal-segments.md.
+    const uint16_t per  = b.perheight ? b.perheight : 2;
+    const uint16_t axis = (per <= box.w) ? (uint16_t)((uint32_t)per * (box.w / per)) : box.w;
+    b.height = axis;
+    left = (uint16_t)(box.left + (box.w - axis) / 2);
   } else {
     b.space = layoutBands.space;
     b.width = (box.h > (uint16_t)b.space) ? (uint16_t)((box.h - b.space) / 2) : 1;
@@ -182,7 +193,7 @@ bool VuWidget::initScreensaver(const VuBox& box, const VUBandsConfig& layoutBand
   if (b.width < 1) b.width = 1;
   if (b.height < 1) b.height = 1;
   WidgetConfig wc;
-  wc.offset = box.left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
+  wc.offset = left; wc.top = box.top; wc.textsize = 1; wc.align = WA_LEFT;
   // Black, never config.theme.background: the screensaver paints its own picture and its background is always
   // black - the clock and the info line do the same while isScreensaver.  The four VU colours stay the live
   // theme's, which is what makes the meter look like the theme's; only what it erases to is black.
@@ -505,10 +516,10 @@ void VuWidget::_drawBars(bool led){
     }
   }
 
-  // The layout's own walk: a fixed pitch, with the last segment clamped.  The screensaver's instance takes the exact
-  // tiling instead, computed by initScreensaver() - see _drawBarsTiled().
-  if (_ssTiling) _drawBarsTiled(len);
-  else
+  // The layout's own walk: a fixed pitch, with the last segment clamped.  The screensaver's instance runs this same walk
+  // over an axis initScreensaver() snapped to an exact multiple of the count, so nothing it draws is a remainder and the
+  // clamp below never fires there.  One loop for both is what keeps the player page identical.
+  // See plans/screensaver-vu-equal-segments.md.
   for (int i = 0; i < len; i += step) {
     // Clamp the last segment to len. The loop bound only guarantees a segment STARTS before len, and anything drawn
     // past the box can never be erased - the fills and _clear() all stop at len. Clamp, not skip, so the bar tip still
@@ -553,53 +564,6 @@ void VuWidget::_drawBars(bool led){
       _fillLocal(0, pkL - peakThk, _bands.width, peakThk, _vupeakcolor);
       _fillLocal(thk + _bands.space, pkR - peakThk, _bands.width, peakThk, _vupeakcolor);
     }
-  }
-}
-
-// The screensaver's exact tiling: the segments span `len` to the last pixel, and the remainder the layout's own loop
-// would leave as background at the loud end is absorbed by the two tip segments, so the min segments stay uniform -
-// which is the point of the exercise ("the vu min segments should always look even").  The DIRECTION of that
-// correction is whichever costs less: the min segments at `len/per` with the tip pair longer, or at `len/per + 1` with
-// the tip pair shorter, ties going to the shorter tip.  That choice is what keeps the rule sane at an exact division,
-// where the "+1" direction would shave `per - 2` off the tip pair - 8 px at 10 segments, a visible step exactly where
-// nothing needed correcting.  The LAST segment is drawn with no trailing gap, so its ink ends on the border column, and
-// with peaks on the marker (thickness == gap) then sits over those columns.  See plans/screensaver-vu-segments.md.
-void VuWidget::_drawBarsTiled(uint16_t len) {
-  uint16_t per = _bands.perheight ? _bands.perheight : 2;
-  if (per > len) per = len;                     // never more segments than pixels
-  if (per < 2) per = 2;
-  const uint16_t gap   = _bands.vspace;
-  const uint16_t base  = (uint16_t)(len / per);
-  const uint16_t rem   = (uint16_t)(len % per);
-  const bool     minUp = (uint16_t)(per - rem) <= rem;         // ties -> the thinner tip
-  const uint16_t minPitch = minUp ? (uint16_t)(base + 1) : base;
-  // The two tip segments take whatever the min segments leave.
-  const uint32_t tipTotal   = (uint32_t)len - (uint32_t)(per - 2) * minPitch;
-  const uint16_t outerPitch = (uint16_t)(tipTotal / 2);        // the one AT the border takes the floor
-  const uint16_t innerPitch = (uint16_t)(tipTotal - outerPitch);
-  // The max-colour band is the last three pitches, as in the layout's loop, measured against the min pitch.
-  uint32_t zone = (uint32_t)minPitch * 3;
-  if (zone > len) zone = len;
-  const uint16_t maxFrom = (uint16_t)(len - (uint16_t)zone);
-  uint16_t pos = 0;
-  for (uint16_t idx = 0; idx < per; idx++) {
-    const uint16_t pitch = (idx + 2 < per) ? minPitch : ((idx + 2 == per) ? innerPitch : outerPitch);
-    // No trailing gap on the last one: that is what puts its ink on the border column.
-    uint16_t hh = (idx + 1 == per) ? pitch : ((pitch > gap) ? (uint16_t)(pitch - gap) : 1);
-    if ((uint32_t)pos + hh > len) hh = (uint16_t)(len - pos);
-    if (!hh) break;
-    uint16_t colorL, colorR;
-    if (_rotate) {
-      colorL = colorR = (pos > maxFrom) ? _vumaxcolor : _vumincolor;
-    } else if (_config.align) {
-      colorL = (pos > minPitch) ? _vumincolor : _vumaxcolor;
-      colorR = (pos > maxFrom) ? _vumaxcolor : _vumincolor;
-    } else {
-      colorL = colorR = (pos < (uint16_t)zone) ? _vumaxcolor : _vumincolor;
-    }
-    _drawBand(pos, 0, hh, colorL);
-    _drawBand(pos, 1, hh, colorR);
-    pos = (uint16_t)(pos + pitch);
   }
 }
 

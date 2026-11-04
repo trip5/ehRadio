@@ -628,8 +628,8 @@ so core cannot compare the codec directly - hence the named predicate rather tha
 
 ## Post-Graft Patch Fixes (2026.11.04)
 
-**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`. Full reasoning in
-`plans/vu-level-reference-and-255-ceiling.md`.
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`, `m3u8redirection()`.
+Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
 
 1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** The return packs the length *cleared* from the
    loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - i.e. a fully lit bar. The old
@@ -648,3 +648,11 @@ so core cannot compare the codec directly - hence the named predicate rather tha
 
 **Side effect, accepted:** the sample styles scale by `256 / config.vuThreshold`, so the waveform and the spectrum now
 normalise to the last few seconds too and brighten through a quiet passage - the same normalisation the bars get.
+
+3. **The codec table could not choose the profile, and one of its positions was wrong.** `m3u8redirection()` matched
+   each `CODECS=` line with `indexOf()`, and `mp4a.40.2` is a literal prefix of `mp4a.40.29`. So every HE-AAC v2 line
+   scored as AAC LC, ties were decided by whichever variant the manifest happened to list first, and the 2026-11-03
+   "sorted by decode cost" order was **inert for exactly the case it was written for**. A match followed by a digit is
+   now rejected, so the index in the table finally decides the profile. Order is now LC, v1, v2, xHE - xHE last here,
+   while **v2 is last on the VS1053**, because that chip does no Parametric Stereo and renders v2 as mono. The two
+   forks differ in exactly that one position, deliberately; the VS1053 notes carry the hardware proof.

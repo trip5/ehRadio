@@ -1654,7 +1654,7 @@ static_assert(
   #define MQTT_ENABLE false
 #endif
 #ifndef MQTT_HOST
-  #define MQTT_HOST "192.168.1.2"
+  #define MQTT_HOST ""
 #endif
 #ifndef MQTT_PORT
   #define MQTT_PORT 1883

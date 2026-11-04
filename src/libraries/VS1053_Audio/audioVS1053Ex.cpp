@@ -2139,16 +2139,22 @@ const char* Audio::m3u8redirection(uint8_t* codec){
     // #EXT-X-STREAM-INF:BANDWIDTH=37500,AVERAGE-BANDWIDTH=37000,CODECS="mp4a.40.29"
     // 32/playlist.m3u8?hlssid=7562d0e101b84aeea0fa35f8b963a174
 
+    // ORDER IS THE PREFERENCE ORDER: the loop below takes the LOWEST matching index.  On this board the only property
+    // that matters is STEREO - the decoder is the chip, so there is no CPU budget to protect.  Measured on hardware
+    // 2026-11-04: the VS1053 does not render Parametric Stereo, so HE-AAC v2 (mp4a.40.29) plays as MONO while LC and
+    // v1 play as stereo.  v2 is therefore LAST - not because it is expensive, but because it is the only variant that
+    // loses a channel here.  Promoting it above v1 for bandwidth or quality reasons means re-testing the chip.
+    // Index 0 must stay mp4a.40.34, because cS == 0 is the sentinel that selects CODEC_MP3 below.
     const char codecString[9][11]={
-        "mp4a.40.34", // mp3 stream
-        "mp4a.40.01", // AAC Main
-        "mp4a.40.2",  // MPEG-4 AAC LC
+        "mp4a.40.34", // mp3 stream                                     <- index 0 = MP3 sentinel
+        "mp4a.40.2",  // MPEG-4 AAC LC                                    <- stereo, best quality
         "mp4a.40.02", // MPEG-4 AAC LC, leading 0 for Aud-OTI compatibility
-        "mp4a.40.29", // MPEG-4 HE-AAC v2 (AAC LC + SBR + PS)
-        "mp4a.40.42", // xHE-AAC
-        "mp4a.40.5",  // MPEG-4 HE-AAC v1 (AAC LC + SBR)
-        "mp4a.40.05", // MPEG-4 HE-AAC v1 (AAC LC + SBR), leading 0 for Aud-OTI compatibility
         "mp4a.67",    // MPEG-2 AAC LC
+        "mp4a.40.01", // AAC Main
+        "mp4a.40.5",  // MPEG-4 HE-AAC v1 (AAC LC + SBR)                  <- stereo, lower bandwidth
+        "mp4a.40.05", // MPEG-4 HE-AAC v1, leading 0 for Aud-OTI compatibility
+        "mp4a.40.42", // xHE-AAC
+        "mp4a.40.29", // MPEG-4 HE-AAC v2 (AAC LC + SBR + PS)             <- MONO on this chip, never preferred
     };
 
     uint16_t choosenLine = 0;
@@ -2160,8 +2166,16 @@ const char* Audio::m3u8redirection(uint8_t* codec){
 
         if(posCodec > 0){
             bool found = false;
-            for(uint8_t j = 0; j < sizeof(codecString); j++){
-                if(indexOf(m_playlistContent[i], codecString[j]) > 0){
+            // sizeof(codecString) is the BYTE size (99), not the element count, so the old bound walked 90 entries
+            // past the end of a 9-element array.  Same expression as the I2S fork now.
+            for(uint8_t j = 0; j < sizeof(codecString) / sizeof(codecString[0]); j++){
+                const int16_t p = indexOf(m_playlistContent[i], codecString[j]);
+                if(p > 0){
+                    // Without this guard a prefix match scores "mp4a.40.29" as "mp4a.40.2", i.e. every HE-AAC v2
+                    // line looked like AAC LC and the table order could never decide the variant.  A digit after
+                    // the match means the line names a longer code, not this one.
+                    const char nxt = m_playlistContent[i][p + strlen(codecString[j])];
+                    if(nxt >= '0' && nxt <= '9') continue;
                     if(j < cS){cS = j; choosenLine = i;}
                     found = true;
                 }
@@ -2170,6 +2184,10 @@ const char* Audio::m3u8redirection(uint8_t* codec){
         }
         if(cS == 0)            *codec = CODEC_MP3;
         if(cS > 0 && cS < 100) *codec = CODEC_AAC;
+    }
+
+    if(cS != 100) { // name the variant actually chosen, so the experiment is readable from the log
+        AUDIO_INFO("variant: %s", m_playlistContent[choosenLine]);
     }
 
     if(cS == 100) {                             // "mp4a.xx.xx" not found

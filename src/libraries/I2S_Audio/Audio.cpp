@@ -3314,25 +3314,25 @@ const char* Audio::m3u8redirection(uint8_t* codec) {
     // 32/playlist.m3u8?hlssid=7562d0e101b84aeea0fa35f8b963a174
 
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return NULL;} // guard
-    // ORDER IS THE PREFERENCE ORDER: the loop below takes the LOWEST matching index.  It is therefore sorted by
-    // DECODE COST on this core, not by nominal quality, because decode cost is what decides whether a stream can play
-    // at all.  Measured 2026.11.03 on the ESP32-S3 at 240 MHz, clock 48000 Hz:
+    // ORDER IS THE PREFERENCE ORDER: the loop below takes the LOWEST matching index.  It is sorted by DECODE COST on
+    // this core, not by nominal quality, because decode cost is what decides whether a stream can play at all.
+    // Measured 2026.11.03 on the ESP32-S3 at 240 MHz, clock 48000 Hz:
     //   plain AAC-LC (mp4a.40.2)  -> sendBytes 66-73% of wall time, 48011 frames/s = exact real time
     //   HE-AAC v2  (mp4a.40.29)   -> sendBytes 97.9% of wall time,  44366 frames/s, i.e. 8% of frames never produced
     // So v2 is roughly half again as expensive as LC, and v1 (SBR without PS) sits between them.  The previous order
-    // put v2 ABOVE v1, which cost Parametric Stereo on every station offering both for a quality-per-bit argument this
-    // CPU cannot afford to honour - at 98% duty there is no headroom left to trade.  xHE-AAC is last because it is the
-    // most expensive and least likely to be supported.
+    // put v2 ABOVE v1 for a quality-per-bit argument this CPU cannot afford to honour - at 98% duty there is no
+    // headroom left to trade.
+    // xHE is last here but v2 is last on the VS1053, which has no PS - see the frankenstein notes.
     const char codecString[9][11]={
         "mp4a.40.34", // mp3 stream
-        "mp4a.40.01", // AAC Main
         "mp4a.40.2",  // MPEG-4 AAC LC                                        <- cheapest, preferred
         "mp4a.40.02", // MPEG-4 AAC LC, leading 0 for Aud-OTI compatibility
         "mp4a.67",    // MPEG-2 AAC LC
+        "mp4a.40.01", // AAC Main
         "mp4a.40.5",  // MPEG-4 HE-AAC v1 (AAC LC + SBR)
         "mp4a.40.05", // MPEG-4 HE-AAC v1, leading 0 for Aud-OTI compatibility
         "mp4a.40.29", // MPEG-4 HE-AAC v2 (AAC LC + SBR + PS)                 <- most expensive short of xHE
-        "mp4a.40.42", // xHE-AAC
+        "mp4a.40.42", // xHE-AAC                                              <- least likely supported, last
     };
 
     uint16_t choosenLine = 0;
@@ -3347,7 +3347,14 @@ const char* Audio::m3u8redirection(uint8_t* codec) {
             // entries past the end of a 9-element array reading whatever followed it.  Harmless only because an
             // out-of-range index can never beat a valid one for the `j < cS` test; still an out-of-bounds read.
             for(uint8_t j = 0; j < sizeof(codecString) / sizeof(codecString[0]); j++){
-                if(indexOf(m_playlistContent[i], codecString[j]) > 0){
+                const int16_t p = indexOf(m_playlistContent[i], codecString[j]);
+                if(p > 0){
+                    // Without this guard a prefix match scores "mp4a.40.29" as "mp4a.40.2", i.e. every HE-AAC v2
+                    // line looks like AAC LC.  Ties then go to whichever variant the manifest lists first, so the
+                    // table above could never decide the profile - which is why the 2026-11-03 reorder went
+                    // unverified for a day.  A digit after the match means the line names a longer code.
+                    const char nxt = m_playlistContent[i][p + strlen(codecString[j])];
+                    if(nxt >= '0' && nxt <= '9') continue;
                     if(j < cS){cS = j; choosenLine = i;}
                     found = true;
                 }

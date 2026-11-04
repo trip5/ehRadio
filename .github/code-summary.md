@@ -4850,8 +4850,9 @@ full blit every frame, so the box *area* is the frame cost - on the 480x360 the 
 [`plans/screensaver-vu-bars-allowance.md`](../plans/screensaver-vu-bars-allowance.md).
 
 **The screensaver's segment GAP and COUNT are its own, and they are PER STYLE** - decided in `initScreensaver()` on the
-copy of `bandsConf` it already makes, and drawn by `_drawBarsTiled()` behind the per-instance `_ssTiling` flag, so the
-player page's `_drawBars()` loop is the historical one, verbatim. The two bar painters read differently, so
+copy of `bandsConf` it already makes; the shared `_drawBars()` loop then draws them unchanged, which is what keeps the
+player page historical and verbatim (the exact-tiling painter and its `_ssTiling` flag were removed). The two bar
+painters read differently, so
 `VU_STYLE_BARS` gets `max(layoutBands.vspace, 1 x vuPeakThickness(box.w))` - gap equal to the marker, which then FILLS
 a gap - and a **square-or-taller** block (`thk >= w`), while `VU_STYLE_DIGITAL_LED` gets `2 x` (air either side of the
 snapped marker) and **1:1.5-or-taller** (`2*thk >= 3*w`). `vuPeakThickness()` is `ceil(len *
@@ -4861,15 +4862,17 @@ at the **hard cap of 16**, which a layout asking for more is clamped down to. On
 so a poor candidate can never be chosen (12 into 460 is 40 long against 25 tall for Bars and is stepped over to 16);
 and because the walk only ever makes blocks SHORTER, a panel whose layout already yields tall enough blocks keeps its
 count - the 320x240 stays at 10 for both styles. On the 480x360 with the 0.75 allowance: Bars = 16 blocks of ~22x25
-with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps. See `plans/screensaver-vu-two-bar-styles.md`. Because the
-chosen count rarely divides the span, the
-tiling is exact: the `per - 2` min segments are uniform at `len/per` or `len/per + 1` - whichever needs the **smaller**
-correction at the tip, ties to the thinner tip - and the two tip segments take the rest, the outer one on the floor, so
-the remainder never becomes background at the loud end. The last segment is drawn with no trailing gap, which puts its
-ink on the border column (and, with peaks on, under the marker). The direction choice is what keeps this sane at an
-exact division, where the "+1" direction would shave `per - 2` off the tip pair. The snap helpers still use one `step`
-(the min pitch): a pitch varying by 1 can put a block edge a pixel off a snapped boundary, which is invisible. See
-[`plans/screensaver-vu-segments.md`](../plans/screensaver-vu-segments.md).
+with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps. See `plans/screensaver-vu-two-bar-styles.md`.
+**Because the count rarely divides the span, the AXIS is snapped down to an exact multiple of it:** `axis = per *
+(box.w / per)` becomes `bands.height` and the box's left edge moves by `(box.w - axis) / 2`, so `step` is exactly the
+pitch `ssSegmentCount()` judged, every block is `len/per - gap` long, and `_drawBars()`'s trailing clamp cannot fire
+there. The pixels given up are fewer than `per` and come back as equal background at both ends of a box that is still
+centred - the 128x64 OLED shows 12 identical blocks of ~8x10 (Bars, 3 px each end) or ~6x10 (Digital LED). This
+replaced an exact tiling that shortened the two tip segments and drew the last one without its trailing gap; on a 5-9 px
+block those differences *are* the picture, which is why the OLED looked wrong. Snapping the axis also keeps
+`vuSnapLit()`'s LED grid and the peak markers on the gaps - a `lead` offset inside the painter would have cut the tip
+block instead - and it leaves the shared painter untouched. See
+[`plans/screensaver-vu-equal-segments.md`](../plans/screensaver-vu-equal-segments.md).
 
 **What the meter draws is `dimension * vuLeft / vuThreshold`** - the live reading as a fraction of the meter's
 REFERENCE - and `get_VUlevel()` returns the length CLEARED from each bar, 8 bits a channel, so **0 means "nothing
@@ -5405,6 +5408,8 @@ libraries embedded directly in the repository, mostly inherited from yoRadio and
   mod). PSRAM is required. `stopSong()` SM_CANCEL sequence now guarded by `if(m_f_running)` — prevents permanently stuck
   CANCEL bit when stop is called during init with no song playing.
   `VS_PATCH_ENABLE` forced `false` on this hardware — FLAC patches produce audio silence on this VS1053 variant.
+  **The chip performs no Parametric Stereo, so HE-AAC v2 (`mp4a.40.29`) plays as mono** — see the codec-order
+  subsection below before touching its variant table.
 - `ES8311_Audio/` — ES8311 codec driver (written for ehRadio by kasperaitis)
 
 ### I2S AAC decode: the facts that decide whether a stream keeps up (2026-11-03)
@@ -5441,6 +5446,24 @@ libraries embedded directly in the repository, mostly inherited from yoRadio and
   boundary. `frames/s` is only meaningful against the clock printed on the same line. `sil` counts runs of 480
   consecutive all-zero frames, i.e. 20 ms at 24 kHz.
 - **Global `-O2` buys nothing here**: decode time was unchanged and flash grew ~180 KB.
+
+### VS1053: HE-AAC v2 is mono, because the chip has no Parametric Stereo (2026-11-04)
+
+- **The failure is a lost channel, not a preference.** HE-AAC v2's AAC core is mono by construction; the stereo image
+  is synthesised by Parametric Stereo. The I2S path runs PS (`PS_DEC`) and plays those streams in stereo. The VS1053
+  decodes in hardware, does not do PS, and therefore outputs the mono core. Confirmed on hardware by forcing the
+  HE-AAC v1 variant: stereo returned immediately.
+- **`mp4a.40.29` is ranked last in `VS1053_Audio/`'s codec table** and LC and v1 sit above it. Never re-order that
+  table for bandwidth or quality reasons without testing the chip; on this backend the order decides whether a stream
+  has two channels at all.
+- **Both forks' tables were unable to decide the profile until 2026-11-04.** The match was `indexOf()`, and
+  `mp4a.40.2` is a literal prefix of `mp4a.40.29`, so every v2 line scored as AAC LC and ties went to whichever
+  variant the manifest listed first. Both now reject a match followed by a digit. The I2S ordering stated on
+  2026-11-03 was inert for v2 lines until this was fixed.
+- **The two tables differ in one position on purpose**: xHE is last on I2S (least likely supported), v2 is last on
+  VS1053 (loses a channel).
+- A `variant:` line naming the chosen `EXT-X-STREAM-INF` is printed once per master-playlist redirect; it is the only
+  record of which profile reached the decoder.
 
 ### Touchscreen library
 - `FT6336_Touchscreen/` — FT6336 capacitive touch driver (written for ehRadio by kasperaitis)

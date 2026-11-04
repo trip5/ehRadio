@@ -881,8 +881,8 @@ Someday these files may be needed again...
 
 ## Post-Graft Patch Fixes (2026.11.04)
 
-**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`. Full reasoning
-in `plans/vu-level-reference-and-255-ceiling.md`.
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`,
+`m3u8redirection()`. Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
 
 1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** Its return packs the length *cleared* from the
    loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - a fully lit bar. The early
@@ -903,3 +903,19 @@ in `plans/vu-level-reference-and-255-ceiling.md`.
 last few seconds too and brightens through a quiet passage - the same normalisation the bars get. Also worth knowing:
 `VU_VS1053_DB_FULL` still cancels out of the bar length, and the reference's *release* is now the only thing that
 decides how quickly quiet material empties.
+
+3. **HE-AAC v2 plays as MONO, because this chip does no Parametric Stereo.** `mp4a.40.29` (HE-AAC v2) ranked above
+   `mp4a.40.5` (v1) in `m3u8redirection()`. v2's AAC core is mono by construction - the stereo image exists only if the
+   decoder runs PS - and the VS1053 does not. Confirmed on hardware 2026-11-04 by forcing v1: stereo came back at once
+   with everything else unchanged. v2 is now ranked **last** on this path; LC and v1 are above it. Two code faults had
+   to be fixed before the order meant anything:
+   - `for(uint8_t j = 0; j < sizeof(codecString); j++)` walked 99 iterations over a 9-element array. Now the element
+     count.
+   - The match was a substring test, and `mp4a.40.2` is a prefix of `mp4a.40.29`, so **every v2 line scored as AAC LC**
+     and ties went to whichever variant the manifest listed first. A match followed by a digit is now rejected.
+   - `AUDIO_INFO("variant: %s", ...)` names the chosen STREAM-INF line once per master redirect, which is what made
+     the test readable.
+
+   **Do not move v2 back above v1 for bandwidth or quality reasons without re-testing on the chip.** It is not a
+   preference here, it is a lost channel. The I2S fork keeps xHE last and v2 above it, because there PS runs; the two
+   tables differ in exactly that one position on purpose.

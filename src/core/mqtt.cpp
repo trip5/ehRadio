@@ -130,12 +130,12 @@ void Mqtt::applySettings() {
   // Built before the enable check: the disable path needs it to publish "offline" before it disconnects.
   snprintf(availabilityTopic, sizeof(availabilityTopic), "%s%s", config.store.mqtttopic, "availability");
 
-  if (!config.store.mqttenable || strlen(config.store.mqtthost) == 0) {
+  if (!config.store.mqttenable || strlen(config.store.mqtthost) == 0 || config.store.mqttport == 0 || strlen(config.store.mqttuser) == 0 || strlen(config.store.mqtttopic) == 0) {
     if (clientStarted) {
       // The library's disconnect() waits for its own client task, and stops a client that is still
       // starting, so it can only run from here.
       publishOfflineBeforeDisconnect();
-      FUNCTIONLOG("MQTT", "Disconnecting (%s)", config.store.mqttenable ? "no host" : "disabled");
+      FUNCTIONLOG("MQTT", "Disconnecting (%s)", config.store.mqttenable ? "host not configured" : "disabled");
       mqttClient.disconnect();
       clientStarted = false;
     }

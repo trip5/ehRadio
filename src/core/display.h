@@ -77,7 +77,6 @@ class Display {
     void updateProgress(const char* label, float progress);
     void clearProgress();
     #ifdef USE_SD
-      // Redraws the SD Manager countdown
       void sdmanCountdown();
     #endif
 
@@ -118,13 +117,12 @@ class Display {
     #endif
     Ticker _returnTicker;
     bool _locked = false;
-    // An SD re-index owns the panel while this is up (SDINDEXSTART / SDINDEXDONE).  It is written and cleared ONLY by
-    // this task, which is what makes the release impossible to refuse: see the guard in _switchMode().
     bool _indexHold = false;
     uint8_t _bootStep = 0;
     displayRequestType_e _deferredType = NOPE;
     int _deferredPayload = 0;
     uint32_t _droppedRequests = 0;
+    uint32_t _evictedRequests = 0;
     uint32_t _deferredDueMs = 0;
     void _createDspTask();
     void _applyBitrate();

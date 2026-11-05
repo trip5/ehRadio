@@ -400,7 +400,7 @@ void Display::init() {
   dsp.initDisplay();
   dsp.setFont((GFXfont *)displayFont());
   displayQueue=NULL;
-  displayQueue = xQueueCreate(5, sizeof(requestParams_t));
+  displayQueue = xQueueCreate(10, sizeof(requestParams_t));
   if (displayQueue==NULL) { ERRORLOG("DISPLAY: displayQueue alloc failed. Rebooting."); delay(10); ESP.restart(); }
   _pager = new Pager();
   _createDspTask();
@@ -1086,6 +1086,21 @@ void Display::putRequest(displayRequestType_e type, int payload) {
       sent = xQueueSend(displayQueue, &request, pdMS_TO_TICKS(DSQ_SEND_DELAY)) == pdTRUE;
     }
   #endif
+  if (!sent) {
+    // The queue must not refuse a request: make room by throwing the OLDEST one away and taking its place.  Everything
+    // in this queue is "make the screen look like X now" - the handlers re-read the live state when they run
+    // (_title() re-reads config.station.title, NEWWEATHER re-reads weatherBuf) and the paired ones are last-wins
+    // (PSTART/PSTOP -> _layoutChange(true/false), NEWMODE, APPLYSTATE, SHOWVUMETER, DRAWVOL, DRAWPLAYLIST/
+    // CLOSEPLAYLIST) - so the head is always the least useful item, while dropping the NEWCOMER is what left a stale
+    // title on the panel when a saturated queue ate a NEWTITLE.  See plans/big-text-title2-weather-overlap.md.
+    requestParams_t victim;
+    if (xQueueReceive(displayQueue, &victim, 0) == pdTRUE) {
+      _evictedRequests++;
+      WARNINGLOG("DISPLAY: queue full, evicted request %d for request %d (%u so far)",
+                 (int)victim.type, (int)type, (unsigned)_evictedRequests);
+      sent = xQueueSend(displayQueue, &request, 0) == pdTRUE;
+    }
+  }
   if (!sent) {
     _droppedRequests++;
     WARNINGLOG("DISPLAY: request %d dropped, queue full (%u so far)", (int)type, (unsigned)_droppedRequests);

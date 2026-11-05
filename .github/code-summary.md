@@ -1315,6 +1315,23 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   there is no strip yet but `_ssStripH()` has become true - nothing playing and no weather cached at entry,
   where only a rebuild can create the widget - and otherwise updates the line as before.
 - Render queue + display task + widget/page orchestration.
+- **The render queue cannot refuse a request.** `displayQueue` is 10 slots of `requestParams_t` (two ints: about 160 B
+  with FreeRTOS's queue header, internal heap), and a `putRequest()` that finds it full waits `DSQ_SEND_DELAY` (200 ms)
+  and then **evicts the OLDEST item** (`xQueueReceive` with a 0-tick timeout) to take its place - logged with the
+  victim's type and counted in `_evictedRequests`; `_droppedRequests` now only counts the case where even that failed,
+  which should be unreachable. The oldest is the right victim because everything in this queue is "make the screen look
+  like X now": the handlers re-read live state when they run (`_title()` re-reads `config.station.title`, `NEWWEATHER`
+  re-reads `weatherBuf`) and the paired ones are last-wins (`PSTART`/`PSTOP` -> `_layoutChange(true/false)`, `NEWMODE`,
+  `APPLYSTATE`, `SHOWVUMETER`, `DRAWVOL`), so losing the older half of a pair is harmless. `SDINDEXSTART`/`SDINDEXDONE`
+  still wait for room (`DSQ_CRITICAL_WAIT`) rather than queue behind an eviction. This replaced drop-the-newcomer, which
+  lost a `NEWTITLE` outright on a saturated queue and left the previous track's title on the panel - the Big Text
+  "title 2 pixels around the weather" report. See `plans/big-text-title2-weather-overlap.md`.
+- **`playerQueue` is split by TYPE instead**, because its entries are commands with side effects and an order:
+  `PR_CHECKSD`/`PR_VUTONUS` are skipped outright when the queue has one free slot or fewer (idempotent, re-issued two
+  seconds later - the field's `dropped cmd=7` was one of these), while `PR_PLAY`/`PR_STOP`/`PR_PREV`/`PR_NEXT`/
+  `PR_TOGGLE`/`PR_VOL`/`PR_BURL` keep trying for `PLQ_CRITICAL_WAIT` (500 ms) before giving up. With the ticks kept out
+  of a queue that is nearly full, it can only fill with commands, which is what makes that wait a rare path rather than
+  a stall for whoever enqueued.
 - **Theme/layout/invert runtime switching** — major refactor:
   - `_applyState()` — central state function: loads layout from PROGMEM, loads theme from PROGMEM (TFT only), applies
     invert (color swap + `metaBGConf_ptr` switch), reinitializes widgets, redraws. Called by all three commands
@@ -4344,6 +4361,18 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     and the step cannot disagree; `_active` is in it because `_calcX()` claims the slot whether or not anything is
     drawn, so an inactive-but-unlocked line used to be able to own the slot invisibly. This is the "the weather line
     scrolls constantly and title 2 never gets a turn" report. See `plans/scroll-turn-fairness.md`.
+  - **A line erases only its OWN box; nothing clears it because another line moved onto it.** Three things remove a
+    scroll line's pixels - its own `setText()` (the union of the old and new text rectangle, or the whole recorded span
+    after it has scrolled - `_spanPainted()`), `lock()`/`_reset()` (`_clear()`, and `freeBuffer()` which erases the
+    window on the panel only if it was ever `display()`ed), and a page repaint. That is deliberate: it is what lets two
+    widgets share one row (`_windowRect()` narrows a fitting line to its glyphs). The consequence to know about is
+    geometric - two TEXT rows closer than `CHARHEIGHT * textsize` interleave, because the lower one cannot reach above
+    its own top edge. `displayTFT480x320conf.h`'s Big Text layout is the one shipped case: `title2Conf` top 95 against
+    `weatherConf` top 100 at textsize 3 (a 24 px row), so 19 px of the two rows overlap and five rows of title 2 sit
+    above the weather's box. 128x128 and 160x128 overlap by 2 px, 320x240 by 1 px, every other conf is clear. The layout
+    editor's collision check cannot flag it: it reports intersecting boxes and cannot tell a background band
+    (`metaBGConf`) from two text rows. Left as the layout's own business - see
+    `plans/big-text-title2-weather-overlap.md`.
   - `ProgressWidget` is the boot screen's animated dots line, with exactly one instantiation (`Display::_bootScreen()`),
     so its behaviour is the boot screen's. The line is `speaker + runway + boot glyph`, hard against both glyphs, and
     `ProgressConfig` is `{ frame interval ms, line character width, blob elements }` — every conf carries that header

@@ -22,6 +22,7 @@
 #endif
 
 static constexpr uint32_t PLQ_SEND_DELAY = 100; // ms; xQueueSend timeout in player.sendCommand()
+static constexpr uint32_t PLQ_CRITICAL_WAIT = 500; // ms; how long a queued COMMAND keeps trying a full queue
 
 // A URL that connects and then never produces audio is not a verdict, so it may retry - but only this many times.
 // STREAM_SETTLE_MS of audio with bytes in the ring is what proves an attempt was not the silent kind.
@@ -93,11 +94,28 @@ void Player::init() {
   SERIALLOG("done");
 }
 
+// Two classes, because losing one of them is much worse than losing the other.  The periodic ticks (PR_CHECKSD,
+// PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a queue that is even nearly full may refuse
+// them - the field logged exactly that ("playerQueue overflow, dropped cmd=7") on a whole-card delete, and the fix then
+// was to drain the queue more often.  Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP,
+// PR_PREV, PR_NEXT, PR_TOGGLE, PR_VOL, PR_BURL): losing one eats a user's Next, or leaves a queued PR_STOP behind a
+// later PR_PLAY, so those wait for room rather than being dropped.  See plans/big-text-title2-weather-overlap.md.
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
-  if (xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) != pdTRUE) {
-    FUNCTIONLOG("Queue", "playerQueue overflow, dropped cmd=%d", request.type);
+  const bool tick = (request.type == PR_CHECKSD || request.type == PR_VUTONUS);
+  // A tick never takes a slot a command might need: one free slot is kept back for exactly that.  With the ticks out of
+  // the way the queue can only fill with commands, which is why the wait below is the rare path and not a stall risk.
+  if (tick && uxQueueSpacesAvailable(playerQueue) <= 1) {
+    FUNCTIONLOG("Queue", "playerQueue nearly full, tick cmd=%d skipped", request.type);
+    return;
   }
+  bool sent = xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) == pdTRUE;
+  const uint32_t waitFrom = millis();
+  while (!sent && !tick && (millis() - waitFrom) < PLQ_CRITICAL_WAIT) {
+    delay(1);
+    sent = xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) == pdTRUE;
+  }
+  if (!sent) FUNCTIONLOG("Queue", "playerQueue overflow, dropped cmd=%d", request.type);
 }
 
 void Player::resetQueue() {

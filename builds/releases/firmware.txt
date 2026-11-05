@@ -1,3 +1,4 @@
+esp32_s3_n16r8|ESP32-S3|taipan_streamer_1|Taipan_streamer_1
 esp32_s3_n16r8|ESP32-S3|kasperaitis_es3c28p|es3c28p
 esp32_s3_n16r8|ESP32-S3|no_display_test|No Display
 esp32_s3_n16r8|ESP32-S3|trip5_sh1106_pcm_remote|OLED with Remote

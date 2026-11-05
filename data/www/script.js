@@ -397,6 +397,11 @@ function setupElement(id,value){
     setRssiBars(value);
     return;
   }
+  if(id === 'mutebutton'){        // lit state comes only from the device, so a refused command cannot leave it wrong
+    const btn = getId(id);
+    if(btn) btn.classList.toggle('active', !!value);
+    return;
+  }
   const element = getId(id);
   if(element){
     if(element.classList.contains("checkbox")){
@@ -1427,6 +1432,7 @@ function continueLoading(mode){
           getWiFi(`http://${hostname}/data/wifi.csv`);
           websocket.send('getactive=1');
           websocket.send('getbattery=1');
+          websocket.send('getmute=1');
           classEach("reset", function(el){ el.innerHTML='<svg viewBox="0 0 16 16" class="fill"><path d="M8 3v5a36.973 36.973 0 0 1-2.324-1.166A44.09 44.09 0 0 1 3.417 5.5a52.149 52.149 0 0 1 2.26-1.32A43.18 43.18 0 0 1 8 3z"/><path d="M7 5v1h4.5C12.894 6 14 7.106 14 8.5S12.894 11 11.5 11H1v1h10.5c1.93 0 3.5-1.57 3.5-3.5S13.43 5 11.5 5h-4z"/></svg>'; });
           initDangerZone();
         });

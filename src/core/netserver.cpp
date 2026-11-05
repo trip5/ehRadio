@@ -750,6 +750,7 @@ void NetServer::processQueue() {
         break;
       }
       case MODE:          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); break;
+      case MUTESTATE:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"mutebutton\", \"value\": %d}]}", player.isMuted() ? 1 : 0); break;
       case EQUALIZER:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bass\", \"value\": %d}, {\"id\": \"middle\", \"value\": %d}, {\"id\": \"treble\", \"value\": %d}]}", config.store.bass, config.store.middle, config.store.treble); break;
       case BALANCE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\": \"balance\", \"value\": %d}]}", config.store.balance); break;
       case SDINIT:        snprintf(wsbuf, sizeof(wsbuf), "{\"sdinit\": %d}", SD_CS!=255); break;
@@ -814,8 +815,12 @@ void NetServer::loop() {
   switch (importRequest) {
     case IMWIFI:  utility.importWifi(); importRequest = IMDONE; break;
     default:      break;
-  }
-  processQueue();
+    }
+    // One place sees every writer of Player::_muted: the toggle, a volume change, a manual station change, a mode
+    // change and an error stop.  A broadcast at each of them would be eight copies to keep in step.
+    const bool muted = player.isMuted();
+    if (muted != _muteSeen) { _muteSeen = muted; requestOnChange(MUTESTATE, 0); }
+    processQueue();
   mqtt.loop(); // single owner of the MQTT client: applies requests, runs queued commands, publishes
   #ifdef RADIO_BROWSER_SEND_CLICKS
     processRadioBrowserClick();
@@ -991,6 +996,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         #endif
         // Send current battery status to the newly connected client immediately
         netserver.requestOnChange(GETBATTERY, client->id());
+        // Mute state for a page that is already open; one still loading asks with getmute once the markup exists.
+        netserver.requestOnChange(MUTESTATE, client->id());
         // And the file manager's state: a page that opened while the manager was already up is told so instead of
         // waiting for a broadcast it missed.
         netserver.requestOnChange(SDMANACTIVE, client->id());

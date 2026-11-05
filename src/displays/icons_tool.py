@@ -109,8 +109,8 @@ SLOT_NOTES = {
     0: ' (unused, should probably stay unused)',
     9: ' (DO NOT USE: TAB control char conflicts with TFT print())',
     10: ' (DO NOT USE: LF control char conflicts with TFT print())',
-    30: ' (DO NOT USE: 0x1E is the spacer character in TextWidget: it gets'
-        ' consumed as a 2px gap before reaching the icon renderer)',
+    30: " (free: the footer's 2px text spacer was retired, so no codepoint is"
+        " spent on a gap any more)",
 }
 
 DECL_RE = re.compile(r'^\s*static\s+const\s+(uint8_t|uint16_t|uint32_t)\s*'
@@ -147,7 +147,12 @@ def read_lines(path=ICONS_H):
     with open(path, 'r', encoding='utf-8', newline='') as f:
         text = f.read()
     EOL = '\r\n' if '\r\n' in text else '\n'
-    return text.split(EOL)
+    lines = text.split(EOL)
+    # A trailing newline leaves an empty last element.  Keeping it made every write add
+    # one more, so the file grew a blank line per run; one newline is put back on write.
+    while lines and lines[-1] == '':
+        lines.pop()
+    return lines
 
 
 def separate_arrays(lines):
@@ -624,6 +629,14 @@ def mode_seed(lines, icons, base, target, force):
         fail(f'{new_name} already exists; --force overwrites it')
     source = max((s for s in scales[base] if s < target and target % s == 0), default=1)
     src = by_name[base] if source == 1 else by_name[f'{base}_{source}']
+    # A seed copies the BINARY.  If the source's comments disagree, the drawing is
+    # probably in them and the result will look nothing like it - say so before writing.
+    off = sum(1 for r in src.rows
+              if (r.comment or '').strip() != pixels(r.value, src.bits))
+    if off:
+        print(f'{ICONS_H.name}:{src.where()}: {src.name} has {off} row(s) whose comment'
+              f' disagrees with its binary, and a seed copies the BINARY - run'
+              f' `-b {src.name}` first if the comments are the drawing')
     rows = expand(src, target)
     icon = Icon(new_name, 'uint32_t', 0, rows, [])
     if existing is not None:

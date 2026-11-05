@@ -79,13 +79,8 @@ void TextWidget::setText(const char* txt) {
   // SAME bytes, instead of agreeing only because resolution happens to be 1:1.
   // Never longer than the input, so the buffer already sized for txt is enough.
   preTextString(_text, displayFont());
-  // Compute width by character count (utf8_strlen) * _charWidth.
-  // Pixel spacers (0x1E) are 2px wide instead of _charWidth, so adjust.
-  uint16_t w = utf8_strlen(_text) * _charWidth;
-  for (const char *p = _text; *p; ++p) {
-    if ((unsigned char)*p == 0x1E) w += (2 - _charWidth); // spacer: 2px instead of _charWidth
-  }
-  _textwidth = w;
+  // One cell per character, which is what _draw() advances; the two must agree or a centred line drifts.
+  _textwidth = utf8_strlen(_text) * _charWidth;
   if (strcmp(_oldtext, _text) == 0) return;
   _paint();
 }
@@ -166,18 +161,11 @@ void TextWidget::_draw() {
   dsp.setFont();
   dsp.setTextSize(_config.textsize);
 
-  // Render characters one-by-one (not byte-by-byte) so multi-byte UTF-8
-  // sequences are written to the decoder as an unbroken group.  Pixel
-  // spacers (0x1E = 2px) are handled per-byte as before.
+  // One write() per character, so a multi-byte UTF-8 sequence reaches the decoder unbroken.
   uint16_t x = _realLeft();
   const char *p = _text;
   while (*p) {
     unsigned char ch = (unsigned char)*p;
-    if (ch == 0x1E) { /* 2-pixel spacer */
-      x += 2;
-      p++;
-      continue;
-    }
     uint8_t clen = 1;
     if      (ch >= 0xF0) clen = 4;
     else if (ch >= 0xE0) clen = 3;

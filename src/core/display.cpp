@@ -1833,15 +1833,14 @@ void Display::_updateVolume() {
   uint8_t vol = config.store.volume;
 
   // 2-glyph: speaker + volume waves
-  // \023 = speaker (always execept when muted) \037 = muted speaker
-  // Volume 0 → space (no waves). >0 → 1-4 waves via \024-\027.
+  // \023 = speaker (always)
+  // Volume 0 or muted → \037 (mute). >0 → 1-4 waves via \024-\027.
   static const char waveGlyphs[4] = { '\024', '\025', '\026', '\027' };
 
   char buf[16];
-  if (vol == 0) buf[0] = '\037'; // muted speaker
-    else buf[0] = '\023'; // speaker
-  if (vol == 0) {
-    buf[1] = ' '; // silence: no waves
+  buf[0] = '\023'; // speaker
+  if (vol == 0 || player.isMuted()) {
+    buf[1] = '\037'; // mute 'x': no waves (mute leaves the stored volume above 0)
   } else {
     int level = (vol * 4) / (VOLUME_SCALE + 1);  // 0-3
     if (level > 3) level = 3;
@@ -1850,10 +1849,19 @@ void Display::_updateVolume() {
   buf[2] = '\0';
 
   if (voltxtFmt[0] != '\0') {
-    strlcat(buf, "\x1E", sizeof(buf));  // 2-pixel spacer before number
-    char numbuf[8];
+    // Three cells hold the number, so the glyph pair never moves: " 5 ", " 42", "100".  An odd spare cell goes to
+    // the left, which keeps a two-digit value against the right edge.  A format with a suffix ("%d%%") adds its
+    // own cells on top of the three, so its digits still get a gap.
+    char numbuf[8], widest[8];
+    snprintf(widest, sizeof(widest), voltxtFmt, VOLUME_SCALE);
     snprintf(numbuf, sizeof(numbuf), voltxtFmt, vol);
-    strlcat(buf, numbuf, sizeof(buf));
+    const size_t digits = (VOLUME_SCALE >= 100) ? 3 : (VOLUME_SCALE >= 10) ? 2 : 1;
+    const size_t field  = (digits < 3 ? 3 : digits) + (strlen(widest) - digits);
+    const size_t pad    = (strlen(numbuf) < field) ? field - strlen(numbuf) : 0;
+    const size_t left   = (pad + 1) / 2;
+    char line[16];
+    snprintf(line, sizeof(line), "%*s%s%*s", (int)left, "", numbuf, (int)(pad - left), "");
+    strlcat(buf, line, sizeof(buf));
   }
 
   _voltxt->setText(buf);

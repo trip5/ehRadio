@@ -202,13 +202,13 @@ void Player::loop() {
   playerRequestParams_t requestP;
   if (xQueueReceive(playerQueue, &requestP, isRunning()?PL_QUEUE_TICKS:PL_QUEUE_TICKS_ST)) {
     switch (requestP.type) {
-      case PR_STOP: _muted = false; _stop(); break;
+      case PR_STOP: _clearMute(); _stop(); break;
       case PR_PLAY: {
         if (requestP.payload>0) {
           config.setLastStation((uint16_t)requestP.payload);
         }
         // Manual next/prev/playlist pick/station selection clears mute; the EOF auto-advance keeps it.
-        if (!autoAdvance) _muted = false;
+        if (!autoAdvance) _clearMute();
         // Re-derived on every PR_PLAY, which is the only call site of _play(): an EOF advance must not wake the panel,
         // restart its countdown or force a mode change, because none of that was the user's doing.
         _autoAdvancePlay = autoAdvance;
@@ -221,7 +221,7 @@ void Player::loop() {
         break;
       }
       case PR_VOL: {
-        _muted = false;   // explicit volume change is a user action: clear mute
+        _clearMute();   // explicit volume change is a user action: clear mute
         config.setVolume(requestP.payload);
         config.saveValueButWait(&config.store.volume, (uint8_t)requestP.payload, 3000);
         uint8_t i2sVol = volToI2S(requestP.payload);
@@ -554,7 +554,7 @@ void Player::_play(uint16_t stationId) {
     char errbuf[STATION_FIELD_LENGTH];
     snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
     player.setError(errbuf);
-    _muted = false;
+    _clearMute();
     _stop(true);
     if (config.getMode() == PM_WEB && !network.lostPlaying) {
       network.noteConnectFailure(config.station.url);
@@ -572,7 +572,7 @@ void Player::playUrl(const char* url) {
   setError("");
   _fatalStream = false;
   _verdictSeen = STREAM_REFUSE_NONE;
-  _muted = false;
+  _clearMute();
   remoteStationName = true;
   audioHandlers.resetMetadata();
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
@@ -600,7 +600,7 @@ void Player::playUrl(const char* url) {
   } else {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);
-    _muted = false;
+    _clearMute();
     _stop(true);
     if (!network.lostPlaying) {
       network.noteConnectFailure(url);
@@ -784,7 +784,14 @@ void Player::setVol(uint8_t volume) {
   player.sendCommand({PR_VOL, volume});
 }
 
+void Player::_clearMute() {
+  if (!_muted) return;
+  _muted = false;
+  display.putRequest(DRAWVOL);   // the footer keeps the mute glyph until it is repainted
+}
+
 void Player::mute() {
+  if (!_muted && config.store.volume == 0) return;   // already silent: there is nothing to mute
   if (_muted) {
     _muted = false;
     _loadVol(_muteVol);
@@ -793,4 +800,5 @@ void Player::mute() {
     _muted = true;
     _loadVol(config.store.volume);
   }
+  display.putRequest(DRAWVOL);   // the footer glyph follows the mute state, not the stored volume
 }

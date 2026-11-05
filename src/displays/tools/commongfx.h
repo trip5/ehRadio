@@ -16,11 +16,6 @@
   #define TFT_BG 0
 #endif
 
-// In-band pixel-spacer control character used by display and widget rendering
-// (ASCII Record Separator 0x1E). Inserting this byte into a display string
-// adds a 2-pixel gap without advancing a full character cell.
-#define DSP_PIXEL_SPACER '\x1E'
-
 typedef struct clipArea {
   uint16_t left; 
   uint16_t top; 

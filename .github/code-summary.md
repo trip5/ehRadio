@@ -1072,6 +1072,22 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - `mute()`: volume-0 toggle backed by the private `_muteVol` member; uses raw `getVolume()`/`setVolume()` so
     `config.store.volume` and the displayed volume are deliberately untouched. Shared by the physical mute buttons, the
     `mute` command, and the IR mute button — the `DSP_DUMMY` suppression lives only at the physical-button call site.
+    It **refuses to turn mute on while `config.store.volume` is 0** (already silent, and the way back would restore 0):
+    that one early return is the whole guard, because every caller comes through here. Unmuting is never refused.
+  - `isMuted()` is the only reader of `_muted`, and the WebUI mirrors it: `NetServer::loop()` compares the value
+    against `_muteSeen` and queues a `MUTESTATE` message on each transition, so the writers above (`PR_VOL`, a manual
+    `PR_PLAY`, `PR_STOP`, two error paths, `clearMute()` on a mode change) need no broadcast of their own.
+  - The volume line is laid out with **spaces**, not a control character: the number sits centred in a **three-cell
+    field** - `" 5 "`, `" 42"`, `"100"`, with an odd spare cell going to the left - so the speaker keeps a fixed x at
+    1, 2 or 3 digits and no digit count can shift the line. `voltxtFmt` supplies any suffix (`"%d%%"`), whose cells
+    are added on top of the three; `""` means no number at all. The old 2px `0x1E` spacer is gone from `display.cpp`,
+    `TextWidget::_draw()`, `TextWidget::setText()` and `DSP_PIXEL_SPACER`, so `icons.h` slot 30 is a free icon again.
+  - The panel's footer glyph follows the same state: `Display::_updateVolume()` draws `\037` when `player.isMuted()`
+    even though the stored volume is still above 0, and `mute()` queues `DRAWVOL` because nothing else repaints that
+    line. A mute that **ends** goes through the private `_clearMute()`, which clears the flag and queues `DRAWVOL` -
+    the station change, the stop, the volume change, `playUrl()` and both connect failures call it, and `clearMute()`
+    (a mode change) is exactly that call. `PR_PLAY` / `PR_STOP` do **not** repaint the volume line by themselves: the
+    first device test left the X on the panel after a station change had already unmuted the audio and the WebUI.
   - `prev()` / `next()` / `toggle()` delegate retry cancellation to `network.cancelStreamRetry()` (previously duplicated
     inline).
   - **Shuffle used to be a uniform draw *with replacement*, and three defects followed from that shape.** `next()` called
@@ -1452,6 +1468,12 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - HTTP + WebSocket + upload/update + search/curated orchestration.
 - **`PLVALIDATE`** (a new `requestType_e`) carries the Playlist Validator's progress: start/count, one `{i, r}`
   per station, then done. See `src/core/playlistvalidator.cpp`.
+- **`MUTESTATE`** (a new `requestType_e`; not named `MUTE`, which `icons.h` already owns) carries
+  `{"payload":[{"id":"mutebutton","value":0|1}]}` read from
+  `player.isMuted()`. It is queued when `NetServer::loop()` sees the state differ from `_muteSeen` — one place that
+  covers every writer of `Player::_muted` — and sent to a client as it connects. It is also answered on demand by the
+  `getmute` command, which the player page sends after `player.html` is injected because the connect-time message
+  arrives before the markup that it paints exists.
 - **The theme editor's API sits at the end of `handleNotFound()`, behind `#if defined(DSP_TFT) || DBGWUI`.**
   Eight routes serve `/editor.html` and nothing else links to them: `GET /theme-elements.json` (one object per
   element — its key and its label — in table order), `GET /themeall.json` (every id, empty slots included, because the editor's source
@@ -4026,6 +4048,14 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   its neighbours at every breakpoint and inherits the `.active` states from that family instead of carrying rules of its
   own. The `playermode` branch in `script.js` is still what shows it in the SD player only, so the info row is left with
   volume, codec, battery and the bars.
+- `#mutebutton` is a 38x25 pill to the LEFT of the volume slider in `#volrow`: the slider's height, its 13px radius,
+  and the round controls' palette (`--icons-outline` at rest; `--highlight-fill` background with
+  `--icon-active-glyph` while muted, hover under the mouse-only query only), so a lit pill reads like a lit `.gb`.
+  The glyph carries a cropped `viewBox` (`1.6 3.6 20.5 17.0` — the artwork's own bounds plus about 0.4 units of
+  air, not a stretched drawing) sized 24x20, which is why its lines sit roughly a pixel off the border instead of
+  floating inside a 24x24 box. It is a `cmdbutton` with `data-command="mute"`, so the click path needs no JS and no
+  local toggle — `setupElement` mirrors the device's state onto `.active`. It is deliberately not a `.gb`, so the
+  breakpoint circle sizes do not apply, and the EQ overlay covers it exactly as it covers the slider.
 
 ## `data/www/settings.html`
 - Settings page structure with grouped sections and `data-command` bindings.

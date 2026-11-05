@@ -18,7 +18,7 @@ Order and sections match that file.
 | `middle` | Set middle (-16..16). |
 | `bass` | Set bass (-16..16). |
 | `volume`, `vol` | Set absolute volume (clamped 0..VOLUME_SCALE). |
-| `mute` | Toggle mute: volume 0 <-> last active level. Same behaviour as the IR mute button; physical-button mute is suppressed without a display. |
+| `mute` | Toggle mute: volume 0 <-> last active level. Refused if volume already 0. Physical-button mute is suppressed without a display. |
 | `startstandby` | Turn display off, stop playback, and preserve smartstart value. |
 | `stopstandby` | Turn display on, optionally resume smartstart playback. |
 | `togglestandby` | Toggle standby on or off |
@@ -54,6 +54,7 @@ Order and sections match that file.
 | `getsystem` | Request system settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getmqtt` | Request MQTT settings payload. Blocked in HTTP/MQTT/Telnet. |
 | `getbattery` | Request battery settings payload. Blocked in HTTP/MQTT/Telnet. |
+| `getmute` | Request mute state payload. Blocked in HTTP/MQTT/Telnet. |
 
 ## Options: Controls
 

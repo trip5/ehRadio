@@ -176,6 +176,19 @@ input[type=range] { overflow: hidden; border: solid 2px var(--meter-outline); bo
 .gb.nb svg { width: 36px; }
 .gb.active.nb svg { width: 32px; }
 .gb svg.fill{ stroke: none; fill: var(--icons-outline); }
+/* Mute pill: the round controls' palette at the slider's height, near-square so the glyph can fill it */
+#mutebutton { flex: 0 0 auto; width: 38px; height: 25px; box-sizing: border-box; cursor: pointer;
+  border: solid 2px var(--icons-outline); border-radius: 13px; display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0); -webkit-touch-callout: none; -webkit-user-select: none;
+  user-select: none; touch-action: manipulation; }
+#mutebutton svg { width: 22px; height: 18px; stroke: none; fill: var(--icons-outline); }
+#mutebutton:active { position: relative; top: 2px; }
+@media (hover: hover) and (pointer: fine) { /* mouse only */
+  #mutebutton:hover { background: var(--highlight-fill); }
+  #mutebutton:hover svg { fill: var(--icon-active-glyph); }
+}
+#mutebutton.active { background: var(--highlight-fill); }
+#mutebutton.active svg { fill: var(--icon-active-glyph); }
 
 /* PLAYER & PLAYLIST EDITOR & PLAYLIST VALIDATOR */
 #nameset { font-weight: bold; font-size: 22px; min-height: 26px; color: var(--station-name); margin: 20px 0 8px 0; text-align: center; user-select: text; }
@@ -188,8 +201,11 @@ input[type=range] { overflow: hidden; border: solid 2px var(--meter-outline); bo
 #equalizer { padding: 14px 34px; background: var(--panel-background); box-shadow: var(--panel-background) 0 10px 20px; margin: 0; }
 #equalizer li { margin-bottom: 10px; color: var(--eq-label-text); }
 .eqinfo, .inputinfo { float: right; }
-#volslider, #sdslider{ width: 440px; margin: 26px -20px 0 -20px; }
-#sdslider { margin-top: 0; }
+#volrow { display: flex; align-items: center; gap: 10px; width: 440px; margin: 26px -20px 0 -20px; }
+/* Flex, not a block: an inline-level range input leaves the font's descent under it, which made the row taller
+   than the slider and centred the pill a couple of pixels low. */
+#volslider { flex: 1 1 auto; min-width: 0; margin: 0; display: flex; }
+#sdslider { width: 440px; margin: 0 -20px; }
 #playernav .modeweb { display: flex; }
 #playernav.sd .modeweb { display: none; }
 #playernav .modeitem { display: none; }
@@ -506,7 +522,9 @@ body.sdman #progresstext.upload #progresspct { font-size: 200%; }
   /* PLAYER & PLAYLIST EDITOR */
   #nameset { font-size: 20px; min-height: 22px; margin: 10px 0 4px 0; }
   #meta { font-size: 14px; min-height: 17px; margin-bottom: 12px; }
-  #volslider, #sdslider { width: 100%; margin: 18px 0 0 0; height: 20px; }
+  #volrow { width: 100%; margin: 18px 0 0 0; }
+  #volslider { width: 100%; margin: 0; }
+  #sdslider { width: 100%; margin: 18px 0 0 0; height: 20px; }
   .formbuttons { margin-top: 10px; }
   .fb { padding: 8px 2px; font-size: 16px; min-width: 80px; margin: 4px; }
   #pleditorwrap { top: 90px; }

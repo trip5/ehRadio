@@ -66,7 +66,7 @@ class Player: public Audio {
     void setVol(uint8_t volume);
     void mute();
     bool isMuted() const { return _muted; }
-    void clearMute() { _muted = false; }
+    void clearMute() { _clearMute(); }
 
     bool hasError() { return strlen(_plError)>0; }
     bool decoderDead() const { return _decoderDead; }  // latched: the decoder stopped answering
@@ -108,6 +108,7 @@ class Player: public Audio {
     void _stop(bool alreadyStopped = false);
     void _play(uint16_t stationId);
     void _loadVol(uint8_t volume);
+    void _clearMute();   // one place a mute ends, so the footer glyph is repainted wherever it happens
 };
 
 extern Player player;

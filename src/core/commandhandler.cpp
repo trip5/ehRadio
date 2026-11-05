@@ -37,7 +37,7 @@ bool CommandHandler::isBlockedForSource(const char *command, CommandSource sourc
 
   return cmdIs(command,
     "getindex", "getactive",
-    "getsystem", "getscreen", "getscreensaver", "getlocale", "getcontrols", "getweather", "getmqtt", "getbattery",
+    "getsystem", "getscreen", "getscreensaver", "getlocale", "getcontrols", "getweather", "getmqtt", "getbattery", "getmute",
     "curated_import", "loadindex", "loadplaylist",
     "newmode", "locale_webui", "plvalidate",
     "irbtn", "chkid", "irclr"
@@ -64,7 +64,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (playlistValidator.active() &&
       !cmdIs(command, "plvalidate",
              "getindex", "getactive", "getsystem", "getscreen", "getscreensaver", "getlocale",
-             "getweather", "getcontrols", "getmqtt", "getbattery"))
+             "getweather", "getcontrols", "getmqtt", "getbattery", "getmute"))
     return false;
 
   /* Websockets for Player */
@@ -150,6 +150,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "getsystem"))   { netserver.requestOnChange(GETSYSTEM, cid); return true; }
   if (cmdIs(command, "getmqtt"))     { netserver.requestOnChange(GETMQTT, cid); return true; }
   if (cmdIs(command, "getbattery"))  { netserver.requestOnChange(GETBATTERY, cid); return true; }
+  if (cmdIs(command, "getmute"))     { netserver.requestOnChange(MUTESTATE, cid); return true; }
 
   /* Options: Controls */
   if (cmdIs(command, "smartstart"))     { config.saveValue(&config.store.smartstart, static_cast<bool>(atoi(value))); return true; }

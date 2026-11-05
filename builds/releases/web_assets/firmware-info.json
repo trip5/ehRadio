@@ -3,9 +3,9 @@
   "version": "2026.08.19",
   "variants": [
     {
-      "name": "Another_Taipan Taipan_streamer_1",
-      "manifest": "manifests/taipan_streamer_1-manifest.json",
-      "description": "ehRadio - taipan_streamer_1"
+      "name": "Another-Taipan Taipan_streamer_1",
+      "manifest": "manifests/Another-Taipan_taipan_streamer_1-manifest.json",
+      "description": "ehRadio - Another-Taipan_taipan_streamer_1"
     },
     {
       "name": "Kasperaitis es3c28p",

@@ -10,7 +10,7 @@
 
 - **ehRadio**: A fork of [yoRadio](https://github.com/e2002/yoradio) with added Web UI functionality, improved Web UI, usability, and customization.
 - **Arduino**: Trip5 hosts firmware files, flashing tools, and Releases on the [Github Repo](https://github.com/trip5/ehRadio) and [Github Page](https://trip5.github.io/ehRadio/)
-- **Online Flasher**: Releases are also available through the [ESP Web Tool](https://trip5.github.io/ehRadio/firmware.html)
+- **Online Flasher**: Releases are also available through the [esptool-js Flasher](https://trip5.github.io/ehRadio/flasher.html) & [ESP Web Tool](https://trip5.github.io/ehRadio/firmware.html)
 - **Online Updating**: Files on a running device are updated using ESPFileUpdater from the Releases on the Github Repo.
 
 ## ⚠️ Critical Rules

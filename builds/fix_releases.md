@@ -8,7 +8,7 @@ This script automatically generates firmware metadata and web assets by scanning
 
 - `releases/firmware.txt`: Machine-readable list of all firmware variants
 - `releases/web_assets/manifests/*.json`: ESP Web Tools manifest files for each firmware variant
-- `releases/web_assets/firmware-info.json`: Summary file for the web flasher (`docs/firmware.html`)
+- `releases/web_assets/firmware-info.json`: Summary file for the web flashers (`docs/flasher.html` / `docs/firmware.html`)
 
 ### File Patched
 

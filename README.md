@@ -54,7 +54,7 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
   - radio station streams can be directly added to using [Radio-browser](https://www.radio-browser.info/) API search
   - upload files directly using the SD Card Manager
 
-- [Web flasher](https://trip5.github.io/ehRadio/firmware.html) & Internet OTA updates
+- [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
   - make getting a new version easy-peasy
   - *caveat:* your build must be in the `builds` folder of this repository
 
@@ -246,7 +246,7 @@ I can't 100% confirm this, but I am pretty sure all devices built for other ESP-
 And although (as of `2026.06.15`), ehRadio has been reworked so an ESP32-S3 can be wired with an SPI display and a VS1053 (which ёRadio & ESP32-RadioV2 can't),
 
 Below here are some sketches and helpful hints to building one of the "prebuilt" firmwares as available in the Releases and the
-[online flasher](https://trip5.github.io/ehRadio/firmware.html).
+[online flasher](https://trip5.github.io/ehRadio/flasher.html).
 
 If you already have a good idea on how the hardware works and would just like to use a prebuilt binary,
 check out the [Releases](https://github.com/trip5/ehRadio/releases/) and click on a link to open the generator with that binary's profile,

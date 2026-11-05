@@ -126,16 +126,19 @@ jobs:
           echo "Asset links rewritten against ${RAW}/"
           echo "Repo file links rewritten against ${BASE}/"
 
-      - name: Customize firmware.html
+      - name: Customize firmware.html and flasher.html
         if: github.repository_owner != 'trip5'
         run: |
-          if [ -f "docs/firmware.html" ]; then
-            sed -i "s|const GITHUB_OWNER = '.*'|const GITHUB_OWNER = '${{ github.repository_owner }}'|g" docs/firmware.html
-            sed -i "s|const REPO_NAME = '.*'|const REPO_NAME = '${{ github.event.repository.name }}'|g" docs/firmware.html
-            sed -i "s|github.com/trip5/ehRadio/releases|github.com/${{ github.repository }}/releases|g" docs/firmware.html
-            sed -i "s|<!-- <p>Forked by XYZ from</p> -->|<p>Forked by ${{ github.repository_owner }} from</p>|g" docs/firmware.html
-            echo "✅ Customized firmware.html for ${{ github.repository_owner }}"
-          fi
+          # One loop, both pages: they share the constants and the marker described above.
+          for page in docs/firmware.html docs/flasher.html; do
+            if [ -f "$page" ]; then
+              sed -i "s|const GITHUB_OWNER = '.*'|const GITHUB_OWNER = '${{ github.repository_owner }}'|g" "$page"
+              sed -i "s|const REPO_NAME = '.*'|const REPO_NAME = '${{ github.event.repository.name }}'|g" "$page"
+              sed -i "s|github.com/trip5/ehRadio/releases|github.com/${{ github.repository }}/releases|g" "$page"
+              sed -i "s|<!-- <p>Forked by XYZ from</p> -->|<p>Forked by ${{ github.repository_owner }} from</p>|g" "$page"
+              echo "✅ Customized $page for ${{ github.repository_owner }}"
+            fi
+          done
 
       - name: Download latest release firmware (.bin files)
         run: |

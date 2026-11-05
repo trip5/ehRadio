@@ -7,7 +7,9 @@ USAGE:
     py icons_tool.py --check                # report only, nothing written
     py icons_tool.py -b [NAME]              # the comment is the drawing: rebuild the binary
     py icons_tool.py -c [NAME]              # the binary is the drawing: regenerate the comment
-    py icons_tool.py -x NAME N [--force]    # seed NAME_N from the largest divisor present
+    py icons_tool.py -s NAME N [--force]    # seed NAME_N from the largest divisor present
+    py icons_tool.py -o LEFT RIGHT [FILE]   # two marks side by side on one sheet
+    py icons_tool.py -i [FILE]              # read that sheet back into icons.h
     py icons_tool.py --list                 # which marks have which scales
     py icons_tool.py --stats                # flash cost per scale
     py icons_tool.py -h | --help
@@ -38,6 +40,21 @@ MODES:
                             whose row 3 value is wrong and whose row 4 comment is.
                             With piped input it degrades to --check, so nothing
                             can hang on a prompt.
+    -o, --stitch-out LEFT RIGHT [FILE]
+                            Two marks on ONE sheet, side by side with a single space
+                            between the columns, at every scale BOTH have.  A scale
+                            only one of them has is reported instead of written, so
+                            the sheet can never carry art for a variant that does not
+                            exist.  Default FILE: icon_stitch.txt beside icons.h.
+    -i, --stitch-in [FILE]  The reverse.  Every row is split on its one space and
+                            checked first: two segments, each exactly 6*N wide for
+                            that group's scale, `@` and `.` only, 8*N rows, names that
+                            exist at the same scale, and columns matching the
+                            codepoints in the header.  Anything wrong is listed
+                            against the SHEET's own line number and nothing is
+                            written.  A named array is then replaced in place, or
+                            created after its base's last variant, and the tables are
+                            regenerated.
     --check                 Validate and write nothing.  Exits 1 on any problem.
     -b, --fix-binary [NAME] The COMMENT is the drawing: rebuild the row values from
                             it.  A row with no comment, a comment not exactly the
@@ -50,7 +67,7 @@ MODES:
                             mark only, and nothing is asked.
                             Without NAME, -b and -c walk the mismatched marks and
                             ask [y/N] once per mark, default No.
-    -x NAME N               Seed NAME_N from the largest existing divisor of N, else
+    -s NAME N               Seed NAME_N from the largest existing divisor of N, else
                             from scale 1, by nearest-neighbour expansion.  Nothing
                             is generated unless it is named: there is no bulk pass
                             and no mark gets a size it was not asked for.  An
@@ -78,8 +95,8 @@ EXAMPLES:
     py icons_tool.py --check
     py icons_tool.py -c MUTE
     py icons_tool.py -b MUTE_2
-    py icons_tool.py -x PAUSE 2
-    py icons_tool.py -x PAUSE 4
+    py icons_tool.py -s PAUSE 2
+    py icons_tool.py -s PAUSE 4
     py icons_tool.py --stats
 """
 
@@ -109,8 +126,6 @@ SLOT_NOTES = {
     0: ' (unused, should probably stay unused)',
     9: ' (DO NOT USE: TAB control char conflicts with TFT print())',
     10: ' (DO NOT USE: LF control char conflicts with TFT print())',
-    30: " (free: the footer's 2px text spacer was retired, so no codepoint is"
-        " spent on a gap any more)",
 }
 
 DECL_RE = re.compile(r'^\s*static\s+const\s+(uint8_t|uint16_t|uint32_t)\s*'
@@ -662,6 +677,176 @@ def mode_seed(lines, icons, base, target, force):
 
 
 # ---------------------------------------------------------------------------
+# Stitching two marks onto one sheet
+# ---------------------------------------------------------------------------
+
+def stitch_path(name=None):
+    """The sheet lives beside icons.h, whatever the cwd is."""
+    return Path(name) if name else ICONS_H.parent / 'icon_stitch.txt'
+
+
+CP_TOKEN_RE = re.compile(r'^\\([0-7]{3})$')
+
+
+def mode_stitch_out(icons, left_name, right_name, sheet):
+    """Two marks side by side, one space between the columns, at every scale both
+    have.  Only shared scales: the sheet must never carry art for a variant that
+    does not exist, or -i would create one."""
+    by_name, scales = model(icons)
+    for name in (left_name, right_name):
+        if name not in by_name:
+            fail(f'no mark named {name} in {ICONS_H.name}')
+    if left_name == right_name:
+        fail('the two columns are the same mark')
+    left, right = by_name[left_name], by_name[right_name]
+    if left.codepoint is None or right.codepoint is None:
+        fail(f'{left_name} and {right_name} both need a codepoint comment to head the sheet')
+    common = sorted(scales[left_name] & scales[right_name])
+    if not common:
+        fail(f'{left_name} and {right_name} share no scale, so there is nothing to line up')
+
+    def pick(name, n):
+        return by_name[name] if n == 1 else by_name[f'{name}_{n}']
+
+    out = [f'\\{left.codepoint:03o} \\{right.codepoint:03o}']
+    for n in common:
+        a, b = pick(left_name, n), pick(right_name, n)
+        out.append(f'{a.name} {b.name}')
+        for ra, rb in zip(a.rows, b.rows):
+            out.append(pixels(ra.value, a.bits) + ' ' + pixels(rb.value, b.bits))
+        out.append('')
+    if out[-1] == '':
+        out.pop()
+    sheet.write_text('\n'.join(out) + '\n', encoding='utf-8')
+    print(f'{sheet}: {left_name} + {right_name}, scale(s)'
+          f' {", ".join(str(n) for n in common)}')
+    for n in sorted(scales[left_name] - scales[right_name]):
+        print(f'  scale {n} skipped: only {left_name} has it')
+    for n in sorted(scales[right_name] - scales[left_name]):
+        print(f'  scale {n} skipped: only {right_name} has it')
+
+
+def read_sheet(sheet, by_name):
+    """(groups, problems).  A group is (scale, left_name, right_name, rows) with one
+    pixel string per column per row.  Everything is checked before anything is
+    written, and every problem is reported against the SHEET's line number."""
+    text = sheet.read_text(encoding='utf-8')
+    lines = text.splitlines()
+    problems = []
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines):
+        return [], [f'{sheet}: the sheet is empty']
+    head = lines[i].split()
+    if len(head) != 2 or not all(CP_TOKEN_RE.match(t) for t in head):
+        return [], [f'{i + 1}: {lines[i]}\n        (the first line must be two '
+                    f'codepoints, like \\007 \\010)']
+    codepoints = [int(CP_TOKEN_RE.match(t).group(1), 8) for t in head]
+    i += 1
+
+    groups = []
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        names_line, names = i + 1, lines[i].split()
+        if len(names) != 2:
+            problems.append(f'{names_line}: {lines[i]}\n        (expected two array names)')
+            i += 1
+            continue
+        scale, cols, bases = None, 0, []
+        for col, name in enumerate(names):
+            base = by_name[name].base if name in by_name else SCALE_RE.sub(
+                lambda m: m.group(1) if 2 <= int(m.group(2)) <= MAX_SCALE else m.group(0),
+                name)
+            bases.append(base)
+            if base not in by_name:
+                problems.append(f'{names_line}: {lines[i]}\n        ({base} is not in'
+                                f' this file)')
+                scale = None
+                break
+            n = 1 if name == base else int(name.rsplit('_', 1)[1])
+            if scale is None:
+                scale = n
+            elif n != scale:
+                problems.append(f'{names_line}: {lines[i]}\n        (the two columns are'
+                                f' different scales)')
+                break
+        if scale is None:
+            i += 1
+            while i < len(lines) and lines[i].strip():
+                i += 1
+            continue
+        for col, base in enumerate(bases):
+            cp = by_name[base].codepoint
+            if cp != codepoints[col]:
+                problems.append(f'{names_line}: {lines[i]}\n        (column {col + 1} is'
+                                f' \\{cp:03o}, the header says \\{codepoints[col]:03o})')
+        cols = BASE_COLS * scale
+        i += 1
+        rows, row_lines = [], []
+        while i < len(lines) and lines[i].strip():
+            row_lines.append(i + 1)
+            segs = lines[i].split(' ')
+            if len(segs) != 2 or any(len(s) != cols or set(s) - set(LIT + '.')
+                                     for s in segs):
+                # The line itself IS the error a reader can see; no note under it.
+                problems.append(f'{i + 1}: {lines[i]}')
+            else:
+                rows.append(segs)
+            i += 1
+        want = BASE_ROWS * scale
+        if len(row_lines) != want:      # rows PRESENT, not rows that parsed
+            problems.append(f'{names_line}: {lines[names_line - 1]}'
+                            f'\n        (scale {scale} needs {want} rows, found'
+                            f' {len(row_lines)})')
+        groups.append((scale, names[0], names[1], rows))
+    return groups, problems
+
+
+def mode_stitch_in(lines, icons, sheet):
+    by_name, _ = model(icons)
+    if not sheet.exists():
+        fail(f'{sheet} not found; run with -o first to write one')
+    groups, problems = read_sheet(sheet, by_name)
+    if problems:
+        print('Problem(s) in input file:')
+        for p in problems:
+            print(p)
+        print(f'{len(problems)} problem(s), nothing written')
+        return 1
+    reported, written = [], 0
+    for scale, left_name, right_name, rows in groups:
+        for col, name in enumerate((left_name, right_name)):
+            by_name, scales = model(parse(lines))
+            base = by_name[name].base if name in by_name else (
+                SCALE_RE.match(name).group(1) if SCALE_RE.match(name) else name)
+            new_rows = [Row(from_pixels(r[col], BASE_COLS * scale), None, 0) for r in rows]
+            icon = Icon(name, 'uint32_t' if scale > 1 else 'uint8_t', 0, new_rows, [])
+            if name in by_name:
+                lines = apply_block(lines, by_name[name],
+                                    render_array(icon, new_rows, icon.want_type))
+                verb = 'updated'
+            else:
+                highest = max(scales[base])
+                anchor = by_name[base] if highest == 1 else by_name[f'{base}_{highest}']
+                block = [''] + render_array(icon, new_rows, icon.want_type)
+                lines = lines[:anchor.end_line + 1] + block + lines[anchor.end_line + 1:]
+                verb = 'created'
+            reported.append((name, verb))
+            written += 1
+    lines = write_tables(lines, parse(lines))
+    write_lines(lines)
+    fresh = {i.name: i for i in parse(read_lines())}
+    for name, verb in reported:
+        at = f'{ICONS_H.name}:{fresh[name].decl_line + 1}' if name in fresh else ICONS_H.name
+        print(f'{at}: {name} {verb}')
+    print(f'{sheet}: {written} array(s) from {len(groups)} scale(s)')
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Reconciling a value with its comment
 # ---------------------------------------------------------------------------
 
@@ -939,8 +1124,13 @@ def main():
         description='one tool for the icon marks and their scale variants in icons.h.',
         formatter_class=argparse.RawDescriptionHelpFormatter, add_help=False)
     action = ap.add_mutually_exclusive_group()
-    action.add_argument('-x', '--extend', nargs=2, metavar=('NAME', 'SCALE'),
+    action.add_argument('-s', '--seed', nargs=2, metavar=('NAME', 'SCALE'),
                         help='seed NAME_SCALE from the largest divisor that exists')
+    action.add_argument('-o', '--stitch-out', nargs='+', metavar='NAME',
+                        help='write LEFT and RIGHT side by side to a sheet, every scale'
+                             ' both have (icon_stitch.txt by default)')
+    action.add_argument('-i', '--stitch-in', nargs='?', const=True, metavar='FILE',
+                        help='read a sheet back into icons.h, creating any array it names')
     action.add_argument('-b', '--fix-binary', nargs='?', const=True, metavar='NAME',
                         help='the comment is the drawing: rebuild the row values from it')
     action.add_argument('-c', '--fix-comment', nargs='?', const=True, metavar='NAME',
@@ -948,7 +1138,7 @@ def main():
     action.add_argument('-k', '--check', action='store_true',
                         help='validate and write nothing')
     ap.add_argument('--force', action='store_true',
-                    help='overwrite an existing variant (-x)')
+                    help='overwrite an existing variant (-s)')
     ap.add_argument('--list', action='store_true',
                     help='every mark, its codepoint, and the scales it has')
     ap.add_argument('--stats', action='store_true',
@@ -965,9 +1155,20 @@ def main():
         if args.stats:
             mode_stats(lines, icons)
         return 0
-    if args.extend:
-        mode_seed(lines, icons, args.extend[0], int(args.extend[1]), args.force)
+    if args.seed:
+        mode_seed(lines, icons, args.seed[0], int(args.seed[1]), args.force)
         return 0
+    if args.stitch_out:
+        if len(args.stitch_out) not in (2, 3):
+            fail('--stitch-out takes LEFT RIGHT [FILE]')
+        mode_stitch_out(icons, args.stitch_out[0], args.stitch_out[1],
+                        stitch_path(args.stitch_out[2]
+                                    if len(args.stitch_out) == 3 else None))
+        return 0
+    if args.stitch_in is not None:
+        return mode_stitch_in(lines, icons,
+                              stitch_path(None if args.stitch_in is True
+                                          else args.stitch_in))
     if args.fix_binary is not None:
         name = None if args.fix_binary is True else args.fix_binary
         return mode_reconcile(lines, icons, 'binary', name)

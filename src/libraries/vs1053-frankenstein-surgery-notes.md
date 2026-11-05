@@ -292,6 +292,24 @@ See "Critical Bug" section above. Added at 5 stream-ready locations + resets in 
 
 ---
 
+## Notes For Future Use
+
+`Maleksm's original` = `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — from Maleksm's yoRadio mod: https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228
+
+`Active` (old ehRadio) = `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` — Maleksm adapted for ehRadio
+
+`ehRadio PR226 copy` = `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — PR226 adapted for ehRadio
+
+Graft result = `src/libraries/VS1053_Audio/` — current production library
+
+Backups: none by folder. A copy of our own library decays the moment the first patch lands, so it is
+worse than no copy at all — the graft-time one was removed on 2026-09-27, leaving git history as the
+record. The upstream folders stay because they are the only local copies of code that is not ours.
+
+Someday these files may be needed again...
+
+---
+
 ## Post-Graft Patch Fixes (2026-07-01)
 
 Two reliability issues found during hardware testing with `VS_PATCH_ENABLE=true`:
@@ -861,23 +879,6 @@ Not bugs in hand - things a future reader should know are still true, in the ord
 - **When migrating upstream**, compare the new version against `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` for the
   audio core and against `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` for Maleksm's graft, then re-apply the
   steps above. Diff `setDefaults()` first: four per-track resets were lost that way.
-
-
-## Notes For Future Use
-
-`Maleksm's original` = `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — from Maleksm's yoRadio mod: https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228
-
-`Active` (old ehRadio) = `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` — Maleksm adapted for ehRadio
-
-`ehRadio PR226 copy` = `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — PR226 adapted for ehRadio
-
-Graft result = `src/libraries/VS1053_Audio/` — current production library
-
-Backups: none by folder. A copy of our own library decays the moment the first patch lands, so it is
-worse than no copy at all — the graft-time one was removed on 2026-09-27, leaving git history as the
-record. The upstream folders stay because they are the only local copies of code that is not ours.
-
-Someday these files may be needed again...
 
 ## Post-Graft Patch Fixes (2026.11.04)
 

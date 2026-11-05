@@ -4718,16 +4718,23 @@ behaviors:
   - **`ICON_TABLE` and `ICON_TABLE_2`..`ICON_TABLE_5` are all emitted**, NULL where a mark has no variant, so
     the lookup needs no `#if` and a new scale cannot leave the header unbuildable. A NULL slot falls through to
     the normal glyph handling exactly as before (`\011`, `\012`, `\036`).
-  - **`src/displays/icons_tool.py`, beside the header, owns the arrays' shape and never their pixels:**
-    `-x NAME N`, `--force`,
-    `--list`, `--check`, `--fix`, `--stats`. It is selective and seed-only - no bulk pass, and an existing
-    variant is left as found unless `--force`, so hand-tuning survives every run. `--check` fails on a row
-    count that is not `8*N`, a row wider than `6*N`, a `uint8_t` declaration above scale 1, a table slot that
-    disagrees with its codepoint, and a pixel comment that disagrees with its own row value. `--fix` rewrites
-    the COMMENT from the value and prints every change: the report is the only thing that can say whether the
-    comment or the drawing was wrong, so it is never a quiet rewrite. The header is committed, like
-    `pretext_fold.h`, and the pixel comments cost no flash - the preprocessor strips them. See
-    `plans/icon-size-variants.md`.
+  - **`src/displays/icons_tool.py`, beside the header, owns the arrays' shape and never their pixels.**
+    Generation is selective and seed-only: `-s NAME N` (with `--force`) seeds one variant from the largest
+    existing divisor, so no mark gets a size it was not asked for and hand-tuning survives every run.
+    Two reconciliation DIRECTIONS exist because a row value and its comment can disagree and only the
+    author knows which half is the drawing: `-b` rebuilds the value from the comment, `-c` regenerates the
+    comment from the value, and the bare run asks per mark (keep binary / keep comment / skip).
+    `--check` reports each fault as a WHOLE-glyph block - all `8*N` rows, value and comment side by side,
+    under the declaration line - and one line each for a row count that is not `8*N`, a row wider than
+    `6*N`, a `uint8_t` declaration above scale 1, a name declared twice, a table slot that names a mark
+    that no longer exists or misses one that does, and a pixel comment that disagrees with its row value.
+    Table faults are settled in the bare run by regenerating the tables, which is exact because the writer
+    derives every slot from the declarations. `-o LEFT RIGHT` writes two marks side by side to
+    `icon_stitch.txt` at every scale both have; `-i` reads it back after validating each row's width,
+    characters, count, names and column codepoints, reporting against the SHEET's line numbers and writing
+    nothing on any problem. `--stats` reports the data cost in B and KB, the per-build copy projection, and
+    what it does not count. The header is committed, like `pretext_fold.h`, and the pixel comments cost no
+    flash - the preprocessor strips them. See `plans/icon-size-variants.md`.
   - **These arrays are `static` in a header, so each TU that emits `_writeGlyph()` keeps its own copy** -
     measured in the linker map as two copies in a PSFBUFFER TFT env and three in an OLED env. That is
     pre-existing behaviour of the scale-1 bitmaps, accepted at ~64-370 B per array copy.

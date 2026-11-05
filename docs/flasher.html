@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="./images/icon.png">
+    <link rel="apple-touch-icon" href="./images/icon.png">
+    <title>ehRadio - Flasher</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            margin: 20px 0;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+            margin-bottom: 20px;
+        }
+
+        .firmware-section {
+            margin: 30px 0;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .firmware-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+
+        .firmware-selector {
+            margin: 20px 0;
+        }
+
+        .firmware-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .firmware-selector select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            background: white;
+            transition: border-color 0.2s;
+        }
+
+        .firmware-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .install-section {
+            margin: 25px 0;
+            text-align: center;
+        }
+
+        button.action {
+            padding: 16px 48px;
+            font-size: 18px;
+            font-weight: 600;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #049cdb 0%, #0273a5 100%);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(4, 156, 219, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 6px;
+        }
+
+        button.action:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(4, 156, 219, 0.6);
+        }
+
+        button.action:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: 0 2px 10px rgba(102, 126, 234, 0.4);
+        }
+
+        button.action:disabled {
+            background: #b9c2cc;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            padding: 10px 22px;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 6px;
+            border: 2px solid #049cdb;
+            background: white;
+            color: #0273a5;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin: 6px;
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background: #eef8fd;
+        }
+
+        button.secondary:disabled {
+            border-color: #ccd3da;
+            color: #9aa5b1;
+            cursor: not-allowed;
+        }
+
+        .progress-wrap {
+            margin: 18px 0 6px;
+            display: none;
+        }
+
+        .progress-track {
+            height: 14px;
+            background: #e3e8ee;
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0;
+            background: linear-gradient(135deg, #049cdb 0%, #0273a5 100%);
+            transition: width 0.2s linear;
+        }
+
+        .progress-label {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #495057;
+            text-align: center;
+        }
+
+        .status {
+            display: none;
+            margin: 18px 0;
+            padding: 16px 18px;
+            border-radius: 8px;
+            border-left: 5px solid #049cdb;
+            background: #eef8fd;
+            color: #123c52;
+        }
+
+        .status.show { display: block; }
+        .status.ok    { border-left-color: #2f9e44; background: #eefaf0; color: #1b3d24; }
+        .status.error { border-left-color: #d64545; background: #fdeeee; color: #4a1717; }
+        .status.wait  { border-left-color: #d9a300; background: #fdf7e6; color: #4a3a07; }
+
+        .status-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .status-body {
+            font-size: 15px;
+            line-height: 1.45;
+        }
+
+        .note {
+            background: #fdf7e6;
+            border: 1px solid #f0e0b0;
+            border-left: 5px solid #d9a300;
+            border-radius: 8px;
+            padding: 14px 16px;
+            color: #4a3a07;
+            font-size: 15px;
+            line-height: 1.5;
+            margin: 18px 0;
+        }
+
+        .note strong { color: #3a2c05; }
+
+        details.log {
+            margin-top: 18px;
+            border: 1px solid #e3e8ee;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        details.log summary {
+            cursor: pointer;
+            padding: 12px 16px;
+            font-weight: 600;
+            color: #495057;
+            outline: none;
+        }
+
+        details.log summary:hover { color: #0273a5; }
+
+        .log-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding: 0 16px 10px;
+            flex-wrap: wrap;
+        }
+
+        pre.log {
+            margin: 0;
+            padding: 12px 16px 16px;
+            max-height: 280px;
+            overflow: auto;
+            background: #0f1419;
+            color: #cfe3ef;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            border-radius: 0 0 8px 8px;
+            border-top: 1px solid #e3e8ee;
+        }
+
+        .field { margin: 14px 0; }
+
+        .field label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .field input[type="text"],
+        .field input[type="password"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px 16px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            background: white;
+        }
+
+        .field input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .field.checkbox {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            color: #495057;
+        }
+
+        .field.checkbox label { margin: 0; font-weight: 400; }
+
+        .timer {
+            display: none;
+            margin: 14px 0 0;
+            text-align: center;
+            font-feature-settings: "tnum";
+            font-size: 15px;
+            color: #0273a5;
+            font-weight: 600;
+        }
+
+        .timer.show { display: block; }
+
+        .hidden { display: none !important; }
+
+        .inline-links {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 15px;
+        }
+
+        .inline-links a { color: #0273a5; }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            button.action {
+                width: 100%;
+                padding: 16px 20px;
+            }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 30px 0;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .footer img {
+            height: 48px;
+            width: auto;
+            margin-bottom: 10px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        .footer img:hover {
+            opacity: 1;
+        }
+
+        .footer a {
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="https://github.com/trip5/ehRadio" target="_blank"><img src="./images/logo-color.png" alt="ehRadio" style="height: 160px;"></a>
+            <p id="release-version">Release: Loading...</p>
+            <p>ehRadio Flasher</p>
+        </div>
+
+        <div class="firmware-section">
+            <p>These firmwares are meant for pre-built radios. They <strong>must</strong> match the device's hardware configuration. Check the
+                    <a href="https://github.com/trip5/ehRadio/releases" target="_blank" style="color: #667eea;">Releases</a>.</p>
+
+        </div>
+
+
+        <!-- ================================ 1. FLASH ================================ -->
+        <div class="firmware-section">
+
+            <h3>Step 1 &middot; Flash the Firmware</h3>
+            <p>This step only writes the firmware. Nothing else happens: no Wi-Fi "improv" prompt, no
+                tab that stays open waiting for the device. When the last block is written you get a success or a failure
+                and that is the end of it.</p>
+
+            <div class="note">
+                <strong>First install or after erasing:</strong> the radio formats its internal storage on first boot.
+                Expect about <strong>3 to 5 minutes on a 16MB board</strong> and up to <strong>8 minutes on a 32MB board</strong>.
+                Do not unplug while this is happening.
+            </div>
+
+            <div class="firmware-selector">
+                <label for="firmware-select">Select Firmware:</label>
+                <select id="firmware-select">
+                    <option value="">Loading available firmware...</option>
+                </select>
+            </div>
+
+            <div class="field checkbox">
+                <input type="checkbox" id="erase-first">
+                <label for="erase-first">Erase the whole flash before installing (wipes settings, Wi-Fi list and storage)</label>
+            </div>
+
+            <div class="install-section">
+                <button class="action" id="flash-button" disabled>Flash Firmware</button>
+            </div>
+
+            <div class="progress-wrap" id="flash-progress">
+                <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+                <div class="progress-label" id="progress-label">Preparing...</div>
+            </div>
+
+            <div class="status" id="flash-status">
+                <div class="status-title" id="flash-status-title"></div>
+                <div class="status-body" id="flash-status-body"></div>
+            </div>
+
+            <details class="log" id="log-details">
+                <summary>Show details</summary>
+                <div class="log-toolbar">
+                    <button class="secondary" id="copy-log-button" type="button">Copy log</button>
+                    <button class="secondary" id="clear-log-button" type="button">Clear</button>
+                </div>
+                <pre class="log" id="log-pre">Nothing yet.</pre>
+            </details>
+        </div>
+
+        <!-- ============================ 2. IMPROV / WI-FI ============================ -->
+        <div class="firmware-section">
+            <h3>Step 2 &middot; Set Up Wi-Fi</h3>
+            <p>Connect over USB and send the Wi-Fi credentials to a radio that is sitting in
+                <em>AP/Improv mode</em>. This part uses the Improv serial protocol, so it needs Chrome, Edge or Brave
+                (Firefox and Safari do not expose the serial port).</p>
+
+            <div class="note">
+                <strong>A radio that has just been flashed</strong> will not answer until it has finished its first
+                boot. Keep this page open: the button below waits and shows a running timer, up to 10 minutes.
+                The timer is the patience message.
+            </div>
+
+            <div class="install-section">
+                <button class="action" id="improv-connect" disabled>Connect & Set Up Wi-Fi</button>
+                <button class="secondary hidden" id="improv-cancel" type="button">Cancel</button>
+            </div>
+
+            <div class="timer" id="improv-timer">Waiting for the device...</div>
+
+            <div class="status" id="improv-status">
+                <div class="status-title" id="improv-status-title"></div>
+                <div class="status-body" id="improv-status-body"></div>
+            </div>
+
+            <div id="improv-form" class="hidden">
+                <div class="field">
+                    <label for="ssid">Wi-Fi network name (SSID)</label>
+                    <input type="text" id="ssid" autocomplete="off" autocapitalize="none" spellcheck="false">
+                </div>
+                <div class="field">
+                    <label for="password">Wi-Fi password</label>
+                    <input type="password" id="password" autocomplete="off">
+                </div>
+                <div class="install-section" style="margin: 10px 0 0;">
+                    <button class="action" id="improv-submit" type="button">Send Credentials</button>
+                </div>
+            </div>
+
+            <div class="install-section hidden" id="visit-wrap">
+                <a id="visit-link" href="#" target="_blank" rel="noopener">
+                    <button class="secondary" type="button" style="border-color: #2f9e44; color: #2f9e44;">Visit the device</button>
+                </a>
+            </div>
+        </div>
+
+        <!-- ============================== 3. LOG VIEWER ============================== -->
+        <div class="firmware-section">
+            <h3>Step 3 &middot; Device Logs</h3>
+            <p>Open the serial console of a running radio. Useful to read the IP address it was
+                given, or to see what happens during that long first boot. Close the log before flashing or setting up
+                Wi-Fi, because only one of them can hold the serial port at a time.</p>
+
+            <div class="install-section">
+                <button class="secondary" id="logs-start" disabled>View Device Logs</button>
+                <button class="secondary hidden" id="logs-stop" type="button">Stop Logs</button>
+            </div>
+
+            <details class="log" id="console-details">
+                <summary>Show console</summary>
+                <pre class="log" id="console-pre">Not connected.</pre>
+            </details>
+        </div>
+
+        <!-- ================================ NOTES ================================ -->
+        <div class="firmware-section">
+            <h3>Good to Know</h3>
+            <ul style="line-height: 1.7;">
+                <li>Flash firmware with Step 1, then set up Wi-Fi with Step 2. They are deliberately separate.</li>
+                <li>The radio restarts once it accepts the credentials. The serial connection drops at that moment:
+                    that is the expected end of the flow, not an error.</li>
+                <li>An already-configured radio does not listen for Improv again until it falls back to AP mode, so
+                    Step 2 only works on a radio in AP/Improv mode.</li>
+                <li>There are 5 Wi-Fi slots. A new network is appended until the list is full, after which slot 5 is
+                    replaced, exactly like the WebUI does it.</li>
+                <li>No luck here? Try the <a href="./firmware.html" style="color: #0273a5;">ESP Web Tools flasher</a>.</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="footer" style="background: #1a1a1a; color: white; text-align: center; padding: 30px 40px; margin-top: 0; border-top: 1px solid #333;">
+        <!-- <p>Forked by XYZ from</p> -->
+        <a href="https://github.com/trip5" target="_blank">
+            <img src="https://raw.githubusercontent.com/trip5/trip5/main/images/Trip5_outline.svg" alt="Trip5">
+        </a>
+        <p style="margin: 10px 0 5px; color: #ccc;">Flashing by <a href="https://github.com/espressif/esptool-js" target="_blank" style="color: #667eea;">esptool-js</a>,
+            provisioning by <a href="https://github.com/esphome/improv-wifi-serial-sdk" target="_blank" style="color: #667eea;">Improv</a></p>
+    </div>
+
+    <script type="module">
+        // ---------------------------------------------------------------------------
+        // Configuration
+        // ---------------------------------------------------------------------------
+        const GITHUB_OWNER = 'trip5';
+        const REPO_NAME = 'ehRadio';
+        const PAGES_BASE = `https://${GITHUB_OWNER}.github.io/${REPO_NAME}/`;
+
+        const FLASH_BAUD = 921600;
+        const IMPROV_MAX_WAIT_MS = 10 * 60 * 1000;   // first boot can format storage for up to ~8 minutes
+        const IMPROV_RETRY_MS = 2000;
+
+        // Both libraries are loaded on demand, with a couple of mirrors each, because a CDN
+        // hiccup should produce a readable message here instead of a dead page.
+        // Versions are pinned on purpose: the exports these two entries need were checked
+        // against esptool-js 0.7.1 (ESPLoader, Transport, writeFlash, reportProgress) and
+        // improv-wifi-serial-sdk 2.8.1 (connect, state, scan, provision, nextUrl, close).
+        const ESPTOOL_URLS = [
+            'https://unpkg.com/esptool-js@0.7.1/bundle.js',
+            'https://cdn.jsdelivr.net/npm/esptool-js@0.7.1/bundle.js/+esm',
+            'https://unpkg.com/esptool-js@0.5.4/bundle.js',
+            'https://cdn.jsdelivr.net/npm/esptool-js@0.5.4/bundle.js/+esm',
+        ];
+        const IMPROV_URLS = [
+            'https://unpkg.com/improv-wifi-serial-sdk@2.8.1/dist/serial.js?module',
+            'https://cdn.jsdelivr.net/npm/improv-wifi-serial-sdk@2.8.1/dist/serial.js/+esm',
+            'https://unpkg.com/improv-wifi-serial-sdk/dist/serial.js?module',
+        ];
+
+        // ---------------------------------------------------------------------------
+        // DOM
+        // ---------------------------------------------------------------------------
+        const $ = (id) => document.getElementById(id);
+
+        const firmwareSelect = $('firmware-select');
+        const eraseFirst = $('erase-first');
+        const flashButton = $('flash-button');
+        const flashProgress = $('flash-progress');
+        const progressFill = $('progress-fill');
+        const progressLabel = $('progress-label');
+        const flashStatus = $('flash-status');
+        const flashStatusTitle = $('flash-status-title');
+        const flashStatusBody = $('flash-status-body');
+        const logPre = $('log-pre');
+        const logDetails = $('log-details');
+        const copyLogButton = $('copy-log-button');
+        const clearLogButton = $('clear-log-button');
+
+        const improvConnectButton = $('improv-connect');
+        const improvCancelButton = $('improv-cancel');
+        const improvTimer = $('improv-timer');
+        const improvStatus = $('improv-status');
+        const improvStatusTitle = $('improv-status-title');
+        const improvStatusBody = $('improv-status-body');
+        const improvForm = $('improv-form');
+        const ssidInput = $('ssid');
+        const passwordInput = $('password');
+        const improvSubmitButton = $('improv-submit');
+        const visitWrap = $('visit-wrap');
+        const visitLink = $('visit-link');
+
+        const logsStartButton = $('logs-start');
+        const logsStopButton = $('logs-stop');
+        const consolePre = $('console-pre');
+        const consoleDetails = $('console-details');
+
+        // ---------------------------------------------------------------------------
+        // State
+        // ---------------------------------------------------------------------------
+        let firmwareData = null;
+        let esptoolPromise = null;
+        let improvSdkPromise = null;
+
+        let flashBusy = false;
+        let improvBusy = false;
+        let improvCancelled = false;
+        let improvDevice = null;
+        let improvPort = null;
+        let improvDeadline = 0;
+        let improvTimerHandle = null;
+
+        let logPort = null;
+        let logReader = null;
+        let logsRunning = false;
+
+        const serialSupported = 'serial' in navigator;
+
+        // ---------------------------------------------------------------------------
+        // Logging
+        // ---------------------------------------------------------------------------
+        const logLines = [];
+        let logFlushHandle = null;
+
+        function stamp() {
+            const now = new Date();
+            return now.toLocaleTimeString([], { hour12: false });
+        }
+
+        // esptool-js emits a lot of very short chunks while syncing and writing, so the
+        // pane is repainted on a timer instead of once per chunk.
+        function scheduleLogFlush() {
+            if (logFlushHandle) return;
+            logFlushHandle = setTimeout(() => {
+                logFlushHandle = null;
+                logPre.textContent = logLines.join('\n');
+                logPre.scrollTop = logPre.scrollHeight;
+            }, 120);
+        }
+
+        function flushLogNow() {
+            if (logFlushHandle) {
+                clearTimeout(logFlushHandle);
+                logFlushHandle = null;
+            }
+            logPre.textContent = logLines.length ? logLines.join('\n') : 'Nothing yet.';
+            logPre.scrollTop = logPre.scrollHeight;
+        }
+
+        function log(message, level) {
+            const text = String(message === undefined || message === null ? '' : message);
+            logLines.push(`[${stamp()}] ${text}`);
+            if (logLines.length > 1200) logLines.shift();
+            scheduleLogFlush();
+            if (level === 'error') console.error(text);
+            else console.log(text);
+        }
+
+        function clearLog() {
+            logLines.length = 0;
+            flushLogNow();
+        }
+
+        async function copyLog() {
+            const text = logLines.join('\n') || 'No log output.';
+            try {
+                await navigator.clipboard.writeText(text);
+                copyLogButton.textContent = 'Copied';
+                setTimeout(() => { copyLogButton.textContent = 'Copy log'; }, 1500);
+            } catch (err) {
+                // Clipboard can be blocked; fall back to selecting the text for a manual copy.
+                logDetails.open = true;
+                const range = document.createRange();
+                range.selectNodeContents(logPre);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                log(`Clipboard refused (${err.message}); text is selected, use Ctrl/Cmd+C.`, 'error');
+            }
+        }
+
+        // ---------------------------------------------------------------------------
+        // Status + progress helpers
+        // ---------------------------------------------------------------------------
+        function setStatus(el, titleEl, bodyEl, kind, title, body) {
+            el.className = `status show ${kind}`;
+            titleEl.textContent = title;
+            bodyEl.textContent = body;
+        }
+
+        function isCancelled(err) {
+            return !!err && (err.name === 'NotFoundError' || /no port selected/i.test(err.message || ''));
+        }
+
+        function setFlashStatus(kind, title, body) {
+            setStatus(flashStatus, flashStatusTitle, flashStatusBody, kind, title, body);
+        }
+
+        function setImprovStatus(kind, title, body) {
+            setStatus(improvStatus, improvStatusTitle, improvStatusBody, kind, title, body);
+        }
+
+        function showProgress(show) {
+            flashProgress.style.display = show ? 'block' : 'none';
+        }
+
+        function setProgress(fraction, label) {
+            const pct = Math.max(0, Math.min(1, fraction || 0)) * 100;
+            progressFill.style.width = `${pct.toFixed(1)}%`;
+            if (label) progressLabel.textContent = label;
+        }
+
+        function setFlashBusy(busy) {
+            flashBusy = busy;
+            flashButton.disabled = busy || !firmwareSelect.value;
+            firmwareSelect.disabled = busy;
+            eraseFirst.disabled = busy;
+            // One owner of the serial port at a time.
+            improvConnectButton.disabled = busy || !serialSupported;
+            logsStartButton.disabled = busy || !serialSupported;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Library loaders
+        // ---------------------------------------------------------------------------
+        function pickExport(mod, name) {
+            if (mod && typeof mod[name] !== 'undefined') return mod[name];
+            if (mod && mod.default && typeof mod.default[name] !== 'undefined') return mod.default[name];
+            return undefined;
+        }
+
+        async function loadEsptool() {
+            if (!esptoolPromise) {
+                esptoolPromise = (async () => {
+                    for (const url of ESPTOOL_URLS) {
+                        try {
+                            const mod = await import(url);
+                            const ESPLoader = pickExport(mod, 'ESPLoader');
+                            const Transport = pickExport(mod, 'Transport');
+                            if (ESPLoader && Transport) {
+                                log(`esptool-js loaded from ${url}`);
+                                return { ESPLoader, Transport };
+                            }
+                            log(`esptool-js at ${url} exported no ESPLoader/Transport.`, 'error');
+                        } catch (err) {
+                            log(`esptool-js load failed at ${url}: ${err.message}`, 'error');
+                        }
+                    }
+                    throw new Error('Could not load esptool-js from any of the mirrors.');
+                })();
+            }
+            return esptoolPromise;
+        }
+
+        async function loadImprovSdk() {
+            if (!improvSdkPromise) {
+                improvSdkPromise = (async () => {
+                    for (const url of IMPROV_URLS) {
+                        try {
+                            const mod = await import(url);
+                            const connect = pickExport(mod, 'connect');
+                            if (typeof connect === 'function') {
+                                log(`Improv serial SDK loaded from ${url}`);
+                                return { connect };
+                            }
+                            log(`Improv SDK at ${url} exported no connect().`, 'error');
+                        } catch (err) {
+                            log(`Improv SDK load failed at ${url}: ${err.message}`, 'error');
+                        }
+                    }
+                    throw new Error('Could not load the Improv serial SDK from any of the mirrors.');
+                })();
+            }
+            return improvSdkPromise;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Port + transport helpers
+        // ---------------------------------------------------------------------------
+        async function requestPort() {
+            if (!serialSupported) {
+                throw new Error('This browser has no Web Serial support. Use Chrome, Edge or Brave on desktop.');
+            }
+            return navigator.serial.requestPort({});
+        }
+
+        async function closePortQuietly(port) {
+            try {
+                if (port && port.readable !== null && port.writable !== null) await port.close();
+            } catch (err) {
+                log(`Ignored while closing the port: ${err.message}`);
+            }
+        }
+
+        async function disconnectTransport(transport) {
+            try {
+                if (transport && typeof transport.disconnect === 'function') await transport.disconnect();
+            } catch (err) {
+                log(`Ignored while disconnecting: ${err.message}`);
+            }
+        }
+
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        function formatElapsed(ms) {
+            const total = Math.max(0, Math.floor(ms / 1000));
+            const minutes = Math.floor(total / 60);
+            const seconds = total % 60;
+            return `${minutes}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        // ---------------------------------------------------------------------------
+        // Firmware info
+        // ---------------------------------------------------------------------------
+        async function loadFirmwareInfo() {
+            try {
+                const url = `${PAGES_BASE}firmware-info.json?t=${Date.now()}`;
+                log(`Fetching ${url}`);
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                firmwareData = await response.json();
+                if (!firmwareData.variants || firmwareData.variants.length === 0) {
+                    throw new Error('No firmware variants listed.');
+                }
+                populateSelect();
+            } catch (err) {
+                log(`Could not load firmware-info.json: ${err.message}`, 'error');
+                firmwareSelect.innerHTML = '<option value="">Failed to load firmware list</option>';
+                setFlashStatus('error', 'Firmware list unavailable',
+                    'The published firmware-info.json could not be read. Open Show details for the exact error.');
+            }
+        }
+
+        function populateSelect() {
+            firmwareSelect.innerHTML = '<option value="">-- Select your firmware --</option>';
+            if (firmwareData.version) {
+                $('release-version').textContent = `Release: ${firmwareData.version}`;
+            }
+            firmwareData.variants.forEach((variant) => {
+                const option = document.createElement('option');
+                option.value = variant.name;
+                option.textContent = variant.name;
+                option.dataset.manifest = variant.manifest;
+                firmwareSelect.appendChild(option);
+            });
+        }
+
+        function selectedVariant() {
+            const option = firmwareSelect.selectedOptions[0];
+            if (!option || !option.dataset.manifest) return null;
+            return { name: option.value, manifest: option.dataset.manifest };
+        }
+
+        // ---------------------------------------------------------------------------
+        // Step 1: flashing
+        // ---------------------------------------------------------------------------
+        function partLabel(url, index, total) {
+            const name = decodeURIComponent(url.split('/').pop() || `part ${index + 1}`);
+            return `${name} (${index + 1} of ${total})`;
+        }
+
+        async function writeFlashCompat(loader, options) {
+            if (typeof loader.writeFlash === 'function') return loader.writeFlash(options);
+            if (typeof loader.write_flash === 'function') return loader.write_flash(options);
+            throw new Error('This esptool-js build offers neither writeFlash nor write_flash.');
+        }
+
+        async function resetAfterFlash(loader) {
+            try {
+                if (typeof loader.after === 'function') {
+                    await loader.after('hard_reset');
+                } else if (typeof loader.hardReset === 'function') {
+                    await loader.hardReset();
+                } else {
+                    log('No reset method on this esptool-js build; leaving the board as it is.');
+                }
+            } catch (err) {
+                log(`Reset after flashing reported: ${err.message}`);
+            }
+        }
+
+        async function onFlashClick() {
+            if (flashBusy) return;
+            const variant = selectedVariant();
+            if (!variant) return;
+
+            clearLog();
+            showProgress(false);
+            setFlashStatus('wait', 'Preparing', 'Requesting the serial port...');
+
+            let port = null;
+            let transport = null;
+            setFlashBusy(true);
+
+            try {
+                // Request the port first: the browser only allows this inside a user gesture,
+                // and the firmware downloads below take long enough to lose that permission.
+                port = await requestPort();
+                log(`Port opened: ${port.getInfo ? JSON.stringify(port.getInfo()) : 'unknown'}`);
+
+                const manifestUrl = new URL(variant.manifest, PAGES_BASE).href;
+                log(`Manifest: ${manifestUrl}`);
+                const manifestResponse = await fetch(manifestUrl);
+                if (!manifestResponse.ok) throw new Error(`Manifest download failed: HTTP ${manifestResponse.status}`);
+                const manifest = await manifestResponse.json();
+                const build = (manifest.builds || [])[0];
+                if (!build || !Array.isArray(build.parts) || build.parts.length === 0) {
+                    throw new Error('The manifest lists no firmware parts.');
+                }
+
+                setFlashStatus('wait', 'Downloading firmware', `Fetching ${build.parts.length} files...`);
+                const parts = [];
+                for (let i = 0; i < build.parts.length; i++) {
+                    const part = build.parts[i];
+                    const url = new URL(part.path, manifestUrl).href;
+                    log(`Download ${url}`);
+                    setProgress(i / (build.parts.length + 1), `Downloading ${partLabel(url, i, build.parts.length)}`);
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+                    const data = new Uint8Array(await response.arrayBuffer());
+                    log(`  ${data.byteLength} bytes at 0x${Number(part.offset).toString(16)}`);
+                    parts.push({ data, address: part.offset, url });
+                }
+
+                const esptool = await loadEsptool();
+                showProgress(true);
+                setFlashStatus('wait', 'Connecting to the board', 'Talking to the bootloader...');
+                setProgress(0, 'Connecting to the bootloader...');
+
+                transport = new esptool.Transport(port, true);
+                const terminal = {
+                    clean() { },
+                    writeLine(line) { if (line) log(String(line)); },
+                    write(text) { if (text) log(String(text).replace(/\r?\n$/, '')); },
+                };
+                const loader = new esptool.ESPLoader({ transport, baudrate: FLASH_BAUD, terminal });
+
+                const chip = typeof loader.main === 'function' ? await loader.main() : await loader.main_fn();
+                log(`Detected: ${chip}`);
+
+                setFlashStatus('wait', 'Writing firmware', 'This is the part to leave alone.');
+                const eraseAll = !!eraseFirst.checked;
+                await writeFlashCompat(loader, {
+                    fileArray: parts.map((part) => ({ data: part.data, address: part.address })),
+                    flashSize: 'keep',
+                    flashMode: 'keep',
+                    flashFreq: 'keep',
+                    eraseAll,
+                    compress: true,
+                    reportProgress: (fileIndex, written, total) => {
+                        const totalParts = parts.length || 1;
+                        const fraction = total ? written / total : 0;
+                        const label = parts[fileIndex] ? partLabel(parts[fileIndex].url, fileIndex, totalParts) : 'Writing...';
+                        setProgress((fileIndex + fraction) / totalParts, `Writing ${label} ${Math.round(fraction * 100)}%`);
+                    },
+                });
+
+                setProgress(1, 'Resetting the board...');
+                await resetAfterFlash(loader);
+                await disconnectTransport(transport);
+                transport = null;
+
+                setFlashStatus('ok', 'Firmware installed',
+                    'The board restarts now. On a first install it formats its internal storage: about 3 to 5 minutes ' +
+                    'on a 16MB board, up to 8 minutes on 32MB. When it is done it sits in AP/Improv mode, ready for Step 2.');
+                log('Flash finished.');
+            } catch (err) {
+                log(err && err.stack ? err.stack : String(err), 'error');
+                try { if (transport) await disconnectTransport(transport); } catch (e) { /* ignored */ }
+                try { await closePortQuietly(port); } catch (e) { /* ignored */ }
+                if (isCancelled(err)) {
+                    setFlashStatus('wait', 'Cancelled', 'No port was selected, so nothing was written.');
+                } else {
+                    const message = err && err.message ? err.message : String(err);
+                    setFlashStatus('error', 'Flashing failed', message + ' Open Show details for the full log.');
+                }
+            } finally {
+                setFlashBusy(false);
+                showProgress(false);
+            }
+        }
+
+        // ---------------------------------------------------------------------------
+        // Step 2: Improv
+        // ---------------------------------------------------------------------------
+        function startImprovTimer() {
+            const started = Date.now();
+            improvTimer.classList.add('show');
+            improvTimer.textContent = 'Elapsed 0:00';
+            clearInterval(improvTimerHandle);
+            improvTimerHandle = setInterval(() => {
+                improvTimer.textContent = `Elapsed ${formatElapsed(Date.now() - started)}`;
+            }, 1000);
+        }
+
+        function stopImprovTimer() {
+            clearInterval(improvTimerHandle);
+            improvTimerHandle = null;
+            improvTimer.classList.remove('show');
+        }
+
+        function setImprovBusy(busy) {
+            improvBusy = busy;
+            improvConnectButton.disabled = busy || !serialSupported || flashBusy || logsRunning;
+            improvCancelButton.classList.toggle('hidden', !busy);
+            improvSubmitButton.disabled = busy;
+            flashButton.disabled = busy || flashBusy || logsRunning || !firmwareSelect.value;
+        }
+
+        async function callMaybe(device, method, ...args) {
+            if (!device || typeof device[method] !== 'function') return undefined;
+            try {
+                return await device[method](...args);
+            } catch (err) {
+                log(`${method}() said: ${err.message}`);
+                return undefined;
+            }
+        }
+
+        function showVisit(url) {
+            if (!url || typeof url !== 'string') return;
+            if (url.includes('{')) {
+                log(`Device reported a placeholder URL (${url}); waiting for a real address.`);
+                return;
+            }
+            visitLink.href = url;
+            visitWrap.classList.remove('hidden');
+            log(`Device address: ${url}`);
+        }
+
+        async function onImprovConnect() {
+            if (improvBusy || flashBusy) return;
+
+            clearLog();
+            visitWrap.classList.add('hidden');
+            improvForm.classList.add('hidden');
+            improvCancelled = false;
+            setImprovBusy(true);
+            setImprovStatus('wait', 'Waiting for the device',
+                'Keep this page open. A freshly flashed radio answers only after its first boot finishes.');
+            startImprovTimer();
+
+            let port = null;
+            try {
+                port = await requestPort();
+                improvPort = port;
+                const sdk = await loadImprovSdk();
+                improvDeadline = Date.now() + IMPROV_MAX_WAIT_MS;
+
+                let connected = false;
+                let state;
+                while (!connected) {
+                    if (improvCancelled) throw new Error('Cancelled by user.');
+                    let candidate = null;
+                    try {
+                        log('Improv handshake...');
+                        candidate = await sdk.connect(port);
+                        // Opening the port can succeed while the device is still booting, so the
+                        // state probe is the real proof that its Improv service is answering.
+                        const probed = await candidate.state();
+                        state = probed && (probed.state || probed);
+                        improvDevice = candidate;
+                        candidate = null;
+                        connected = true;
+                    } catch (err) {
+                        if (candidate) {
+                            try { await candidate.close(); } catch (e) { /* ignored */ }
+                        }
+                        log(`Handshake failed: ${err && err.message ? err.message : err}`);
+                        if (Date.now() > improvDeadline) {
+                            throw new Error('The device never answered. If it is still formatting storage, let it ' +
+                                'finish booting and press the button again.');
+                        }
+                        await closePortQuietly(port);
+                        setImprovStatus('wait', 'Still waiting',
+                            'The radio is not answering yet. That is normal during a first boot: it formats its ' +
+                            'storage before it starts listening. Waiting...');
+                        await sleep(IMPROV_RETRY_MS);
+                    }
+                }
+
+                stopImprovTimer();
+                log(`Improv state: ${state === undefined ? 'unknown' : state}`);
+
+                if (state === 'PROVISIONED' || state === 'AUTHORIZED') {
+                    showVisit(await callMaybe(improvDevice, 'nextUrl'));
+                    setImprovStatus('ok', 'Device is already set up',
+                        'This radio already has Wi-Fi credentials, so there is nothing to send. Use Device Logs to ' +
+                        'find the address it was given.');
+                    await callMaybe(improvDevice, 'close');
+                    await closePortQuietly(port);
+                    improvDevice = null;
+                    improvPort = null;
+                    return;
+                }
+
+                improvForm.classList.remove('hidden');
+                ssidInput.focus();
+                setImprovStatus('ok', 'Device found',
+                    'Enter the Wi-Fi details below. The radio verifies them for up to 10 seconds before saving.');
+            } catch (err) {
+                stopImprovTimer();
+                log(err && err.stack ? err.stack : String(err), 'error');
+                try { await callMaybe(improvDevice, 'close'); } catch (e) { /* ignored */ }
+                await closePortQuietly(port);
+                // The device reference is dropped only on failure: on success the credentials form still
+                // needs it to send the provisioning command.
+                improvDevice = null;
+                improvPort = null;
+                if (improvCancelled || isCancelled(err)) {
+                    setImprovStatus('wait', 'Cancelled', 'Nothing was sent to the device.');
+                } else {
+                    setImprovStatus('error', 'Could not reach the device', (err && err.message) || String(err));
+                }
+            } finally {
+                stopImprovTimer();
+                setImprovBusy(false);
+            }
+        }
+
+        async function onImprovSubmit() {
+            const ssid = ssidInput.value.trim();
+            const password = passwordInput.value;
+            if (!ssid) {
+                setImprovStatus('error', 'Network name required', 'Enter the SSID of the Wi-Fi network.');
+                ssidInput.focus();
+                return;
+            }
+
+            if (!improvDevice) {
+                setImprovStatus('error', 'Not connected', 'Press Connect again: the Improv session is gone.');
+                return;
+            }
+
+            improvSubmitButton.disabled = true;
+            setImprovStatus('wait', 'Sending credentials',
+                'The radio is trying to join the network. This can take up to 10 seconds.');
+            try {
+                const result = await improvDevice.provision(ssid, password);
+                log(`provision() returned: ${JSON.stringify(result || null)}`);
+
+                let url;
+                if (typeof result === 'string') url = result;
+                else if (result && typeof result.nextUrl === 'string') url = result.nextUrl;
+                if (!url) url = await callMaybe(improvDevice, 'nextUrl');
+                showVisit(url);
+
+                setImprovStatus('ok', 'Credentials accepted',
+                    'The radio saves them to wifi.csv and restarts to join your network. The serial connection drops ' +
+                    'now, which is expected. Close this tab whenever you like.');
+                improvForm.classList.add('hidden');
+                passwordInput.value = '';
+                await callMaybe(improvDevice, 'close');
+                await closePortQuietly(improvPort);
+                improvPort = null;
+                improvDevice = null;
+            } catch (err) {
+                log(err && err.stack ? err.stack : String(err), 'error');
+                setImprovStatus('error', 'Credentials rejected',
+                    ((err && err.message) || String(err)) + ' Check the password and that the network is 2.4GHz.');
+            } finally {
+                improvSubmitButton.disabled = false;
+            }
+        }
+
+        // ---------------------------------------------------------------------------
+        // Step 3: device logs
+        // ---------------------------------------------------------------------------
+        function appendConsole(text) {
+            if (consolePre.textContent === 'Not connected.') consolePre.textContent = '';
+            consolePre.textContent += text;
+            if (consolePre.textContent.length > 60000) {
+                consolePre.textContent = consolePre.textContent.slice(-40000);
+            }
+            consolePre.scrollTop = consolePre.scrollHeight;
+        }
+
+        function setLogsRunning(running) {
+            logsRunning = running;
+            logsStopButton.classList.toggle('hidden', !running);
+            logsStartButton.classList.toggle('hidden', running);
+            logsStartButton.disabled = running || flashBusy || improvBusy;
+            flashButton.disabled = running || flashBusy || !firmwareSelect.value;
+            improvConnectButton.disabled = running || improvBusy || flashBusy || !serialSupported;
+        }
+
+        async function onLogsStart() {
+            if (logsRunning) return;
+            consoleDetails.open = true;
+            consolePre.textContent = '';
+            try {
+                logPort = await requestPort();
+                await logPort.open({ baudRate: 115200, bufferSize: 8192 });
+                log('Serial log connected at 115200 baud.');
+                setLogsRunning(true);
+
+                const decoder = new TextDecoderStream();
+                logPort.readable.pipeTo(decoder.writable).catch((err) => {
+                    log(`Log stream ended: ${err.message}`);
+                });
+                logReader = decoder.readable.getReader();
+                while (true) {
+                    const { value, done } = await logReader.read();
+                    if (done) break;
+                    if (value) appendConsole(value);
+                }
+                log('Log stream closed.');
+            } catch (err) {
+                log(`Could not open the log: ${err.message}`, 'error');
+                appendConsole(`\n[error] ${err.message}\n`);
+            } finally {
+                await onLogsStop();
+            }
+        }
+
+        async function onLogsStop() {
+            try { if (logReader) await logReader.cancel(); } catch (err) { /* ignored */ }
+            logReader = null;
+            try { if (logPort) await logPort.close(); } catch (err) { /* ignored */ }
+            logPort = null;
+            if (logsRunning) log('Serial log stopped.');
+            setLogsRunning(false);
+        }
+
+        // ---------------------------------------------------------------------------
+        // Wiring
+        // ---------------------------------------------------------------------------
+        firmwareSelect.addEventListener('change', () => {
+            flashButton.disabled = flashBusy || improvBusy || logsRunning || !firmwareSelect.value;
+            setFlashStatus('wait', 'Ready', 'Press Flash Firmware to write the selected build.');
+        });
+        flashButton.addEventListener('click', onFlashClick);
+        copyLogButton.addEventListener('click', copyLog);
+        clearLogButton.addEventListener('click', clearLog);
+        logDetails.addEventListener('toggle', () => { if (logDetails.open) flushLogNow(); });
+
+        improvConnectButton.addEventListener('click', onImprovConnect);
+        improvCancelButton.addEventListener('click', () => {
+            improvCancelled = true;
+            setImprovStatus('wait', 'Cancelling', 'Closing the Improv session...');
+        });
+        improvSubmitButton.addEventListener('click', onImprovSubmit);
+        passwordInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') onImprovSubmit();
+        });
+
+        logsStartButton.addEventListener('click', onLogsStart);
+        logsStopButton.addEventListener('click', onLogsStop);
+
+        async function init() {
+            if (!serialSupported) {
+                setFlashStatus('error', 'Web Serial is not available',
+                    'This browser cannot reach serial ports. Use Chrome, Edge or Brave on desktop, served over HTTPS ' +
+                    'or localhost. The classic installer has the same requirement.');
+                flashButton.disabled = true;
+                improvConnectButton.disabled = true;
+                logsStartButton.disabled = true;
+                log('navigator.serial is missing.', 'error');
+            } else {
+                improvConnectButton.disabled = false;
+                logsStartButton.disabled = false;
+            }
+            await loadFirmwareInfo();
+        }
+
+        init();
+    </script>
+</body>
+</html>

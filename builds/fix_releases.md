@@ -23,6 +23,12 @@ cd builds/
 python fix_releases.py
 ```
 
+To validate contributor naming only (writes nothing, exits non-zero on problems):
+
+```bash
+python builds/fix_releases.py --check
+```
+
 The script will:
 1. Scan all immediate subfolders of `builds/` (e.g. `trip5/`, `kasperaitis/`) for a `myoptions.h`
 2. Parse each `myoptions.h` to find firmware definitions (commented-out `#define` lines are ignored)
@@ -40,17 +46,26 @@ Each contributor's `myoptions.h` must have firmware definitions in this format:
 
 ```cpp
 #elif defined(ESP32_S3_YOURBOARD)
-  #define FIRMWARE "your_board.bin" // "board_esp32_s3_n16r8", "ESP32-S3", "YourName"
+  #define FIRMWARE "yourusername_your_board.bin" // "esp32_s3_n16r8", "ESP32-S3", "YourUserName"
   #define FIRMWARE_NAME "Your Friendly Name" // "https://optional-url.com"
   #define ARDUINO_ESP32S3_DEV
 ```
 
 The comments after `FIRMWARE` are critical:
-- First field: bootloader board environment (e.g., `"board_esp32_s3_n16r8"`)
-- Second field: chip family (e.g., `"ESP32-S3"`, `"ESP32"`)
-- Third field: contributor name (e.g., `"Trip5"`, `"Kasperaitis"`)
+- First field: board environment from `platformio.ini` (e.g., `"esp32_s3_n16r8"`)
+- Second field: chip family (e.g., `"ESP32-S3"`, `"ESP32"`, `"ESP32-C3"`)
+- Third field: contributor name, which must agree with the contributor folder (e.g., `"Trip5"`, `"Kasperaitis"`)
 
-The `fw_env` used in all generated files is the FIRMWARE filename minus `.bin`, exactly as written — no folder prefix is added. Entries whose filename starts with `board_` are skipped (bare board binaries, not full firmware).
+### Naming rules (enforced)
+
+`fw_env` is the FIRMWARE filename minus `.bin` and is used verbatim for the release asset, the manifest filename, and `firmware-info.json`. The release workflows derive every asset name as `<contributor folder>_<env>.bin`, so:
+
+1. `FIRMWARE` must be `"<contributor folder>_<env>.bin"`, where `<env>` is an `[env:...]` name declared in that folder's `platformio.ini`.
+2. The contributor field must match that folder name, so the credit and the asset name cannot drift apart.
+
+Comparison ignores case and treats spaces, hyphens and underscores as equivalent, so `"No Display"`/`no_display` and `"Trip5"`/`trip5` are accepted. A define that breaks either rule still compiles, but the binary is never copied into the release — `fix_releases.py` rejects it both when generating and with `--check`, and that check runs in the PR workflow and in STAGE 0 of `add-builds.py`.
+
+Entries whose filename starts with `board_` are skipped (bare board binaries, not full firmware).
 
 ### `releases.md` patching behavior
 
@@ -64,10 +79,11 @@ Variant names are formatted as `Contributor FriendlyName` (e.g. `Trip5 Color Scr
 
 ### Adding a New Contributor
 
-1. Create a subfolder under `builds/` using your username (letters, digits, `_`, `-` only)
-2. Add a `myoptions.h` with your firmware definitions following the format above
+1. Create a subfolder under `builds/` using your GitHub username (letters, digits, `_`, `-` only)
+2. Add a `myoptions.h` with your firmware definitions following the format above, naming every `FIRMWARE` as `<folder>_<env>.bin`
 3. Ensure `releases/releases.md` exists with a `### YourName Firmware` section (or let the script add one automatically before `### Add Yours`)
-4. Run the script from `builds/` — your entries will be merged into `releases/`
+4. Run `python builds/fix_releases.py --check` to confirm the naming rules pass
+5. Run the script from `builds/` — your entries will be merged into `releases/`
 
 ### Automation
 

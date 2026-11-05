@@ -81,7 +81,29 @@ jobs:
               -fail-level=any
 
   # -------------------------------------------------------------------------
-  # Job 3: Compile firmware (test builds)
+  # Job 3: Validate contributor build naming
+  # The release workflows derive every asset as '<contributor folder>_<env>.bin'.
+  # A FIRMWARE define that does not follow that pattern still compiles, but the
+  # resulting binary is never copied into a release. Runs only for PRs to 'dev'.
+  # -------------------------------------------------------------------------
+  build-naming:
+    name: Build naming check
+    runs-on: ubuntu-latest
+    needs: branch-guard
+    if: github.base_ref == 'dev'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Validate FIRMWARE naming
+        run: python3 builds/fix_releases.py --check
+
+  # -------------------------------------------------------------------------
+  # Job 4: Compile firmware (test builds)
   # Runs only for PRs targeting 'dev'.
   # -------------------------------------------------------------------------
   compile:

@@ -10,8 +10,12 @@ Scans all builds/*/myoptions.h files, generates:
 
 Run from the builds/ directory:
   python fix_releases.py
+
+Validate contributor naming only (writes nothing, exits non-zero on problems):
+  python fix_releases.py --check
 """
 
+import argparse
 import re
 import json
 from pathlib import Path
@@ -82,6 +86,81 @@ def parse_myoptions_h(myoptions_path):
         firmwares.append((board_env, chip_family, fw_env, friendly_name, contributor))
 
     return firmwares, url_map, missing_name_envs
+
+
+ENV_PATTERN = re.compile(r'^\s*\[env:([^\]]+)\]', re.MULTILINE)
+
+
+def normalize_name(value):
+    """Normalize a name so 'No Display', 'no_display' and 'no-display' compare equal."""
+    return re.sub(r'[\s_\-]+', '_', (value or '').strip().lower()).strip('_')
+
+
+def read_pio_envs(platformio_path):
+    """Return the [env:NAME] names declared in a platformio.ini (empty when unreadable)."""
+    platformio_path = Path(platformio_path)
+    if not platformio_path.is_file():
+        return []
+    text = platformio_path.read_text(encoding='utf-8', errors='ignore')
+    return ENV_PATTERN.findall(text)
+
+
+def contributor_folders(script_dir):
+    """Subfolders of builds/ that carry a myoptions.h and a usable name."""
+    folders = []
+    for subfolder in sorted(script_dir.iterdir()):
+        if not subfolder.is_dir():
+            continue
+        if subfolder.name == 'releases':
+            continue
+        if not re.match(r'^[a-zA-Z0-9_-]+$', subfolder.name):
+            continue
+        if (subfolder / 'myoptions.h').is_file():
+            folders.append(subfolder)
+    return folders
+
+
+def validate_build_naming(script_dir):
+    """
+    The release workflows derive every asset name as '<contributor folder>_<env>.bin',
+    so a FIRMWARE define that ignores that pattern compiles fine but produces a binary
+    that is never copied into the release. Checks, per contributor folder:
+
+      1. FIRMWARE "x.bin" must equal "<folder>_<env>.bin" for an [env:...] declared in
+         that folder's platformio.ini.
+      2. The contributor field of the FIRMWARE comment must prefix the filename, so the
+         credited name and the asset name cannot drift apart.
+
+    Comparison ignores case and treats space, hyphen and underscore as equivalent, so
+    'No Display'/'no_display' and 'Trip5'/'trip5' do not raise false positives.
+
+    Returns a list of human-readable error strings (empty when everything is fine).
+    """
+    errors = []
+    for folder in contributor_folders(script_dir):
+        firmwares, _url_map, _missing = parse_myoptions_h(folder / 'myoptions.h')
+        if not firmwares:
+            continue
+
+        pio_envs = read_pio_envs(folder / 'platformio.ini')
+        expected = [f'{folder.name}_{env}.bin' for env in pio_envs]
+        location = f'builds/{folder.name}/myoptions.h'
+
+        for _board_env, _chip_family, fw_env, _friendly_name, contributor in firmwares:
+            filename = f'{fw_env}.bin'
+            if filename not in expected:
+                errors.append(
+                    f'{location}: FIRMWARE "{filename}" is not "<folder>_<env>.bin"\n'
+                    f'      expected one of: '
+                    + (', '.join(expected) if expected
+                       else f'(no [env:...] found in builds/{folder.name}/platformio.ini)')
+                )
+            if not normalize_name(fw_env).startswith(normalize_name(contributor) + '_'):
+                errors.append(
+                    f'{location}: contributor "{contributor}" does not prefix FIRMWARE "{filename}"\n'
+                    f'      expected FIRMWARE "{folder.name}_<env>.bin" // ..., "{contributor}"'
+                )
+    return errors
 
 
 def get_version_from_options_h():
@@ -256,8 +335,30 @@ def generate_firmware_info_json(firmwares, output_path, version=''):
 
 
 def main():
-    script_dir    = Path(__file__).parent  # builds/
-    releases_dir  = script_dir / 'releases'
+    parser = argparse.ArgumentParser(
+        description='Generate release metadata from builds/*/myoptions.h')
+    parser.add_argument(
+        '--check', action='store_true',
+        help='only validate contributor naming; write nothing')
+    args = parser.parse_args()
+
+    script_dir   = Path(__file__).parent  # builds/
+    releases_dir = script_dir / 'releases'
+
+    naming_errors = validate_build_naming(script_dir)
+    if naming_errors:
+        print(f'[X] Contributor naming check failed ({len(naming_errors)} problem(s)):')
+        for error in naming_errors:
+            print(f'  - {error}')
+        print('')
+        print('    Rule: the FIRMWARE filename must be "<contributor folder>_<env>.bin" and the')
+        print('    contributor field of its comment must match that folder name. The release')
+        print('    workflows build "<folder>_<env>.bin", so any other name yields no asset.')
+        return 1
+    print('[OK] Contributor naming check passed')
+    if args.check:
+        return 0
+
     all_firmwares = []
     all_url_map   = {}
     seen_fw_envs  = set()

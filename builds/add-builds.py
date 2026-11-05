@@ -5,8 +5,9 @@ add-builds.py
 Add or refresh firmware builds in the latest GitHub release, then carry the
 same files over to the dev branch. Steps:
 
-  STAGE 0  PRECHECK   confirm main branch, that fix_releases.py was run, and
-                      collect the changed contributor folders
+  STAGE 0  PRECHECK   validate FIRMWARE naming, confirm main branch, that
+                      fix_releases.py was run, and collect the changed
+                      contributor folders
   STAGE 1  COMMIT     commit builds/ on main
   STAGE 2  PUSH main  push main to origin
   STAGE 3  RUN        trigger and watch the Update Builds in Release workflow
@@ -170,6 +171,18 @@ def gh_ready():
     return run(["gh", "auth", "status"], check=False).returncode == 0
 
 
+def naming_check():
+    # The release workflows build "<contributor folder>_<env>.bin", so a FIRMWARE
+    # define that does not follow that pattern compiles fine and uploads nothing.
+    # fix_releases.py owns the rule; run it in check mode so both stay in sync.
+    script = REPO_ROOT / "builds" / "fix_releases.py"
+    result = run([sys.executable, str(script), "--check"], check=False)
+    out = ((result.stdout or "") + (result.stderr or "")).strip()
+    if out:
+        print(out)
+    return result.returncode == 0
+
+
 def stage_0():
     print("[*] STAGE 0: PRECHECK")
     branch = current_branch()
@@ -179,6 +192,10 @@ def stage_0():
             return None
     elif branch != MAIN_BRANCH:
         print("[X] You should switch to main branch and add the build. (current: %s)" % branch)
+        return None
+
+    if not naming_check():
+        print("[X] FIRMWARE naming check failed (see above). Fix builds/*/myoptions.h, then re-run.")
         return None
 
     if git("fetch", "origin", MAIN_BRANCH, check=False).returncode != 0:

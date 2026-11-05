@@ -157,6 +157,7 @@ jobs:
 
           mkdir -p binaries
           declare -A board_done
+          SKIPPED=()
 
           for c in "${!WANTED[@]}"; do
             echo "🔨 Building contributor: ${c}"
@@ -166,15 +167,21 @@ jobs:
             pio run
 
             for d in .pio/build/*/; do
+              [ -d "$d" ] || continue
               pio_env=$(basename "$d")
               fw_env="${c}_${pio_env}"
               if ! grep -qF "|${fw_env}|" "$FW_TXT"; then
+                echo "  ⏭️  ${pio_env}: firmware.txt has no ${fw_env}.bin"
+                SKIPPED+=("${fw_env}.bin (env ${pio_env} in builds/${c})")
                 continue
               fi
-              if [ -f "$d/firmware.bin" ]; then
-                cp "$d/firmware.bin" "binaries/${fw_env}.bin"
-                echo "  ✅ ${fw_env}.bin"
+              if [ ! -f "$d/firmware.bin" ]; then
+                echo "  ⚠️  ${pio_env}: no firmware.bin in ${d}"
+                SKIPPED+=("${fw_env}.bin (firmware.bin not produced)")
+                continue
               fi
+              cp "$d/firmware.bin" "binaries/${fw_env}.bin"
+              echo "  ✅ ${fw_env}.bin"
               board_env=$(awk -F'|' -v fw="${fw_env}" '$3 == fw {print $1; exit}' "$FW_TXT")
               if [ -n "$board_env" ] && [ -z "${board_done[$board_env]+x}" ]; then
                 if [ -f "$d/bootloader.bin" ] && [ -f "$d/partitions.bin" ]; then
@@ -187,12 +194,28 @@ jobs:
             done
           done
 
-          COUNT=$(ls -1 binaries/*.bin 2>/dev/null | wc -l)
+          # Collect the results with nullglob. `ls binaries/*.bin` would return 2 on an
+          # empty directory and, with `set -euo pipefail`, kill the step before any of
+          # the diagnostics below could run.
+          shopt -s nullglob
+          BINARIES=(binaries/*.bin)
+          shopt -u nullglob
+          COUNT=${#BINARIES[@]}
+
           echo "📦 Built ${COUNT} binaries."
           if [ "$COUNT" -eq 0 ]; then
             echo "❌ No binaries were produced."
+            if [ "${#SKIPPED[@]}" -gt 0 ]; then
+              echo "   Build environments that produced nothing usable:"
+              printf '     %s\n' "${SKIPPED[@]}"
+            fi
+            echo "   Asset names come from the FIRMWARE define in each myoptions.h and must"
+            echo "   look like '<contributor folder>_<env>.bin'. firmware.txt expects:"
+            awk -F'|' 'NF >= 4 { print "     " $3 ".bin" }' "$FW_TXT"
+            echo "   Fix the define, then run: python builds/fix_releases.py --check"
             exit 1
           fi
+          printf '  %s\n' "${BINARIES[@]}"
           echo "built=${COUNT}" >> $GITHUB_OUTPUT
 
       - name: Upload binaries to release

@@ -120,6 +120,104 @@ def contributor_folders(script_dir):
     return folders
 
 
+def parse_ini_sections(ini_path):
+    """Minimal INI reader: {section: {key: value}}, with ';' comments stripped."""
+    sections = {}
+    ini_path = Path(ini_path)
+    if not ini_path.is_file():
+        return sections
+    current = None
+    for raw in ini_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = raw.split(';', 1)[0].strip()
+        if not line:
+            continue
+        header = re.match(r'^\[([^\]]+)\]$', line)
+        if header:
+            current = header.group(1).strip()
+            sections.setdefault(current, {})
+            continue
+        if current is None or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        sections[current][key.strip()] = value.strip()
+    return sections
+
+
+def board_partition_tables(ini_path):
+    """
+    Map each board environment to the partition CSV it declares.
+
+    A contributor ini looks like [env:taipan_streamer_1] extends esp32_s3_n16r8, and
+    board_build.partitions lives on the board block, so the extends chain is walked
+    until a section actually carries the key.
+    """
+    sections = parse_ini_sections(ini_path)
+    tables = {}
+    for name in sections:
+        if not name.startswith('env:'):
+            continue
+        board = sections[name].get('extends', '')
+        seen = set()
+        while board and board not in seen:
+            seen.add(board)
+            table = sections.get(board, {}).get('board_build.partitions')
+            if table:
+                tables[board] = table
+                break
+            board = sections.get(board, {}).get('extends', '')
+    return tables
+
+
+def read_filesystem_partition(csv_path):
+    """Return {'offset': int, 'size': int} for the LittleFS row of a partition CSV."""
+    csv_path = Path(csv_path)
+    if not csv_path.is_file():
+        return None
+    for raw in csv_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        columns = [column.strip() for column in line.split(',')]
+        if len(columns) < 5:
+            continue
+        name, ptype, subtype, offset, size = (
+            columns[0].lower(), columns[1].lower(), columns[2].lower(), columns[3], columns[4])
+        # The subtype has to stay "spiffs" for the toolchain, so the row is found by its
+        # name first and only then by the data/spiffs combination.
+        if name.startswith('littlefs') or (
+                ptype == 'data' and subtype == 'spiffs'
+                and name not in ('nvs', 'otadata', 'coredump')):
+            try:
+                return {'offset': int(offset, 0), 'size': int(size, 0)}
+            except ValueError:
+                return None
+    return None
+
+
+def collect_filesystem_images(script_dir, repo_root):
+    """
+    Work out, per board environment, which filesystem image the flasher should write and
+    where. Content is identical for every variant on the same partition layout, so one
+    image per board is enough and the name follows the bootloader/partitions convention.
+    """
+    images = {}
+    for folder in contributor_folders(script_dir):
+        for board_env, table in board_partition_tables(folder / 'platformio.ini').items():
+            if board_env in images:
+                continue
+            partition = read_filesystem_partition(repo_root / table)
+            if not partition:
+                print(f'  [!] {board_env}: no LittleFS row found in {table}; no filesystem image will be listed')
+                continue
+            images[board_env] = {
+                'path': f'../firmware/{board_env}_filesystem.bin',
+                'offset': partition['offset'],
+                'size': partition['size'],
+                'source': table,
+            }
+    return images
+
+
 def validate_build_naming(script_dir):
     """
     The release workflows derive every asset name as '<contributor folder>_<env>.bin',
@@ -130,6 +228,9 @@ def validate_build_naming(script_dir):
          that folder's platformio.ini.
       2. The contributor field of the FIRMWARE comment must prefix the filename, so the
          credited name and the asset name cannot drift apart.
+      3. platformio.ini must ask for littlefs. The firmware mounts LittleFS, so a
+         SPIFFS-packed image can never mount, and buildfs would leave spiffs.bin where
+         the release pipeline expects littlefs.bin.
 
     Comparison ignores case and treats space, hyphen and underscore as equivalent, so
     'No Display'/'no_display' and 'Trip5'/'trip5' do not raise false positives.
@@ -138,6 +239,21 @@ def validate_build_naming(script_dir):
     """
     errors = []
     for folder in contributor_folders(script_dir):
+        # Filesystem type first: a SPIFFS ini breaks the filesystem image the flasher writes,
+        # and the fix is a different tool, so it is reported before any naming problem.
+        for section, values in parse_ini_sections(folder / 'platformio.ini').items():
+            filesystem = values.get('board_build.filesystem')
+            if filesystem is None or filesystem.strip().lower() == 'littlefs':
+                continue
+            errors.append(
+                f'builds/{folder.name}/platformio.ini: board_build.filesystem = {filesystem} '
+                f'in [{section}]\n'
+                f'      the firmware mounts LittleFS, so a {filesystem.upper()}-packed image cannot mount,\n'
+                f'      and buildfs would leave {filesystem.lower()}.bin where littlefs.bin is expected.\n'
+                f'      Run:  python builds/patch_pio_ini_files.py   (no arguments), then re-run this check.\n'
+                f'      That tool is what keeps the per-board sections in step with the master template.'
+            )
+
         firmwares, _url_map, _missing = parse_myoptions_h(folder / 'myoptions.h')
         if not firmwares:
             continue
@@ -260,8 +376,15 @@ def generate_releases_md(firmwares, url_map, output_path):
     print(f'[*] Patched {output_path}')
 
 
-def generate_esp_web_tools_manifests(firmwares, output_dir, version=''):
-    """Generate ESP Web Tools manifest JSON files. Cleans manifests/ before writing."""
+def generate_esp_web_tools_manifests(firmwares, output_dir, version='', filesystem_images=None):
+    """
+    Generate ESP Web Tools manifest JSON files. Cleans manifests/ before writing.
+
+    Each manifest gains a non-standard "filesystem" entry naming the shared board image
+    and its offset. ESP Web Tools ignores the key; docs/flasher.html uses it to offer a
+    full reinstall when "Erase the whole flash" is ticked.
+    """
+    filesystem_images = filesystem_images or {}
     
     if not version:
         version = get_version_from_options_h()
@@ -296,6 +419,13 @@ def generate_esp_web_tools_manifests(firmwares, output_dir, version=''):
                 }
             ],
         }
+        filesystem = filesystem_images.get(board_env)
+        if filesystem:
+            manifest['filesystem'] = {
+                'path': filesystem['path'],
+                'offset': filesystem['offset'],
+                'size': filesystem['size'],
+            }
         manifest_file = manifests_dir / f'{fw_env}-manifest.json'
         with open(manifest_file, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2)
@@ -347,15 +477,17 @@ def main():
 
     naming_errors = validate_build_naming(script_dir)
     if naming_errors:
-        print(f'[X] Contributor naming check failed ({len(naming_errors)} problem(s)):')
+        print(f'[X] Contributor build check failed ({len(naming_errors)} problem(s)):')
         for error in naming_errors:
             print(f'  - {error}')
         print('')
         print('    Rule: the FIRMWARE filename must be "<contributor folder>_<env>.bin" and the')
         print('    contributor field of its comment must match that folder name. The release')
         print('    workflows build "<folder>_<env>.bin", so any other name yields no asset.')
+        print('    A contributor platformio.ini must also ask for littlefs, because the firmware')
+        print('    mounts LittleFS and the flasher writes a littlefs image into that partition.')
         return 1
-    print('[OK] Contributor naming check passed')
+    print('[OK] Contributor build check passed')
     if args.check:
         return 0
 
@@ -408,9 +540,25 @@ def main():
 
     releases_dir.mkdir(parents=True, exist_ok=True)
 
+    filesystem_images = collect_filesystem_images(script_dir, script_dir.parent)
+    # Only boards that a firmware actually uses need an image: an unused board section
+    # (one that no FIRMWARE entry points at) would otherwise build a file nobody flashes.
+    used_boards = {entry[0] for entry in all_firmwares}
+    filesystem_images = {board: info for board, info in filesystem_images.items()
+                         if board in used_boards}
+    if filesystem_images:
+        print('')
+        print('[*] Filesystem images the release must carry:')
+        for board_env, info in sorted(filesystem_images.items()):
+            print(f"  {board_env}_filesystem.bin  offset 0x{info['offset']:x}  "
+                  f"{info['size'] // 1024} KB  (from {info['source']})")
+    else:
+        print('[!] No filesystem images resolved; manifests will not offer a full reinstall')
+
     generate_firmware_txt(all_firmwares,              releases_dir / 'firmware.txt')
     generate_releases_md(all_firmwares, all_url_map,  releases_dir / 'releases.md')
-    generate_esp_web_tools_manifests(all_firmwares,   releases_dir / 'web_assets')
+    generate_esp_web_tools_manifests(all_firmwares,   releases_dir / 'web_assets',
+                                     filesystem_images=filesystem_images)
     generate_firmware_info_json(all_firmwares,        releases_dir / 'web_assets' / 'firmware-info.json')
 
     return 0

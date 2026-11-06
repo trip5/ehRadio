@@ -157,6 +157,7 @@ jobs:
 
           mkdir -p binaries
           declare -A board_done
+          declare -A fs_done
           SKIPPED=()
 
           for c in "${!WANTED[@]}"; do
@@ -189,6 +190,28 @@ jobs:
                   cp "$d/partitions.bin" "binaries/${board_env}_partitions.bin"
                   echo "  ✅ ${board_env}: bootloader + partitions"
                   board_done[$board_env]=1
+                fi
+              fi
+
+              # Filesystem image for the same board (first occurrence only), so the online
+              # flasher's "Erase the whole flash" path has something to write.
+              if [ -n "$board_env" ] && [ -z "${fs_done[$board_env]+x}" ]; then
+                echo "  📦 ${board_env}: building filesystem image from ${pio_env}..."
+                if pio run -e "$pio_env" -t buildfs > /tmp/buildfs.log 2>&1; then
+                  if [ -f "$d/littlefs.bin" ]; then
+                    cp "$d/littlefs.bin" "binaries/${board_env}_filesystem.bin"
+                    echo "  ✅ ${board_env}_filesystem.bin"
+                    fs_done[$board_env]=1
+                  elif [ -f "$d/spiffs.bin" ]; then
+                    echo "  ⚠️  ${board_env}: buildfs produced spiffs.bin, not littlefs.bin."
+                    echo "      board_build.filesystem must be littlefs in builds/${c}/platformio.ini"
+                    echo "      A SPIFFS image cannot be mounted as LittleFS, so nothing was copied."
+                  else
+                    echo "  ⚠️  ${board_env}: buildfs succeeded but left no image in ${d}"
+                  fi
+                else
+                  echo "  ⚠️  ${board_env}: buildfs failed for ${pio_env}"
+                  tail -n 20 /tmp/buildfs.log || true
                 fi
               fi
             done

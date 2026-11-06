@@ -285,27 +285,85 @@
 
         .field.checkbox label { margin: 0; font-weight: 400; }
 
-        .timer {
-            display: none;
-            margin: 14px 0 0;
-            text-align: center;
-            font-feature-settings: "tnum";
-            font-size: 15px;
-            color: #0273a5;
-            font-weight: 600;
+        .ssid-list {
+            margin-top: 12px;
+            max-height: 260px;
+            overflow: auto;
+            border: 1px solid #e3e8ee;
+            border-radius: 8px;
+            background: #fff;
         }
 
-        .timer.show { display: block; }
+        .ssid-list:empty { display: none; }
+
+        .ssid-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 10px 14px;
+            border: none;
+            border-bottom: 1px solid #eef1f5;
+            background: none;
+            font-family: inherit;
+            font-size: 15px;
+            color: #333;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .ssid-row:last-child { border-bottom: none; }
+
+        .ssid-row:hover { background: #eef8fd; }
+
+        .ssid-row.static {
+            cursor: default;
+            color: #6b7684;
+            font-size: 14px;
+        }
+
+        .ssid-name {
+            flex: 1 1 auto;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .ssid-meta {
+            flex: 0 0 auto;
+            font-size: 13px;
+            color: #6b7684;
+            font-feature-settings: "tnum";
+        }
+
+        .ssid-lock {
+            flex: 0 0 auto;
+            width: 1em;
+            color: #8a94a0;
+            font-size: 13px;
+        }
+
+        .bars {
+            display: inline-flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 14px;
+            flex: 0 0 auto;
+        }
+
+        .bars span {
+            width: 4px;
+            background: #cfd8e0;
+            border-radius: 1px;
+        }
+
+        .bars span.on { background: #2f9e44; }
+        .bars span:nth-child(1) { height: 4px; }
+        .bars span:nth-child(2) { height: 7px; }
+        .bars span:nth-child(3) { height: 10px; }
+        .bars span:nth-child(4) { height: 14px; }
 
         .hidden { display: none !important; }
-
-        .inline-links {
-            text-align: center;
-            margin-top: 24px;
-            font-size: 15px;
-        }
-
-        .inline-links a { color: #0273a5; }
 
         @media (max-width: 600px) {
             .container {
@@ -363,7 +421,7 @@
 
         <div class="firmware-section">
             <p>These firmwares are meant for pre-built radios. They <strong>must</strong> match the device's hardware configuration. Check the
-                    <a href="https://github.com/trip5/ehRadio/releases" target="_blank" style="color: #667eea;">Releases</a>.</p>
+               <a href="https://github.com/trip5/ehRadio/releases" target="_blank" style="color: #667eea;">Releases</a>.</p>
 
         </div>
 
@@ -372,14 +430,18 @@
         <div class="firmware-section">
 
             <h3>Step 1 &middot; Flash the Firmware</h3>
-            <p>This step only writes the firmware. Nothing else happens: no Wi-Fi "improv" prompt, no
-                tab that stays open waiting for the device. When the last block is written you get a success or a failure
-                and that is the end of it.</p>
+            <p>This step writes the firmware. It may be used to upgrade existing firmware.</p>
+            <p> <strong>Full install</strong> will clear the entire flash, including settings and files.
+                If this is checked, the WebUI files will also be installed.
+                This is recommended for first-time flashes or fresh installs.</p>
+            <p> <strong>Upgrading an existing ehRadio?</strong> Do not check <em>full reinstall</em>.
+                WebUI files will be updated after reboot and your settings and playlists will be intact.</p>
+            
 
             <div class="note">
-                <strong>First install or after erasing:</strong> the radio formats its internal storage on first boot.
-                Expect about <strong>3 to 5 minutes on a 16MB board</strong> and up to <strong>8 minutes on a 32MB board</strong>.
-                Do not unplug while this is happening.
+                On a first boot, the filesystem will be checked. If it is not valid, it will be
+                formatted before Wi-fi is configured. This can take some time.
+                After connecting to to the network, the WebUI files will then be downloaded.
             </div>
 
             <div class="firmware-selector">
@@ -391,7 +453,17 @@
 
             <div class="field checkbox">
                 <input type="checkbox" id="erase-first">
-                <label for="erase-first">Erase the whole flash before installing (wipes settings, Wi-Fi list and storage)</label>
+                <label for="erase-first">Full install: erase flash, flash firmware and file system
+                                        (wipes all settings and files)</label>
+            </div>
+
+            <div class="firmware-selector">
+                <label for="flash-baud">Flash speed</label>
+                <select id="flash-baud">
+                    <option value="921600" selected>Fast: 921600 baud (default)</option>
+                    <option value="460800">Safer: 460800 baud - use if Fast fails</option>
+                    <option value="115200">Slowest: 115200 baud - last resort</option>
+                </select>
             </div>
 
             <div class="install-section">
@@ -420,15 +492,13 @@
 
         <!-- ============================ 2. IMPROV / WI-FI ============================ -->
         <div class="firmware-section">
-            <h3>Step 2 &middot; Set Up Wi-Fi</h3>
-            <p>Connect over USB and send the Wi-Fi credentials to a radio that is sitting in
-                <em>AP/Improv mode</em>. This part uses the Improv serial protocol, so it needs Chrome, Edge or Brave
-                (Firefox and Safari do not expose the serial port).</p>
+            <h3>Step 2 &middot; Set Up Wi-Fi (Improv)</h3>
+            <p>When the radio is in <strong>AP/Improv Mode</strong>, this will send Wi-fi provisioning data so it
+                can connect to your local network.</p>
 
             <div class="note">
-                <strong>A radio that has just been flashed</strong> will not answer until it has finished its first
-                boot. Keep this page open: the button below waits and shows a running timer, up to 10 minutes.
-                The timer is the patience message.
+                This uses the Improv serial protocol, so it needs <strong>Chrome, Edge, or Brave</strong>.
+                Firefox and Safari do not expose the serial port.
             </div>
 
             <div class="install-section">
@@ -436,14 +506,18 @@
                 <button class="secondary hidden" id="improv-cancel" type="button">Cancel</button>
             </div>
 
-            <div class="timer" id="improv-timer">Waiting for the device...</div>
-
-            <div class="status" id="improv-status">
-                <div class="status-title" id="improv-status-title"></div>
-                <div class="status-body" id="improv-status-body"></div>
-            </div>
+            <!-- Rotation of reassurance lines; the phrases and timings live in the script below. -->
+            <div id="improv-wait-msg"
+                 style="display: none; margin: 16px 0 4px; text-align: center; font-size: 16px;
+                        font-weight: 600; color: #003DA5; opacity: 0;
+                        transition: opacity 2500ms linear;"></div>
 
             <div id="improv-form" class="hidden">
+                <div class="field">
+                    <label>Nearby networks</label>
+                    <button class="secondary" id="scan-button" type="button" disabled>Scan for networks</button>
+                    <div class="ssid-list" id="ssid-list"></div>
+                </div>
                 <div class="field">
                     <label for="ssid">Wi-Fi network name (SSID)</label>
                     <input type="text" id="ssid" autocomplete="off" autocapitalize="none" spellcheck="false">
@@ -484,16 +558,9 @@
 
         <!-- ================================ NOTES ================================ -->
         <div class="firmware-section">
-            <h3>Good to Know</h3>
+            <h3>No luck here?</h3>
             <ul style="line-height: 1.7;">
-                <li>Flash firmware with Step 1, then set up Wi-Fi with Step 2. They are deliberately separate.</li>
-                <li>The radio restarts once it accepts the credentials. The serial connection drops at that moment:
-                    that is the expected end of the flow, not an error.</li>
-                <li>An already-configured radio does not listen for Improv again until it falls back to AP mode, so
-                    Step 2 only works on a radio in AP/Improv mode.</li>
-                <li>There are 5 Wi-Fi slots. A new network is appended until the list is full, after which slot 5 is
-                    replaced, exactly like the WebUI does it.</li>
-                <li>No luck here? Try the <a href="./firmware.html" style="color: #0273a5;">ESP Web Tools flasher</a>.</li>
+                <li>Try the <a href="./firmware.html" style="color: #0273a5;">ESP Web Tools flasher</a>.</li>
             </ul>
         </div>
     </div>
@@ -515,15 +582,36 @@
         const REPO_NAME = 'ehRadio';
         const PAGES_BASE = `https://${GITHUB_OWNER}.github.io/${REPO_NAME}/`;
 
-        const FLASH_BAUD = 921600;
-        const IMPROV_MAX_WAIT_MS = 10 * 60 * 1000;   // first boot can format storage for up to ~8 minutes
-        const IMPROV_RETRY_MS = 2000;
+        // The rate is picked in Step 1. 921600 is the default: native USB ignores it entirely, and
+        // a USB-UART bridge that cannot sustain it is handled by choosing a slower option.
+        const FLASH_BAUD_DEFAULT = 921600;
+        const IMPROV_RETRY_MS = 2000;   // pause between handshake attempts; there is no overall timeout
+
+        // Lines shown in rotation while the browser waits for the radio to answer. Reword or
+        // extend this array freely: every entry is shown the same way, so a message fades in
+        // over WAIT_FADE_MS, sits fully visible for WAIT_HOLD_MS, fades out over WAIT_FADE_MS,
+        // and the next one takes over. 2500 + 5000 + 2500 = one message per 10 seconds, with
+        // the text solid for the middle 5.
+        const IMPROV_WAIT_MESSAGES = [
+            'Checking if device is in AP/Improv Mode',
+            'Waiting for device to answer',
+            'Are you sure the device is in Improv Mode?',
+            'Keep waiting?',
+        ];
+        const WAIT_FADE_MS = 2500;
+        const WAIT_HOLD_MS = 5000;
 
         // Both libraries are loaded on demand, with a couple of mirrors each, because a CDN
         // hiccup should produce a readable message here instead of a dead page.
-        // Versions are pinned on purpose: the exports these two entries need were checked
-        // against esptool-js 0.7.1 (ESPLoader, Transport, writeFlash, reportProgress) and
-        // improv-wifi-serial-sdk 2.8.1 (connect, state, scan, provision, nextUrl, close).
+        // Versions are pinned on purpose, and the exports below were read out of the
+        // published bundles rather than assumed:
+        //   esptool-js 0.7.1              exports ESPLoader, Transport; writeFlash takes
+        //                                 fileArray/flashSize/flashMode/flashFreq/eraseAll/
+        //                                 compress/reportProgress, and opens the port itself
+        //   improv-wifi-serial-sdk 2.8.1  exports ONLY the ImprovSerial class. There is no
+        //                                 connect() helper: you open the port yourself, then
+        //                                 new ImprovSerial(port, logger) and call
+        //                                 initialize/requestCurrentState/provision/scan/close
         const ESPTOOL_URLS = [
             'https://unpkg.com/esptool-js@0.7.1/bundle.js',
             'https://cdn.jsdelivr.net/npm/esptool-js@0.7.1/bundle.js/+esm',
@@ -543,6 +631,7 @@
 
         const firmwareSelect = $('firmware-select');
         const eraseFirst = $('erase-first');
+        const flashBaudSelect = $('flash-baud');
         const flashButton = $('flash-button');
         const flashProgress = $('flash-progress');
         const progressFill = $('progress-fill');
@@ -557,16 +646,15 @@
 
         const improvConnectButton = $('improv-connect');
         const improvCancelButton = $('improv-cancel');
-        const improvTimer = $('improv-timer');
-        const improvStatus = $('improv-status');
-        const improvStatusTitle = $('improv-status-title');
-        const improvStatusBody = $('improv-status-body');
+        const improvWaitMsg = $('improv-wait-msg');
         const improvForm = $('improv-form');
         const ssidInput = $('ssid');
         const passwordInput = $('password');
         const improvSubmitButton = $('improv-submit');
         const visitWrap = $('visit-wrap');
         const visitLink = $('visit-link');
+        const scanButton = $('scan-button');
+        const ssidList = $('ssid-list');
 
         const logsStartButton = $('logs-start');
         const logsStopButton = $('logs-stop');
@@ -585,12 +673,12 @@
         let improvCancelled = false;
         let improvDevice = null;
         let improvPort = null;
-        let improvDeadline = 0;
-        let improvTimerHandle = null;
+        let waitMsgToken = 0;
 
         let logPort = null;
         let logReader = null;
         let logsRunning = false;
+        let improvScanning = false;
 
         const serialSupported = 'serial' in navigator;
 
@@ -660,10 +748,19 @@
         // ---------------------------------------------------------------------------
         // Status + progress helpers
         // ---------------------------------------------------------------------------
+        function revealLog() {
+            logDetails.open = true;
+            try {
+                logDetails.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch (err) { /* older browsers just jump */ }
+        }
+
         function setStatus(el, titleEl, bodyEl, kind, title, body) {
             el.className = `status show ${kind}`;
             titleEl.textContent = title;
             bodyEl.textContent = body;
+            // A failure message is useless without the reason, and the reason is in the log.
+            if (kind === 'error') revealLog();
         }
 
         function isCancelled(err) {
@@ -672,10 +769,6 @@
 
         function setFlashStatus(kind, title, body) {
             setStatus(flashStatus, flashStatusTitle, flashStatusBody, kind, title, body);
-        }
-
-        function setImprovStatus(kind, title, body) {
-            setStatus(improvStatus, improvStatusTitle, improvStatusBody, kind, title, body);
         }
 
         function showProgress(show) {
@@ -693,6 +786,7 @@
             flashButton.disabled = busy || !firmwareSelect.value;
             firmwareSelect.disabled = busy;
             eraseFirst.disabled = busy;
+            flashBaudSelect.disabled = busy;
             // One owner of the serial port at a time.
             improvConnectButton.disabled = busy || !serialSupported;
             logsStartButton.disabled = busy || !serialSupported;
@@ -733,20 +827,28 @@
         async function loadImprovSdk() {
             if (!improvSdkPromise) {
                 improvSdkPromise = (async () => {
+                    const reasons = [];
                     for (const url of IMPROV_URLS) {
                         try {
                             const mod = await import(url);
-                            const connect = pickExport(mod, 'connect');
-                            if (typeof connect === 'function') {
+                            // This package exports the ImprovSerial class itself. There is no
+                            // connect() helper in 2.x, so a lookup for one reports "no export"
+                            // on every mirror even though the module loaded perfectly.
+                            const ImprovSerial = pickExport(mod, 'ImprovSerial');
+                            if (typeof ImprovSerial === 'function') {
                                 log(`Improv serial SDK loaded from ${url}`);
-                                return { connect };
+                                return { ImprovSerial };
                             }
-                            log(`Improv SDK at ${url} exported no connect().`, 'error');
+                            const reason = `${url}: module loaded but has no ImprovSerial export`;
+                            reasons.push(reason);
+                            log(reason, 'error');
                         } catch (err) {
-                            log(`Improv SDK load failed at ${url}: ${err.message}`, 'error');
+                            const reason = `${url}: ${(err && err.message) || err}`;
+                            reasons.push(reason);
+                            log(`Improv SDK load failed: ${reason}`, 'error');
                         }
                     }
-                    throw new Error('Could not load the Improv serial SDK from any of the mirrors.');
+                    throw new Error(`Could not load the Improv serial SDK. ${reasons[0] || 'No mirror responded.'}`);
                 })();
             }
             return improvSdkPromise;
@@ -779,13 +881,6 @@
         }
 
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-        function formatElapsed(ms) {
-            const total = Math.max(0, Math.floor(ms / 1000));
-            const minutes = Math.floor(total / 60);
-            const seconds = total % 60;
-            return `${minutes}:${String(seconds).padStart(2, '0')}`;
-        }
 
         // ---------------------------------------------------------------------------
         // Firmware info
@@ -857,6 +952,42 @@
             }
         }
 
+        // One attempt at the rate chosen in Step 1. esptool-js opens the port itself, so nothing
+        // here may open it first: doing exactly that is what produced "The port is already open"
+        // on every attempt of the earlier fallback version.
+        async function flashAtBaud(esptool, port, baud, parts, eraseAll) {
+            const terminal = {
+                clean() { },
+                writeLine(line) { if (line) log(String(line)); },
+                write(text) { if (text) log(String(text).replace(/\r?\n$/, '')); },
+            };
+
+            log(`Connecting at ${baud} baud.`);
+            const transport = new esptool.Transport(port, true);
+            const loader = new esptool.ESPLoader({ transport, baudrate: baud, terminal });
+
+            const chip = typeof loader.main === 'function' ? await loader.main() : await loader.main_fn();
+            log(`Detected ${chip} at ${baud} baud.`);
+
+            setFlashStatus('wait', 'Writing firmware', 'This is the part to leave alone.');
+            await writeFlashCompat(loader, {
+                fileArray: parts.map((part) => ({ data: part.data, address: part.address })),
+                flashSize: 'keep',
+                flashMode: 'keep',
+                flashFreq: 'keep',
+                eraseAll,
+                compress: true,
+                reportProgress: (fileIndex, written, total) => {
+                    const totalParts = parts.length || 1;
+                    const fraction = total ? written / total : 0;
+                    const label = parts[fileIndex] ? partLabel(parts[fileIndex].url, fileIndex, totalParts) : 'Writing...';
+                    setProgress((fileIndex + fraction) / totalParts, `Writing ${label} ${Math.round(fraction * 100)}%`);
+                },
+            });
+
+            return { loader, transport, baud };
+        }
+
         async function onFlashClick() {
             if (flashBusy) return;
             const variant = selectedVariant();
@@ -900,47 +1031,48 @@
                     parts.push({ data, address: part.offset, url });
                 }
 
+                // A full reinstall writes the shared WebUI filesystem too. The manifest names the
+                // image and its partition offset, so the page never has to know the layout.
+                const eraseAll = !!eraseFirst.checked;
+                const filesystem = manifest.filesystem;
+                if (eraseAll && filesystem && filesystem.path) {
+                    const url = new URL(filesystem.path, manifestUrl).href;
+                    log(`Filesystem image: ${url}`);
+                    setProgress(0, `Downloading ${partLabel(url, parts.length, parts.length + 1)}`);
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`${url} returned HTTP ${response.status}. ` +
+                            'This release may not carry a filesystem image yet.');
+                    }
+                    const data = new Uint8Array(await response.arrayBuffer());
+                    log(`  ${data.byteLength} bytes at 0x${Number(filesystem.offset).toString(16)}`);
+                    parts.push({ data, address: filesystem.offset, url });
+                } else if (eraseAll) {
+                    log('This manifest lists no filesystem image; the radio will format and download the WebUI instead.');
+                }
+
                 const esptool = await loadEsptool();
                 showProgress(true);
                 setFlashStatus('wait', 'Connecting to the board', 'Talking to the bootloader...');
                 setProgress(0, 'Connecting to the bootloader...');
 
-                transport = new esptool.Transport(port, true);
-                const terminal = {
-                    clean() { },
-                    writeLine(line) { if (line) log(String(line)); },
-                    write(text) { if (text) log(String(text).replace(/\r?\n$/, '')); },
-                };
-                const loader = new esptool.ESPLoader({ transport, baudrate: FLASH_BAUD, terminal });
-
-                const chip = typeof loader.main === 'function' ? await loader.main() : await loader.main_fn();
-                log(`Detected: ${chip}`);
-
-                setFlashStatus('wait', 'Writing firmware', 'This is the part to leave alone.');
-                const eraseAll = !!eraseFirst.checked;
-                await writeFlashCompat(loader, {
-                    fileArray: parts.map((part) => ({ data: part.data, address: part.address })),
-                    flashSize: 'keep',
-                    flashMode: 'keep',
-                    flashFreq: 'keep',
-                    eraseAll,
-                    compress: true,
-                    reportProgress: (fileIndex, written, total) => {
-                        const totalParts = parts.length || 1;
-                        const fraction = total ? written / total : 0;
-                        const label = parts[fileIndex] ? partLabel(parts[fileIndex].url, fileIndex, totalParts) : 'Writing...';
-                        setProgress((fileIndex + fraction) / totalParts, `Writing ${label} ${Math.round(fraction * 100)}%`);
-                    },
-                });
+                const baud = Number(flashBaudSelect.value) || FLASH_BAUD_DEFAULT;
+                const result = await flashAtBaud(esptool, port, baud, parts, eraseAll);
+                transport = result.transport;
+                log(`Flashed at ${result.baud} baud.`);
 
                 setProgress(1, 'Resetting the board...');
-                await resetAfterFlash(loader);
+                await resetAfterFlash(result.loader);
                 await disconnectTransport(transport);
                 transport = null;
 
                 setFlashStatus('ok', 'Firmware installed',
-                    'The board restarts now. On a first install it formats its internal storage: about 3 to 5 minutes ' +
-                    'on a 16MB board, up to 8 minutes on 32MB. When it is done it sits in AP/Improv mode, ready for Step 2.');
+                    eraseAll
+                        ? 'The board restarts now with its WebUI files already in flash, so there is no format wait. ' +
+                          'Once it boots it sits in AP/Improv mode, ready for Step 2.'
+                        : 'The board restarts now. On a first install it formats its internal storage: about 3 to 5 ' +
+                          'minutes on a 16MB board, up to 8 minutes on 32MB. When it is done it sits in AP/Improv mode, ' +
+                          'ready for Step 2.');
                 log('Flash finished.');
             } catch (err) {
                 log(err && err.stack ? err.stack : String(err), 'error');
@@ -949,8 +1081,9 @@
                 if (isCancelled(err)) {
                     setFlashStatus('wait', 'Cancelled', 'No port was selected, so nothing was written.');
                 } else {
-                    const message = err && err.message ? err.message : String(err);
-                    setFlashStatus('error', 'Flashing failed', message + ' Open Show details for the full log.');
+                    setFlashStatus('error', 'Flashing failed',
+                        ((err && err.message) || String(err)) +
+                        ' If this keeps happening, choose a slower Flash speed and try again.');
                 }
             } finally {
                 setFlashBusy(false);
@@ -961,20 +1094,66 @@
         // ---------------------------------------------------------------------------
         // Step 2: Improv
         // ---------------------------------------------------------------------------
-        function startImprovTimer() {
-            const started = Date.now();
-            improvTimer.classList.add('show');
-            improvTimer.textContent = 'Elapsed 0:00';
-            clearInterval(improvTimerHandle);
-            improvTimerHandle = setInterval(() => {
-                improvTimer.textContent = `Elapsed ${formatElapsed(Date.now() - started)}`;
-            }, 1000);
+        // One element carries every Step 2 line, so the three states below are mutually exclusive
+        // by construction: the rotation, a held line, or a line that fades away.
+        const WAIT_MSG_COLOR = '#003DA5';
+        const STATUS_MSG_COLOR = '#C80C02';
+
+        function paintMessage(text, color) {
+            improvWaitMsg.textContent = text;
+            improvWaitMsg.style.color = color;
+            improvWaitMsg.style.transition = `opacity ${WAIT_FADE_MS}ms linear`;
+            improvWaitMsg.style.display = 'block';
+            void improvWaitMsg.offsetWidth;   // force a reflow so the fade restarts from opacity 0
+            improvWaitMsg.style.opacity = '1';
         }
 
-        function stopImprovTimer() {
-            clearInterval(improvTimerHandle);
-            improvTimerHandle = null;
-            improvTimer.classList.remove('show');
+        function fadeOutMessage(token) {
+            if (token !== waitMsgToken) return;
+            improvWaitMsg.style.opacity = '0';
+            setTimeout(() => {
+                if (token === waitMsgToken) improvWaitMsg.style.display = 'none';
+            }, WAIT_FADE_MS + 100);
+        }
+
+        // The token invalidates every pending fade and step, so a stopped rotation can never put
+        // a message back on screen, however many timers were still in flight.
+        function startWaitMessages() {
+            const token = ++waitMsgToken;
+            let index = 0;
+            const step = () => {
+                if (token !== waitMsgToken) return;
+                paintMessage(IMPROV_WAIT_MESSAGES[index], WAIT_MSG_COLOR);
+                setTimeout(() => {
+                    if (token === waitMsgToken) improvWaitMsg.style.opacity = '0';
+                }, WAIT_FADE_MS + WAIT_HOLD_MS);
+                setTimeout(() => {
+                    if (token !== waitMsgToken) return;
+                    index = (index + 1) % IMPROV_WAIT_MESSAGES.length;
+                    step();
+                }, WAIT_FADE_MS * 2 + WAIT_HOLD_MS);
+            };
+            step();
+        }
+
+        // Stays on screen until something replaces it: no fade-out is scheduled. Used for
+        // "Device found", which should remain while the credentials are being typed.
+        function holdMessage(text) {
+            waitMsgToken++;
+            paintMessage(text, STATUS_MSG_COLOR);
+        }
+
+        // Shown, held, then faded away, leaving the space empty again for the next action.
+        function flashMessage(text) {
+            const token = ++waitMsgToken;
+            paintMessage(text, STATUS_MSG_COLOR);
+            setTimeout(() => fadeOutMessage(token), WAIT_HOLD_MS);
+        }
+
+        function clearMessages() {
+            waitMsgToken++;
+            improvWaitMsg.style.opacity = '0';
+            fadeOutMessage(waitMsgToken);
         }
 
         function setImprovBusy(busy) {
@@ -982,17 +1161,8 @@
             improvConnectButton.disabled = busy || !serialSupported || flashBusy || logsRunning;
             improvCancelButton.classList.toggle('hidden', !busy);
             improvSubmitButton.disabled = busy;
+            scanButton.disabled = busy || improvScanning || !improvDevice;
             flashButton.disabled = busy || flashBusy || logsRunning || !firmwareSelect.value;
-        }
-
-        async function callMaybe(device, method, ...args) {
-            if (!device || typeof device[method] !== 'function') return undefined;
-            try {
-                return await device[method](...args);
-            } catch (err) {
-                log(`${method}() said: ${err.message}`);
-                return undefined;
-            }
         }
 
         function showVisit(url) {
@@ -1006,92 +1176,191 @@
             log(`Device address: ${url}`);
         }
 
+        function escapeHtml(value) {
+            // Assembled from a char code on purpose: writing the entities out in full invites
+            // an HTML-aware editor to "helpfully" decode them and break the mapping.
+            const amp = String.fromCharCode(38);
+            const map = {
+                [amp]: amp + 'amp;',
+                '<': amp + 'lt;',
+                '>': amp + 'gt;',
+                '"': amp + 'quot;',
+                "'": amp + '#39;',
+            };
+            return String(value).replace(/[&<>"']/g, (ch) => map[ch]);
+        }
+
+        // RSSI thresholds loosely match what a phone shows: -55 is strong, -78 is barely usable.
+        function signalBars(rssi) {
+            const level = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -78 ? 2 : 1;
+            let html = '<span class="bars">';
+            for (let bar = 1; bar <= 4; bar++) html += `<span class="${bar <= level ? 'on' : ''}"></span>`;
+            return `${html}</span>`;
+        }
+
+        function ssidPlaceholder(text) {
+            const row = document.createElement('div');
+            row.className = 'ssid-row static';
+            row.textContent = text;
+            ssidList.appendChild(row);
+        }
+
+        function renderSsids(networks) {
+            ssidList.innerHTML = '';
+            if (!networks || networks.length === 0) {
+                ssidList.classList.remove('hidden');
+                ssidPlaceholder('The device reported no networks. Type the name below instead.');
+                return;
+            }
+            for (const network of networks) {
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.className = 'ssid-row';
+                row.title = `${network.name} - ${network.rssi} dBm - ${network.secured ? 'password required' : 'open'}`;
+                row.innerHTML = `<span class="ssid-name">${escapeHtml(network.name)}</span>` +
+                    signalBars(network.rssi) +
+                    `<span class="ssid-meta">${network.rssi} dBm</span>` +
+                    `<span class="ssid-lock">${network.secured ? '&#128274;' : ''}</span>`;
+                row.addEventListener('click', () => {
+                    ssidInput.value = network.name;
+                    if (network.secured) passwordInput.focus();
+                    else improvSubmitButton.focus();
+                });
+                ssidList.appendChild(row);
+            }
+        }
+
+        async function onScanClick() {
+            if (!improvDevice || improvScanning) return;
+            improvScanning = true;
+            scanButton.disabled = true;
+            const originalLabel = scanButton.textContent;
+            scanButton.textContent = 'Scanning...';
+            ssidList.innerHTML = '';
+            ssidPlaceholder('Asking the radio to scan. This takes a few seconds and briefly keeps the device busy...');
+            try {
+                log('Requesting a Wi-Fi scan from the device...');
+                // The firmware blocks inside WiFi.scanNetworks() and then answers with one packet
+                // per network, so this is a single call whose timeout has to cover the scan itself.
+                const networks = await improvDevice.scan(30000);
+                log(`Scan returned ${networks.length} network(s).`);
+                renderSsids(networks);
+            } catch (err) {
+                const reason = (err && err.message) || String(err);
+                log(`Scan failed: ${reason}. Typing the network name below works the same.`, 'error');
+                ssidList.innerHTML = '';
+                ssidPlaceholder('Scan failed. Type the network name below instead.');
+            } finally {
+                improvScanning = false;
+                scanButton.textContent = originalLabel;
+                scanButton.disabled = !improvDevice;
+            }
+        }
+
+        // ImprovSerial takes an already open port and a logger with these four methods.
+        function improvLogger() {
+            return {
+                log: (...args) => log(`improv: ${args.join(' ')}`),
+                info: (...args) => log(`improv: ${args.join(' ')}`),
+                debug: (...args) => log(`improv dbg: ${args.join(' ')}`),
+                error: (...args) => log(`improv err: ${args.join(' ')}`, 'error'),
+            };
+        }
+
+        async function ensurePortOpen(port) {
+            if (!port) throw new Error('No serial port.');
+            if (port.readable !== null && port.writable !== null) return;   // already open
+            await port.open({ baudRate: 115200, bufferSize: 4096 });
+        }
+
+        async function closeImprovQuietly() {
+            const device = improvDevice;
+            improvDevice = null;
+            if (device) {
+                // close() waits for a disconnect event, so bound it: a wedged close must not
+                // freeze the page.
+                try {
+                    await Promise.race([device.close(), sleep(2000)]);
+                } catch (err) {
+                    log(`Ignored while closing Improv: ${err.message}`);
+                }
+            }
+            await closePortQuietly(improvPort);
+            improvPort = null;
+            ssidList.innerHTML = '';
+            scanButton.disabled = true;
+        }
+
         async function onImprovConnect() {
             if (improvBusy || flashBusy) return;
 
             clearLog();
+            clearMessages();
             visitWrap.classList.add('hidden');
             improvForm.classList.add('hidden');
             improvCancelled = false;
             setImprovBusy(true);
-            setImprovStatus('wait', 'Waiting for the device',
-                'Keep this page open. A freshly flashed radio answers only after its first boot finishes.');
-            startImprovTimer();
 
-            let port = null;
             try {
-                port = await requestPort();
-                improvPort = port;
+                improvPort = await requestPort();
+                await ensurePortOpen(improvPort);
+                log('Serial port open at 115200.');
                 const sdk = await loadImprovSdk();
-                improvDeadline = Date.now() + IMPROV_MAX_WAIT_MS;
+                // No deadline: the handshake retries for as long as the user is willing to wait,
+                // and Cancel is the only way out.
+                startWaitMessages();
 
                 let connected = false;
-                let state;
                 while (!connected) {
                     if (improvCancelled) throw new Error('Cancelled by user.');
-                    let candidate = null;
                     try {
+                        await ensurePortOpen(improvPort);
+                        const candidate = new sdk.ImprovSerial(improvPort, improvLogger());
                         log('Improv handshake...');
-                        candidate = await sdk.connect(port);
-                        // Opening the port can succeed while the device is still booting, so the
-                        // state probe is the real proof that its Improv service is answering.
-                        const probed = await candidate.state();
-                        state = probed && (probed.state || probed);
+                        // initialize() re-sends its state request every second for `timeout` ms and
+                        // rejects when the device stays silent, which is what makes the retry loop
+                        // work. On failure it closes its reader, so each attempt gets a new instance.
+                        await candidate.initialize(1200);
                         improvDevice = candidate;
-                        candidate = null;
                         connected = true;
                     } catch (err) {
-                        if (candidate) {
-                            try { await candidate.close(); } catch (e) { /* ignored */ }
-                        }
-                        log(`Handshake failed: ${err && err.message ? err.message : err}`);
-                        if (Date.now() > improvDeadline) {
-                            throw new Error('The device never answered. If it is still formatting storage, let it ' +
-                                'finish booting and press the button again.');
-                        }
-                        await closePortQuietly(port);
-                        setImprovStatus('wait', 'Still waiting',
-                            'The radio is not answering yet. That is normal during a first boot: it formats its ' +
-                            'storage before it starts listening. Waiting...');
+                        const reason = (err && (err.message || err.name)) || String(err);
+                        log(`Handshake failed: ${reason}`);
                         await sleep(IMPROV_RETRY_MS);
                     }
                 }
 
-                stopImprovTimer();
-                log(`Improv state: ${state === undefined ? 'unknown' : state}`);
+                const state = improvDevice.state;
+                log(`Improv state: ${state || 'unknown'}`);
+                if (improvDevice.nextUrl) log(`Device reports address: ${improvDevice.nextUrl}`);
 
                 if (state === 'PROVISIONED' || state === 'AUTHORIZED') {
-                    showVisit(await callMaybe(improvDevice, 'nextUrl'));
-                    setImprovStatus('ok', 'Device is already set up',
-                        'This radio already has Wi-Fi credentials, so there is nothing to send. Use Device Logs to ' +
-                        'find the address it was given.');
-                    await callMaybe(improvDevice, 'close');
-                    await closePortQuietly(port);
-                    improvDevice = null;
-                    improvPort = null;
+                    showVisit(improvDevice.nextUrl);
+                    flashMessage('Device is already set up');
+                    log('Device already has Wi-Fi credentials; nothing to send.');
+                    await closeImprovQuietly();
                     return;
                 }
 
                 improvForm.classList.remove('hidden');
+                ssidList.innerHTML = '';
+                scanButton.disabled = false;
                 ssidInput.focus();
-                setImprovStatus('ok', 'Device found',
-                    'Enter the Wi-Fi details below. The radio verifies them for up to 10 seconds before saving.');
+                holdMessage('Device found');
+                log('Device found, ready for credentials.');
             } catch (err) {
-                stopImprovTimer();
                 log(err && err.stack ? err.stack : String(err), 'error');
-                try { await callMaybe(improvDevice, 'close'); } catch (e) { /* ignored */ }
-                await closePortQuietly(port);
-                // The device reference is dropped only on failure: on success the credentials form still
-                // needs it to send the provisioning command.
-                improvDevice = null;
-                improvPort = null;
+                // The device handle is kept after a successful handshake so the form can use it,
+                // so only clean up when the handshake itself failed.
+                await closeImprovQuietly();
                 if (improvCancelled || isCancelled(err)) {
-                    setImprovStatus('wait', 'Cancelled', 'Nothing was sent to the device.');
+                    flashMessage('Cancelled');
+                    log('Cancelled; nothing was sent to the device.');
                 } else {
-                    setImprovStatus('error', 'Could not reach the device', (err && err.message) || String(err));
+                    flashMessage('Could not reach the device');
+                    revealLog();   // the reason is already the last line of the log
                 }
             } finally {
-                stopImprovTimer();
                 setImprovBusy(false);
             }
         }
@@ -1100,42 +1369,35 @@
             const ssid = ssidInput.value.trim();
             const password = passwordInput.value;
             if (!ssid) {
-                setImprovStatus('error', 'Network name required', 'Enter the SSID of the Wi-Fi network.');
+                flashMessage('Network name required');
+                log('Network name required.', 'error');
                 ssidInput.focus();
                 return;
             }
 
             if (!improvDevice) {
-                setImprovStatus('error', 'Not connected', 'Press Connect again: the Improv session is gone.');
+                flashMessage('Improv session lost');
+                log('The Improv session is gone; press Connect again.', 'error');
                 return;
             }
 
             improvSubmitButton.disabled = true;
-            setImprovStatus('wait', 'Sending credentials',
-                'The radio is trying to join the network. This can take up to 10 seconds.');
+            log('Sending Wi-Fi credentials...');
             try {
-                const result = await improvDevice.provision(ssid, password);
-                log(`provision() returned: ${JSON.stringify(result || null)}`);
-
-                let url;
-                if (typeof result === 'string') url = result;
-                else if (result && typeof result.nextUrl === 'string') url = result.nextUrl;
-                if (!url) url = await callMaybe(improvDevice, 'nextUrl');
-                showVisit(url);
-
-                setImprovStatus('ok', 'Credentials accepted',
-                    'The radio saves them to wifi.csv and restarts to join your network. The serial connection drops ' +
-                    'now, which is expected. Close this tab whenever you like.');
+                // provision() stores the device's answer in nextUrl. The firmware only replies
+                // after it has verified the credentials itself, so allow more than its 10 seconds.
+                await improvDevice.provision(ssid, password, 30000);
+                showVisit(improvDevice.nextUrl);
+                flashMessage('Wi-Fi configured. Rebooting...');
+                log('Credentials accepted; the radio restarts to join the network.');
                 improvForm.classList.add('hidden');
                 passwordInput.value = '';
-                await callMaybe(improvDevice, 'close');
-                await closePortQuietly(improvPort);
-                improvPort = null;
-                improvDevice = null;
+                await closeImprovQuietly();
             } catch (err) {
                 log(err && err.stack ? err.stack : String(err), 'error');
-                setImprovStatus('error', 'Credentials rejected',
-                    ((err && err.message) || String(err)) + ' Check the password and that the network is 2.4GHz.');
+                log('Password rejected. Check the password and that the network is 2.4GHz.', 'error');
+                flashMessage('Password rejected');
+                revealLog();
             } finally {
                 improvSubmitButton.disabled = false;
             }
@@ -1215,9 +1477,10 @@
         improvConnectButton.addEventListener('click', onImprovConnect);
         improvCancelButton.addEventListener('click', () => {
             improvCancelled = true;
-            setImprovStatus('wait', 'Cancelling', 'Closing the Improv session...');
+            log('Cancelling the Improv session...');
         });
         improvSubmitButton.addEventListener('click', onImprovSubmit);
+        scanButton.addEventListener('click', onScanClick);
         passwordInput.addEventListener('keydown', (event) => {
             if (event.key === 'Enter') onImprovSubmit();
         });

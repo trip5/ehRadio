@@ -55,6 +55,15 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 - `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts by re-running
   `builds/fix_releases.py` on CI and diff-checking `builds/releases/` (contains `firmware.txt`, `releases.md`, and
   `web_assets/`) against what was committed.
+- Both release workflows also produce one `<board_env>_filesystem.bin` per board: `pio run -e <env> -t buildfs`, then
+  the image is copied out of `$BUILD_DIR/littlefs.bin` and deduplicated with an `fs_done` map, exactly like the
+  bootloader and partitions. Content is identical across variants, so one image per partition layout is enough. If
+  `buildfs` produces `spiffs.bin` instead, `board_build.filesystem` is wrong in that contributor's `platformio.ini`
+  and the step warns rather than shipping an image LittleFS cannot mount.
+- `builds/fix_releases.py` resolves each board's partition CSV (env -> `extends` chain -> `board_build.partitions` ->
+  the `littlefs` row) and writes a non-standard `filesystem` entry (`path`, `offset`, `size`) into every manifest.
+  ESP Web Tools ignores it; `docs/flasher.html` uses it to write the WebUI filesystem when "Full reinstall" is ticked,
+  which is why that path skips the first-boot format and the later download of the web files.
 - `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves
   the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
 - `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to

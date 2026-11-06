@@ -1,6 +1,7 @@
 # How to Sync Config Files in VS Code
 
-This folder contains contributor-specific configuration files that are automatically synced from the root directory
+This folder contains contributor-specific configuration files that are automatically synced from the root directory.
+These builds are all added to official releases (with the exception of "reserved" folders `test` and `data`).
 
 ## What Gets Synced
   - /platformio.ini
@@ -40,7 +41,7 @@ This folder contains contributor-specific configuration files that are automatic
 
 ### Done!
 
-The 3 important files that are ignored by `.gitignore` will now be backed-up and shared and Github workflow will build your firmwares automatically!
+The 2 important files that are ignored by `.gitignore` will now be backed-up and shared and Github workflow will build your firmwares automatically!
 
 ### Note
 

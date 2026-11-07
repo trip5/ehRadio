@@ -39,20 +39,25 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
   - up to 2 rotaries and 6 buttons
   - touchscreen control (basic swipes and taps)
   - IR remote control
-  - Nextion support removed
 
-- 37 Display languages
-  - uses a single Unicode font
-  - easily changeable in WebUI
+- Display Options Changeable While Running
+  - 37 locales available
+    - Matrix fonts contain most Latin / Cyrillic characters
+    - other fonts will fallback to available characters
+  - system font
+  - clock font
+  - themes
+  - screen layout
+  - VU type
 
 - Mobile-first WebUI design
-  - many settings changeable (including themes, screen layout)
-  - 50 Languages available (easily changeable in WebUI)
+  - 50 locales available
   - WebUI easily accessed using [ehDP](https://github.com/trip5/eh-Device-Scanner)
+  - radio station streams can be explored using [Radio-browser](https://www.radio-browser.info/) API search
   - playlists can be edited, imported, exported to files
   - playlists can be imported, merged, and shared via [webstations](https://github.com/trip5/webstations) curated lists
-  - radio station streams can be directly added to using [Radio-browser](https://www.radio-browser.info/) API search
   - upload files directly using the SD Card Manager
+  - WebUI themes match display themes
 
 - [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
   - make getting a new version easy-peasy
@@ -88,6 +93,14 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
 
 - System and user default settings can be set in `myoptions.h`
   - still changeable in WebUI
+
+### Features For Tinkerers
+
+- Many tools are included in the codebase to edit:
+  - layouts (on a live display)
+  - themes (both display and WebUI)
+  - fonts (both system and clock)
+  - translations
 
 ---
 
@@ -369,7 +382,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.11.05 `dev` | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts, screen fonts, themes, and VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI updates, IR code overhauled (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons increased resolution, many patches to the audio libraries, boot time shorter |
+| 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts, screen fonts, themes, and VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI updates, IR code overhauled (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons increased resolution, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

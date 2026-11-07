@@ -2050,7 +2050,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   another declaration points at that is not a role - so a hand-added family needs no list maintained anywhere. A
   theme can write `--outlines: #e3d25f` and move seven outline roles in one line, and `--deflate` folds members
   back into that line (the value most of them agree on wins; a member that differs stays declared as a deliberate
-  split).
+  split; a tie between two colours goes to the first member in family order, because the block has to be spelled
+  and a head plus splits is never longer). `webui_tool.html` breaks the same tie the same way.
 - **Values may be `var(--other)`.** `resolve_value()` follows aliases block-first and then `:root`, so every
   comparison is on hex; a block that spells out `#262626` where `:root` says `var(--fills)` is redundant.
 - `validate_props()` **checks that every palette declaration begins its line** (indentation only) and fails with
@@ -2128,11 +2129,13 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `:root` - so the preview repaints while every rule, hover and layout still comes from `style.css`; **Reset
   all** just removes those properties. Reading the starting colours is `getComputedStyle`, with a `var()` walk
   for a browser that hands back the token stream instead of the substituted value.
-- **The lock rule is the collapse rule.** Setting a head (`state.heads`) locks the family and clears its member
-  splits; setting a member (`state.members`) splits only that member and marks the row `splitrow` with an arrow
-  that rejoins it. When fewer than two members still follow a head, its colour is handed to the last followers
-  and the head is forgotten - which is why the copied block drops the head line at exactly the same point
-  `theme_tool.py --deflate` would.
+- **A head moves its followers, and the collapse rule is the other half.** Setting a head (`state.heads`) changes
+  only the members still following it - a split keeps its own colour, so tuning a family member by member does not
+  need a head pick undone afterwards, and a pick while nothing follows the head sets a colour no member uses until
+  `Optimize` regroups the family. Setting a member (`state.members`) splits only that member and marks the row
+  `splitrow` with an arrow that rejoins it. When fewer than two members still follow a head, its colour is handed
+  to the last followers and the head is forgotten - which is why the copied block drops the head line at exactly
+  the same point `theme_tool.py --deflate` would.
 - **Two arrows per row, and the ROW decides what each resets.** `button.rejoin` &#8635; goes back to `:root`,
   and `paint()` reveals it by adding `setrow` to the row. `tr[data-head]` clears the head **and** every split in its
   family; `tr[data-role]` clears that one role. The key is read from the row's own `data-head` / `data-role` -
@@ -2172,6 +2175,29 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   grey** - a copy icon drawn in the colour read as if it held one itself, which is what made the pair confusing.
   Hover lights the chip's border in `--tool-accent` exactly as the reset arrow does, and leaves the glyph alone so
   the colour stays visible.
+- **`Stash all` / `Load from stash` is a temporary save of the model, not of the file.** `STASH` is one
+  `{heads, members}` snapshot taken with the same `snapshot()` the picker rollback uses, and a load assigns it back
+  whole and calls `apply()`, so colours changed after the stash are **undone** rather than merged into it. Nothing
+  clears it - not `Reset all`, a theme `Load` nor a `Save` - and `LOADED` is left alone, a stash being neither a
+  file in nor a file out; that is what lets a palette be stashed under one theme and written into another block.
+  `#loadStashBtn` starts `disabled`, the note counts `Object.keys(modelDeltas()).length` colours, and the limit is
+  that it lives in page memory only, so a reload loses it.
+- **`Optimize` re-spells a family; it never recolours one.** A block is a head line plus one line per member that
+  differs from it, so the cheapest spelling of a family is its most-used colour in the head. `planFamily(f, valOf,
+  st)` prices "no head" and every distinct colour as a candidate through `familyDeltas()` - the function that
+  writes the block, so the head-with-one-follower rule is priced as the line it really is - widest group first,
+  strict improvement only, so a candidate that ties with the current labelling is not adopted. `optimiseFamilies()`
+  adopts the winner in each family that gets shorter; no colour moves, so only the head and split marks and the
+  block change. `refreshOptimise()` runs at the end of `apply()`, keeping the button disabled unless a family would
+  shed a line, and `loadTheme()` reuses the same pass, so a loaded theme arrives in the spelling the button would
+  have produced. `modelDeltas()` is a merge of `familyDeltas()` per family plus the standalone loop.
+- **Every block in a save is spelled by that pass, and that is what keeps a re-save stable.** `valueDeltas()` - the
+  path that writes the themes not being edited, from values alone - used to carry its own copy of the fold rule and
+  refused a head on a tie (the `collapse_families()` rule), so a family split 3-3 was written as six member lines:
+  theme 9's `maintexts` lost its `#ffffff` head that way, two lines longer, on a save made with another theme
+  selected. It now builds a fully split state and asks `planFamily()`, deciding a tie by the widest group instead
+  of dodging it - a block has to be spelled either way, and a head plus splits is never longer. `collapse_families()`
+  follows the same rule, so `--deflate`, `-i`, `--theme` and a save here all write the same shortest block.
 - **Cancel is a real cancel, and accept wins the race.** A native colour dialog fires `input` on every drag (that
   is the live preview) but `change` only when it is accepted, so the circle click snapshots `{heads, members}`,
   `input` marks the session dirty (an `input` whose colour equals the current one is ignored - opening the dialog
@@ -2191,8 +2217,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **The loader takes a numeric id, not a list.** No theme names live in the page: it cannot read a linked
   stylesheet's rules on a `file://` page and `themes.h` is not reachable, so a hardcoded list would rot as soon as
   a slot appeared. Typing an id and pressing Load sets `data-theme` for one synchronous read of all 65 names,
-  restores the attribute, and rebuilds the state by the same rule the tool uses (the value most of a family's
-  members agree on becomes the head, the rest stay split) - so a head-using theme loads short. The note reports
+  restores the attribute, splits every role that differs from `:root`, and then runs the same `optimiseFamilies()`
+  the button runs - so a loaded theme arrives in its shortest spelling. The note reports
   how many colours differed, or that the id came back as the `:root` palette (no block, or an empty one).
   **Reset all to :root** clears the state, which is exactly "the root numbers". **Copy to Clipboard** emits
   `:root[data-theme="X"] { /* Name here - and replace the X! */ ... }`, with `execCommand` as the fallback when

@@ -197,8 +197,11 @@ body { height: auto; padding: 0; }
                padding: 3px 10px; cursor: pointer; }
 .outp button:hover { border-color: var(--tool-accent); }
 .outp button:active { background: var(--tool-accent); color: #1b1b1d; }
+/* A disabled button would do nothing, so it keeps the resting look and swallows both state styles above. */
+.outp button:disabled, .outp button:disabled:hover, .outp button:disabled:active {
+             color: var(--tool-dim); background: var(--tool-panel); border-color: var(--tool-line); cursor: default; }
 .outp select { width: auto; min-width: 16em; max-width: 100%; }
-#loadnote { font-size: 14px; color: var(--tool-dim); }
+#loadnote, #stashnote, #optnote { font-size: 14px; color: var(--tool-dim); }
 #toolout { width: 100%; box-sizing: border-box; min-height: 170px; margin: 4px 0; resize: vertical;
            font-family: Consolas, "Courier New", monospace; font-size: 14px; line-height: 1.45;
            color: var(--tool-code); background: var(--tool-panel);
@@ -233,7 +236,7 @@ body { height: auto; padding: 0; }
       linked by relative path.</li>
     <li><b>Click a colour circle</b> in the table to open the colour picker. Every sample repaints while you drag;
       <b>OK keeps the colour and Cancel puts it back</b>. The circle on a <b>family head</b> - the boxed row -
-      moves that whole family at once and locks it.</li>
+      moves the members that still follow it; a member you split keeps its own colour.</li>
     <li><b>Click a variable name</b> to jump to the first element on the right that uses that colour. A head jumps
       to a member of its family, so it lands where the colour really shows. The element it lands on is ringed for
       two and a half seconds in a colour that <b>cycles the spectrum three times</b>, so the ring can never be
@@ -250,8 +253,18 @@ body { height: auto; padding: 0; }
       &#128464; copies that row's colour into a clipboard of this page's own, &#8614; pastes it into the row you are
       on. Once something is held, the &#8614; is drawn in that colour, so what the clipboard holds is always visible.
       The pair stays on the row you last hovered and disappears after three seconds of quiet; <b>Esc</b> empties the
-      clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves and locks that
-      family, and pasting into a member splits it off.</li>
+      clipboard. A paste commits exactly as a picker's OK does, so pasting into a family head moves only the members
+      following it, and pasting into a member splits it off.</li>
+    <li><b>Stash all is a temporary save of the table.</b> It keeps every colour showing - heads and splits alike -
+      and <b>Load from stash</b> puts the table back exactly as it was, so the colours changed since the stash go
+      with it. There is one stash: another <b>Stash all</b> replaces it, and it outlives <b>Reset all</b>, a theme
+      <b>Load</b> and a <b>Save</b>, so it can also carry a palette into another theme's block.</li>
+    <li><b>Optimize re-spells the families, it never recolours them.</b> A block is a head line plus one line per
+      member that differs from it, so the cheapest way to say any family is its most-used colour in the head. The
+      button lights up while some family can be written shorter, and pressing it moves no colour: it only swaps
+      which members follow the head and which name their own colour. The check re-runs after every change, load,
+      reset and stash load, and the note says how many lines a press would shed. A <b>Save</b> spells every block
+      that is not being edited the same way.</li>
     <li><b>The dropdown is the block you are writing; Load fills the table from it.</b> Picking a theme retargets the
       block in the window below - its id and its <code>--theme-name</code> change, the colours on screen do not - and
       pressing <b>Load</b> replaces those colours with that theme's own. So you can load a theme you like, pick the
@@ -381,7 +394,8 @@ body { height: auto; padding: 0; }
   <code>:root</code>. <b>Save</b> rewrites the whole of <code>data/www/themes.css</code> with every other theme
   left as it is, so overwrite that file with the download and then rebuild the filesystem image.</p>
   <p>It will re-save the entire file but only changes to the <b>currently-selected theme</b> are recorded,
-  so if needing to work on multiple themes, be sure to save after altering each theme.</p>
+  so if needing to work on multiple themes, be sure to save after altering each theme. Every other block is
+  re-spelled by the same rules <b>Optimize</b> uses, so a save can shorten one but never lengthen it.</p>
   <div class="outp">
     <div class="row">
       <label for="themePick">Load theme:</label>
@@ -390,6 +404,16 @@ body { height: auto; padding: 0; }
       <span id="loadnote"></span>
     </div>
     <textarea id="toolout" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button type="button" id="stashBtn">Stash all</button>
+      <button type="button" id="loadStashBtn" disabled>Load from stash</button>
+      <span id="stashnote"></span>
+    </div>
+    <div class="row">
+      <button type="button" id="optBtn" disabled
+              title="Re-spell each changed family with its most-used colour in the head">Optimize</button>
+      <span id="optnote"></span>
+    </div>
     <div class="row">
       <button type="button" id="saveBtn">Save themes.css</button>
       <button type="button" id="resetBtn">Reset all to :root</button>
@@ -1108,6 +1132,8 @@ body { height: auto; padding: 0; }
   // What the loaded theme gave each role, so the second arrow can put a row back to it.  null until something
   // has been loaded, which is exactly when that arrow has nothing to offer.
   var LOADED = null;
+  // A temporary copy of the table: Stash all writes it, Load from stash puts it back, nothing else clears it.
+  var STASH = null;
 
   function clearInline() {
     applied.forEach(function (n) { html.style.removeProperty('--' + n); });
@@ -1125,6 +1151,7 @@ body { height: auto; padding: 0; }
     });
     paint();
     writeOutput();
+    refreshOptimise();
   }
   // A role's colour in a given state: its own setting, its own head line, its family's head, then :root.  Both
   // arrows and the comparison behind them go through this, so a split, a head line and plain inheritance all
@@ -1188,15 +1215,12 @@ body { height: auto; padding: 0; }
     });
   }
 
-  // The one place a colour is committed, so the picker and the paste arrow cannot drift apart: setting a head
-  // locks its family and clears the splits, setting a member splits that member off, and once fewer than two
-  // members still follow the head its colour is handed to the last followers and the head line is dropped.
+  // The one place a colour is committed, so the picker and the paste arrow cannot drift apart: a head moves only
+  // the members still following it, setting a member splits that member off, and once fewer than two members
+  // still follow the head its colour is handed to the last followers and the head line is dropped.
   function setValue(name, v) {
     if (headNames.indexOf(name) !== -1) {
-      state.heads[name] = v;
-      families.forEach(function (f) {
-        if (f.name === name) f.members.forEach(function (m) { delete state.members[m]; });
-      });
+      state.heads[name] = v;      // a split keeps its own colour, so a head pick no longer overwrites the family
       return;
     }
     state.members[name] = v;
@@ -1479,28 +1503,15 @@ body { height: auto; padding: 0; }
     var vals = {};
     names.forEach(function (n) { vals[n] = css(n); });
     if (prev === null) html.removeAttribute('data-theme'); else html.setAttribute('data-theme', prev);
+    // Every role that differs from :root, split; the optimise pass then folds each family into whichever head
+    // spells those colours shortest, so a loaded theme arrives in the form the button would have given it.
     state.heads = {};
     state.members = {};
     families.forEach(function (f) {
-      var groups = {}, order = [];
-      f.members.forEach(function (m) {
-        var v = vals[m];
-        if (!groups[v]) { groups[v] = []; order.push(v); }
-        groups[v].push(m);
-      });
-      var best = null, bestN = 0, tie = false;
-      order.forEach(function (v) {
-        if (groups[v].length > bestN) { best = v; bestN = groups[v].length; tie = false; }
-        else if (groups[v].length === bestN) tie = true;
-      });
-      if (best && bestN >= 2 && !tie && best !== defaults[f.name]) {
-        state.heads[f.name] = best;
-        f.members.forEach(function (m) { if (vals[m] !== best) state.members[m] = vals[m]; });
-      } else {
-        f.members.forEach(function (m) { if (vals[m] !== defaults[m]) state.members[m] = vals[m]; });
-      }
+      f.members.forEach(function (m) { if (vals[m] !== defaults[m]) state.members[m] = vals[m]; });
     });
     standalone.forEach(function (n) { if (vals[n] !== defaults[n]) state.members[n] = vals[n]; });
+    optimiseFamilies();
     apply();
     LOADED = snapshot();          // from here on, the second arrow means "back to this theme"
     var differ = 0;
@@ -1528,25 +1539,27 @@ body { height: auto; padding: 0; }
 
   // The theme on screen, as {role: colour}.  A line only earns its place if it says something: a colour equal
   // to the one the role would inherit WITHOUT that line says nothing at all, which is also what keeps a value
-  // left behind by a cancelled picker out of the block.
+  // left behind by a cancelled picker out of the block.  One family at a time, so a candidate labelling can be
+  // priced with the very rules that write it.
+  function familyDeltas(st, f) {
+    var d = {}, head = st.heads[f.name];
+    var followers = f.members.filter(function (m) { return !st.members[m]; });
+    if (head && followers.length >= 2 && head !== defaults[f.name]) d[f.name] = head;
+    f.members.forEach(function (m) {
+      if (!st.members[m]) return;
+      var inherited = d[f.name] ? head : defaults[m];
+      if (st.members[m] !== inherited) d[m] = st.members[m];
+    });
+    // The head line is not worth writing for a single follower, so that follower names the colour itself.
+    if (head && followers.length === 1 && head !== defaults[followers[0]]) d[followers[0]] = head;
+    return d;
+  }
+
   function modelDeltas() {
-    var deltas = {}, printedHead = {};
+    var deltas = {};
     families.forEach(function (f) {
-      var head = state.heads[f.name];
-      var followers = f.members.filter(function (m) { return !state.members[m]; });
-      if (head && followers.length >= 2 && head !== defaults[f.name]) {
-        printedHead[f.name] = true;
-        deltas[f.name] = head;
-      }
-      f.members.forEach(function (m) {
-        if (!state.members[m]) return;
-        var inherited = printedHead[f.name] ? head : defaults[m];
-        if (state.members[m] !== inherited) deltas[m] = state.members[m];
-      });
-      // The head line is not worth writing for a single follower, so that follower names the colour itself.
-      if (head && followers.length === 1 && head !== defaults[followers[0]]) {
-        deltas[followers[0]] = head;
-      }
+      var d = familyDeltas(state, f);
+      Object.keys(d).forEach(function (k) { deltas[k] = d[k]; });
     });
     standalone.forEach(function (n) {
       if (state.members[n] && state.members[n] !== defaults[n]) deltas[n] = state.members[n];
@@ -1554,34 +1567,85 @@ body { height: auto; padding: 0; }
     return deltas;
   }
 
-  // A theme that is NOT the one on screen, as {role: colour}: every role whose value differs from :root, with a
-  // family folded back into one head line when two or more of its members agree - the same shape --deflate makes.
-  // Only values are available here, so a role a hand edit set to exactly the :root colour cannot be seen; that
-  // is the one thing this path cannot know, and --deflate would drop such a line anyway.
-  function valueDeltas(vals) {
-    var deltas = {};
-    families.forEach(function (f) {
-      var groups = {}, order = [];
+  // The cheapest way to spell one family: its most-used colour in the head, everyone else split.  The value source
+  // is passed in, so a family that exists only as values is priced by the same rules.  The widest group is tried
+  // first and "no head" before them all, and only a strict improvement wins; a head with one follower is priced as
+  // the line it really is.
+  function planFamily(f, valOf, st) {
+    st = st || state;
+    var vals = {}, groups = {}, order = [];
+    f.members.forEach(function (m) {
+      var v = valOf(m);
+      vals[m] = v;
+      if (!groups[v]) { groups[v] = []; order.push(v); }
+      groups[v].push(m);
+    });
+    order.sort(function (a, b) { return groups[b].length - groups[a].length; });
+    var best = null, bestN = Infinity;
+    [null].concat(order).forEach(function (head) {
+      var cand = { heads: {}, members: {} };
+      if (head !== null) cand.heads[f.name] = head;
       f.members.forEach(function (m) {
-        var v = vals[m];
-        if (!v || v === defaults[m]) return;
-        if (!groups[v]) { groups[v] = []; order.push(v); }
-        groups[v].push(m);
+        if (vals[m] !== (head === null ? defaults[m] : head)) cand.members[m] = vals[m];
       });
-      var best = null, bestN = 0, tie = false;
-      order.forEach(function (v) {
-        if (groups[v].length > bestN) { best = v; bestN = groups[v].length; tie = false; }
-        else if (groups[v].length === bestN) tie = true;
+      var n = Object.keys(familyDeltas(cand, f)).length;
+      if (n < bestN) { bestN = n; best = cand; }
+    });
+    return { cand: best, lines: bestN, now: Object.keys(familyDeltas(st, f)).length };
+  }
+
+  // Adopt that labelling in every family that gets shorter.  No colour moves - a member keeps the value it
+  // already resolves to - so the samples do not repaint: only the head and split marks and the block change.
+  function optimiseFamilies() {
+    var saved = 0, fams = 0;
+    families.forEach(function (f) {
+      var p = planFamily(f, valueOf);
+      if (p.lines >= p.now) return;
+      delete state.heads[f.name];
+      f.members.forEach(function (m) { delete state.members[m]; });
+      Object.keys(p.cand.heads).forEach(function (h) { state.heads[h] = p.cand.heads[h]; });
+      Object.keys(p.cand.members).forEach(function (m) { state.members[m] = p.cand.members[m]; });
+      saved += p.now - p.lines;
+      fams++;
+    });
+    return { saved: saved, families: fams };
+  }
+
+  // Live only while a family can be written shorter, so a press is never a no-op.  Runs from apply(), which is
+  // where every change, load, reset and stash load ends up.
+  function refreshOptimise() {
+    var saved = 0;
+    families.forEach(function (f) {
+      var p = planFamily(f, valueOf);
+      if (p.lines < p.now) saved += p.now - p.lines;
+    });
+    optBtn.disabled = !saved;
+    optNote.textContent = saved ? saved + ' line' + (saved === 1 ? '' : 's') + ' to shed' : 'nothing to shed';
+  }
+
+  // A theme that is NOT the one on screen, as {role: colour}: only values are available, so the theme is written
+  // out fully split and the optimise pass is asked to spell each family, the same one the button runs.  A tie is
+  // decided there rather than dodged: the block must be given some spelling, and a head plus splits is never
+  // longer than spelling every member - the rule collapse_families() in theme_tool.py applies too, so a
+  // --deflate run and a save here write the same block.
+  function valueDeltas(vals) {
+    var st = { heads: {}, members: {} }, deltas = {};
+    families.forEach(function (f) {
+      f.members.forEach(function (m) {
+        var v = vals[m] || defaults[m];
+        if (v !== defaults[m]) st.members[m] = v;
       });
-      if (best && bestN >= 2 && !tie) {
-        deltas[f.name] = best;
-        order.forEach(function (v) { if (v !== best) groups[v].forEach(function (m) { deltas[m] = v; }); });
-      } else {
-        order.forEach(function (v) { groups[v].forEach(function (m) { deltas[m] = v; }); });
-      }
     });
     standalone.forEach(function (n) {
-      if (vals[n] && vals[n] !== defaults[n]) deltas[n] = vals[n];
+      if (vals[n] && vals[n] !== defaults[n]) st.members[n] = vals[n];
+    });
+    families.forEach(function (f) {
+      var plan = planFamily(f, function (m) { return valueIn(st, m); }, st);
+      var d = familyDeltas(plan.cand, f);
+      Object.keys(d).forEach(function (k) { deltas[k] = d[k]; });
+    });
+    standalone.forEach(function (n) {
+      if (st.members[n]) deltas[n] = st.members[n];
     });
     return deltas;
   }
@@ -1694,6 +1758,35 @@ body { height: auto; padding: 0; }
       LOADED = snapshot();
     });
   }
+
+  // ---- stash: a temporary save of the table, for abandoning an experiment ----
+  // The restore is the picker rollback's, one step wider: the whole model goes back, so a colour changed after the
+  // stash is undone with it.  LOADED is left alone - a stash is neither a file in nor a file out.
+  var stashNote = document.getElementById('stashnote'), loadStashBtn = document.getElementById('loadStashBtn');
+  document.getElementById('stashBtn').addEventListener('click', function () {
+    STASH = snapshot();
+    var n = Object.keys(modelDeltas()).length;
+    stashNote.textContent = n ? 'stashed ' + n + ' colour' + (n === 1 ? '' : 's')
+                              : 'stashed the :root palette: nothing was changed';
+    loadStashBtn.disabled = false;
+  });
+  loadStashBtn.addEventListener('click', function () {
+    if (!STASH) return;
+    state.heads = Object.assign({}, STASH.heads);
+    state.members = Object.assign({}, STASH.members);
+    apply();
+    stashNote.textContent = 'the table is back as it was when stashed';
+  });
+
+  // ---- optimize: the same colours, spelled with fewer lines ----
+  var optBtn = document.getElementById('optBtn'), optNote = document.getElementById('optnote');
+  optBtn.addEventListener('click', function () {
+    var r = optimiseFamilies();
+    apply();                     // repaints and rewrites the block; refreshOptimise() clears the note on the way
+    optNote.textContent = r.saved
+      ? 'shed ' + r.saved + ' line' + (r.saved === 1 ? '' : 's') + ' in ' + r.families + ' famil' + (r.families === 1 ? 'y' : 'ies')
+      : 'nothing to shed';
+  });
 
   document.getElementById('saveBtn').addEventListener('click', saveThemesCss);
   document.getElementById('resetBtn').addEventListener('click', function () {

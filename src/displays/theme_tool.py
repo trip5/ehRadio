@@ -349,6 +349,13 @@ def collapse_families(props, root, families):
     A member that resolves differently is a deliberate split and stays declared, so a theme can still
     say "this one outline is not the family outline".
 
+    Two colours carried by the same number of members is a tie, and it is folded as well: the block has
+    to be given some spelling and a head plus splits is never longer than the members written out.  The
+    first member in family order decides which colour becomes the head, so the answer is deterministic -
+    and the browser tool in src/displays/webui_tool.html breaks the tie the same way.  A family the block
+    spells out only in part is never folded: the members it left out resolve to the master, and a new head
+    line would drag them along with it.
+
     `props` is edited in place; returns (removed, added).
     """
     removed, added = {}, {}
@@ -363,7 +370,10 @@ def collapse_families(props, root, families):
             put = None
         else:
             # The colour most of the members agree on IS the family colour; a lone member that says
-            # something else is a deliberate split and keeps its own line under the new head.
+            # something else is a deliberate split and keeps its own line under the new head.  A family
+            # the block spells only in part stays as it is - its silent members resolve to the master.
+            if len(spelled) < len(families[head]):
+                continue
             groups = {}
             for member in spelled:
                 value = resolve_value(props[member], props, root)
@@ -371,12 +381,11 @@ def collapse_families(props, root, families):
                     groups.setdefault(value, []).append(member)
             if not groups:
                 continue
+            # A tie goes to the first member in family order, so the shortest spelling is still chosen.
             best = max(groups, key=lambda value: len(groups[value]))
             winners = groups[best]
             if len(winners) < 2:
-                continue
-            if sum(1 for value in groups if len(groups[value]) == len(winners)) > 1:
-                continue          # a tie says nothing about which colour the family has
+                continue          # a head with one follower is not worth a line
             candidate = best
             drop = winners
             put = best

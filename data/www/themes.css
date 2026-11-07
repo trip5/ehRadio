@@ -6,7 +6,7 @@
    style.css imports this file.  It is written by src/displays/theme_tool.py and by the browser tool
    in src/displays/webui_tool.html, which can only see values and therefore rewrites the file whole. */
 :root[data-theme="0"] {
-  --theme-name:         "ehRadio Blue & Red (Trip5)";
+  --theme-name:         "Blue & Red (Trip5)";
   --actives:            #ffffff;
   --control-bg:         #f81c00;
   --highlights:         #f81c00;
@@ -21,41 +21,22 @@
   --warning-outline:    #f81c00;
 }
 :root[data-theme="1"] {
-  --theme-name:         "ёRadio Gold (e2002)";
-  --actives:            #000000;
-  --highlights:         #ad9838;
+  --theme-name:         "Blue & Red & More (Trip5)";
+  --actives:            #ffffff;
+  --control-bg:         #f81c00;
+  --highlights:         #f81c00;
   --infotexts:          #cccccc;
-  --labels:             #e3d360;
-  --list-names:         #ad9838;
-  --logo:               #e3d25f;
-  --logo-shadow:        #a89c46;
-  --logo-text:          #ff0000;
-  --outlines:           #e3d25f;
+  --link-quiet:         #115fff;
+  --link-text:          #98d8e8;
+  --list-active-bg:     #115fff;
+  --meter-fill:         #16a316;
+  --playlist-hover:     #df28ff;
+  --spinner-ring:       #ffff00;
+  --switch-text:        #000000;
+  --switch-track-on:    #ffff00;
+  --warning-outline:    #df28ff;
 }
 :root[data-theme="2"] {
-  --theme-name:         "Graphite (Kle7rx)";
-  --edges:              #7d7d7d;
-  --fills:              #5e5e5e;
-  --highlights:         #4551b3;
-  --infotexts:          #c0c0c0;
-  --labels:             #d5d5d5;
-  --list-names:         #828282;
-  --logo:               #3656f4;
-  --logo-shadow:        #2d48cd;
-  --logo-text:          #ffffff;
-  --maintexts:          #828282;
-  --outlines:           #bbbbbb;
-}
-:root[data-theme="3"] {
-  --theme-name:         "Gray (Krzsiek)";
-  --actives:            #000000;
-  --highlights:         #b4b4b4;
-  --logo:               #ffffff;
-  --logo-shadow:        #303030;
-  --logo-text:          #a0a0a0;
-  --maintexts:          #c2c2c2;
-}
-:root[data-theme="4"] {
   --theme-name:         "Elle (Trip5)";
   --actives:            #ffffff;
   --fills:              #f000f0;
@@ -70,8 +51,48 @@
   --panel-gradient:     #200020;
   --playlist-hover:     #ff00ff;
 }
+:root[data-theme="3"] {
+  --theme-name:         "ёRadio Gold (e2002)";
+  --actives:            #000000;
+  --highlights:         #ad9838;
+  --infotexts:          #cccccc;
+  --labels:             #e3d360;
+  --list-names:         #ad9838;
+  --logo:               #e3d25f;
+  --logo-shadow:        #a89c46;
+  --logo-text:          #ff0000;
+  --outlines:           #e3d25f;
+}
+:root[data-theme="4"] {
+  --theme-name:         "Graphite (Kle7rx)";
+  --actives:            #ebebeb;
+  --control-bg:         #d00000;
+  --edges:              #7d7d7d;
+  --fills:              #5e5e5e;
+  --highlights:         #6070f5;
+  --infotexts:          #c0c0c0;
+  --labels:             #ffffff;
+  --link-text:          #6070f5;
+  --list-names:         #c8c8c8;
+  --logo:               #ffffff;
+  --logo-shadow:        #505050;
+  --logo-text:          #ffffff;
+  --maintexts:          #c0c0c0;
+  --meter-fill:         #d00000;
+  --outlines:           #bbbbbb;
+  --warning-outline:    #d00000;
+}
 :root[data-theme="5"] {
-  --theme-name:         "Colorful (Levente Daradici)";
+  --theme-name:         "Gray (Krzsiek)";
+  --actives:            #000000;
+  --highlights:         #b4b4b4;
+  --logo:               #ffffff;
+  --logo-shadow:        #303030;
+  --logo-text:          #a0a0a0;
+  --maintexts:          #c2c2c2;
+}
+:root[data-theme="6"] {
+  --theme-name:         "Colorful I (Levente Daradici)";
   --actives:            #000000;
   --button-active-fill: #00ff00;
   --edges:              #7a7e7a;
@@ -88,7 +109,7 @@
   --outlines:           #eff300;
   --warning-outline:    #fc00fc;
 }
-:root[data-theme="6"] {
+:root[data-theme="7"] {
   --theme-name:         "Ocean (Levente Daradici)";
   --actives:            #000000;
   --edges:              #e20000;
@@ -104,11 +125,10 @@
   --panel-gradient:     #00004c;
   --surfaces:           #00005a;
 }
-:root[data-theme="7"] {
+:root[data-theme="8"] {
   --theme-name:         "White and Black (Levente Daradici)";
   --actives:            #f9fdf9;
   --button-fill:        #ffffff;
-  --button-text:        #000000;
   --control-bg:         #e20000;
   --edges:              #e20000;
   --fills:              #000000;
@@ -117,6 +137,7 @@
   --infotexts:          #000000;
   --input-border:       #ff0000;
   --input-text:         #ffffff;
+  --labels:             #000000;
   --link-text:          #e20000;
   --list-bars:          #c0c0c0;
   --list-names:         #020202;
@@ -129,11 +150,10 @@
   --panel-gradient:     #d4d7d4;
   --playlist-hover:     #e20000;
   --select-text:        #ffffff;
-  --station-name:       #000000;
   --surfaces:           #f9fdf9;
   --switch-text:        #ffffff;
 }
-:root[data-theme="8"] {
+:root[data-theme="9"] {
   --theme-name:         "UltraPerfect (András Daradici)";
   --actives:            #000000;
   --edges:              #9b7d7a;
@@ -152,7 +172,7 @@
   --surfaces:           #420000;
   --switch-track-on:    #f70000;
 }
-:root[data-theme="9"] {
+:root[data-theme="10"] {
   --theme-name:         "Golden Wind (András Daradici)";
   --actives:            #000000;
   --button-outline:     #ffffff;
@@ -178,4 +198,3 @@
   --switch-text:        #ffffff;
   --switch-track-on:    #9d5400;
 }
-

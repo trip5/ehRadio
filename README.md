@@ -231,6 +231,7 @@ SD Shuffle (which makes the "previous" button do nothing) will be read from pref
 It is not saved to preferences in this mode.  All other buttons will have expected behaviour.
 
 Exit this mode (and reboot with network functionality) by powering off and powering on again.
+Your radio will boot into whatever mode it did before.
 
 ---
 

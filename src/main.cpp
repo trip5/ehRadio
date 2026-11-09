@@ -113,7 +113,7 @@ void setup() {
   }
   startup.getDefaultPlaylist();
   BOOTTIMELOG("getDefaultPlaylist");
-  if (SD_CS!=255 && config.store.play_mode==PM_SDCARD) {
+  if (SD_CS!=255 && config.getMode()==PM_SDCARD) {
     display.putRequest(WAITFORSD, 0);
     BOOTLOG("SD Search");
   }

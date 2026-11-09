@@ -604,6 +604,13 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `initPlaylistMode()` short-circuits to `PM_WEB` without calling `sdman.start()` when `SD_CARD_DETECT_PIN` reports
     slot-empty during SD boot
   - `changeMode()` short-circuits SD mode switches the same way, avoiding the SPI retry path when the slot is empty
+  - **SD Offline Mode is a session, not a stored mode** (2026.11.09). `_sdOfflineSession` (RAM only, never in `store`)
+    is raised in `Config::init()` from the one-shot `store.SDoffline` flag and by `Config::beginOfflineSdSession()` from
+    `Controls::checkButtonsHeldOnBoot()`; while it is set `getMode()` answers `PM_SDCARD`, `syncSDFS()` points at `sdman`,
+    and `initPlaylistMode()` skips its `play_mode` save. None of the three offline entry points (hold at boot, the
+    AP/LOST switch in `changeMode()`, the centre button on that screen) writes `playmode` to NVS any more, so the next
+    normal boot returns to the stored mode. Boot code must read `getMode()`, never `store.play_mode` - the two differ
+    for exactly that session.
 - Key interaction:
   - almost every module reads/writes through `config`.
 - Theme loading note:
@@ -650,6 +657,9 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   if the server is up, and clears the stamp if it is not, so the proof restarts when the WebUI does.
 - **SD offline still never calls `checkSafeMode()`** (`network.offlineMode || config.store.SDoffline`), so
   `_bootStablePending` stays false and the marker is not touched — the long-standing workaround, still deliberate.
+- **That same expression is the only thing that decides the offline boot;** the SD *mode* for the session comes from
+  `Config::_sdOfflineSession` (see the `config.cpp` notes), which is set from both halves of it before `setup()` reads
+  `offlineBoot` and clears `SDoffline`. Nothing along that path stores `play_mode`.
 - **The earlier design history is worth keeping:** the first version waited indefinitely for the SD park to end, so a
   device that booted into SD playback never proved its boot and the next boot came up in Safe Mode once — and safe
   mode forces web mode, meaning **SD mode could not survive a restart at all**. Keying the proof on the WebUI removes

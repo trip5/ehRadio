@@ -351,7 +351,7 @@ class Config {
       if (getMode()==PM_WEB) store.lastStation = newstation;
       else saveValueButWait(&store.lastSdStation, newstation, 5000);
     }
-    uint8_t getMode() { return store.play_mode; }
+    uint8_t getMode() { return _sdOfflineSession ? PM_SDCARD : store.play_mode; }
     bool vuSourceWanted() const {
       const bool ss = isScreensaver;
       return (store.vumeter && !ss) || (ss && store.screensaverVU);
@@ -378,6 +378,7 @@ class Config {
     }
     FS* SDPLFS() { return _SDplaylistFS; }
     void syncSDFS();  // update _SDplaylistFS after external play_mode changes (e.g. button hold)
+    void beginOfflineSdSession();  // run this session in SD Offline Mode
     bool isRTCFound() { return _rtcFound; };
     Preferences prefs; // For Preferences, we use a look-up table to maintain compatibility...
     static const configKeyMap keyMap[];
@@ -489,6 +490,7 @@ class Config {
   private:
     bool _bootDone = false;
     bool _rtcFound = false;
+    bool _sdOfflineSession = false;  // set at boot for SD Offline Mode; play_mode keeps its stored value
     FS* _SDplaylistFS = nullptr;
     uint32_t _lastStationUrlDueMs = 0;
 

@@ -542,7 +542,6 @@ void Controls::onBtnClick(int id) {
           #ifdef USE_SD
             config.saveValue(&config.store.bootStableMarker, true);
             config.saveValue(&config.store.SDoffline, true);
-            config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_SDCARD));
             ESP.restart();
           #endif
         }
@@ -739,8 +738,7 @@ void Controls::checkButtonsHeldOnBoot() {
     #endif
     if (held || gpioheld) {
       network.offlineMode = true;  // signals network.begin() to skip Wi-Fi
-      config.store.play_mode = PM_SDCARD;
-      config.syncSDFS();  // update _SDplaylistFS so SDPLFS() returns &sdman not &LittleFS
+      config.beginOfflineSdSession();  // SD for this boot only
       if (gpioheld) BOOTLOG("SD Offline Mode triggered by gpio hold");
       else BOOTLOG("SD Offline Mode triggered by button hold");
     }

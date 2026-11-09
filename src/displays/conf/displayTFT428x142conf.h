@@ -10,9 +10,9 @@
 #define BOOTLOGOTOP     28
 
 const BootData _bootConfig PROGMEM = {
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .apTitleConf         = {{ TFT_BORDER, TFT_BORDER, 3, WA_CENTER }, MAX_WIDTH, 0, 4, 20 },
-        .apSettConf          = {{ TFT_BORDER, DSP_HEIGHT-18, 2, WA_LEFT }, MAX_WIDTH, 0, 4, 30 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .apTitleConf         = {{ TFT_BORDER, TFT_BORDER, 3, WA_CENTER }, MAX_WIDTH },
+        .apSettConf          = {{ TFT_BORDER, DSP_HEIGHT-18, 2, WA_LEFT }, MAX_WIDTH },
         /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
         .apTitleBGConf       = {{ 0, 0, 0, 0 }, DSP_WIDTH, 29, false }, // The AP and SD-manager band.  Boot screens must not borrow a layout's
         /* WIDGETS             { offset, top, fontsize, align } */
@@ -37,12 +37,12 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, 5000, 5, 30 },
-        .title1Conf          = {{ TFT_BORDER, 38, 2, WA_LEFT }, MAX_WIDTH-180, 5000, 4, 30 },
-        .title2Conf          = {{ TFT_BORDER, 57, 2, WA_LEFT }, MAX_WIDTH-180, 5000, 4, 35 },
-        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, 1000, 4, 30 },
-        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-52, 2, WA_CENTER }, MAX_WIDTH, 0, 2, 16 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH },
+        .title1Conf          = {{ TFT_BORDER, 38, 2, WA_LEFT }, MAX_WIDTH-180 },
+        .title2Conf          = {{ TFT_BORDER, 57, 2, WA_LEFT }, MAX_WIDTH-180 },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-52, 2, WA_CENTER }, MAX_WIDTH },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-TFT_BORDER-3, 0, 0 }, MAX_WIDTH, 4, true },
         .bufferbarConf       = {{ TFT_BORDER, DSP_HEIGHT-2, 0, 0 }, MAX_WIDTH, 2, false },
@@ -79,12 +79,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Default Air
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, 5000, 5, 30 },
-        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-168, 5000, 4, 30 },
-        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-168, 5000, 4, 35 },
-        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, 1000, 4, 30 },
-        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-58, 2, WA_CENTER }, MAX_WIDTH, 0, 2, 16 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH },
+        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-168 },
+        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-168 },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-58, 2, WA_CENTER }, MAX_WIDTH },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-TFT_BORDER-3, 0, 0 }, MAX_WIDTH, 4, true },
         .bufferbarConf       = {{ TFT_BORDER, DSP_HEIGHT-2, 0, 0 }, MAX_WIDTH, 2, false },
@@ -121,12 +121,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Large VU
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, 5000, 5, 30 },
-        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-168, 5000, 4, 30 },
-        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-168, 5000, 4, 35 },
-        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, 1000, 4, 30 },
-        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-52, 2, WA_CENTER }, MAX_WIDTH, 0, 2, 16 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH },
+        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-168 },
+        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-168 },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-52, 2, WA_CENTER }, MAX_WIDTH },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-TFT_BORDER-3, 0, 0 }, MAX_WIDTH, 4, true },
         .bufferbarConf       = {{ TFT_BORDER, DSP_HEIGHT-2, 0, 0 }, MAX_WIDTH, 2, false },
@@ -163,12 +163,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // BoomBox
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH, 5000, 5, 30 },
-        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-180, 5000, 4, 30 },
-        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-180, 5000, 4, 35 },
-        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, 1000, 4, 30 },
-        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-44, 2, WA_CENTER }, MAX_WIDTH, 0, 2, 16 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER, TFT_BORDER, 3, WA_LEFT }, MAX_WIDTH },
+        .title1Conf          = {{ TFT_BORDER, 40, 2, WA_LEFT }, MAX_WIDTH-180 },
+        .title2Conf          = {{ TFT_BORDER, 59, 2, WA_LEFT }, MAX_WIDTH-180 },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER, DSP_HEIGHT-44, 2, WA_CENTER }, MAX_WIDTH },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-TFT_BORDER-3, 0, 0 }, MAX_WIDTH, 4, true },
         .bufferbarConf       = {{ TFT_BORDER, DSP_HEIGHT-2, 0, 0 }, MAX_WIDTH, 2, false },

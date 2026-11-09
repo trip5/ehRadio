@@ -63,10 +63,6 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
   - make getting a new version easy-peasy
   - *caveat:* your build must be in the `builds` folder of this repository
 
-- MQTT, Telnet, HTTP
-  - almost all WebUI [commands](Commands.md) are available
-  - with MQTT, Home Assistant integration is possible, too
-
 ### Features For Builders
 
 - Development is primarily focused on ESP32-S3
@@ -96,6 +92,10 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
 
 ### Features For Tinkerers
 
+- Commands can be sent over MQTT, Telnet, and HTTP
+  - almost all WebUI [commands](Commands.md) are available
+  - with MQTT, Home Assistant integration is possible, too
+
 - Many tools are included in the codebase to edit:
   - layouts (on a live display)
   - themes (both display and WebUI)
@@ -108,7 +108,7 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
 
 The WebUI is optimized for mobile browsers but looks great on PCs, too.
 
-<img src="images/Screenshot_Player.jpg" width="33%">
+<img src="images/Screenshot_Player_Web.jpg" width="33%">
 
 More screenshots from the WebUI are [here](WebUI.md).
 
@@ -197,9 +197,11 @@ Most displays will show an icon next to the IP address to show which mode the pl
 
 **SD Mode** <img src="images/Icon_SD.png">
 
+Since the IP is only shown when the WebUI is available, the mode icon will appear alone for a bit.
+
 ## Boot Mode Icons 
 
-As part of the boot animation, an icon will appear to reflect certain boot modes.
+As part of the boot animation, an icon will appear on the right of the loading animation to reflect the boot modes.
 
 ### Smart Start <img src="images/Icon_Play.png">
 
@@ -222,7 +224,8 @@ An RTC module is required for the time to be displayed in this mode.
 Otherwise, the clock will not be shown.
 
 Most settings, as set in the WebUI, are preserved in this mode.
-These are disabled: Safe mode, Deep Sleep, Mode switch.
+
+These functions are disabled: Safe mode, Deep Sleep, Mode switch.
 
 SD Shuffle (which makes the "previous" button do nothing) will be read from preferences and changeable using Mode switch (the mode button or double-click of a rotary encoder).
 It is not saved to preferences in this mode.  All other buttons will have expected behaviour.
@@ -382,7 +385,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts, screen fonts, themes, and VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI updates, IR code overhauled (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons increased resolution, many patches to the audio libraries, boot time shorter |
+| 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |

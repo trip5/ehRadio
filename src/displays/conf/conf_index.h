@@ -113,9 +113,6 @@ const ConfCell _confCellsScroll[] = {
   { "fontsize",    "Font size",    CK_NUM },
   { "align",       "Align",        CK_ALIGN },
   { "width",       "Width",        CK_NUM },
-  { "scrolldelay", "Scroll delay", CK_NUM },
-  { "scrolldelta", "Scroll delta", CK_NUM },
-  { "scrolltime",  "Scroll time",  CK_NUM },
 };
 
 const ConfCell _confCellsFill[] = {
@@ -241,13 +238,12 @@ static_assert(CONF_FIELD_COUNT == LAYOUT_FIELD_COUNT,
   #define CONF_DSP_WIDTH       (DSP_WIDTH)
   #define CONF_DSP_HEIGHT      (DSP_HEIGHT)
   #define CONF_FRAMEWDT        (TFT_BORDER) // the inset that keeps text off the panel edge
-  #define CONF_MAX_WIDTH       (MAX_WIDTH)    // the usable width inside that inset
-  #define CONF_SCROLLDELAY     (SCROLLDELAY)
-  #define CONF_SCROLLTIME      (SCROLLTIME)
-  #define CONF_VU_MAX_WIDTH    (VU_MAX_WIDTH)  // the meter's pixel budget, so the page can explain a clamped box
+  #define CONF_MAX_WIDTH       (MAX_WIDTH) // the usable width inside that inset
+  #define CONF_SCROLLPX        (SCROLLPX) // The pace a scrolling line gets on THIS panel
+  #define CONF_VU_MAX_WIDTH    (VU_MAX_WIDTH) // the meter's pixel budget, so the page can explain a clamped box
   #define CONF_VU_MAX_HEIGHT   (VU_MAX_HEIGHT)
   #ifdef BOOTLOGOTOP
-    #define CONF_BOOTLOGOTOP   (BOOTLOGOTOP)  // reported for context, never edited per layout
+    #define CONF_BOOTLOGOTOP   (BOOTLOGOTOP) // reported for context, never edited per layout
   #else
     #define CONF_BOOTLOGOTOP   (0)
   #endif
@@ -257,8 +253,7 @@ static_assert(CONF_FIELD_COUNT == LAYOUT_FIELD_COUNT,
   #define CONF_DSP_HEIGHT      0
   #define CONF_FRAMEWDT        0
   #define CONF_MAX_WIDTH       0
-  #define CONF_SCROLLDELAY     0
-  #define CONF_SCROLLTIME      0
+  #define CONF_SCROLLPX        0
   #define CONF_VU_MAX_WIDTH    0
   #define CONF_VU_MAX_HEIGHT   0
   #define CONF_BOOTLOGOTOP     0

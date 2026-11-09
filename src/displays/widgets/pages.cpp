@@ -58,8 +58,8 @@ Page::~Page() {
 // The panel has ONE scroll slot (dsp.setScrollId()), and this is where it is handed out.  While it is free, the first
 // widget that wants it - asked with the side-effect-free scrollWanted() - takes the turn, and the walk starts AFTER
 // the widget served last, so the lines take turns instead of racing: no line can take two turns in a row while another
-// wants one, the page's widget order no longer decides who scrolls, and a conf's `startscrolldelay` of 0 (every
-// weatherConf writes one) stops meaning "always".  The owner then keeps the slot for its whole sweep and steps in its
+// wants one, the page's widget order no longer decides who scrolls, and a SCROLLDELAY_WEATHER of 0 (dspconf.h) stops
+// meaning "always".  The owner then keeps the slot for its whole sweep and steps in its
 // own loop() below.  A page with a single scrolling line is unaffected: it is the only candidate, so it is served at
 // every handover.  See plans/scroll-turn-fairness.md.
 void Page::loop() {

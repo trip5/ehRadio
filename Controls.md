@@ -58,7 +58,7 @@ IR receivers can be configured from the WebUI. Up to 3 remotes can be used.
 
 1. Go to Settings, controls, IR Recorder.
 2. Press the button you need on the left to record the IR code.
-3. Select the slot on the right and press the button on the physical IR remote. Avoid `UNKNOWN`.
+3. Select the slot on the right and press the button on the physical IR remote. Avoid `UNKNOWN` and `REPEATED`.
 
 ![image](images/IRrecorder.jpg)
 

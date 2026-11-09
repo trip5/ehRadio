@@ -408,6 +408,16 @@ void VuWidget::_draw(){
   if (_rotate) { _cw = _len; _ch = _bands.width * 2 + _bands.space; }
   else         { _cw = _bands.width * 2 + _bands.space; _ch = _bands.height; }
 
+  // Full-size segments: snap the level axis down to an exact multiple of the segment count, the rule initScreensaver()
+  // applies too, so `step` divides the axis and the trailing clamp in _drawBars() never fires.  The pixels given up stay
+  // background at the loud end, and _cw/_ch are untouched so the box, canvas and blit keep their size.  BAR FAMILY only -
+  // the trace styles' axis is a time or frequency span.
+  const uint8_t styleNow = _style();
+  if (styleNow == VU_STYLE_BARS || styleNow == VU_STYLE_DIGITAL_LED || styleNow >= (uint8_t)VU_STYLE_COUNT) {
+    const uint16_t per = _bands.perheight ? _bands.perheight : 1;
+    if (per > 1 && per <= _len) _len = (uint16_t)(per * (_len / per));
+  }
+
   _levels(_len, _measL, _measR);
 
   // Every painter wipes the whole box first.  The trace styles have nothing to erase with, and the bar
@@ -516,10 +526,8 @@ void VuWidget::_drawBars(bool led){
     }
   }
 
-  // The layout's own walk: a fixed pitch, with the last segment clamped.  The screensaver's instance runs this same walk
-  // over an axis initScreensaver() snapped to an exact multiple of the count, so nothing it draws is a remainder and the
-  // clamp below never fires there.  One loop for both is what keeps the player page identical.
-  // See plans/screensaver-vu-equal-segments.md.
+  // The layout's own walk: a fixed pitch, with the last segment clamped.  Both instances hand it an axis that is an exact
+  // multiple of the count (initScreensaver(), and _len in _draw()), so the clamp only guards a count larger than the axis.
   for (int i = 0; i < len; i += step) {
     // Clamp the last segment to len. The loop bound only guarantees a segment STARTS before len, and anything drawn
     // past the box can never be erased - the fills and _clear() all stop at len. Clamp, not skip, so the bar tip still

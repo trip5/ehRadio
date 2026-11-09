@@ -239,8 +239,9 @@ overlap in the vertical band. Read the held-back line, not just the groups.
 
 Converts an old-style yoRadio display conf into ehRadio's format. It either
 
-- **appends a layout** to an existing `displayTFT{W}x{H}conf.h` (chosen by `DSP_WIDTH` ×
-  `DSP_HEIGHT`, or by `--target`), or
+- **writes a layout** into an existing `display{W}x{H}conf.h` — appending it, or **updating** the layout that
+  already carries that name (see *A name that already exists is updated* below); the file is chosen by
+  `DSP_WIDTH` × `DSP_HEIGHT`, by the OLED/TFT token in the source file's own name, or by `--target`, or
 - **creates the file** if the target does not exist, with `Define` lines, the `BootData` block,
   `_layoutNames[]`, the entries and the `STRINGS` section.
 
@@ -253,6 +254,7 @@ py conf_tool.py --import community_conf.h --name "Author Name" --dry-run
 
 ```c
 const ScrollConfig apTitleConf PROGMEM = {{ 10, 10, 4, WA_CENTER }, 140, false, 460, 0, 3, 5000};
+                                        /* buffsize, uppercase, width, delay, delta, time - only WIDTH survives */
 
 #ifdef BOOMBOX_STYLE
 const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, true};
@@ -283,10 +285,15 @@ const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, false};
   values that use it.
 - **`bandsConf`** loses an obsolete sixth value (`fadespeed`; the fade rate now comes from the band
   length and `VU_FADE_MS`). Only a plain integer is dropped, so a real expression is never lost.
-- **`ScrollConfig`** loses `buffsize` and `uppercase`, which are no longer members. Every conf passed the same
-  `140`, which is now `WIDGET_BUFF_SIZE` in `options.h`, and `uppercase` never did anything. The leading widget
-  group is kept whole (it has braces of its own) and only a remainder of exactly the old six parts is trimmed,
-  so a comment or an expression anywhere in it stops the trim rather than being silently rearranged.
+- **`ScrollConfig` keeps its widget group and `width`, and nothing else.** `buffsize` and `uppercase` went first
+  (the buffer is `WIDGET_BUFF_SIZE` in `widgets.h`, and `uppercase` never did anything), and now `scrolldelay`,
+  `scrolldelta` and `scrolltime` are retired too: the pace belongs to the display class, in `dspconf.h`, not to a
+  layout. So `{{ 1, 1, 2, WA_LEFT }, 126, 5000, 2, 35 }` and the older
+  `{{ 1, 1, 2, WA_LEFT }, 140, false, 126, 5000, 2, 35 }` both become `{{ 1, 1, 2, WA_LEFT }, 126 }`. The leading
+  group is kept whole (it has braces of its own), `width` is the first cell after it in either shape, a comment or an
+  expression anywhere in the tail stops the trim rather than rearranging a value a human wrote, and a line already in
+  the new shape is untouched - so the pass is idempotent. See
+  [`plans/scroll-global-speed-and-delay.md`](../../../plans/scroll-global-speed-and-delay.md).
 - **OLED targets** get `metaBGConf` / `metaBGConfInv` sorted by height, because ehRadio selects
   `metaBGConfInv` when *invert title* is on and OLEDs default to inverted: the hairline (height 3 or
   less) goes to `metaBGConf`, the rectangle to `metaBGConfInv`. Two hairlines or two rectangles are left
@@ -308,6 +315,36 @@ const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, false};
 
 Every emitted entry lists every master field, in master order, exactly like a `--clean` result, so an
 imported layout is instantly readable next to the shipped ones.
+
+### A name that already exists is updated, not duplicated
+
+Both writing modes place each entry by its name — `--name`, or a layout document's own `"name"` — compared
+truncated to 50 characters, trimmed and case-insensitively. A name the conf already has is **regenerated where
+it stands**: same index, `_layoutNames[]` untouched, so a `config.store.layoutId` persisted on a device still
+means the same layout. A name that is not there is appended, entry and name together, at the end of both arrays.
+
+An existing name is always asked about first:
+
+```
+  "Big VU" already exists as layout 1 of displayOLED128x64conf.h.
+  note: the entry being replaced carries 2 hand-written comment(s); a layout document holds values only, so
+  they are not carried over
+  Update "Big VU"? [y/N]:
+```
+
+- `n` writes **nothing at all** — not even the temp — and prints how to get the other outcome.
+- `--name "<something else>"` is how a **copy** is made: a name that is not in the file is simply appended.
+- That note is the one real cost of an update. The entry is rebuilt from values, so a sentence a human wrote
+  into it (`// clock disappears when VU is on`) or a commented-out alternative has nowhere to come from. The
+  tool's own `// unused` and `NEEDS EDITING` markers are not counted.
+- The `.new.h` temp and the install prompt come after, unchanged.
+
+Two guards run before any of that, because an update replaces a layout that is live on a panel:
+
+- the conf's **size** — `{W}x{H}` in its own name, or its `DSP_WIDTH`/`DSP_HEIGHT` if it is named to some other
+  scheme — must equal the layout's, so a 128x64 document cannot overwrite a 480x320 layout;
+- a layout **document** must carry `metaConf` and `playlistConf`, the two load-bearing lines `--clean` refuses
+  to repair. A document without them is refused rather than written as `{ }`.
 
 ### After importing
 
@@ -331,8 +368,13 @@ py conf_tool.py --fromjson layout3.json --target displayTFT320x240conf.h --dry-r
 ```
 
 - **The target is the document's own `"screen"`**, matched against this directory (`320x240` finds
-  `displayTFT320x240conf.h`). `--target` overrides it, and if neither says which file, the tool stops rather
-  than guessing — `--import` can *create* a conf file, but this mode needs the file to exist.
+  `displayTFT320x240conf.h`). `--target` overrides it, and when one size has two confs — the 128x128 pair — the
+  OLED/TFT token in the source file's own name settles it (`..._OLED128x128.json`), with a question as the last
+  resort. If no conf matches, the tool stops rather than guessing: a document carries no `#define`s, no
+  `BootData` and no `STRINGS`, so it cannot *create* a conf file — `--import` of a community conf does that.
+- **Re-importing an edited layout updates it.** Export the slot from the editor, run this on the file, answer
+  `y`, and the layout of that name is regenerated in place; that is the whole edit round trip. Mode 3's *A name
+  that already exists is updated* has the prompt, the comment note and the size guard.
 - **`--name` defaults to the document's own name.** The entry is appended to `_layouts[]` and the name to
   `_layoutsNames[]`, at the **end**, so no existing layout's index moves and a persisted
   `config.store.layoutId` cannot come to mean a different layout. The `.new.h` temp and the install prompt are

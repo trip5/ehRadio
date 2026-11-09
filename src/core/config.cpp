@@ -85,7 +85,7 @@ void Config::init() {
     SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI);
   #endif
   store.play_mode = store.play_mode & 0b11;
-  if (store.play_mode>1) store.play_mode=PM_WEB;
+  if (store.play_mode>1) store.play_mode = PM_WEB;
   CONFIGTIMELOG("RTC & SPI.begin & play_mode");
   _initHW();
   CONFIGTIMELOG("_initHW");
@@ -329,7 +329,7 @@ void Config::initPlaylistMode() {
             strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
             return;  // no SD — nothing more to init
           } else {
-            store.play_mode=PM_WEB;
+            store.play_mode = PM_WEB;
             WARNINGLOG("SD card not inserted.");
             changeMode(PM_WEB);
             _lastStation = store.lastStation;
@@ -342,7 +342,7 @@ void Config::initPlaylistMode() {
           strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
           return;  // no SD — nothing more to init
         } else {
-          store.play_mode=PM_WEB;
+          store.play_mode = PM_WEB;
           ERRORLOG("SD mount failed");
           changeMode(PM_WEB);
           _lastStation = store.lastStation;
@@ -362,7 +362,7 @@ void Config::initPlaylistMode() {
       _lastStation = store.lastStation;
     }
   #else
-    store.play_mode=PM_WEB;
+    store.play_mode = PM_WEB;
     _lastStation = store.lastStation;
   #endif //ifdef USE_SD
   CONFIGTIMELOG("SD/WEB mode branch");

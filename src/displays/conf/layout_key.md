@@ -39,10 +39,10 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS   {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf      = {{ TFT_BORDER, TFT_BORDER, 2, WA_LEFT }, MAX_WIDTH, SCROLLDELAY, 2, SCROLLTIME },
-        .title1Conf    = {{ TFT_BORDER, 19, 1, WA_LEFT }, MAX_WIDTH-24, SCROLLDELAY, 1, SCROLLTIME },
-        .playlistConf  = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH, SCROLLDELAY/5, 1, SCROLLTIME },
+        /* SCROLLS   {{ offset, top, fontsize, align }, width } */
+        .metaConf      = {{ TFT_BORDER, TFT_BORDER, 2, WA_LEFT }, MAX_WIDTH },
+        .title1Conf    = {{ TFT_BORDER, 19, 1, WA_LEFT }, MAX_WIDTH-24 },
+        .playlistConf  = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH },
         /* WIDGETS   { offset, top, fontsize, align } */
         .bitrateConf   = { 0, 19, 1, WA_RIGHT },
         .clockConf     = { TFT_BORDER, 38+FONTSHIFT, 0, WA_CENTER },
@@ -57,7 +57,9 @@ const LayoutData _layouts[] PROGMEM = {
 Four rules that break the build, or the reading, if you ignore them:
 
 - **`_layoutNames[]` and `_layouts[]` must stay the same length**, in the same order. The
-  layout's index is its position in both arrays.
+  layout's index is its position in both arrays, and a device persists that index in
+  `config.store.layoutId` — which is why `conf_tool.py` never deletes an entry or moves one, and why
+  re-importing an edited layout **updates it where it stands** instead of appending a second copy.
 - **Write the fields in the order listed in §3.** These are designated initialisers, so a field
   that comes earlier in the struct must be written earlier in the entry. Commenting a line out
   is fine; swapping two lines is not.
@@ -96,15 +98,25 @@ it moves right of centre rather than staying put. The VU is the exception to all
 meter's orientation, see §6 — and a `MoveConfig` has no `align` at all, so a MOVE's `left`/`top` really are a
 left edge and a top. This cell was called `left`, which was true for the first row only (round 9).
 
-`ScrollConfig` — a line of text that can scroll. `{ { offset, top, fontsize, align }, width,
-scrolldelay, scrolldelta, scrolltime }`. The text buffer is not a conf field: it is `WIDGET_BUFF_SIZE` in
-[`widgets.h`](../widgets/widgets.h), one size for every conf, with two exceptions - the weather row and the
-screensaver's info line take `COMPOSED_LINE_BUFF` sizes of their own, because they are handed composed strings.
-See [`plans/widget-text-buffer-sizes.md`](../../../plans/widget-text-buffer-sizes.md).
-`scrolldelay` is a wait, not a priority: it is how long the line parks before its first move and again after each
-wrap, and when several lines overflow they take the panel's single scroll slot in turn - round-robin, starting after
-the line served last. Writing `0` there makes the line ready at once; it does not make it win.
-See [`plans/scroll-turn-fairness.md`](../../../plans/scroll-turn-fairness.md).
+`ScrollConfig` — a line of text that can scroll. `{ { offset, top, fontsize, align }, width }`. The text buffer is
+not a conf field: it is `WIDGET_BUFF_SIZE` in [`widgets.h`](../widgets/widgets.h), one size for every conf, with two
+exceptions - the weather row and the screensaver's info line take `COMPOSED_LINE_BUFF` sizes of their own, because they
+are handed composed strings. See [`plans/widget-text-buffer-sizes.md`](../../../plans/widget-text-buffer-sizes.md).
+
+**A line has no pace of its own.** `scrolldelay`, `scrolldelta` and `scrolltime` used to sit in every one of these,
+the same numbers in nearly every layout, and they were the only control over how much of the display a scrolling line
+took - which a layout author could neither see nor be trusted with. They are retired: the panel sets the pace, in
+[`dspconf.h`](../dspconf.h) - `SCROLLPX` (pixels per second at fontsize 1, scaled per font size),
+`SCROLL_DUTY` (the share of the display task it may take) and the `SCROLLDELAY_*` holds, all overridable from
+`myoptions.h`. The step size and the redraw pitch are derived from those, so there is no pitch to set. A line declares
+only which KIND it is (`setScrollRole()`: meta, titles, playlist, weather, boot) so it gets the right hold. An old conf
+or layout file that still carries the three values imports fine - they are ignored, not converted.
+See [`plans/scroll-global-speed-and-delay.md`](../../../plans/scroll-global-speed-and-delay.md).
+
+The hold is a wait, not a priority: it is how long the line parks before its first move and again after each wrap,
+and when several lines overflow they take the panel's single scroll slot in turn - round-robin, starting after the line
+served last. A hold of `0` (`SCROLLDELAY_WEATHER`, `SCROLLDELAY_BOOT`) makes the line ready at once; it does not make
+it win. See [`plans/scroll-turn-fairness.md`](../../../plans/scroll-turn-fairness.md).
 
 `FillConfig` — a rectangle, solid or as a frame. `{ { offset, top, 0, 0 }, width, height, outlined }`: a fill
 reads neither `fontsize` nor `align`, so both of those cells are written `0`, and the header says so. With
@@ -297,9 +309,20 @@ the two boxes plainly overlap in the vertical band.
   is not one; round 8 renamed it, and carried `conf_tool.py --import` with it, so a community conf
   that still says `TFT_FRAMEWDT` imports as `TFT_BORDER`. On the 128x64 OLED the margin is 1 px, which
   keeps text off the very first and last pixel column.
-- **`width`** in a scroll config is the width of the scrolling window.
-- **Scroll speed** is `scrolldelta * 1000 / scrolltime` pixels per second. The shipped confs for
-  the 128x64 OLED scroll the title at 50 px/s and the playlist at 150 px/s.
+- **`width`** in a scroll config is the width of the scrolling window, and it is also what a scroll costs: one step
+  repaints `width x fontsize*8` pixels, so the window is the one number that decides both how much text is visible
+  and how heavy the line is.
+- **Scroll speed** is the panel's, not the layout's: `SCROLLPX` is pixels per second **at fontsize 1**, where one column
+  of the smallest glyph is 6 px - so 52 is 8.7 columns a second. Every larger size scales it by **sqrt(fontsize)**, i.e.
+  100 / 141 / 173 / 200 / 224 % for sizes 1..5, and the panel's own width nudges the base up a little (`52` at 128 px
+  wide, `60` at 480) because the same px/s replaces a short row far sooner than a long one. On a 128 px panel the four
+  shipped sizes therefore move at 52 / 74 / 90 / 104 px/s. A linear law ("ms per character") holds every size at one
+  character rate and reads as a crawl at font 1 and a
+  race at font 4; a constant pixel rate makes small text impossible to read.
+- **The step and the pitch are derived**, not set: the step is a whole number of pixels chosen from the panel's duty
+  budget (`SCROLL_DUTY`), and the pitch follows from it so the speed stays exact. A whole-pixel step is deliberate -
+  a fractional one alternates and can owe a tick that moves nothing, which reads as a slow line and a stutter, and the
+  pitch is also what gives a slow panel its settled gap between pushes, i.e. what stops a wide line tearing.
 
 ### The two clock transforms: `fullClock` and `seconds`
 
@@ -700,9 +723,11 @@ What that means for a layout author:
   not. The editor states the panel's own numbers — the border inset and the scroll defaults — once, under the
   `Display type` line, and marks a `left` or `top` that falls off the panel, which is the closest a browser can
   come to validating an expression.
-- **`py conf_tool.py --fromjson` is the way back into a conf file.** It appends the saved layout as an entry
-  with the numbers left as numbers: round 8 removed the tool's revival of a value into a macro name, which is
-  how a `bandsConf` cell meaning "how many bands" had been coming back as `TFT_BORDER`. See
+- **`py conf_tool.py --fromjson` is the way back into a conf file**, and the round trip is meant to be repeated:
+  a layout of the *same name* already in the file is updated in place (same index) after the tool asks, and only
+  a new name is appended. The entry carries the numbers as numbers — round 8 removed the tool's revival of a
+  value into a macro name, which is how a `bandsConf` cell meaning "how many bands" had been coming back as
+  `TFT_BORDER` — so an updated entry reads in plain numbers where the shipped ones spell macros. See
   [`conf_tool.md`](conf_tool.md) mode 4.
 - **The two lines a layout cannot do without are refused at save time**, on the page and on the device:
   `metaConf` and `playlistConf`, for the reason in §5. Everything else may be `{ }`.

@@ -49,7 +49,7 @@ function irbuttonClick(){
   var irid = '-1';
   if(!hasactive) {
     irid = this.getAttribute('data-irid') || '-1';
-    document.getElementById("irrecordtitle").innerHTML = t('msg_codes_for_button', 'Codes for button') + ' <span>'+this.innerHTML+'</span>';
+    document.getElementById("irrecordtitle").innerHTML = t('msg_codes_for_button', 'Codes for button') + '<br /> <span>'+this.innerHTML+'</span>';
     document.getElementById("irrecord").classList.remove("hidden");
     document.getElementById("irstartrecord").classList.add("hidden");
     this.classList.add("active");

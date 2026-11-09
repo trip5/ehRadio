@@ -81,9 +81,9 @@ class  psFrameBuffer : public Adafruit_GFX {
       uint16_t &pixel = buffer[x + y * _ww];
       if (pixel != color) pixel = color;  // skip write if already target color
     }
+    // Into the PSRAM buffer, clipped to the window - nothing here reaches the panel; display() is what pushes it.
+    // Overriding fillRect is enough: the base writeFillRect() calls this (virtual), so both spellings land in the buffer.
     void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color){
-      // Write directly to PSRAM buffer — do NOT use base-class writeFillRect
-      // which bypasses the framebuffer and writes to the display over SPI.
       if(!buffer) return;
       if(x < 0){ w += x; x = 0; }
       if(y < 0){ h += y; y = 0; }
@@ -163,8 +163,7 @@ class  psFrameBuffer : public Adafruit_GFX {
                 if (line & (1UL << (w - 1 - col))) {
                   const int16_t x = cursor_x + (int16_t)col * psx;
                   const int16_t y = renderY + (int16_t)((int16_t)row - h) * psy;
-                  if (psx == 1 && psy == 1) drawPixel(x, y, textcolor);
-                  else writeFillRect(x, y, psx, psy, textcolor);
+                  fillRect(x, y, psx, psy, textcolor);   // this class's fillRect: into the buffer, clipped
                 }
               }
             }
@@ -214,15 +213,23 @@ class  psFrameBuffer : public Adafruit_GFX {
           uint8_t *bitmap = (uint8_t *)pgm_read_ptr(&f->bitmap);
           uint16_t bo = pgm_read_word(&glyph->bitmapOffset);
           uint8_t bits = 0, bit = 0;
+          const int16_t adv = (int16_t)pgm_read_byte(&glyph->xAdvance);
           for (uint8_t yy = 0; yy < h; yy++) {
             for (uint8_t xx = 0; xx < w; xx++) {
               if (bit == 0) { bits = pgm_read_byte(&bitmap[bo++]); bit = 0x80; }
-              if ((int16_t)(xo + xx) < (int16_t)pgm_read_byte(&glyph->xAdvance)) {
+              if ((int16_t)(xo + xx) < adv) {
                 if (bits & bit) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    drawPixel(cursor_x + xo + xx, renderY + yo + yy, textcolor);
-                  else
-                    writeFillRect(cursor_x + (xo + xx) * textsize_x, renderY + (yo + yy) * textsize_y, textsize_x, textsize_y, textcolor);
+                  // Per DISPLAY pixel, never a textsize-wide block - the same rule the textsize-1 path has always
+                  // used.  A glyph entering a scrolling line always straddles the window edge, and fillRect handles a
+                  // straddling block by SHAVING its width, which is a different clip from the per-pixel test and looks
+                  // like a glyph that arrives whole at some text sizes.  drawPixel clips per pixel at every size.
+                  const int16_t gx = cursor_x + (int16_t)(xo + xx) * textsize_x;
+                  const int16_t gy = renderY + (int16_t)(yo + yy) * textsize_y;
+                  for (uint8_t py = 0; py < (uint8_t)textsize_y; py++) {
+                    for (uint8_t px = 0; px < (uint8_t)textsize_x; px++) {
+                      drawPixel(gx + px, gy + py, textcolor);
+                    }
+                  }
                 }
               }
               bit >>= 1;
@@ -252,6 +259,12 @@ class  psFrameBuffer : public Adafruit_GFX {
 struct psFrameBuffer {
   bool ready() { return false; }
   void display() {}
+  // No buffer, so there is nothing to count and nowhere to push: the WIDGET_DEBUG probe reads these and reports -1.
+  int16_t columnInk(int16_t) { return -1; }
+  int16_t left()   { return -1; }
+  int16_t top()    { return -1; }
+  int16_t width()  { return -1; }
+  int16_t height() { return -1; }
 };
 #endif //#ifdef PSFBUFFER
 

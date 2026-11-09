@@ -383,6 +383,7 @@ table.stations .importantmessage { color: var(--heading-text) !important; font-s
 .searchwrap::-webkit-scrollbar { width: 5px; height: 8px; background-color: var(--scrollbar-track); }
 .searchwrap { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); scrollbar-width: thin; }
 .searchwrap::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+#searchdone, #curateddone { display: block; width: fit-content; margin: auto; }
 
 /* CURATED PAGE LAYOUT (Re-uses from SEARCH) */
 .sectiontitle { margin: 4px 0 2px 0; padding: 0; font-size: 18px; font-weight: bold; text-align: center; color: var(--heading-text); }
@@ -459,11 +460,11 @@ body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: non
 .irradio span:after { content: ""; position: absolute; display: none; }
 .irradio.active span:after { display: block; }
 .irradio span:after { top: 6px; left: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--button-active-text); }
-.irrecordvalue { box-sizing: border-box; background: var(--button-fill); color: var(--button-text); padding: 0px 12px; line-height: 36px; height: 40px; font-size: 24px; border: var(--button-outline) 2px solid; border-radius: 20px; font-weight: normal; flex: 1; overflow: hidden; max-width: 212px; text-align: center; }
+.irrecordvalue { box-sizing: border-box; background: var(--button-fill); color: var(--button-text); padding: 0px 10px; line-height: 36px; height: 40px; font-size: 20px; border: var(--button-outline) 2px solid; border-radius: 20px; font-weight: normal; flex: 1; overflow: hidden; text-align: left; }
 #protocol { text-transform: uppercase; line-height: 20px; height: 20px; padding-left: 40px; }
 .irrecordvalue.active { background-color: var(--button-active-fill); color: var(--button-active-text); }
 .irtitle { line-height: 48px; margin: 5px 0; text-align: center; padding-top: 10px; font-weight: bold; font-size: 26px; color: var(--heading-text); width: 100%; }
-#done_ir { display: block; }
+#playerwrap #done_ir, #playerwrap #back_ir { display: block; width: fit-content; margin: 20px auto 10px auto; }
 .irclear { box-sizing: border-box; width: 22px; height: 22px; background-color: var(--button-fill); border: var(--button-outline) 2px solid; border-radius: 50%; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; }
 .irclear:before, .irclear:after { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 2px; border-radius: 1px; background-color: var(--button-text); }
 .irclear:before { transform: translate(-50%, -50%) rotate(45deg); }

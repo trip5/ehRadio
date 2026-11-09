@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.10.30"
+#define RADIOVERSION "2026.11.09"
 
 /*******************************************************
  
@@ -51,31 +51,43 @@ or examine the examples in builds/trip5 and make your own!
 /* ============================== DISPLAY ============================== */
 
 /* --- DISPLAYS ENUM --- */
+/* Define your display as #define DSP_MODEL DSP_ILI9488 */
 // DSP_MODEL identifies the controller / driver chip.
 // Resolution variants use DSP_WIDTH / DSP_HEIGHT (see below).
-// Interface (I2C vs SPI/parallel) is auto-detected from pin definitions.
+// Interface (I2C vs SPI/parallel) is auto-detected from pi`n definitions.
 // If I2C_SDA != 255 && I2C_SCL != 255 → I2C, otherwise SPI/parallel.
 // ST7735 sub-models uses DTYPE (required by Adafruit_ST7735 library).
 
-#define DSP_DUMMY       0 // no display
-#define DSP_GC9A01A     1 // 240x240 round (fixed in displayGC9A01A.h)
-#define DSP_GC9106      2 // 160x80 (fixed in displayGC9106.h)
-#define DSP_ILI9225     3 // 220x176 (default)
-#define DSP_ILI9341     4 // 320x240 (fixed in displayILI9341.h)
-#define DSP_ILI9488     5 // 480x320 (default)
-#define DSP_ILI9486     6 // 480x320 (default) (not fully tested - see notes inside the library regarding gamma correction)
-#define DSP_NV3007      7 // 428x142 (fixed in displayNV3007.h)
-#define DSP_SH1106      8 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SH1107      9 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1305     10 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1306     11 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_SSD1322     12 // 256x64 (default): SPI
-#define DSP_SSD1327     13 // 128x64 (default): SPI or I2C (auto-detected from pins)
-#define DSP_ST7735      14 // 160x128 / 128x128 / 160x80 (dimensions derived from DTYPE in displayST7735.h)
-#define DSP_ST7789      15 // 320x240 (default)
-#define DSP_ST7796      16 // 480x320 (default)
+#define DSP_DUMMY       0  // no display
+/* TFT */
+#define DSP_GC9A01A     1  // 240x240 round (fixed in displayGC9A01A.h)
+#define DSP_GC9106      2  // 160x80 (fixed in displayGC9106.h)
+#define DSP_ILI9225     3  // 220x176 (default)
+#define DSP_ILI9341     4  // 320x240 (fixed in displayILI9341.h)
+#define DSP_ILI9488     5  // 480x320 (default)
+#define DSP_ILI9486     6  // 480x320 (default) (not fully tested - see notes inside the library regarding gamma correction)
+#define DSP_NV3007      7  // 428x142 (fixed in displayNV3007.h)
+#define DSP_ST7735      8  // 160x128 / 128x128 / 160x80 (dimensions derived from DTYPE in displayST7735.h)
+#define DSP_ST7789      9  // 320x240 (default)
+#define DSP_ST7796      10 // 480x320 (default)
+/* OLED */
+#define DSP_SH1106      20 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SH1107      21 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1305     22 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1306     23 // 128x64 (default): SPI or I2C (auto-detected from pins)
+#define DSP_SSD1322     24 // 256x64 (default): SPI
+#define DSP_SSD1327     25 // 128x64 (default): SPI or I2C (auto-detected from pins)
 
-/* Define your display as #define DSP_MODEL DSP_ILI9488 */
+/* ST7735 display submodel */
+// INITR_BLACKTAB // 1.8" https://aliexpress.ru/item/1005002822797745.html
+//     See this note If INITR_BLACKTAB has a noisy line on one side of the screen https://github.com/e2002/yoradio#note-if-initr_blacktab-dsp-have-a-noisy-line-on-one-side-of-the-screen-then-in-adafruit_st7735cpp
+// INITR_144GREENTAB // 1.44" https://aliexpress.ru/item/1005002822797745.html
+// INITR_MINI160x80 // 0.96" 160x80
+// INITR_GREENTAB
+// INITR_REDTAB
+#ifndef DTYPE
+  #define DTYPE INITR_BLACKTAB
+#endif
 
 #ifndef DSP_MODEL
   #define DSP_MODEL DSP_DUMMY
@@ -127,17 +139,6 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 #ifndef TFT_DC
   #define TFT_DC 255
-#endif
-
-/* ST7735 display submodel */
-// INITR_BLACKTAB // 1.8" https://aliexpress.ru/item/1005002822797745.html
-//     See this note If INITR_BLACKTAB have a noisy line on one side of the screen https://github.com/e2002/yoradio#note-if-initr_blacktab-dsp-have-a-noisy-line-on-one-side-of-the-screen-then-in-adafruit_st7735cpp
-// INITR_144GREENTAB // 1.44" https://aliexpress.ru/item/1005002822797745.html
-// INITR_MINI160x80 // 0.96" 160x80
-// INITR_GREENTAB
-// INITR_REDTAB
-#ifndef DTYPE
-  #define DTYPE INITR_BLACKTAB
 #endif
 
 /* --- I2C DISPLAY PINS --- */
@@ -197,11 +198,12 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef DSP_INVERT_QUIRK
   #define DSP_INVERT_QUIRK false // if a display shows inverted colors by default, override it by setting this to true
 #endif
-/* RSSI_DIGIT used to be a per-model macro here ("display RSSI as number").  It is a per-layout
-   boolean now (LayoutData.rssiDigit), so a stale #define is no longer read. */
 #ifndef RSSI_STEPS
-  #define RSSI_STEPS -50,-60,-70,-80
+  #define RSSI_STEPS -50,-60,-70,-80 // minimum measurement to add each signal bar
 #endif
+/* Tweaks to Scrolls (see dspconf.h for more) */
+// #define SCROLLDELAY 5000 // ms, the delay scrolls are held for before moving (will not affect all scrolls)
+// #define SCROLLPX (52 + (DSP_WIDTH - 128) / 44) // px/s at fontsize 1, widened a little per panel; see dspconf.h
 
 /* Big displays (480x320) get a bigger boot logo ( but can be disabled with #define BIG_BOOT_LOGO false)*/
 #if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ST7796
@@ -213,13 +215,6 @@ or examine the examples in builds/trip5 and make your own!
     #endif
   #endif
 #endif
-
-/* Scrolling Speed: may be manually tweaked using myoptions.h */
-/* check dspconf.h for the actual per-class defaults */
-// pixels per second = scrolldelta * 1000 / scrolltime]
-// Here are the defaults for OLED and TFT displays:
-// #define SCROLLDELAY 5000 // delay time (ms) for widgets: meta, title1, title2 / playlist mode scroll divides by 5
-// #define SCROLLTIME 20 // time (ms) per pixel-column movement (a column of font pixels, not display pixels)
 
 /* ============================== SPI BUSES AND PINS ============================== */
 

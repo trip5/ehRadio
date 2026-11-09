@@ -254,7 +254,6 @@
 
 #if defined(ILI9488_PCM_1BUTTON_FULL)
   #define IR_PIN          14
-  #define IR_BUTTON_POWER 0xFF0FF0
   #define RTC_MODULE      DS1307
   #define RTC_SDA         17
   #define RTC_SCL         18
@@ -356,8 +355,9 @@
 //#define AUDIO_DEBUG            // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
 //#define METADATA_LOG           // every ID3 field and each ICY title and station name - the switch for "no title on this station"
 //#define CONFIG_KEY_DEBUG       // every Prefs key and the value written to it
-#define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
+//#define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
 //#define SD_PLAY_TRACE_MS 30000 // the two [SD] trace lines (0 = off): the pair that says whether the card or the decoder stopped
+//#define ESPFILEUPDATER_VERBOSE true
 
 /* --- Display --- */
 // Display Font:

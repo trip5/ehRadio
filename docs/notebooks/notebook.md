@@ -3,6 +3,8 @@
 I keep a digital notebook of various builds I have made along with tips and important notes.
 Here are some pages.
 
+Some of these notes predate work on ehRadio so may be incomplete.
+
 ### VS1053 Decoder
 
 ![image](VS1053_note.jpg)

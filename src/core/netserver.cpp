@@ -1953,7 +1953,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var editorThemes=%s;\n"
       "var editorLayouts=%s;\n"
       "var dspFamily='%s';\n"
-      "var confDsp={width:%d,height:%d,framewdt:%d,maxWidth:%d,scrollDelay:%d,scrollTime:%d,bootLogoTap:%d,hasConfMacros:%d,vuMaxWidth:%d,vuMaxHeight:%d};\n",
+      "var confDsp={width:%d,height:%d,framewdt:%d,maxWidth:%d,scrollPx:%d,bootLogoTap:%d,hasConfMacros:%d,vuMaxWidth:%d,vuMaxHeight:%d};\n",
       #if defined(DSP_TFT)
         "true",
       #else
@@ -1974,7 +1974,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
         "",
       #endif
       CONF_DSP_WIDTH, CONF_DSP_HEIGHT, CONF_FRAMEWDT, CONF_MAX_WIDTH,
-      CONF_SCROLLDELAY, CONF_SCROLLTIME, CONF_BOOTLOGOTOP, CONF_HAS_CONF_MACROS,
+      CONF_SCROLLPX, CONF_BOOTLOGOTOP, CONF_HAS_CONF_MACROS,
       CONF_VU_MAX_WIDTH, CONF_VU_MAX_HEIGHT);
     AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", confjsbuf);
     response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");

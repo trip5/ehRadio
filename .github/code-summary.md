@@ -1706,11 +1706,32 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   via `saveValue` and trigger `display._applyState()`.
 
 ## `src/displays/conf/conf_tool.py`
-- **One tool, two modes** (it replaced `importlayout.py`, which is gone): `--clean` repairs every `display*conf.h` in
-  its own directory; `--import <file> --name "X" [--target file.h]` converts a community yoRadio conf file, appending a
-  layout or creating the file when the target does not exist; `--dry-run` in both. There is deliberately no bare
-  invocation - no mode prints a two-line pointer and exits 2, and `-h`/`--help` prints the module docstring, which is
-  the only copy of the help.
+- **One tool, four modes** (it replaced `importlayout.py`, which is gone): `--clean` repairs every `display*conf.h` in
+  its own directory; `--import <file> --name "X" [--target file.h]` converts a community yoRadio conf file, creating
+  the file when the target does not exist; `--fromjson <layout.json>` writes a layout saved by the on-device editor
+  back into an existing conf; `--check` reports intersecting rectangles; `--dry-run` in the writing modes. There is
+  deliberately no bare invocation - no mode prints a two-line pointer and exits 2, and `-h`/`--help` prints the module
+  docstring, which is the only copy of the help.
+- **A layout is placed by its NAME, and an existing name is updated rather than duplicated.** `place_entries()` (used
+  by both writing passes) compares each label against the entry names in `_layouts[]` - truncated to 50, trimmed,
+  case-insensitive (`name_key()`), because the editor's name field is free text - then regenerates a match **where it
+  stands** via `entry_spans()`: same index, `_layoutNames[]` untouched, so a persisted `config.store.layoutId` still
+  means the same layout and the entry keeps the conf's own spelling. Only a name that is not there is appended, entry
+  and name together at the end. An existing name is **asked about first** (`Update "X"? [y/N]`), and `n` writes
+  nothing at all; `--name "<something else>"` is how a copy is made. The prompt also names the hand-written comments
+  the replaced entry will lose (excluding the tool's own `// unused` and `NEEDS EDITING` markers): the entry is rebuilt
+  from values, so a note like `// clock disappears when VU is on` or a commented-out alternative has nowhere to come
+  from. This is the edit round trip the layout editor was built for - export the slot, re-import it, answer `y`.
+- **Two guards an update makes mandatory.** `check_target_size()` refuses a conf whose `{W}x{H}` (from its name, or
+  from `DSP_WIDTH`/`DSP_HEIGHT` when it is named to another scheme) is not the layout's size, so a 128x64 document
+  cannot overwrite a 480x320 layout; `--fromjson` also refuses a document with no `metaConf`/`playlistConf`, the two
+  load-bearing lines `--clean` will not repair.
+- **Target resolution is shared** (`target_conf()`): `--target` first (the `.h` may be left off), then the size, then
+  the OLED/TFT token in the **source file's own name** (`_family_hint()` - `..._OLED128x64.json`), then a question.
+  That hint exists because 128x128 is the one size with both a `displayOLED128x128conf.h` and a
+  `displayTFT128x128conf.h`; with no conf at a size, `--import` asks and creates, while `--fromjson` stops, since a
+  document carries no `#define`s, no `BootData` and no `STRINGS` and so cannot create a file. `--import` on a `.json`
+  now says to use `--fromjson` instead of "is this a valid conf file?".
 - **The master is `widgetsconfig.h`.** `struct LayoutData` and `struct BootData` supply the field order, each field's
   type (which decides `{ }` versus `false`), the section headers, and the per-field comments. The tool keeps no list of
   its own, so a field added to the struct reaches every conf on the next run. The hand-maintained `LAYOUT_FIELDS` in the
@@ -1732,9 +1753,9 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   is built on `playlistConf`, so the tool warns loudly, leaves that entry byte-identical, and lists the file as NEEDS
   HAND EDITING. No layout is ever removed: that would shift every index after it and the index is persisted.
 - **Writes are two-stage.** Both modes write `<file>.new.h` (the `.h` extension so it reads in the editor), print a
-  per-file report and a summary, and install only on `Update ...? [y/N]`; declining offers to delete the temps;
+  per-file report and a summary, and install only on `Update <file>? [y/N]`; declining offers to delete the temps;
   `--dry-run` writes the same temps but never installs. `--clean` is idempotent - a second run reports every file
-  unchanged.
+  unchanged, which is also how to confirm that an updated entry is a conforming one.
 - Import mode keeps the old format's behaviour: `BOOMBOX_STYLE` yields two entries, the BoomBox one with `vuConf`'s
   `align` set to `WA_CENTER` by `force_vu_boombox()` (it used to emit `.boomboxVU = true`); `HIDE_*` zeroes a config and
   keeps the original commented beneath it; `HIDE_IP_ONLY_MAIN_SCREEN` and `RSSI_DIGIT` become `true` switches; the
@@ -1742,14 +1763,17 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `bandsConf` (a sixth plain integer only, so an expression is never lost); OLED targets get
   `metaBGConf`/`metaBGConfInv` swapped; and anything the source did not provide is written as `{ }` with `//
   <--------- NEEDS EDITING!`.
-- Docs: [`conf_tool.md`](../src/displays/conf/conf_tool.md) covers both modes,
-  [`layout_key.md`](../src/displays/conf/layout_key.md) documents every field and now states the write-every-field and
-  keep-the-headers rules.
+- Docs: [`conf_tool.md`](../src/displays/conf/conf_tool.md) covers all four modes, including *A name that already
+  exists is updated, not duplicated*, [`layout_key.md`](../src/displays/conf/layout_key.md) documents every field and
+  states the write-every-field, keep-the-headers and index-is-persisted rules. Reasoning:
+  `plans/conf-tool-json-update.md`.
 
 ## `src/displays/conf/conf_index.h`
 - **The conf file's own table, described for the layout JSON parser and the editor page.** `dspcore.h` includes it at
   its TAIL, after the driver chain, because the `CONF_*` names at the bottom are the selected conf file's macros
-  (`DSP_WIDTH`, `DSP_HEIGHT`, `TFT_BORDER`, `MAX_WIDTH`, `SCROLLDELAY`, `SCROLLTIME`, `BOOTLOGOTOP`).
+  and the panel's own pace (`DSP_WIDTH`, `DSP_HEIGHT`, `TFT_BORDER`, `MAX_WIDTH`, `SCROLLPX`, `BOOTLOGOTOP`) - the
+  editor's "Display type" line explains the pace with `SCROLLPX` instead of telling an author to
+  type a scroll delay, because a layout no longer has one.
 - **`CONF_HAS_CONF_MACROS` is guarded on `DSP_TFT` / `DSP_OLED`, not on `DUMMYDISPLAY`.** Those two are what prove a
   conf file was included; in a build with no display there is no `TFT_BORDER` or `MAX_WIDTH` to read, so every
   constant falls back to 0.
@@ -4355,14 +4379,11 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   - The boot text line (`Display::_bootstring`, built in `Display::_bootScreen()`) is a `ScrollWidget` fed from the
     conf's plain `bootstrConf` `WidgetConfig`, so a string that fits is drawn statically at the conf's align (WA_CENTER
     still rules) and a longer one parks at the span's edge and scrolls. Its window and buffer are derived in code
-    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128), and its **scroll cadence is
-    borrowed from the panel's own
-    `apSettConf`** — `startscrolldelay`, `scrolldelta` and `scrolltime` only, never that entry's
-    `left/top/width/buffsize/fontsize`, which belong to its own line and differ on the round TFT (`left =
-    TFT_BORDER+32`, `width = MAX_WIDTH-64`) and the 220x176 (`width = DSP_WIDTH+10`). That inherits each panel's tuned
-    step: 1px on the OLEDs and small TFTs, 2px on the 220x176 and every panel 240px and up, 4px on the 428x142,
-    `apSettConf.widget.textsize > 0` is the guard if the entry is `{ }`, which zero-initialises it and would leave the
-    boot line standing still — the fallback is `SCROLLTIME`. **`offset` is the one field the conf cannot supply**:
+    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128), and its **pace comes from the panel
+    like every other line's**: `setScrollRole(SCROLL_ROLE_BOOT)` selects `SCROLLDELAY_BOOT` and the derived speed and
+    step (below). The block that used to borrow `apSettConf`'s `startscrolldelay`/`scrolldelta`/`scrolltime` field by
+    field is gone with those fields - a boot screen no longer inherits a message line's cadence, because there is no
+    per-line cadence to inherit. **`offset` is the one field the conf cannot supply**:
     it is the span's LEFT EDGE, not a margin (`WidgetConfig::offset`), and it is dead in the plain centred widget the
     conf declares — which is why every conf leaves it `0`. It goes live as soon as the line becomes a scroll, so with
     `width = MAX_WIDTH` it must be the border inset; left at `0` the line centred inside `[0, MAX_WIDTH)` and sat one
@@ -4390,12 +4411,85 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     step and takes the slot. The owner then keeps stepping in its own `loop()`, which claims nothing: `loop()` is now
     "step if I own it", and only the page hands the slot out. Consequences: no line can take two turns in a row while
     another wants one; the page's widget ORDER no longer decides who scrolls (a title 2 appended late in the layout
-    path used to sit after the weather row and was therefore never reached first); and a conf's `startscrolldelay`
-    of 0 - which every `weatherConf` in the tree writes, against `SCROLLDELAY` for every other line - no longer means
+    path used to sit after the weather row and was therefore never reached first); and a hold of 0 - `SCROLLDELAY_WEATHER`
+    and `SCROLLDELAY_BOOT` in `dspconf.h`, against `SCROLLDELAY` for every other role - no longer means
     "always". `_scrollReady()` folds the gates (`_present`, `_active`, `!_locked`, `_doscroll`, textsize) so the poll
     and the step cannot disagree; `_active` is in it because `_calcX()` claims the slot whether or not anything is
     drawn, so an inactive-but-unlocked line used to be able to own the slot invisibly. This is the "the weather line
     scrolls constantly and title 2 never gets a turn" report. See `plans/scroll-turn-fairness.md`.
+  - **The PACE is the panel's, not a layout's.** `ScrollConfig` is `{ WidgetConfig widget; uint16_t width; }` - the
+    retired `scrolldelay`/`scrolldelta`/`scrolltime` were the same numbers in nearly every layout, could only be
+    written as literals by the editor, and were the sole control over display bandwidth that an author could not see.
+    `dspconf.h` now owns `SCROLLPX` (**pixels per second at fontsize 1** - one column of the smallest glyph is
+    `CHARWIDTH` = 6 px - scaled by `sqrt(textsize)`, i.e. 100 / 141 / 173 / 200 / 224 % for sizes 1..5, and nudged up
+    with the panel's width: `(42 + (DSP_WIDTH - 128) / 44)`, so 42 at 128 px wide and 50 at 480. The width term is
+    calibrated on both panels by eye, because the same px/s replaces a 110-px row in a couple of seconds and a 460-px
+    row in seven or eight - the small screen reads as racing and the big one as sluggish. Affine, not proportional: a
+    readable character rate barely depends on the panel, only the sluggishness term grows with the row.
+    `SCROLL_PUSH_US_PER_PX` cannot stand in for it - that macro is a bootstrap estimate of step cost, replaced by the
+    measured mean after four steps, and it moves the step/pitch pair, never the speed), `SCROLL_DUTY` (100 - the whole
+    display task may go to one scrolling line. On a slow panel this is a
+    SMOOTHNESS knob rather than an FPS guard, because a cycle slower than any admissible pitch cannot be bought back by
+    the budget; what the budget buys is step resolution, and at 50 a 460-px line moved 2-4 px per paint and read as a
+    stutter while at 90 it moves 1 px. Measured cost of raising it on the 480x320: about 1-2% of the VU's frame),
+    `SCROLL_PUSH_US_PER_PX` (0.02f / 0.95f, an estimate used only until a step is measured), and the five holds
+    `SCROLLDELAY_META`/`_TITLES`/`_PLAYLIST`/`_WEATHER`/`_BOOT`. All of them are `#ifndef`, so `myoptions.h` still
+    overrides everything; `SCROLLTIME` and `SCROLLSTEP_MS` are gone - `options.h` warns once if an override still
+    defines either - because **there is no pitch knob**. A line says only WHICH KIND it is - `setScrollRole()`, called
+    at each construction in `display.cpp` (the screensaver line is `SCROLL_ROLE_WEATHER` at 75%, which is exact now
+    instead of a delta truncation) - and `init()` derives the rest.
+    **The size term is the square root of the cell.** "ms per character" is linear in the size, so every size runs one
+    character rate and it crawls at font 1 while racing at font 4; a constant pixel rate goes the other way and makes
+    small text unreadable. Pixel speed proportional to `sqrt(cell)` sits between them, and `_applyPace()` computes
+    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`. A QUADRATIC normalised at font 1 was tried and
+    reverted: it allows font 1 only 81 % of font 2's px/s, i.e. 1.6x its character rate.
+    **A perfect scroll is impossible on this hardware, and chasing it costs a day - do not.** A line can only paint on
+    a display-task pass (`DSP_TASK_DELAY`, 10 ms) and the panel needs the push it gets, so the derived pitch never
+    lands on that grid. Paying the distance from the clock makes the speed exact but the STEP uneven, and the lean a
+    push leaves at the panel is as wide as the step - the text then flickers; carrying the paint deadline instead keeps
+    the step constant but spends the remainder as a regular pulse; counting passes makes both exact and can only reach
+    `(1000 / pass) x (step / passes)`, which at font 1 on a 12 ms grid needs a 3-px step. So the delivered speed is
+    NOMINAL - 70-100 % of `SCROLLPX` - and the value is dialled by eye against real panels rather than derived.
+    **The step is WHOLE pixels and the pitch is derived from it.** A fractional step alternates its distance and can
+    owe a tick that moves nothing at all - which reads as a slow line AND as a stutter, and that is exactly what the
+    fractional version shipped first did on a monochrome panel. So `_applyPace()` chooses
+    `step = max(1, ceil(speed * dutyMin / 1000))` pixels from the duty budget and then `pitch = ceil(1000 * step / speed)`,
+    which keeps the speed exact, the cadence even, `pitch >= dutyMin` (so the budget holds) and the slow panel's settled
+    gap - the tear fix - intact. `_calcX()` therefore has no accumulator at all, and `_measureStep()` replaces the cost
+    estimate with the measured mean after four steps, re-deriving the step and the pitch together. **The duty test
+    mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest admissible pitch is
+    `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a 2.2 s pitch, the 1 s
+    cap clipped it, and the step became `speed x 1 s`, a station name crossing in three jumps. The second slip was a
+    stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every size to
+    0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling". Three
+    units meet in this one function (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
+    Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
+    chunks". It was never a rendering fault, and four candidates were withdrawn by measurement before the arithmetic
+    gave it away: *quantisation* (the step is fine - the row was run at `SCROLLPX 28`, one display pixel per step, and
+    the symptom survived), *the block clip* (a `textsize`-wide block shaved at the window edge leaves exactly the
+    columns a per-pixel test would, and `Adafruit_GFX::writeFillRect()` calls the VIRTUAL `fillRect()`, which
+    `psFrameBuffer` overrides with its buffer writer - so the scaled path never bypassed the framebuffer, whatever the
+    stale warning in that class says), *the missing partial itself* (`psFrameBuffer::columnInk(x)`, which counts
+    non-background pixels in a column, reported a non-zero range on every character, `ink=7..22` for the
+    maple-icon one), and *the framebuffer* (a `SCROLL_NO_FB` bisect forced the same row down `dsp` + `setClipping` and
+    fontsize 3 was still wrong there - that path also flashes on every step, so it is not a mode worth keeping).
+    The cause is in `_draw()`'s window string. A glyph sits at `cur + i*cell` with `cur` running 0 down to
+    `-(cell-1)`, so it can be partly visible while `i < (width - cur)/cell`, which reaches `width/cell + 1`; the code
+    kept only `width/cell + 1` characters (indices 0 .. n), one short. The LAST kept glyph therefore always showed
+    exactly `width % charWidth` pixels of itself - a constant that does not depend on `cur` - so it appeared that many
+    columns wide on the frame it first showed, and the rest slid in normally. On a 460-px room that overhang is 4 px at
+    cells of 6, 12 and 24 px but **10 px at the fontsize-3 cell of 18 px**, and minus the font's blank left bearing it
+    leaves four columns of ink popping at once - which is exactly the 4 columns reported, and why only fontsize 3 looked
+    broken. The fix is one character more: `_maxVis()` is `width/charWidth + 2` and `_winBytes()` sizes the string as
+    `_maxVis()*4 + 1`, used by `_draw()` and `setText()` on both the framebuffer and `dsp` paths, so the glyph halfway
+    into the window is emitted and clipped by the window edge one pixel at a time. Confirmed on the panel
+    ("buttery smooth"); every other size carried the same fault at 4 px rather than 10, so the rule fixes them all, and
+    the probe set that found it (`[SCROLL]`, `[PAINT]`, `columnInk()`, `left()`/`top()`) has been removed. The five scroll
+    cells are also gone from `conf_index.h`, so the editor page draws no such boxes (it is generic over `f.cells`) and
+    the device parser - which walks the CELL LIST, not the document's keys - ignores them in an old slot file;
+    `trim_scroll_conf()` in `conf_tool.py` drops them from a `.h` or a layout document on import. See
+    `plans/scroll-global-speed-and-delay.md`.
   - **A line erases only its OWN box; nothing clears it because another line moved onto it.** Three things remove a
     scroll line's pixels - its own `setText()` (the union of the old and new text rectangle, or the whole recorded span
     after it has scrolled - `_spanPainted()`), `lock()`/`_reset()` (`_clear()`, and `freeBuffer()` which erases the
@@ -4995,6 +5089,16 @@ block those differences *are* the picture, which is why the OLED looked wrong. S
 `vuSnapLit()`'s LED grid and the peak markers on the gaps - a `lead` offset inside the painter would have cut the tip
 block instead - and it leaves the shared painter untouched. See
 [`plans/screensaver-vu-equal-segments.md`](../plans/screensaver-vu-equal-segments.md).
+**The PLAYER page's bars now use the same rule**, from the other end: `VuWidget::_draw()` snaps `_len` itself to
+`per * (_len / per)` for the bar family only, immediately after `_cw`/`_ch` are resolved and BEFORE `_levels()`, so one
+snapped axis serves the measurement, the erase strips, the LED snap and the markers. `_cw`/`_ch` are deliberately left at
+the band's full size - in rotate mode `_cw = _len` was already taken - so the box, the canvas and the blit do not move and
+the leftover columns are simply never painted; the shortfall is at the loud end rather than split, because a layout's box
+cannot be re-centred. Before this, `_drawBars()` drew `ceil(len/step)` blocks with the last one clamped: the 128x64 Default
+layout (53 px, 10 segments, gap 1) had **11 blocks with an 11 px stub at the end**, and the second 128x64 layout 11 with a
+6 px stub. The trace styles are excluded - their axis is a time or frequency span. Keep the two rules in step: the
+screensaver snaps a copy of `bandsConf`, the player page snaps `_len`, and both must agree. See
+`plans/vu-bars-full-segments-player.md`.
 
 **What the meter draws is `dimension * vuLeft / vuThreshold`** - the live reading as a fraction of the meter's
 REFERENCE - and `get_VUlevel()` returns the length CLEARED from each bar, 8 bits a channel, so **0 means "nothing

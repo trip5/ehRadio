@@ -16,9 +16,9 @@
 
 
 const BootData _bootConfig PROGMEM = {
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .apTitleConf         = {{ TFT_BORDER+12, TFT_BORDER+28+20, 3, WA_CENTER }, MAX_WIDTH-24, 0, 3, SCROLLTIME },
-        .apSettConf          = {{ TFT_BORDER+32, 240-TFT_BORDER-34, 2, WA_LEFT }, MAX_WIDTH-64, 0, 2, SCROLLTIME },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .apTitleConf         = {{ TFT_BORDER+12, TFT_BORDER+28+20, 3, WA_CENTER }, MAX_WIDTH-24 },
+        .apSettConf          = {{ TFT_BORDER+32, 240-TFT_BORDER-34, 2, WA_LEFT }, MAX_WIDTH-64 },
         /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
         .apTitleBGConf       = {{ 0, 32+20, 0, 0 }, DSP_WIDTH, 30, false },
         /* WIDGETS             { offset, top, fontsize, align } */
@@ -40,13 +40,13 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER+12, TFT_BORDER+28+20, 3, WA_CENTER }, MAX_WIDTH-24, SCROLLDELAY, 3, SCROLLTIME*5/4 },
-        .title1Conf          = {{ TFT_BORDER, /*70*/90, 2, WA_CENTER }, MAX_WIDTH, SCROLLDELAY, 2, SCROLLTIME },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER+12, TFT_BORDER+28+20, 3, WA_CENTER }, MAX_WIDTH-24 },
+        .title1Conf          = {{ TFT_BORDER, /*70*/90, 2, WA_CENTER }, MAX_WIDTH },
         .title2Conf          = { }, // unused
         // .title2Conf        = {{ TFT_BORDER, 90, 2, WA_CENTER }, MAX_WIDTH, SCROLLDELAY, 2, SCROLLTIME },
-        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH, SCROLLDELAY/5, 2, SCROLLTIME },
-        .weatherConf         = {{ TFT_BORDER+30, 37, 1, WA_LEFT }, MAX_WIDTH-60, 0, 1, SCROLLTIME },
+        .playlistConf        = {{ TFT_BORDER, 112, 2, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER+30, 37, 1, WA_LEFT }, MAX_WIDTH-60 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER+56, 240-TFT_BORDER-6, 0, 0 }, MAX_WIDTH-112, 6+TFT_BORDER+1, true },
         .bufferbarConf       = {{ 0, 83, 0, 0 }, DSP_WIDTH, 1, false },

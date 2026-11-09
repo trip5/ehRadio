@@ -1214,7 +1214,12 @@ function setDspInfo() {
   var lines = ['Display type: ' + (DSP_FAMILY ? DSP_FAMILY + ' ' : '') + CONF.width + 'x' + CONF.height];
   if (CONF.hasConfMacros) {
     lines.push('Recommended on this display to allow ' + CONF.framewdt + ' pixels on the edges as a border');
-    lines.push('Also, use Scroll delay = ' + CONF.scrollDelay + ' and Scroll time = ' + CONF.scrollTime + ' for titles');
+    // Scrolling is the display's, not a layout's: a layout says where a line is and how wide, and dspconf.h sets the
+    // pace - so there is nothing here for an author to type, only something to know.  The speed is pixels per second at
+    // fontsize 1, and a larger font scales it by sqrt(size); the step and the redraw pitch are derived from the panel's
+    // own duty budget, so there is no pitch to quote.
+    lines.push('Scrolling is set by this display, not by a layout: ' + CONF.scrollPx +
+               ' px/s at font 1 (one 6 px column), larger text scaled by sqrt(size)');
   }
   el.innerHTML = lines.join('<br>');
 }

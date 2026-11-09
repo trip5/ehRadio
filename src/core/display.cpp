@@ -412,8 +412,11 @@ void Display::init() {
   _nums = new NumWidget();
   _clock = new ClockWidget();
   _meta = new ScrollWidget();
+  _meta->setScrollRole(SCROLL_ROLE_META);
   _title1 = new ScrollWidget();
+  _title1->setScrollRole(SCROLL_ROLE_TITLES);
   _plcurrent = new ScrollWidget();
+  _plcurrent->setScrollRole(SCROLL_ROLE_PLAYLIST);
   layoutCopy(config.store.layoutId, &activeLayout);
   _setLayoutPointers();
   SERIALLOG("done");
@@ -447,16 +450,13 @@ void Display::_bootScreen() {
   // its edge is the border inset itself.
   bootScroll.widget.offset = TFT_BORDER;
   bootScroll.width = MAX_WIDTH;
-  // The cadence is borrowed from the panel's own message line rather than hardcoded: apSettConf is the same
-  // species of line and its step and scrolltime are tuned per panel.  Only these three fields are taken, and a
-  // zeroed line is absent by the one rule, so fall back to a 1px step on the default tick.
-  const bool apSettUsable = presentOf(_bootConfig.apSettConf);
-  bootScroll.startscrolldelay = apSettUsable ? _bootConfig.apSettConf.startscrolldelay : 0;
-  bootScroll.scrolldelta      = apSettUsable ? _bootConfig.apSettConf.scrolldelta : 1;
-  bootScroll.scrolltime       = apSettUsable ? _bootConfig.apSettConf.scrolltime : SCROLLTIME;
+  // The pace is the panel's, like every other line's: SCROLL_ROLE_BOOT (dspconf.h) is the hold, and the speed and
+  // step are derived.  The block that used to borrow apSettConf's cadence field by field is gone with the fields.
   // BOOTSTR_LEN, not the widget default: this line's window is its own budget, sized for a locale label, a
   // 32 character SSID and the icon pair.
-  _bootstring = (TextWidget*) &_boot->addWidget(new ScrollWidget(bootScroll, BOOT_TXT_COLOR, 0, BOOTSTR_LEN));
+  ScrollWidget* bootLine = new ScrollWidget(bootScroll, BOOT_TXT_COLOR, 0, BOOTSTR_LEN);
+  bootLine->setScrollRole(SCROLL_ROLE_BOOT);
+  _bootstring = (TextWidget*) &_boot->addWidget(bootLine);
   _bootstring->setText(""); // empty until player.init happens
   _pager->addPage(_boot);
   _pager->setPage(_boot, true);
@@ -482,6 +482,7 @@ void Display::_buildPager() {
   _overLinePage = new Page();
   if (presentOf(*title2Conf_ptr)) {
     _title2 = new ScrollWidget(*title2Conf_ptr, config.theme.title2, config.theme.background);
+    _title2->setScrollRole(SCROLL_ROLE_TITLES);
   }
   _plbackground = new FillWidget(*playlBGConf_ptr, config.theme.plcurrentbg);
   _metabackground = new FillWidget(*metaBGConf_ptr, config.theme.metabg);
@@ -516,6 +517,7 @@ void Display::_buildPager() {
     // COMPOSED_LINE_BUFF, not the default: this widget is handed network.weatherBuf whole, which is built up to 511
     // bytes.  See plans/widget-text-buffer-sizes.md.
     _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background, COMPOSED_LINE_BUFF);
+    _weather->setScrollRole(SCROLL_ROLE_WEATHER);
   }
 
   if (_volbar)   _footer->addWidget(_volbar);
@@ -568,6 +570,7 @@ void Display::_buildPager() {
     updConf.widget.top = max<int16_t>(0, updConf.widget.top - CHARHEIGHT);
     _updLabel = new ScrollWidget(updConf,
                                  config.theme.title1, config.theme.background);
+    _updLabel->setScrollRole(SCROLL_ROLE_TITLES);
     _updLabel->lock(true);   // don't paint the label's background band unless updating
 
     // compute bar width once
@@ -621,6 +624,7 @@ void Display::_apScreen() {
     uint16_t mfg = config.theme.meta;
     uint16_t mbg = config.theme.metabg;
     ScrollWidget *bootTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apTitleConf, mfg, mbg));
+    bootTitle->setScrollRole(SCROLL_ROLE_BOOT);
     bootTitle->setText(l10n(L10N_LBL_AP_IMPROV_MODE));
     TextWidget *apname = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.apNameConf, config.theme.title1, config.theme.background, 30));
     apname->setText(l10n(L10N_LBL_APNAME));
@@ -637,6 +641,7 @@ void Display::_apScreen() {
       appass2->setText(AP_PASSWORD);
     #endif
     ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apSettConf, config.theme.title2, config.theme.background));
+    bootSett->setScrollRole(SCROLL_ROLE_BOOT);
     bootSett->setText(utility.ipToStr(WiFi.softAPIP()), l10n(L10N_MSG_CONNECT_OPEN));
     _pager->addPage(_boot);
     _pager->setPage(_boot);
@@ -660,8 +665,10 @@ void Display::_sdmanScreen() {
   uint16_t mfg = config.theme.meta;
   uint16_t mbg = config.theme.metabg;
   ScrollWidget *sdTitle = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apTitleConf, mfg, mbg));
+  sdTitle->setScrollRole(SCROLL_ROLE_BOOT);
   sdTitle->setText(l10n(L10N_LBL_SDMAN));
   ScrollWidget *sdUrl = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apSettConf, config.theme.title2, config.theme.background));
+  sdUrl->setScrollRole(SCROLL_ROLE_BOOT);
   sdUrl->setText(utility.ipToStr(WiFi.localIP()), l10n(L10N_MSG_OPEN));
   // apName2Conf, not apNameConf: the fontsize-2 title already occupies y=2..18 on a 128x64 and apNameConf's
   // top is 18, so the countdown drew over the title's last row.
@@ -1734,16 +1741,9 @@ void Display::_screensaverWidgets() {
     conf.widget.textsize = ssTextSize();
     conf.widget.align = WA_CENTER;
     conf.width = dsp.width() - TFT_BORDER * 2;
-    // Three quarters of the weather row's speed.  scrolldelta is pixels per step and scrolltime the ms between
-    // steps, so speed = delta/time and either one can carry the reduction; the step is preferred because it keeps
-    // the finer motion, but only where it divides exactly - a 1 px step (every OLED row) or the TFTs' 2 px scaled
-    // by 3/4 would truncate to 0, or to half the speed asked for, so those stretch the interval instead.
-    // startscrolldelay is left as weatherConf states it (0): the line moves as soon as it is up.
-    if (weatherConf_ptr->scrolldelta % 4 == 0) {
-      conf.scrolldelta = (uint8_t)(weatherConf_ptr->scrolldelta * 3 / 4);
-    } else {
-      conf.scrolltime = (uint16_t)(weatherConf_ptr->scrolltime * 4 / 3);
-    }
+    // Three quarters of the weather row's speed, and it is a plain percentage now: the pace is derived, so 75 scales
+    // SCROLLPX exactly instead of truncating a delta or stretching an interval and hoping the arithmetic stayed
+    // honest.  The hold is the weather row's own (SCROLLDELAY_WEATHER): the line moves as soon as it is up.
     // The mark is the widget's own now, so what a wrapping line shows reads exactly like the joins inside the
     // screensaver line above.
     // Black, never config.theme.background: the screensaver paints its own picture and its background is
@@ -1751,10 +1751,12 @@ void Display::_screensaverWidgets() {
     // coloured band over the black the rest of the panel shows.
     if (!_sstext) {
       _sstext = new ScrollWidget(conf, config.theme.textss, 0, COMPOSED_LINE_BUFF);
+      _sstext->setScrollRole(SCROLL_ROLE_WEATHER, 75);
       pages[PG_SCREENSAVER]->addWidget(_sstext);
     } else {
       // The size must be passed again: init() re-mallocs both string buffers at the size it is given.
       _sstext->init(conf, config.theme.textss, 0, COMPOSED_LINE_BUFF);
+      _sstext->setScrollRole(SCROLL_ROLE_WEATHER, 75);
     }
     _sstext->lock(false);
     _screensaverLine();
@@ -1944,6 +1946,7 @@ void Display::_reinitWidgets() {
   if (title2InLayout()) {
     if (!_title2) {
       _title2 = new ScrollWidget(*title2Conf_ptr, config.theme.title2, config.theme.background);
+      _title2->setScrollRole(SCROLL_ROLE_TITLES);
       pages[PG_PLAYER]->addWidget(_title2);
     } else {
       _title2->init(*title2Conf_ptr, config.theme.title2, config.theme.background);
@@ -1962,6 +1965,7 @@ void Display::_reinitWidgets() {
   if (weatherInLayout()) {
     if (!_weather) {
       _weather = new ScrollWidget(*weatherConf_ptr, config.theme.weather, config.theme.background, COMPOSED_LINE_BUFF);
+      _weather->setScrollRole(SCROLL_ROLE_WEATHER);
       pages[PG_PLAYER]->addWidget(_weather);
     } else {
       // The size has to be repeated here, exactly as the footer widgets do: init() re-mallocs both string buffers at

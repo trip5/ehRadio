@@ -77,6 +77,8 @@ static void setCell(uint8_t* rec, uint8_t type, uint8_t cell, int32_t v) {
       break;
     }
     case CT_SCROLL: {
+      // Only cells 0..4 exist.  The parse walks the CELL LIST and not the document's keys, so a document carrying
+      // more scroll cells simply never has them looked up.
       ScrollConfig* c = (ScrollConfig*)rec;
       switch (cell) {
         case 0: c->widget.offset = clampU16(v); break;
@@ -84,9 +86,6 @@ static void setCell(uint8_t* rec, uint8_t type, uint8_t cell, int32_t v) {
         case 2: c->widget.textsize = clampU16(v); break;
         case 3: c->widget.align = (WidgetAlign)clampAlign(v); break;
         case 4: c->width = clampU16(v); break;
-        case 5: c->startscrolldelay = clampU16(v); break;
-        case 6: c->scrolldelta = clampU8(v); break;
-        case 7: c->scrolltime = clampU16(v); break;
       }
       break;
     }
@@ -218,9 +217,6 @@ static int32_t getCell(const uint8_t* rec, uint8_t type, uint8_t cell) {
         case 2: return c->widget.textsize;
         case 3: return (int32_t)c->widget.align;
         case 4: return c->width;
-        case 5: return c->startscrolldelay;
-        case 6: return c->scrolldelta;
-        case 7: return c->scrolltime;
       }
       break;
     }

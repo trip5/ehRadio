@@ -10,9 +10,9 @@
 #define BOOTLOGOTOP     8
 
 const BootData _bootConfig PROGMEM = {
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .apTitleConf         = {{ TFT_BORDER+1, TFT_BORDER+1, 1, WA_CENTER }, MAX_WIDTH-2, 0, 1, SCROLLTIME },
-        .apSettConf          = {{ TFT_BORDER, 64-7, 1, WA_LEFT }, MAX_WIDTH, 0, 1, SCROLLTIME },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .apTitleConf         = {{ TFT_BORDER+1, TFT_BORDER+1, 1, WA_CENTER }, MAX_WIDTH-2 },
+        .apSettConf          = {{ TFT_BORDER, 64-7, 1, WA_LEFT }, MAX_WIDTH },
         /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
         //.apTitleBGConf       = {{ 0, 18, 0, WA_LEFT }, DSP_WIDTH, 1, false },
         .apTitleBGConf       = { }, // unused
@@ -37,12 +37,12 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ 2, 2, 1, WA_LEFT }, 252, 5000, 2, 35 },
-        .title1Conf          = {{ 2, 16, 1, WA_LEFT }, 144, 5000, 1, 20 },
-        .title2Conf          = {{ 2, 26, 1, WA_LEFT }, 144, 5000, 1, 20 },
-        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254, 1000, 1, 20 },
-        .weatherConf         = {{ 2, 52, 1, WA_LEFT }, 144, 0, 1, 20 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ 2, 2, 1, WA_LEFT }, 252 },
+        .title1Conf          = {{ 2, 16, 1, WA_LEFT }, 144 },
+        .title2Conf          = {{ 2, 26, 1, WA_LEFT }, 144 },
+        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254 },
+        .weatherConf         = {{ 2, 52, 1, WA_LEFT }, 144 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ 0, 61, 0, 0 }, 256, 3, true },
         .bufferbarConf       = { }, // unused
@@ -79,12 +79,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // BoomBox
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ 2, 2, 1, WA_LEFT }, 252, 5000, 2, 35 },
-        .title1Conf          = {{ 2, 15, 1, WA_LEFT }, 192, 5000, 1, 20 },
-        .title2Conf          = {{ 2, 26, 1, WA_LEFT }, 192, 5000, 1, 20 },
-        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254, 1000, 1, 20 },
-        .weatherConf         = {{ 2, 50, 1, WA_LEFT }, 253, 0, 1, 20 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ 2, 2, 1, WA_LEFT }, 252 },
+        .title1Conf          = {{ 2, 15, 1, WA_LEFT }, 192 },
+        .title2Conf          = {{ 2, 26, 1, WA_LEFT }, 192 },
+        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254 },
+        .weatherConf         = {{ 2, 50, 1, WA_LEFT }, 253 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ 0, 61, 0, 0 }, 256, 3, true },
         .bufferbarConf       = { }, // unused
@@ -121,12 +121,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // Fatty
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ 1, 1, 2, WA_LEFT }, 252, 5000, 2, 35 },
-        .title1Conf          = {{ 1, 21, 1, WA_LEFT }, 120, 5000, 1, 20 },
-        .title2Conf          = {{ 1, 30, 1, WA_LEFT }, 120, 5000, 1, 20 },
-        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254, 1000, 1, 20 },
-        .weatherConf         = {{ 1, 51, 1, WA_LEFT }, 120, 0, 1, 20 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ 1, 1, 2, WA_LEFT }, 252 },
+        .title1Conf          = {{ 1, 21, 1, WA_LEFT }, 120 },
+        .title2Conf          = {{ 1, 30, 1, WA_LEFT }, 120 },
+        .playlistConf        = {{ 1, 30, 1, WA_LEFT }, 254 },
+        .weatherConf         = {{ 1, 51, 1, WA_LEFT }, 120 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ 0, 61, 0, 0 }, 256, 3, true },
         .bufferbarConf       = { }, // unused

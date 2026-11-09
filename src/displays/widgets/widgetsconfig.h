@@ -22,12 +22,11 @@ struct WidgetConfig {
   uint8_t  align;
 };
 
+// A line says WHERE it is and how WIDE its window is.  How fast it scrolls, how often it steps and how long it holds
+// before a sweep are the panel's: SCROLLPX / SCROLL_DUTY / SCROLLDELAY_* in dspconf.h, overridable in myoptions.h.
 struct ScrollConfig {
   WidgetConfig widget;
   uint16_t width;
-  uint16_t startscrolldelay;
-  uint8_t scrolldelta;
-  uint16_t scrolltime;
 };
 
 struct FillConfig {
@@ -87,7 +86,7 @@ struct BitrateConfig {
    list with no warning at all. */
 
 struct BootData {
-    /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
+    /* SCROLLS             {{ offset, top, fontsize, align }, width } */
     ScrollConfig   apTitleConf;
     ScrollConfig   apSettConf;
     /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
@@ -104,7 +103,7 @@ struct BootData {
 };
 
 struct LayoutData {
-    /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
+    /* SCROLLS             {{ offset, top, fontsize, align }, width } */
     ScrollConfig metaConf;
     ScrollConfig title1Conf;
     ScrollConfig title2Conf;
@@ -184,7 +183,7 @@ struct LayoutData {
 // absence, so presentOf() must not read its zeros as "this field is gone".  The confs and the editor still
 // SPELL those zeros `{ }` - the spelling and the presence rule are two different questions (round 7).
 static inline bool presentOf(const WidgetConfig&  c) { return c.offset || c.top || c.textsize || c.align; }
-static inline bool presentOf(const ScrollConfig&  c) { return presentOf(c.widget) || c.width || c.startscrolldelay || c.scrolldelta || c.scrolltime; }
+static inline bool presentOf(const ScrollConfig&  c) { return presentOf(c.widget) || c.width; }
 static inline bool presentOf(const FillConfig&    c) { return presentOf(c.widget) || c.width || c.height || c.outlined; }
 static inline bool presentOf(const BitrateConfig& c) { return presentOf(c.widget) || c.dimension; }
 static inline bool presentOf(const VUBandsConfig& c) { return c.width || c.height || c.space || c.vspace || c.perheight; }

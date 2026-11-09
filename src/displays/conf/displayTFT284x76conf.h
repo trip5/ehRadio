@@ -13,9 +13,9 @@
 // check displayOLED128x64 if needing to share IP & RSSI with Weather & Battery
 
 const BootData _bootConfig PROGMEM = {
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .apTitleConf         = {{ TFT_BORDER+1, TFT_BORDER+1, 1, WA_CENTER }, MAX_WIDTH-2, 0, 1, SCROLLTIME },
-        .apSettConf          = {{ TFT_BORDER, 64-7, 1, WA_LEFT }, MAX_WIDTH, 0, 1, SCROLLTIME },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .apTitleConf         = {{ TFT_BORDER+1, TFT_BORDER+1, 1, WA_CENTER }, MAX_WIDTH-2 },
+        .apSettConf          = {{ TFT_BORDER, 64-7, 1, WA_LEFT }, MAX_WIDTH },
         /* LINES + RECTANGLES  {{ offset, top, 0, 0 }, width, height, outlined } */
         .apTitleBGConf       = {{ 0, 0,  0, 0 }, DSP_WIDTH, 19, false },
         /* WIDGETS             { offset, top, fontsize, align } */
@@ -38,12 +38,12 @@ const char _layoutNames[][64] PROGMEM = {
 
 const LayoutData _layouts[] PROGMEM = {
     {   // Default
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER+1, TFT_BORDER+1, 2, WA_LEFT }, MAX_WIDTH-2, SCROLLDELAY, 2, SCROLLTIME*7/4 },
-        .title1Conf          = {{ TFT_BORDER, 21, 1, WA_LEFT }, DSP_WIDTH/2+18, SCROLLDELAY, 1, SCROLLTIME },
-        .title2Conf          = {{ TFT_BORDER, 30, 1, WA_LEFT }, DSP_WIDTH/2+18, SCROLLDELAY, 1, SCROLLTIME },
-        .playlistConf        = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH, SCROLLDELAY/5, 1, SCROLLTIME },
-        .weatherConf         = {{ TFT_BORDER, 64-12, 1, WA_LEFT }, DSP_WIDTH/2+18, 0, 1, SCROLLTIME },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER+1, TFT_BORDER+1, 2, WA_LEFT }, MAX_WIDTH-2 },
+        .title1Conf          = {{ TFT_BORDER, 21, 1, WA_LEFT }, DSP_WIDTH/2+18 },
+        .title2Conf          = {{ TFT_BORDER, 30, 1, WA_LEFT }, DSP_WIDTH/2+18 },
+        .playlistConf        = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER, 64-12, 1, WA_LEFT }, DSP_WIDTH/2+18 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-4, 0, 0 }, DSP_WIDTH-TFT_BORDER*2, 3, true },
         .bufferbarConf       = { }, // unused
@@ -82,12 +82,12 @@ const LayoutData _layouts[] PROGMEM = {
         .rssiDigit           = false, // signal drawn as a number, not bars
     },
     {   // krzxsiek
-        /* SCROLLS             {{ offset, top, fontsize, align }, width, scrolldelay, scrolldelta, scrolltime } */
-        .metaConf            = {{ TFT_BORDER+1, TFT_BORDER, 2, WA_LEFT }, MAX_WIDTH-2, 5000, 2, 25 },
-        .title1Conf          = {{ TFT_BORDER+1, 21, 1, WA_LEFT }, DSP_WIDTH/2+18, 5000, 2, 25 },
-        .title2Conf          = {{ TFT_BORDER+1, 32, 1, WA_LEFT }, DSP_WIDTH/2+18, 5000, 2, 25 },
-        .playlistConf        = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH, 500, 2, 25 },
-        .weatherConf         = {{ TFT_BORDER+1, DSP_HEIGHT-12, 1, WA_CENTER }, MAX_WIDTH-2, 0, 2, 30 },
+        /* SCROLLS             {{ offset, top, fontsize, align }, width } */
+        .metaConf            = {{ TFT_BORDER+1, TFT_BORDER, 2, WA_LEFT }, MAX_WIDTH-2 },
+        .title1Conf          = {{ TFT_BORDER+1, 21, 1, WA_LEFT }, DSP_WIDTH/2+18 },
+        .title2Conf          = {{ TFT_BORDER+1, 32, 1, WA_LEFT }, DSP_WIDTH/2+18 },
+        .playlistConf        = {{ TFT_BORDER, 30, 1, WA_LEFT }, MAX_WIDTH },
+        .weatherConf         = {{ TFT_BORDER+1, DSP_HEIGHT-12, 1, WA_CENTER }, MAX_WIDTH-2 },
         /* SLIDER BARS         {{ offset, top, 0, 0 }, width, height, outlined } */
         .volbarConf          = {{ TFT_BORDER, DSP_HEIGHT-7, 0, 0 }, MAX_WIDTH, 5, true },
         .bufferbarConf       = {{ TFT_BORDER, DSP_HEIGHT-1, 0, 0 }, DSP_WIDTH, 2, false },

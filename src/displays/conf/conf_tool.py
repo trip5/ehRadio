@@ -43,9 +43,13 @@ OPTIONS:
                        comments can be affected.  A protected marker such as
                        // <--------- NEEDS EDITING! always keeps its own text.
     --import           Ingest a community yoRadio display conf file, creating a new
-                       displayTFT{W}x{H}conf.h or appending layout entries to an existing one.
-    --name, -n         (import) layout display name.  Required by --import.
-    --target           (import) target conf file; default is chosen by DSP_WIDTH x DSP_HEIGHT.
+                       displayTFT{W}x{H}conf.h or writing layout entries into an existing one.
+    --name, -n         (import) layout display name.  Required by --import; a layout document defaults
+                       to its own "name".  Either way the name is what decides whether an existing layout
+                       is UPDATED or a new one appended.
+    --target           Target conf file.  Left out, the size chooses it (DSP_WIDTH x DSP_HEIGHT for a
+                       community conf, the document's "screen" for a layout document), and the OLED/TFT
+                       token in the source file's own name settles the 128x128 pair.
     --dry-run          Write the .new.h temp files but never touch the originals.  The run ends
                        by offering to delete the temps, and prints their paths so they can be
                        read in the editor first.
@@ -58,6 +62,8 @@ EXAMPLES:
     py conf_tool.py --check displayTFT428x142conf.h --strict
     py conf_tool.py --import krzxsiek-displayNV3007_142conf.h --name "krzxsiek"
     py conf_tool.py --import krzxsiek-displayNV3007_142conf.h --name "krzxsiek" --dry-run
+    py conf_tool.py --fromjson ehRadioLayout-Big_VU_OLED128x64.json --dry-run
+    py conf_tool.py --fromjson layout.json --name "My Layout 2"          # a copy, not an update
 
 WHAT --clean DOES (per file, nothing is written until the final prompt):
     1. _layoutNames[] is checked against the number of _layouts[] entries.  Too few names are
@@ -87,6 +93,22 @@ WHAT --import DOES:
     comment), RSSI_DIGIT / HIDE_IP_ONLY_MAIN_SCREEN (set true), the BITRATE_FULL/TITLE_FIX block,
     and always emits a conforming entry: every master field, in master order, with
     `// <--------- NEEDS EDITING!` on any value the source did not provide.
+
+WHAT BOTH WRITING MODES DO WITH A NAME:
+    A layout name that ALREADY EXISTS is updated, not duplicated - a layout that is edited is exported
+    from the editor and comes back here, so the same name arrives twice.  Each entry is placed by its
+    name, compared truncated, trimmed and case-insensitively; one that matches is regenerated where it
+    stands, at the same index, because config.store.layoutId persists an index and a persisted layout
+    must not come to mean a different one.  _layoutNames[] is left alone then, so the entry keeps the
+    conf's own spelling, and only a name that is genuinely new is appended - entry and name together.
+    An existing name is always asked about first:
+
+        "Big VU" already exists as layout 1 of displayOLED128x64conf.h.
+        Update "Big VU"? [y/N]:
+
+    Answering n writes nothing at all; --name "<something else>" is how a copy is made instead.  Before
+    any of it, the conf's own DSP_WIDTH x DSP_HEIGHT must agree with the layout's size: an update
+    replaces a layout that lives on that panel.
 """
 
 import re, sys, os, glob, shutil
@@ -344,6 +366,117 @@ def indent_of(line):
 
 
 # ==============================================================================
+#  Placing entries in _layouts[] (shared by the two write passes)
+# ==============================================================================
+# A layout that is edited is exported from the editor and comes back here, so the same name arrives twice.  The
+# append-only rule this replaces was chosen so no layout's index moves - config.store.layoutId persists one - and
+# that reason still holds, which is why an update replaces the entry WHERE IT STANDS rather than being deleted and
+# appended: the index survives, and the device keeps using the layout it was already using.
+
+def entry_spans(lines, ls, le):
+    """[(start, end, name)] for every entry of a `_layouts[]` block, as absolute line indices.
+
+    The same walk as split_entries(), recording WHERE each entry is instead of copying its lines, so an entry can be
+    replaced where it stands.  count_braces() ignores braces inside comments, which is what makes the walk possible
+    at all: every entry carries section headers of its own."""
+    spans, start, depth = [], None, 0
+    for i in range(ls + 1, le):
+        if start is None:
+            if not re.match(r'^\s*\{', lines[i]):
+                continue
+            start, depth = i, count_braces(lines[i])
+        else:
+            depth += count_braces(lines[i])
+        if depth <= 0:
+            spans.append((start, i, entry_name([lines[start]])))
+            start = None
+    return spans
+
+
+def name_key(text):
+    """What two layout names have to share before they are the same layout.
+
+    trunc_name() first, because that is the name as it will be written: a 60-character name and its truncated form
+    in the conf are one layout.  Case is ignored and runs of spaces collapse - the editor's name field is free text,
+    and `big vu` appending a twin of `Big VU` is exactly the failure this rule exists to stop."""
+    return ' '.join(trunc_name(text or '').split()).casefold()
+
+
+def place_entries(lines, items, out_name, converted_from='the source'):
+    """[(label, build)] written into a conf's `_layouts[]`: an entry whose name already exists is UPDATED where it
+    stands, the rest are appended.  Returns the new line list.
+
+    An update leaves _layoutNames[] alone on purpose: the entry keeps the conf's own spelling of its name, and only
+    a genuinely new layout adds a name.  `build(label)` returns `(entry_text, converted, not_found)` and is called
+    with the name the entry will carry, so an update is regenerated under that spelling.  A name that already
+    exists is asked about, and a refusal ends the run before anything is written."""
+    ls, le = find_block(lines, r'_layouts\[\]\s+PROGMEM\s*=\s*\{')
+    if ls is None:
+        die(f"{out_name} has no _layouts[]")
+    ns, ne = find_block(lines, r'_layoutNames\[\]\[\d+\]\s+PROGMEM\s*=\s*\{')
+    if ns is None:
+        die(f"{out_name} has no _layoutNames[]")
+    spans = entry_spans(lines, ls, le)
+
+    by_name = {}
+    for idx, (_s, _e, nm) in enumerate(spans):
+        by_name.setdefault(name_key(nm), (idx, nm))
+
+    plan = []                      # (kind, index, the label the entry will carry, builder)
+    for label, build in items:
+        hit = by_name.get(name_key(label))
+        if hit is None:
+            plan.append(('add', None, label, build))
+            continue
+        idx, existing = hit
+        print(f'\n  "{existing}" already exists as layout {idx} of {out_name}.')
+        start, end, _nm = spans[idx]
+        # A regenerated entry is built from values, so a note a human wrote into the old one - "clock disappears
+        # when VU is on", or a commented-out alternative - has nowhere to come from.  Say so before the question,
+        # because it is part of what replacing that entry costs.  The tool's own `// unused` and `NEEDS EDITING`
+        # markers are not a human's note and are not counted.
+        notes = [l for l in lines[start + 1:end + 1]
+                 if '//' in l and '// unused' not in l and 'NEEDS EDITING' not in l]
+        if notes:
+            print(f'  note: the entry being replaced carries {len(notes)} hand-written comment(s); a layout '
+                  f'document holds values only, so they are not carried over')
+        if not ask(f'  Update "{existing}"? [y/N]: ', False):
+            print('\nNothing written.  Re-run with --name "<something else>" to add it as a new layout instead.\n')
+            sys.exit(1)
+        plan.append(('update', idx, existing, build))
+
+    built, updated, added = [], [], []
+    for kind, idx, label, build in plan:
+        text, conv, nf = build(label)
+        print(f'  {label}: {conv} values from {converted_from}, {nf} needing editing')
+        built.append((kind, idx, label, text))
+        (updated if kind == 'update' else added).append(label)
+
+    out = list(lines)
+    # A replacing entry can change the line count, so updates go in from the BOTTOM up and every span above keeps
+    # the indices it was measured with.
+    for kind, idx, _label, text in sorted((b for b in built if b[0] == 'update'),
+                                          key=lambda b: b[1], reverse=True):
+        start, end, _nm = spans[idx]
+        out[start:end + 1] = text.split('\n')
+
+    if added:
+        ns, ne = find_block(out, r'_layoutNames\[\]\[\d+\]\s+PROGMEM\s*=\s*\{')
+        old_names = [l.strip().strip(',').strip('"') for l in out[ns + 1:ne] if l.strip()]
+        names_block = [out[ns]] + [f'    "{n}",' for n in old_names + added] + ['};']
+        out = out[:ns] + names_block + out[ne + 1:]
+        ls, le = find_block(out, r'_layouts\[\]\s+PROGMEM\s*=\s*\{')
+        # At the END of _layouts[], which is also the end of the array, so no existing layout's index moves.
+        out[le:le] = [text for kind, _i, _l, text in built if kind == 'add']
+
+    for label in updated:
+        print(f'  updated layout {by_name[name_key(label)][0]} ("{label}")')
+    for label in added:
+        print(f'  "{label}" appended at the end of _layouts[]')
+    return out
+
+
+# ==============================================================================
 #  Master-driven block rewriting (shared by the clean pass and the import pass)
 # ==============================================================================
 
@@ -381,14 +514,25 @@ def trim_bands_conf(val):
     return val
 
 
-def trim_scroll_conf(val):
-    """ScrollConfig no longer carries buffsize or uppercase, and an old source still passes both - emitting
-    them verbatim is a "too many initializers" error.  The buffer is WIDGET_BUFF_SIZE in options.h (every conf
-    wrote the same 140) and uppercase never did anything (PRETEXT_ALLCAPS replaced it), so both are dropped.
+_SCROLL_TRIM_REPORTED = False
 
-    The leading widget group is kept whole, because it has braces of its own; only a remainder of exactly the
-    old six parts is trimmed, and a comment anywhere in it stops the trim so a value a human wrote is never
-    silently rearranged."""
+
+def trim_scroll_conf(val):
+    """ScrollConfig keeps only its WIDGET group and `width`: the pace fields are retired, not converted.
+
+    A scrolling line no longer carries a scrolldelay, a scrolldelta or a scrolltime.  A layout says WHERE a line is
+    and how WIDE its window is; the panel says how fast anything moves (SCROLLPX, in pixels per second at fontsize 1,
+    SCROLL_DUTY and the SCROLLDELAY_* holds, all in dspconf.h).  Every historical shape therefore collapses to
+    `{{ offset, top, fontsize, align }, width }`:
+
+        {{ 1, 1, 2, WA_LEFT }, 126, 5000, 2, 35 }              ->  {{ 1, 1, 2, WA_LEFT }, 126 }
+        {{ 1, 1, 2, WA_LEFT }, 140, false, 126, 5000, 2, 35 }  ->  {{ 1, 1, 2, WA_LEFT }, 126 }
+
+    The leading widget group is kept whole, because it has braces of its own, and `width` is the first cell after it
+    in both shapes (the older one also carried buffsize and uppercase, retired before these).  A comment anywhere in
+    the tail stops the trim rather than risk rearranging a value a human wrote, an unrecognised count is left alone
+    for a human to read, and a line already in the new shape is returned untouched - so the pass is idempotent."""
+    global _SCROLL_TRIM_REPORTED
     s = val.strip()
     if not (s.startswith('{') and s.endswith('}')):
         return val
@@ -399,9 +543,19 @@ def trim_scroll_conf(val):
     if '//' in tail or '/*' in tail:
         return val
     rest = [p.strip() for p in tail.split(',') if p.strip()]
-    if len(rest) != 6:
-        return val
-    return '{{ ' + group[1:-1].strip() + ' }, ' + ', '.join(rest[2:]) + ' }'
+    if len(rest) == 1:
+        return val                          # already `{{ ... }, width }`
+    if len(rest) == 4:                      # width, scrolldelay, scrolldelta, scrolltime
+        width = rest[0]
+    elif len(rest) == 6:                    # buffsize, uppercase, width, scrolldelay, scrolldelta, scrolltime
+        width = rest[2]
+    else:
+        return val                          # an unrecognised shape: leave it for a human to read
+    if not _SCROLL_TRIM_REPORTED:
+        _SCROLL_TRIM_REPORTED = True
+        print("NOTE: scrolldelay / scrolldelta / scrolltime are retired - the display class sets the pace "
+              "(dspconf.h).  Dropped from every ScrollConfig; `width` is kept.")
+    return '{{ ' + group[1:-1].strip() + ' }, ' + width + ' }'
 
 
 def force_vu_boombox(value):
@@ -1356,10 +1510,101 @@ def finish(out_path, new_text, dry_run, out_name):
         print("Temp file deleted.")
 
 
+# ------------------------------------------------------------------------------
+#  Which conf file a layout goes into (shared by the two write passes)
+# ------------------------------------------------------------------------------
+TARGET_RE = re.compile(r'^display(TFT|OLED)(\d{2,4})x(\d{2,4})conf\.h$')
+# The family is written in the SOURCE file's own name far more often than anywhere else - `..._OLED128x64.json`,
+# `foo-displayTFT480x320conf.h` - and 128x128 is the one size where both families ship a conf, so it is the one
+# case where a layout can arrive with two possible homes and nothing else to go on.
+FAMILY_HINT_RE = re.compile(r'(OLED|TFT)\D{0,3}(\d{2,4})x(\d{2,4})', re.IGNORECASE)
+
+
+def _conf_size(path):
+    """(width, height) from a conf's own DSP_WIDTH/DSP_HEIGHT, or (None, None)."""
+    text = read_text(path)
+    dw = re.search(r'#define\s+DSP_WIDTH\s+(\d+)', text)
+    dh = re.search(r'#define\s+DSP_HEIGHT\s+(\d+)', text)
+    return (int(dw.group(1)), int(dh.group(1))) if dw and dh else (None, None)
+
+
+def _family_hint(source_name):
+    """'OLED' or 'TFT' as the source file's own name spells it, else None."""
+    m = FAMILY_HINT_RE.search(source_name or '')
+    return m.group(1).upper() if m else None
+
+
+def target_conf(script_dir, target, width, height, source_name, may_create=True):
+    """The conf file a layout is written into, as (out_name, full path, is_oled).
+
+    --target wins (and may be given without the `.h`, like --check's file).  Otherwise the size picks it out of this
+    directory - one match answers both the file and the family - and only when the size alone cannot decide is
+    anything asked: the 128x128 pair, where the source's own filename is asked first, and a size no conf covers,
+    where a file has to be created.  `may_create` is False for the layout-document pass, which cannot create one:
+    it would be asking a question whose answer it is about to refuse."""
+    if target:
+        out_name = os.path.basename(target)
+        path = os.path.join(script_dir, out_name)
+        if not os.path.exists(path) and os.path.exists(path + '.h'):
+            out_name, path = os.path.basename(path + '.h'), path + '.h'
+        up = out_name.upper()
+        oled = 'OLED' in up
+        if may_create and not oled and 'TFT' not in up and not os.path.exists(path):
+            oled = ask(f"Creating {out_name}, which says neither TFT nor OLED. Is this display an OLED? [y/N]: ", False)
+        return out_name, path, oled
+
+    cands = [f for f in sorted(os.listdir(script_dir))
+             if TARGET_RE.match(f) and int(TARGET_RE.match(f).group(2)) == width
+             and int(TARGET_RE.match(f).group(3)) == height]
+    if len(cands) == 1:
+        return cands[0], os.path.join(script_dir, cands[0]), 'OLED' in cands[0].upper()
+
+    hint = _family_hint(source_name)
+    if hint and len(cands) > 1:
+        picked = [f for f in cands if f.upper().startswith('DISPLAY' + hint)]
+        if len(picked) == 1:
+            print(f"  {width}x{height} has an OLED and a TFT conf; the source name "
+                  f"{os.path.basename(source_name or '')} says {hint}")
+            return picked[0], os.path.join(script_dir, picked[0]), hint == 'OLED'
+
+    if cands:
+        oled = ask(f"{width}x{height} exists as {' and '.join(cands)}. Is this display an OLED? [y/N]: ", False)
+    elif may_create:
+        # No file here matches the source size, and a community conf cannot say which family it is for - a yoRadio
+        # OLED conf and a yoRadio TFT conf are the same band-plus-rule pair - so ask.  The answer names the file as
+        # well as deciding the meta pair order.
+        oled = ask(f"No conf here matches {width}x{height}. Is this display an OLED? [y/N]: ", False)
+    else:
+        oled = False       # the caller refuses a missing conf; the family would only name the file it cannot make
+    out_name = f"display{'OLED' if oled else 'TFT'}{width}x{height}conf.h"
+    return out_name, os.path.join(script_dir, out_name), oled
+
+
+def check_target_size(path, out_name, width, height):
+    """Refuse a conf that is not the size the layout was drawn for.
+
+    An appended layout lives on that panel and an UPDATE replaces one that does, so a name match must never be able
+    to write 128x64 geometry into a 480x320 conf.  The size comes out of the conf's own NAME first, because these
+    files name their panel and take DSP_WIDTH/DSP_HEIGHT from options.h rather than defining them; the defines are
+    the fallback for a file named to some other scheme."""
+    if not os.path.exists(path) or width is None or height is None:
+        return
+    m = TARGET_RE.match(os.path.basename(path))
+    tw, th = (int(m.group(2)), int(m.group(3))) if m else _conf_size(path)
+    if tw is None or th is None:
+        print(f"  note: {out_name} names no size and defines no DSP_WIDTH/DSP_HEIGHT - not checked")
+        return
+    if (tw, th) != (width, height):
+        die(f"{out_name} is {tw}x{th} and this layout is {width}x{height} - "
+            f"a layout cannot be written into a conf for another screen")
+
+
 def run_import(community_path, name, target, dry_run, script_dir):
     master = Master(os.path.join(script_dir, MASTER_REL))
     if not os.path.exists(community_path):
         die(f"file not found: {community_path}")
+    if community_path.lower().endswith('.json'):
+        die("this is a layout document, not a community conf file - it goes through --fromjson")
     data = parse_conf(community_path)
     if data['width'] is None or data['height'] is None:
         die("DSP_WIDTH/DSP_HEIGHT not found - is this a valid conf file?")
@@ -1370,27 +1615,8 @@ def run_import(community_path, name, target, dry_run, script_dir):
         die(f"missing mandatory widget(s): {', '.join(missing)} - is this a valid conf file?")
 
     basename = os.path.basename(community_path)
-    if target:
-        out_name = os.path.basename(target)
-        target_full = os.path.join(script_dir, out_name)
-        oled = 'OLED' in out_name.upper()
-        if not oled and 'TFT' not in out_name.upper() and not os.path.exists(target_full):
-            oled = ask(f"Creating {out_name}, which says neither TFT nor OLED. Is this display an OLED? [y/N]: ", False)
-    else:
-        TARGET_RE = re.compile(r'^display(TFT|OLED)(\d{2,4})x(\d{2,4})conf\.h$')
-        cands = [f for f in os.listdir(script_dir)
-                 if TARGET_RE.match(f) and int(TARGET_RE.match(f).group(2)) == data['width']
-                 and int(TARGET_RE.match(f).group(3)) == data['height']]
-        if len(cands) == 1:
-            out_name = cands[0]        # an existing conf answers it: the filename is the family
-            oled = 'OLED' in out_name.upper()
-        else:
-            # A new conf.  No file here matches the source size, and the source cannot say which family
-            # it is for - a yoRadio OLED conf and a yoRadio TFT conf are the same band-plus-rule pair -
-            # so ask.  The answer names the file as well as deciding the meta pair order.
-            oled = ask(f"No conf here matches {data['width']}x{data['height']}. Is this display an OLED? [y/N]: ", False)
-            out_name = f"display{'OLED' if oled else 'TFT'}{data['width']}x{data['height']}conf.h"
-        target_full = os.path.join(script_dir, out_name)
+    out_name, target_full, oled = target_conf(script_dir, target, data['width'], data['height'], basename)
+    check_target_size(target_full, out_name, data['width'], data['height'])
     normalise_meta_pair(data, oled)
 
     if not os.path.exists(target_full):
@@ -1398,39 +1624,20 @@ def run_import(community_path, name, target, dry_run, script_dir):
         finish(target_full, create_target_file(target_full, data, name, master), dry_run, out_name)
         return
 
-    print(f"\nImporting {basename} into {out_name} as \"{name}\"...")
-    tc = read_text(target_full)
-    ls, le = find_block(tc.split('\n'), r'_layouts\[\]\s+PROGMEM\s*=\s*\{')
-    if ls is None:
-        die(f"{out_name} has no _layouts[]")
-
-    entries = []
-    labels = []
+    print(f"\nWriting {out_name} from {basename} as \"{name}\"...")
     if data['has_boombox']:
-        combos = [(name, data['configs_normal'], False, ''),
-                  (f'{name} (BoomBox)', data['configs_boombox'], True, ' (BoomBox)')]
+        combos = [(name, data['configs_normal'], False),
+                  (f'{name} (BoomBox)', data['configs_boombox'], True)]
     elif data['boombox_mandatory']:
-        combos = [(name, data['configs_normal'], True, ' (BoomBox mandatory)')]
+        combos = [(name, data['configs_normal'], True)]
     else:
-        combos = [(name, data['configs_normal'], False, '')]
-    for lname, cfgs, bb, _suffix in combos:
-        et, conv, nf = emit_import_entry(trunc_name(lname), cfgs, master, data['hidden_fields'], bb)
-        entries.append(et)
-        labels.append(trunc_name(lname))
-        print(f"  {trunc_name(lname)}: {conv} values from the source, {nf} needing editing")
-
-    lines = tc.split('\n')
-    ns, ne = find_block(lines, r'_layoutNames\[\]\[\d+\]\s+PROGMEM\s*=\s*\{')
-    if ns is None:
-        die(f"{out_name} has no _layoutNames[]")
-    old_names = [l.strip().strip(',').strip('"') for l in lines[ns + 1:ne] if l.strip()]
-    new_names = old_names + labels
-    names_block = [lines[ns]] + [f'    "{n}",' for n in new_names] + ['};']
-    out = lines[:ns] + names_block + lines[ne + 1:]
-    shift = len(names_block) - (ne - ns + 1)
-    ls2, le2 = ls + shift, le + shift
-    out = out[:le2] + entries + out[le2:]
-
+        combos = [(name, data['configs_normal'], False)]
+    # A BoomBox variant is two layouts out of one file, so each half is placed on its own name: one of them may
+    # already exist while the other does not.
+    items = [(trunc_name(lname),
+              (lambda lbl, cfgs=cfgs, bb=bb: emit_import_entry(lbl, cfgs, master, data['hidden_fields'], bb)))
+             for lname, cfgs, bb in combos]
+    out = place_entries(read_text(target_full).split('\n'), items, out_name)
     finish(target_full, '\n'.join(out), dry_run, out_name)
 
 
@@ -1571,47 +1778,32 @@ def run_fromjson(json_path, name, target, dry_run, script_dir):
     width, height = (int(m.group(1)), int(m.group(2))) if m else (None, None)
     if not name:
         name = doc.get('name') or os.path.splitext(os.path.basename(json_path))[0]
+    if width is None and not target:
+        die("the document carries no \"screen\", so --target has to name the conf file")
 
-    if target:
-        out_name = os.path.basename(target)
-    else:
-        if width is None or height is None:
-            die("the document carries no \"screen\", so --target has to name the conf file")
-        cands = [f for f in os.listdir(script_dir)
-                 if re.match(rf'^display(TFT|OLED){width}x{height}conf\.h$', f)]
-        if len(cands) != 1:
-            die(f"{len(cands)} conf file(s) here match {width}x{height} - name one with --target")
-        out_name = cands[0]
-    target_full = os.path.join(script_dir, out_name)
+    out_name, target_full, _oled = target_conf(script_dir, target, width, height,
+                                               os.path.basename(json_path), may_create=False)
     if not os.path.exists(target_full):
-        # --import creates a conf file; this pass has a conf file's macros to read, so it has to exist.
-        die(f"{out_name} does not exist - use --import to create a conf file")
+        # This pass needs a conf file's macros to read - the document carries no #define, no BootData and no
+        # STRINGS - so it appends to one.  Creating one stays --import's job.
+        die(f"{out_name} does not exist - a layout document cannot create a conf file, so import a community "
+            f"conf file with --import first")
+    check_target_size(target_full, out_name, width, height)
 
-    conf_text = read_text(target_full)
     configs = entry_from_doc(doc, master)
     if not configs:
         die("the document carries no field this tool knows - is it a layout file?")
+    # The same two load-bearing lines --import guards: a document that never carried them would be written as `{ }`
+    # and --clean refuses to repair those, so refuse the document instead.
+    carried = {f for f, _v in configs}
+    missing = [f for f in MANDATORY_LAYOUT_FIELDS if f not in carried]
+    if missing:
+        die(f"the document has no {', '.join(missing)} - those two are load bearing and cannot be left blank")
 
-    print(f"\nAppending {out_name} as \"{name}\"...")
-    et, conv, nf = emit_import_entry(trunc_name(name), configs, master, set())
-    print(f"  {trunc_name(name)}: {conv} values from the document, {nf} needing editing")
-
-    lines = conf_text.split('\n')
-    ls, le = find_block(lines, r'_layouts\[\]\s+PROGMEM\s*=\s*\{')
-    if ls is None:
-        die(f"{out_name} has no _layouts[]")
-    ns, ne = find_block(lines, r'_layoutNames\[\]\[\d+\]\s+PROGMEM\s*=\s*\{')
-    if ns is None:
-        die(f"{out_name} has no _layoutNames[]")
-    old_names = [l.strip().strip(',').strip('"') for l in lines[ns + 1:ne] if l.strip()]
-    names_block = [lines[ns]] + [f'    "{n}",' for n in old_names + [trunc_name(name)]] + ['};']
-    out = lines[:ns] + names_block + lines[ne + 1:]
-    shift = len(names_block) - (ne - ns + 1)
-    ls2, le2 = ls + shift, le + shift
-    # At the END of _layouts[], which is also the end of the array, so no layout's index moves and a
-    # persisted config.store.layoutId cannot come to mean a different layout.
-    out = out[:le2] + [et] + out[le2:]
-
+    label = trunc_name(name)
+    print(f"\nWriting {out_name} as \"{label}\"...")
+    items = [(label, lambda lbl: emit_import_entry(lbl, configs, master, set()))]
+    out = place_entries(read_text(target_full).split('\n'), items, out_name, 'the document')
     finish(target_full, '\n'.join(out), dry_run, out_name)
 
 
@@ -1665,7 +1857,7 @@ def _num(text):
 
 
 def _outer_parts(value):
-    """The fields after the widget group: ScrollConfig (width, scrolldelay...), FillConfig
+    """The fields after the widget group: ScrollConfig (width only - the pace fields are retired), FillConfig
     (width, height, outlined), BitrateConfig (dimension)."""
     v = _clean_value(value)
     m = re.match(r'^\{\s*\{[^}]*\}\s*,?\s*(.*?)\s*\}$', v, re.S)

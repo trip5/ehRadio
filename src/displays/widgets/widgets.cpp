@@ -185,7 +185,8 @@ void TextWidget::_draw() {
  ************************/
 
 // The mark a looping line prints between its tail and its head, and what the screensaver's info line joins its own parts with.
-#define SCROLL_MARK_TEXT "\xC2\xB7" // « U+00B7 "Bullet" in UTF-8: a bare 0xB7 byte is dropped as a stray continuation
+//#define SCROLL_MARK_TEXT "\xC2\xB7" // « U+00B7 "Bullet" in UTF-8: a bare 0xB7 byte is dropped as a stray continuation
+#define SCROLL_MARK_TEXT "\036" // Round Bullet
 #define SCROLL_MARK_ICON "\007\010" // Maple Icon (Happy Canada Day!)
 // A function-local static because there is one mark shape at a time and the mark is consumed immediately either way- copied by the widget, concatenated by the screensaver line.
 const char* scrollMark() {
@@ -217,19 +218,16 @@ void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, u
   TextWidget::init(conf.widget, fgcolor, bgcolor, buffsize);
   if (_window) { free(_window); _window = nullptr; }
   _x = conf.widget.offset;
-  _startscrolldelay = conf.startscrolldelay;
-  _scrolldelta = conf.scrolldelta;
-  _scrolltime = conf.scrolltime;
   _charSize(_config.textsize, _charWidth, _textheight);
   _setMark(scrollMark());     // after _charSize: _sepwidth is measured with _charWidth
   _width = conf.width;
   if (_width > (uint16_t)MAX_WIDTH) _width = (uint16_t)MAX_WIDTH;
   _backMove.width = _width;
   // The span is the room this line has, not what it paints: _syncWindow() narrows the window to the text
-  // whenever the text fits, and widens it back to the room only while the line scrolls.  One extra
-  // character of room in _window, because a scrolling line deliberately emits the glyph that is only
-  // partly visible at the edge (see _draw()).
-  uint16_t wndsz = _width / _charWidth * 4 + 5;   /* worst-case: 4-byte UTF-8 chars, plus one */
+  // whenever the text fits, and widens it back to the room only while the line scrolls.  The string needs room for
+  // TWO characters past the room itself - the one being eaten at the left edge and the one entering at the right -
+  // and _winBytes() carries that arithmetic with the reason (see _maxVis() in the header).
+  uint16_t wndsz = _winBytes();
   _window = (char *) malloc(sizeof(char) * wndsz);
   memset(_window, 0, wndsz);
   _winx = _winw = 0;
@@ -243,6 +241,77 @@ void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, u
     // window that was never blitted is not erased when it goes (see psFrameBuffer::freeBuffer()).
     _syncWindow(true);
   #endif
+  // Last, once _width and _textheight are known: the pace depends on the window's area.
+  _applyPace();
+}
+
+// A line's hold before each sweep comes from its ROLE; dspconf.h owns the five values.
+static uint16_t scrollHoldFor(ScrollRole_e role) {
+  switch (role) {
+    case SCROLL_ROLE_META:     return SCROLLDELAY_META;
+    case SCROLL_ROLE_PLAYLIST: return SCROLLDELAY_PLAYLIST;
+    case SCROLL_ROLE_WEATHER:  return SCROLLDELAY_WEATHER;
+    case SCROLL_ROLE_BOOT:     return SCROLLDELAY_BOOT;
+    case SCROLL_ROLE_TITLES:
+    default:                   return SCROLLDELAY_TITLES;
+  }
+}
+
+void ScrollWidget::setScrollRole(ScrollRole_e role, uint8_t speedPct) {
+  _role = role;
+  _speedPct = speedPct ? speedPct : 100;
+  _applyPace();
+}
+
+// Work out how fast a line moves, how far it steps and how often, from the panel's numbers (dspconf.h) and this line's
+// own geometry.  Called from init(), from setScrollRole(), and once more after the first steps have been measured.
+void ScrollWidget::_applyPace() {
+  // Speed.  SCROLLPX is px/s at fontsize 1, and sqrt(textsize) scales it: a cell is 6 x textsize px, so a pixel speed
+  // proportional to the cell's square root makes a bigger font move faster in px/s while its character rate falls.
+  const uint32_t base = (uint32_t)(SCROLLPX ? SCROLLPX : 1);
+  const uint32_t pct  = (uint32_t)(_speedPct ? _speedPct : 100);
+  const uint32_t ts   = (uint32_t)(_config.textsize > 16 ? 16 : _config.textsize);  // a clamp no conf can reach
+  // 100 * sqrt(ts), exact by search: 100 / 141 / 173 / 200 / 224 % for sizes 1..5.
+  uint32_t scalePct = 100;
+  while ((scalePct + 1) * (scalePct + 1) <= ts * 10000UL) scalePct++;
+  uint32_t px = base * scalePct / 100UL;
+  px = px * pct / 100UL;
+  if (!px) px = 1;
+  _speedPxS = (uint16_t)(px > 0xFFFFUL ? 0xFFFFUL : px);
+  // Step and pitch.  A step is WHOLE pixels on purpose: a fractional one alternates (1, 1, 1, 2...) and can owe a
+  // tick that moves nothing at all, which reads both as a slow line and as a stutter.  So the step comes from the
+  // panel's budget and the pitch follows from it, which keeps the speed exact and the cadence even:
+  //
+  //   dutyMin = cost * 100 / (SCROLL_DUTY * 1000)      ms - shortest pitch the budget allows (cost is in us)
+  //   step    = max(1, ceil(speed * dutyMin / 1000))   whole pixels, never 0
+  //   pitch   = ceil(1000 * step / speed)              ms - >= dutyMin by construction
+  //
+  // That last line is also what paces a slow panel: the 480x320's meta line cannot afford better than ~3 px per
+  // 35 ms, and the settled gap between those pushes is what stops the band being caught mid-refresh.
+  uint32_t costUs = _stepCostUs;
+  if (!costUs) costUs = (uint32_t)((float)((uint32_t)_width * (uint32_t)_textheight) * SCROLL_PUSH_US_PER_PX);
+  uint32_t dutyMin = costUs * 100UL / ((uint32_t)(SCROLL_DUTY ? SCROLL_DUTY : 100) * 1000UL);
+  if (dutyMin < 1) dutyMin = 1;
+  uint32_t step = (px * dutyMin + 999UL) / 1000UL;      // ceil(speed * dutyMin / 1000)
+  if (step < 1) step = 1;
+  uint32_t pitch = (1000UL * step + px - 1) / px;       // ceil, ms
+  if (pitch < 1)    pitch = 1;
+  if (pitch > 1000) pitch = 1000;       // a whole second per step is the slowest a line can be and still be one
+  _stepPx = (uint16_t)(step > 0xFFFFUL ? 0xFFFFUL : step);
+  _stepMs = (uint16_t)pitch;
+  _startscrolldelay = scrollHoldFor(_role);
+}
+
+// The estimate only has to be in the right order of magnitude, because the first few steps replace it with what this
+// panel actually costs.  A running mean, then ONE re-derivation - the speed is unchanged by it, so the motion does not
+// jump; only the step size and the pitch move together.
+#define SCROLL_MEASURE_STEPS 4
+void ScrollWidget::_measureStep(uint32_t us) {
+  if (_stepCount >= SCROLL_MEASURE_STEPS) return;
+  if (us > 60000UL) us = 60000UL;       // never let one outlier own the mean
+  _stepCount++;
+  _stepCostUs = (uint16_t)(((uint32_t)_stepCostUs * (_stepCount - 1) + us) / _stepCount);
+  if (_stepCount == SCROLL_MEASURE_STEPS) _applyPace();
 }
 
 // Copy a mark in and re-measure it.  Allocation failure leaves the previous mark alone: a refresh that cannot
@@ -327,10 +396,8 @@ void ScrollWidget::setText(const char* txt) {
       #ifdef PSFBUFFER
         _fb->fillRect(0, 0, _width, _textheight, _bgcolor);
         _fb->setCursor(0, 0);
-        snprintf(_window, _width / _charWidth * 4 + 5, "%s", _text); //TODO
-        // Truncate to the visible characters PLUS ONE: the entering glyph is emitted whole and the clip
-        // cuts it at the pixel it may reach, so it slides in instead of popping.
-        { uint16_t maxVis = _width / _charWidth + 1;
+        snprintf(_window, _winBytes(), "%s", _text);
+        { uint16_t maxVis = _maxVis();
           if (utf8_strlen(_window) > maxVis) {
             char *cut = (char*)utf8_offset(_window, maxVis);
             *cut = '\0';
@@ -343,8 +410,8 @@ void ScrollWidget::setText(const char* txt) {
       } else {
         dsp.fillRect(_config.offset,  _config.top, _width, _textheight, _bgcolor);
         dsp.setCursor(_config.offset, _config.top);
-        snprintf(_window, _width / _charWidth * 4 + 5, "%s", _text); //TODO
-        { uint16_t maxVis = _width / _charWidth + 1;   // the entering glyph is drawn and clipped, not dropped
+        snprintf(_window, _winBytes(), "%s", _text);
+        { uint16_t maxVis = _maxVis();   // the entering glyph is drawn and clipped, not dropped
           if (utf8_strlen(_window) > maxVis) {
             char *cut = (char*)utf8_offset(_window, maxVis);
             *cut = '\0';
@@ -409,14 +476,13 @@ bool ScrollWidget::_scrollReady() const {
   return _present && _active && !_locked && _doscroll && _config.textsize != 0;
 }
 
-// Could this line use the slot now?  Asked on every pass by Page::loop() for every widget it holds, BEFORE one of them
-// is chosen, so it must be free of side effects - that is the whole reason _checkDelay() is not reused here: it
-// refreshes the stamp it tests.  The delay is the one loop() has always used: the start delay while the line is parked
-// at the beginning of a sweep, the step interval while it is mid-sweep.
+// Could this line use the slot now?  Called by Page::loop() for every widget BEFORE one is chosen, so it has no side
+// effects - unlike _checkDelay(), which refreshes the stamp it tests.  The wait is the start delay while the line is
+// parked and the step interval while it is mid-sweep.
 bool ScrollWidget::scrollWanted() const {
   if (!_scrollReady()) return false;
   const uint16_t fbl = _fb->ready() ? 0 : _config.offset;
-  const uint16_t wait = (_x == fbl) ? _startscrolldelay : _scrolltime;
+  const uint16_t wait = (_x == fbl) ? _startscrolldelay : _stepMs;
   return (uint32_t)(millis() - _scrolldelay) > wait;
 }
 
@@ -427,8 +493,15 @@ bool ScrollWidget::scrollWanted() const {
 void ScrollWidget::scrollTurn() {
   if (!_scrollReady() || dsp.getScrollId() != NULL) return;
   _scrolldelay = millis();
-  _calcX();
-  if (_active) _draw();
+  // A slow speed on a short pitch owes zero pixels on some steps.  Spend the step and draw nothing: the page has
+  // already moved its round-robin past this line, so the slot goes to the next one and no frame is wasted pushing a
+  // window that did not change.
+  if (!_calcX()) return;
+  if (_active) {
+    const uint32_t t0 = micros();
+    _draw();
+    _measureStep(micros() - t0);
+  }
 }
 
 void ScrollWidget::loop() {
@@ -438,9 +511,12 @@ void ScrollWidget::loop() {
   // never race for it and a line that has just finished a sweep cannot take it back before the others get a turn.
   if (!_doscroll || _config.textsize == 0 || dsp.getScrollId() != this) return;
   uint16_t fbl = _fb->ready()?0:_config.offset;
-  if (_checkDelay(_x == fbl ? _startscrolldelay : _scrolltime, _scrolldelay)) {
-    _calcX();
-    if (_active) _draw();
+  if (_checkDelay(_x == fbl ? _startscrolldelay : _stepMs, _scrolldelay)) {
+    if (_calcX() && _active) {
+      const uint32_t t0 = micros();
+      _draw();
+      _measureStep(micros() - t0);
+    }
   }
 }
 
@@ -476,16 +552,15 @@ void ScrollWidget::_draw() {
     const char* _cursor = utf8_offset(_text, charOffset);
     uint16_t hiddenChars = charOffset;
     uint16_t textLen = utf8_strlen(_text);
-    // One MORE character than the window holds.  The glyph on its way in is emitted whole and the clip
-    // cuts it at the pixel it is allowed to reach, so it slides in at the edge instead of appearing only
-    // once it fits - which is what the pop-in at one end of a scrolling line was.
-    const uint16_t maxVis = _width / _charWidth + 1;
+    // Two characters more than the window holds (see _maxVis()), both emitted whole: the clip cuts each at the pixel it
+    // may reach, so a glyph slides in and out a column at a time.
+    const uint16_t maxVis = _maxVis();
     if (hiddenChars < textLen) {
-      snprintf(_window, _width / _charWidth * 4 + 5, "%s%s%s", _cursor, _sep, _text);
+      snprintf(_window, _winBytes(), "%s%s%s", _cursor, _sep, _text);
     } else {
       uint16_t sepOffset = hiddenChars - textLen;
       const char* _scursor = utf8_offset(_sep, sepOffset);
-      snprintf(_window, _width / _charWidth * 4 + 5, "%s%s", _scursor, _text);
+      snprintf(_window, _winBytes(), "%s%s", _scursor, _text);
     }
     // Truncate to that count so a multi-byte UTF-8 sequence straddling the window edge does not leave
     // an orphan lead byte.
@@ -544,9 +619,12 @@ void ScrollWidget::_draw() {
   }
 }
 
-void ScrollWidget::_calcX() {
-  if (!_doscroll || _config.textsize == 0) return;
-  _x -= _scrolldelta;
+// One step of _stepPx whole pixels.  Returns false only when the line is not scrolling.
+bool ScrollWidget::_calcX() {
+  if (!_doscroll || _config.textsize == 0) return false;
+  const uint16_t d = _stepPx;
+  if (!d) return false;
+  _x -= d;
   uint16_t fbl = _fb->ready()?0:_config.offset;
   if (-_x > _textwidth + _sepwidth - fbl) {
     _x = fbl;
@@ -554,6 +632,7 @@ void ScrollWidget::_calcX() {
   } else {
     dsp.setScrollId(this);
   }
+  return true;
 }
 
 bool ScrollWidget::_checkDelay(int m, uint32_t &tstamp) {
@@ -599,6 +678,19 @@ void ScrollWidget::_syncWindow(bool force){
       _fb->freeBuffer();                       // erases the old window - the only pixels this line owns
       _fb->begin(&dsp, x, _config.top, w, _textheight, _bgcolor);
       _winx = x; _winw = w;
+      #ifdef WIDGET_DEBUG
+        // JITTER PROBE (temporary): re-making a window ERASES THE PANEL (freeBuffer -> fillRect) with no push behind
+        // it, then allocates and zero-fills in PSRAM, and only then does _draw() paint and push - an erase, a gap and a
+        // redraw, which is the reported shape.  Prints only when it actually happens, so a quiet log is an answer too.
+        static uint16_t winMakes = 0;
+        static uint32_t winMakesMs = 0;
+        const uint32_t nowMk = millis();
+        SERIALLOG("[JT] winmake n=%u top=%u rect=%u,%u %ux%u since=%ums",
+                  ++winMakes, _config.top, x, _config.top, w, _textheight,
+                  winMakesMs ? (unsigned)(nowMk - winMakesMs) : 0u);
+        SERIALLOGLF();
+        winMakesMs = nowMk;
+      #endif
     }
   #endif
 }

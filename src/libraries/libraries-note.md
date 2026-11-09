@@ -49,15 +49,8 @@ Sorry and good luck.
   - possibly irreplaceable due to how it manipulates ILI9486/8 quirks
     - seriously, after some deep investigation, I'm impressed this display works as well as it does compared to other libraries
 
-#### LiquidCrystalI2C
-  - slightly-modified from version 1.1.3 https://github.com/johnrickman/LiquidCrystal_I2C
-
 #### SSD1322
   - slightly-modified from initial commit https://github.com/JamesHagerman/Jamis_SSD1322
-
-#### ST7920
-  - very similar or modified (or perhaps share a common source) with https://github.com/BornaBiro/ST7920_GFX_Library
-  - may be worth looking at as well: https://github.com/BornaBiro/ST7920_GFX_Library
 
 
 ### Audio Decoder Drivers
@@ -83,5 +76,11 @@ Sorry and good luck.
 
 See also this issue: https://github.com/trip5/ehRadio/issues/39
 
-Other folders (especially those with notes in brackets) are for study purposes and meant for further advancements of the existing audio libraries.
+Other folders (those with version notes in brackets) are kept as lineage: the upstream version each live
+audio library was derived from, plus the two v0.9.720m copies a future graft would need. They are reference
+material — **not** backups.
+
+The only copies of our own libraries are `src/libraries/I2S_Audio/` and `src/libraries/VS1053_Audio/`, and
+git history is their backup. The folder copies of them have been removed (2026-09-27): a copy of a library
+we keep patching goes stale quietly, and restoring one drops every fix made since it was taken.
 See the "frankenstein-surgery-notes" files for more information.

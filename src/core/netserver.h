@@ -1,12 +1,19 @@
 #ifndef netserver_h
 #define netserver_h
 
+// ESP-IDF's FLAG_ATTR macro-generates a constexpr operator| that clashes with this library's own, which
+// GCC reports as a spurious -Wattributes.  Scoped to the include so other attribute warnings stay visible.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <ESPAsyncWebServer.h>
+#pragma GCC diagnostic pop
 #include "../displays/widgets/widgetsconfig.h"
 
-enum requestType_e : uint8_t  { PLAYLIST=1, STATION=2, STATIONNAME=3, ITEM=4, TITLE=5, VOLUME=6, NRSSI=7, BITRATE=8, MODE=9, EQUALIZER=10, BALANCE=11, PLAYLISTSAVED=12, GETINDEX=13, GETACTIVE=14, GETSYSTEM=15, GETSCREEN=16, GETLOCALE=17, GETWEATHER=18, GETCONTROLS=19, DSPON=20, SDPOS=21, SDLEN=22, SDSHUFFLE=23, SDINIT=24, GETPLAYERMODE=25, CHANGEMODE=26, SEARCH_DONE=27, SEARCH_FAILED=28, CURATED_INDEX_DONE=29, CURATED_PLAYLIST_DONE=30, CURATED_FAILED=31, GETMQTT=32, GETBATTERY=33, ARTWORK=34 };
+// SDMANACTIVE is the file manager's own open/closed state, pushed so its page can follow the device without
+// polling; it is deliberately NOT the play mode (see the case in netserver.cpp).
+enum requestType_e : uint8_t  { PLAYLIST=1, STATION=2, STATIONNAME=3, ITEM=4, TITLE=5, VOLUME=6, NRSSI=7, BITRATE=8, MODE=9, EQUALIZER=10, BALANCE=11, PLAYLISTSAVED=12, GETINDEX=13, GETACTIVE=14, GETSYSTEM=15, GETSCREEN=16, GETLOCALE=17, GETWEATHER=18, GETCONTROLS=19, DSPON=20, SDPOS=21, SDLEN=22, SDSHUFFLE=23, SDINIT=24, GETPLAYERMODE=25, CHANGEMODE=26, SEARCH_DONE=27, SEARCH_FAILED=28, CURATED_INDEX_DONE=29, CURATED_PLAYLIST_DONE=30, CURATED_FAILED=31, GETMQTT=32, GETBATTERY=33, ARTWORK=34, PLAYLISTREADY=35, SDMANACTIVE=36, PLVALIDATE=37, GETSCREENSAVER=38, MUTESTATE=39 };
 
-/* PSRAM-backed static file cache entry */
+// PSRAM-backed static file cache entry
 struct CachedFile {
     char path[32];          /* URL path e.g. "/script.js" */
     const char* data;       /* PSRAM pointer (plain data, or NULL) */
@@ -16,11 +23,11 @@ struct CachedFile {
     const char* contentType; /* MIME type string */
 };
 
-/* PSRAM-backed static file cache — loads all WebUI files from SPIFFS once at boot */
+// PSRAM-backed static file cache — loads all WebUI files from LittleFS once at boot
 class StaticFileCache {
 public:
     StaticFileCache() : count(0) { memset(entries, 0, sizeof(entries)); }
-    void loadAll();                 /* Read all wwwFiles[] from SPIFFS into PSRAM */
+    void loadAll();                 /* Read all wwwFiles[] from LittleFS into PSRAM */
     const CachedFile* find(const char* urlPath) const;  /* Lookup by URL path */
     bool invalidate(const char* urlPath);                /* Reload single file after update */
     void freeAll();                 /* Free all PSRAM allocations */
@@ -44,7 +51,7 @@ input[type=file]{color:#ccc;} input[type=file]::file-selector-button, input[type
 input[type=submit]{font-size:18px; padding:8px 26px; margin-top:10px; font-family:Times;} span{color:#ccc} .flex{display:flex; justify-content: space-around;margin-top:10px;}
 input[type=text],input[type=password]{width:170px; background:#272727; color:#eecccc; padding:6px 12px; font-size:20px; border:#2d2d2d 1px solid; margin:4px 0 0 4px; border-radius:4px; outline:none;}
 select{background:#272727; color:#eecccc; padding:4px 8px; font-size:16px; border:#2d2d2d 1px solid; border-radius:4px; margin-left:8px;}
-@media screen and (max-width:480px) {section{zoom:0.7; -moz-transform:scale(0.7);}}
+@media screen and (max-width:480px) {section{font-size:14px; max-width:100%; padding:10px;} h2{font-size:18px;} input[type=file]::file-selector-button, input[type=submit]{font-size:14px; padding:4px 12px; margin:0 3px;} input[type=text],input[type=password]{font-size:15px; width:140px; padding:4px 8px;} select{font-size:14px;} a{font-size:12px;}}
 </style>
 <script type="text/javascript" src="/variables.js"></script>
 <script type="text/javascript" src="/locale.js"></script>
@@ -130,7 +137,6 @@ const char index_html[] PROGMEM = R"(
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="icon" type="image/png" href="icon.png">
-  <link rel="stylesheet" id="themeCSS" href="theme.css" type="text/css" />
   <link rel="stylesheet" id="styleCSS" href="style.css" type="text/css" />
   <script type="text/javascript" src="/variables.js"></script>
   <script type="text/javascript" src="/locale.js"></script>
@@ -170,6 +176,7 @@ void vTaskFetchCuratedIndex(void *pvParameters);
 void vTaskFetchCuratedPlaylist(void *pvParameters);
 void launchPlaybackTask(const String& url, const String& name);
 void radioBrowserSendClick(const char* stationUrl);
+void radioBrowserCancelClick();
 void processRadioBrowserClick();
 void checkForOnlineUpdate();
 void startOnlineUpdate();
@@ -196,9 +203,12 @@ class NetServer {
     void onWsMessage(void *arg, uint8_t *data, size_t len, uint8_t clientId);
     void requestOnChange(requestType_e request, uint8_t clientId);
     void resetQueue();
-    void triggerMqttPlaylistSync();
     void setBootReady(bool val) { bootReady = val; }
     bool isBootReady() const { return bootReady; }
+    // True once begin() has actually registered the routes and started listening.  begin() creates a fresh
+    // queue every call, so this is what makes the deferred start idempotent: the WebUI is now brought up from
+    // Startup::loop() when the startup services are out of the way, and that check must not run twice.
+    bool isListening() const { return listening; }
 
     void setRSSI(int val) { rssi = val; };
     int  getRSSI()        { return rssi; };
@@ -214,6 +224,8 @@ class NetServer {
     QueueHandle_t nsQueue;
     int rssi = 0;
     bool bootReady = false;
+    bool listening = false;
+    bool _muteSeen = false;   // last mute state broadcast, so loop() announces each transition once
     StaticFileCache fileCache;   /* PSRAM-backed WebUI file cache */
 
     static size_t chunkedHtmlPageCallback(uint8_t* buffer, size_t maxLen, size_t index);

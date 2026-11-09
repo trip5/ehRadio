@@ -11,7 +11,7 @@
 ehRadio runs on an ESP32-S3 to play Internet radio streams.
 
 A radio may be built using an ESP32-S3, an audio decoder, a display, and some inputs.
-ESP32 or ESP32-C3 boards are possible but may require special work.
+ESP32-WROOM boards are possible but are untested. PSRAM is required so WROVER boards are not supported.
 In some cases, like for the ES3C28P, no peripherals are even needed.
 
 To develop, I prefer [VS Code](https://code.visualstudio.com/) but you may try other IDEs.
@@ -21,7 +21,7 @@ Some libraries may only be available from [Platformio Registry](https://registry
 If you have zero desire to use VS Code but still want to build a radio, that's OK, too.
 I would suggest you read the documentation a bit to make sure you get the right firmware for your radio.
 
-ehRadio is a fork of [ёRadio](https://github.com/e2002/yoradio/) / yoRadio v0.9.533 and would not exist without
+ehRadio was forked from [ёRadio](https://github.com/e2002/yoradio/) / yoRadio v0.9.533 and would not exist without
 the years of work e2002 put into it.  Read [A History of ESP Radios](#a-history-of-esp-radios) for more.
 
 ---
@@ -31,7 +31,7 @@ the years of work e2002 put into it.  Read [A History of ESP Radios](#a-history-
 ehRadio is focused on increasing usability for a non-builder / non-coder while at the same time
 stressing future-compatibility for builders (starting with the ESP32-S3 and future ESP boards).
 
-ehRadio inherits a lot from ёRadio, but improvements have been made to many functions.
+ehRadio inherits a lot from ёRadio, but improvements have been made to make it more usable, more stable, and more customizable.
 
 ### Features For Users
 
@@ -39,34 +39,36 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
   - up to 2 rotaries and 6 buttons
   - touchscreen control (basic swipes and taps)
   - IR remote control
-  - Nextion support removed
 
-- 36 Display languages
-  - uses a single Unicode font
-  - easily changeable in WebUI
+- Display Options Changeable While Running
+  - 37 locales available
+    - Matrix fonts contain most Latin / Cyrillic characters
+    - other fonts will fallback to available characters
+  - system font
+  - clock font
+  - themes
+  - screen layout
+  - VU type
 
 - Mobile-first WebUI design
-  - many settings changeable
-  - 50 Languages available (easily changeable in WebUI)
+  - 50 locales available
   - WebUI easily accessed using [ehDP](https://github.com/trip5/eh-Device-Scanner)
+  - radio station streams can be explored using [Radio-browser](https://www.radio-browser.info/) API search
   - playlists can be edited, imported, exported to files
   - playlists can be imported, merged, and shared via [webstations](https://github.com/trip5/webstations) curated lists
-  - radio station streams can be directly added to using [Radio-browser](https://www.radio-browser.info/) API search
+  - upload files directly using the SD Card Manager
+  - WebUI themes match display themes
 
-- [Web flasher](https://trip5.github.io/ehRadio/firmware.html) & Internet OTA updates
+- [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
   - make getting a new version easy-peasy
   - *caveat:* your build must be in the `builds` folder of this repository
-
-- MQTT, Telnet, HTTP
-  - almost all WebUI [commands](Commands.md) are available
-  - with MQTT, Home Assistant integration is possible, too
 
 ### Features For Builders
 
 - Development is primarily focused on ESP32-S3
   - 8MB flash recommended (4MB possible but will break features)
-  - ESP-WROVER with PSRAM probably supported but untested
-  - ESP32-C3 possible but untested
+  - PSRAM is required - a board without it will not build
+  - ESP-WROVER with PSRAM likely supported but untested
 
 - Multiple decoders supported
   - I2S DAC Modules are recommended and well-supported
@@ -74,11 +76,12 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
     - UDA1334
     - MAX98357A
     - ES8311 (mono)
-  - VS1053 updated but not recommended
+  - VS1053 updated and well-supported
 
 - Display architecture based on ёRadio
   - simplified and expanded
   - multiple themes and layouts compiled-in
+  - tools in codebase to edit/import themes and layouts
 
 - SPI architecture supports non-standard pins
   - uses custom-named buses `SPIA` and `SPIB` defined in `myoptions.h`
@@ -87,13 +90,25 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to many fun
 - System and user default settings can be set in `myoptions.h`
   - still changeable in WebUI
 
+### Features For Tinkerers
+
+- Commands can be sent over MQTT, Telnet, and HTTP
+  - almost all WebUI [commands](Commands.md) are available
+  - with MQTT, Home Assistant integration is possible, too
+
+- Many tools are included in the codebase to edit:
+  - layouts (on a live display)
+  - themes (both display and WebUI)
+  - fonts (both system and clock)
+  - translations
+
 ---
 
 ## WebUI
 
 The WebUI is optimized for mobile browsers but looks great on PCs, too.
 
-<img src="images/Screenshot_Player.jpg" width="33%">
+<img src="images/Screenshot_Player_Web.jpg" width="33%">
 
 More screenshots from the WebUI are [here](WebUI.md).
 
@@ -113,6 +128,28 @@ Some hardware questions may also be answered within this file.
 
 Want to get even more advanced? There are bunches of notes and tools in the codebase including font editors & builders, localization scripts, and more.
 
+### `/data` Folder
+
+This is the folder that platformio should flash when uploading the filesystem. ehRadio uses LittleFS.
+This folder contains no files, only the 2 subfolders.
+
+#### `/data/www`
+
+This folder contains all needed file for the WebUI.
+
+The standard ehRadio `platformio.ini` file executes `extra_scripts` to gzip these files before being flashed, greatly reducing their size and increasing throughput for the WebUI.
+
+#### `/data/data`
+
+This folder contains files needed for operation. You can put your own files here that make the radio run "out of the box."
+None are mandatory.  All of these files should be exported directly from ehRadio.
+
+Examples of these files may be found in the `/builds/data` folder:
+  - `playlist.csv` contains a list of radio streams (up to 65,535 stations)
+  - `wifi.csv` is list of Wireless APs and passwords (up to 5 APs)
+  - `theme1.json`...`theme10.json` custom themes (must be single exported themes)
+  - `layout1.json`...`layout10.json` custom layouts (must be single exported layouts)
+
 ### Languages
 
 Language-support is directly hardcoded into the firmware and use the [Matrix-Fonts 8x6-series fonts](https://github.com/trip5/Matrix-Fonts#8x6-series-fonts).
@@ -131,39 +168,70 @@ When in doubt or having issues, check the serial output.  Serial output logs sho
 Add `#define ALL_DEBUG_LOGS` to your `myoptions.h` to view extended diagnostic information.
 Connecting to the radio via telnet will also show serial logs.
 
+### System Options
+
+#### Scan for Best Wi-Fi on Boot
+
+Normally, the device will do a fast and blind connect to the local wireless network.
+For networks with only one access point, this is correct but unfortunately on mesh networks, may result in
+your radio connecting to a distant, sub-optimal access point.
+
+Checking this will ensure it connects to the AP that has the strongest signal.
+
+#### eh Discovery Protocol
+
+Although the radio can also advertise itself on the network using mDNS, ehDP ensures an easy way to connect to the radio's WebUI using an app.
+In simple terms, the app will send out a request over the network which devices with a WebUI can respond to.
+
+For devices without a display, this makes connecting to the WebUI extremely simple.
+
+Read more about how it works and get the app [here](https://trip5.github.io/eh-Device-Scanner/).
+
 ---
 
-## Boot Modes & Icons 
+## Mode Icons 
 
-Next to the version on the boot screen (which is very brief when `Scan for Best Wi-Fi on Boot` is disabled),
-an icon will appear to reflect certain boot modes.
+Most displays will show an icon next to the IP address to show which mode the player is in:
 
-### Smart Start <img src="images/Booticon_Pause.png">
+**Web Mode** <img src="images/Icon_Web.png">
+
+**SD Mode** <img src="images/Icon_SD.png">
+
+Since the IP is only shown when the WebUI is available, the mode icon will appear alone for a bit.
+
+## Boot Mode Icons 
+
+As part of the boot animation, an icon will appear on the right of the loading animation to reflect the boot modes.
+
+### Smart Start <img src="images/Icon_Play.png">
 
 Selectable in the `Settings` of the WebUI, `Smart Start` will automatically play the station stream or SD file which was playing when last powered-off.
 
-### Safe Mode <img src="images/Booticon_Play.png">
+### Safe Mode <img src="images/Icon_Pause.png">
 
-After booting, the device waits 30 seconds after network connection to mark (in NVS) the boot as stable.
-If powering off before this time has elapsed, the next boot will enter "safe mode" - which disables smart start, auto update, and SD Mode.
-The settings for smart start and auto update will appear as off but they will resume their previously-saved setting on next boot (if the safe mode boot was marked as stable).
+After booting, the device waits a few seconds after all services have finished to mark the boot as stable (in NVS).
+If powering off before this time has elapsed, the next boot will enter "safe mode" - which disables smart start, auto update, and will start in online (not SD) mode.
 
-### SD Offline Mode <img src="images/Booticon_SD.png">
+### SD Offline Mode <img src="images/Icon_SD.png">
 
 To enter a special SD-card only mode (with network functionality disabled), hold down any button (including encoder switches) shortly after powering-up (until the display shows something).
-It is not necessary to hold these buttons while powering-up, and actually could cause issues if the builder put a button on a strapping pin.
+It is not necessary to hold this button while powering-up, and actually could cause issues if the builder put that button on a strapping pin.
 
 You can also enter this mode by pressing the play button, clicking a rotary encoder button, or tapping the touch screen
-in AP/Improv Mode or when you see `* LOST *`, which will trigger a reboot.
+in AP/Improv Mode or when you see `LOST`, which will trigger a reboot.
 
-If no RTC is connected, the clock will not display.
+An RTC module is required for the time to be displayed in this mode.
+Otherwise, the clock will not be shown.
+
 Most settings, as set in the WebUI, are preserved in this mode.
-These are disabled: Safe mode, Deep Sleep, Mode switch.
+
+These functions are disabled: Safe mode, Deep Sleep, Mode switch.
 
 SD Shuffle (which makes the "previous" button do nothing) will be read from preferences and changeable using Mode switch (the mode button or double-click of a rotary encoder).
 It is not saved to preferences in this mode.  All other buttons will have expected behaviour.
 
-Exit this mode (reboot with network functionality) by powering off and powering on again.
+Exit this mode (and reboot with network functionality) by powering off and powering on again.
+Your radio will boot into whatever mode it did before.
 
 ---
 
@@ -178,7 +246,11 @@ For a detailed guide to supported hardware and peripherals, wiring, and audio is
 ## A Warning & Disclaimer
 
 With the `2026.07.31` release, the display architecture was overhauled to make layouts and colors changeable while running.
-This involved significant changes to the original code and layouts.
+
+Further, recent releases have begun to overhaul more of the the display architecture to make switching VUs and fonts changeable as well.
+
+This involved significant changes to the original ёRadio code and layouts.
+Tools are available in the repository to assist in converting files from ёRadio mods for inclusion in ehRadio
 
 Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
 Other display sizes may have quirks or issues with layouts that need repair.
@@ -191,7 +263,7 @@ I can't 100% confirm this, but I am pretty sure all devices built for other ESP-
 And although (as of `2026.06.15`), ehRadio has been reworked so an ESP32-S3 can be wired with an SPI display and a VS1053 (which ёRadio & ESP32-RadioV2 can't),
 
 Below here are some sketches and helpful hints to building one of the "prebuilt" firmwares as available in the Releases and the
-[online flasher](https://trip5.github.io/ehRadio/firmware.html).
+[online flasher](https://trip5.github.io/ehRadio/flasher.html).
 
 If you already have a good idea on how the hardware works and would just like to use a prebuilt binary,
 check out the [Releases](https://github.com/trip5/ehRadio/releases/) and click on a link to open the generator with that binary's profile,
@@ -201,7 +273,7 @@ There is also a `no_display` build here if you just wish to test functionality.
 Note that if following this path, you don't necessarily to attach all peripherals (rotary, buttons, IR Receiver, SD card, display).
 The radio needs only the ESP board and the audio decoder to function... although your WebUI may show links to peripherals that don't exist.
 
-If don't want to mess around with VS Code but would still like your own build added to the Releases, you can make a
+If you don't want to mess around with VS Code but would still like your own build added to the Releases, you can make a
 [firmware request](https://github.com/trip5/ehRadio/discussions/categories/firmware-requests).
 Please also do some research before requesting a firmware.
 
@@ -249,7 +321,7 @@ Edzelf was probably the first to work on the idea of an ESP-based radio with [Es
 [April 4, 2016](https://github.com/Edzelf/Esp-radio/tree/0a53a03c2301e9e5f0bfaee418942be67739dee0) which included audio decoding with a VS1053 decoder, built on a ESP8266.
 
 Edzelf then made [ESP32-Radio](https://github.com/Edzelf/ESP32-Radio/), with his first release on [May 23, 2017](https://github.com/Edzelf/ESP32-Radio/tree/c268677dd8e46db2b7a8bfbd12a131c169e32019).
-Later, [ESP32Radio-V2](https://github.com/Edzelf/ESP32Radio-V2/) was created on [October 4, 2021](https://github.com/Edzelf/ESP32Radio-V2/tree/81ea92481eb36e49c8983e9dd1e5a34fecca73a9) and includes I2C audio decoding (see below).
+Later, [ESP32Radio-V2](https://github.com/Edzelf/ESP32Radio-V2/) was created on [October 4, 2021](https://github.com/Edzelf/ESP32Radio-V2/tree/81ea92481eb36e49c8983e9dd1e5a34fecca73a9) and includes I2S audio decoding (see below).
 Edzelf still maintains ESP32Radio-V2.
 
 karawin began work on [Ka-Radio](https://github.com/karawin/Ka-Radio) with his first Github submission [June 15, 2016](https://github.com/karawin/Ka-Radio/tree/13df16e5bd4dcf646ebfa6ffbb1eeb43173d2093) for VS1053 and ESP8266.
@@ -314,6 +386,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
+| 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
 | 2026.08.03 | Minor fixes (and whoops) fixed Search and Curated |
@@ -353,8 +426,8 @@ A full history of ёRadio from v0.4.177 to v0.9.533 can be seen in the [old Read
 ### Credit
 
 Thanks to:
-
-  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute feature, VS1053/I2S fixing, and amplifier schematics
+  - [death-kiss78](https://github.com/death-kiss78) - `ro_RO` & `it_IT` translations, SDMMC testing, initiated SD File Manager, inspired screensaver info text & screensaver sleep, sleep command fixes
+  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142
   - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales, battery support and widget, and a bunch of work for ES3C28P (including ES8311 decoder, FT6336 touchscreen)
   - [e2002](https://github.com/e2002) - for [ёRadio](https://github.com/e2002/yoradio/) without which ehRadio would not be possible
 

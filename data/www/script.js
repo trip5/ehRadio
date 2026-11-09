@@ -26,6 +26,18 @@ function updateBitinfo(){
   var bi = getId('bitinfo'); if(bi) bi.textContent = txt;
 }
 
+// RSSI bars.  The device thresholds the raw dBm with RSSI_STEPS and sends the bar count, so no scale lives in the WebUI
+// Bars past the level are recoloured rather than hidden, so the graphic never changes size - behavior is the same as display widget
+function setRssiBars(level){
+  var svg = getId('rssibars');
+  if(!svg) return;
+  var bars = svg.querySelectorAll('path');
+  var lit = parseInt(level, 10);
+  if(isNaN(lit) || lit < 0) lit = 0;
+  if(lit > bars.length) lit = bars.length;
+  for(var i = 0; i < bars.length; i++) bars[i].classList.toggle('off', i >= lit);
+}
+
 
 function loadCSS(href){ const link = document.createElement("link"); link.rel = "stylesheet"; link.href = href; document.head.appendChild(link); }
 function loadJS(src, callback){ const script = document.createElement("script"); script.src = src; script.type = "text/javascript"; script.async = true; script.onload = callback; document.head.appendChild(script); }
@@ -127,14 +139,51 @@ function onMessage(event) {
       setTimeout(function(){ window.location.href=data.redirect; }, 4000);
       return;
     }
+    /* playlist validator progress */
+    if(typeof data.plvalidate !== 'undefined'){
+      handleValidationMessage(data.plvalidate);
+      return;
+    }
     if(typeof data.playermode !== 'undefined') { //Web, SD
+      const wasSd = modesd;
       modesd = data.playermode=='modesd';
+      const modeChanged = _modeKnown && (wasSd !== modesd);
+      _modeKnown = true;
       classEach('modeitem', function(el){ el.classList.add('hidden') });
-      if(modesd) { getId('toggleplaylist').classList.add('sd-mode'); showById(['modesd', 'sdsvg', 'shuffle'],['plsvg']); } else { getId('toggleplaylist').classList.remove('sd-mode'); showById(['modeweb','plsvg','bitinfo'],['sdsvg','shuffle']); }
+      if(modesd) { getId('toggleplaylist').classList.add('sd-mode'); showById(['modesd', 'sdmanbtn', 'shuffle'],['plsvg']); } else { getId('toggleplaylist').classList.remove('sd-mode'); showById(['modeweb','plsvg','bitinfo'],['sdmanbtn','shuffle']); }
       /* if sdslider is ever fixed, it will be hidden without the next line to unhide it */
       // if(modesd) { showById(['volslider', 'sdslider'],[]); } else { showById(['volslider'],['sdslider']); }
       showById(['volslider'],[]);
       getId('toggleplaylist').classList.remove('active');
+      /* This notice means one thing only: the mode has CHANGED, so a switch has started.  The device sends it before
+         it verifies or indexes the card, so the page blanks, shows the loader and locks HERE - and does not fetch,
+         because anything the device could answer now is either the list being left behind or one that is still being
+         rewritten.  The fetch waits for playlistready (below).  The first report after a page load only establishes
+         which mode we are on; it is not a switch, so it must not lock anything. */
+      if (modeChanged) { setModeSwitching(true); return; }
+      /* THE MODE DID NOT CHANGE WHILE THE PAGE WAS WAITING, which means the device REFUSED the switch.  There is
+         exactly one refusal that matters: SD mode with no card in the slot.  config.changeMode() logs "SD card not
+         found", sends this very report, and returns WITHOUT changing the mode - so the page sat on its spinner until
+         the 3-minute backstop ran out, which is the "stuck" it was reported as.  Only the first report after a page
+         load is innocent, and _modeKnown is what marks it; if a switch is still outstanding (_switching) the wait
+         ends HERE instead of running out the clock.  The device has already shown why it refused, on the display, and
+         a card-less device is refused again by the SD File Manager itself - so the page says nothing, drops the lock
+         and shows the list it still has.  A no-op switch (asking for the mode we are already in) lands here too. */
+      if (_switching) {
+        setModeSwitching(false);
+        generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
+      }
+      return;
+    }
+    if(typeof data.playlistready !== 'undefined') {
+      /* One signal, two states.  false: a rebuild is walking the card right now, so blank, show the loader and LOCK -
+         the list must not be visible or playable while the card is being walked, which is exactly what used to
+         happen (a stream started mid-rebuild put a reader on the card alongside the walker, and an SPI card cannot
+         take that).  true: the list is ready, so unlock and fetch.  It arrives whether or not a build produced
+         anything - the page waits for the device to STOP TRYING, never for a build to succeed - and it is also sent
+         when a client connects, so a page opened mid-switch ends up with a list either way. */
+      if (data.playlistready === false) { setModeSwitching(true); return; }
+      setModeSwitching(false);
       generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
       return;
     }
@@ -225,28 +274,21 @@ function onMessage(event) {
     
     if(typeof data.payload !== 'undefined'){
       data.payload.forEach(item=> {
-        // battery string: parse and fill separate elements (labels in HTML with data-i18n)
+        // battery string: volt and percentage only, there is no charge state to report
         if(item.id === 'battery' && typeof item.value === 'string'){
-          var m = /volt: (\d+)mV, percentage: (\d+)%?, status: (.+)/.exec(item.value);
+          var m = /volt: (\d+)mV, percentage: (\d+)%/.exec(item.value);
           if(m){
-            var volt = m[1], perc = m[2], stat = m[3].trim();
-            
+            var volt = m[1], perc = m[2];
             setupElement('battery_volt', volt);
             setupElement('battery_perc', perc);
-            
-            // Hide all battery status spans, then show the active one
-            ['battery_charging', 'battery_discharging', 'battery_idle'].forEach(function(id) {
-              var el = getId(id);
-              if(el) el.classList.add('hidden');
-            });
-            
-            var statusId = 'battery_' + stat.toLowerCase();
-            var statusEl = getId(statusId);
-            if(statusEl) statusEl.classList.remove('hidden');
-            
-            // Show battery info wrapper
+            // The player row shows the percentage; the settings page shows voltage and percentage
+            const compact = getId('battery');
+            if (compact) compact.innerText = perc + '%';
             const wrap = getId('batteryinfo');
             if (wrap) wrap.classList.remove('hidden');
+          }else{
+            const nowrap = getId('batteryinfo');
+            if (nowrap) nowrap.classList.add('hidden');   // no battery reported
           }
           return; // Skip normal setupElement for 'battery' id
         }
@@ -265,13 +307,27 @@ function onMessage(event) {
           websocket.send('getindex=1');
           return;
         }
-      if(typeof data.act !== 'undefined'){ data.act.forEach(showclass=> { classEach(showclass, function(el) { el.classList.remove("hidden"); }); }); return; }
+      /* The server reports the settings groups in BOTH directions: "group_x" offers a group and
+         "hide_group_x" withdraws it.  The conditions for the layout-driven groups (VU, buffer bar,
+         weather) come from the active layout, so they can flip while this page is open - the withdrawal
+         is what stops a row for a widget the new layout dropped from lingering until a reload.
+         The token has to be INTERPRETED, not applied: classEach() does querySelectorAll('.'+name), so
+         passing "hide_group_x" through as a class name would silently match nothing. */
+      if(typeof data.act !== 'undefined'){
+        data.act.forEach(showclass=> {
+          if (showclass.startsWith('hide_')) classEach(showclass.slice(5), function(el) { el.classList.add("hidden"); });
+          else classEach(showclass, function(el) { el.classList.remove("hidden"); });
+        });
+        return;
+      }
       // Apply maxVol to volume slider if present in flat config data
       if (typeof data.maxVol !== 'undefined') {
         var volSlider = getId('volume');
         if (volSlider) { volSlider.max = data.maxVol; fillSlider(volSlider); }
       }
       Object.keys(data).forEach(key=>{
+        // The Settings page is the only place that asks for GETSCREEN, so its reply also carries the stored theme id: apply it here
+        if (key === 'themeId') document.documentElement.setAttribute('data-theme', data[key]);
         setupElement(key, data[key]);
       });
     }
@@ -317,7 +373,7 @@ function fillSlider(sl){
   const slaveid = sl.dataset.slaveid;
   const value = (sl.value-sl.min)/(sl.max-sl.min)*100;
   if(slaveid) getId(slaveid).innerText=sl.value;
-  sl.style.background = 'linear-gradient(to right, var(--accent-dark) 0%,  var(--accent-dark) ' + value + '%, var(--odd-bg-color) ' + value + '%, var(--odd-bg-color) 100%)';
+  sl.style.background = 'linear-gradient(to right, var(--meter-fill) 0%,  var(--meter-fill) ' + value + '%, var(--meter-track) ' + value + '%, var(--meter-track) 100%)';
 }
 function setupElement(id,value){
   // handle bitrate/codec specially
@@ -329,6 +385,21 @@ function setupElement(id,value){
   if(id === 'bitrate'){
     currentBitrate = parseInt(value) || 0;
     updateBitinfo();
+    return;
+  }
+  if(id === 'rssi'){              // the dBm reading, kept only for the bars' tooltip
+    var rtt = getId('rssititle');
+    if(rtt && value !== '' && value !== null && typeof value !== 'undefined')
+      rtt.textContent = t('lbl_rssi', 'RSSI') + ': ' + value + t('unit_dbm', 'dBm');
+    return;
+  }
+  if(id === 'rssibars'){          // the bar count the device derived from RSSI_STEPS
+    setRssiBars(value);
+    return;
+  }
+  if(id === 'mutebutton'){        // lit state comes only from the device, so a refused command cannot leave it wrong
+    const btn = getId(id);
+    if(btn) btn.classList.toggle('active', !!value);
     return;
   }
   const element = getId(id);
@@ -388,6 +459,7 @@ function initPLEditor(){
       <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="140" />
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>
       <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${item.dataset.ovol}" />
+      <span class="pleinput plestatus"></span>
       </li>`;
   });
   ple.innerHTML=html;
@@ -395,7 +467,7 @@ function initPLEditor(){
 function handlePlaylistData(fileData) {
   const ul = getId('playlist');
   ul.innerHTML='';
-  if (!fileData) return;
+  if (!fileData) { alignPlaylistStripes(); return; }
   const lines = fileData.split(/\r?\n/);
   let li='', html='';
   for(var i = 0;i < lines.length;i++){
@@ -407,9 +479,57 @@ function handlePlaylistData(fileData) {
     }
   }
   ul.innerHTML=html;
+  alignPlaylistStripes();
   setCurrentItem(currentItem);
   if(!modesd) initPLEditor();
 }
+
+/* The playlist's stripes are a background pattern on the scroll box whose bands are 39px - one single-line
+   row. A wrapped name makes its row taller than that, so instead of calibrating the pattern the offset is
+   set from where the list actually ends: background-attachment: local keeps the pattern with the rows while
+   the list scrolls, and the offset puts the colour the next row would have had under the last one, so the
+   empty space reads as the list continuing. Re-run on resize, which is what rewraps the names. */
+function alignPlaylistStripes() {
+  const ul = getId('playlist');
+  if (!ul) return;
+  const rows = ul.children, band = 39, cycle = band * 2;
+  if (!rows.length) { ul.style.backgroundPositionY = '0px'; return; }
+  const last = rows[rows.length - 1];
+  const end = last.offsetTop + last.offsetHeight;
+  const shift = (rows.length % 2) ? band : 0;   // an odd number of rows leaves an even colour next
+  ul.style.backgroundPositionY = (((end - shift) % cycle + cycle) % cycle) + 'px';
+}
+window.addEventListener('resize', alignPlaylistStripes);
+
+/* ---- a mode switch: the icon, the blanked list, the loader and the lock, all at once ---------------------- */
+
+/* Entering SD mode verifies the card and can rebuild the whole index, which is minutes on a big card.  For all of
+   that the player page must not keep showing the mode being left - the streaming playlist was exactly the wrong
+   thing - and must not accept a press that belongs to that mode.  So the list is blanked to the same spinner
+   generatePlaylist uses and the whole page is locked, from the click (or from the device's first notice, for a
+   switch started on the box itself) until the device says the mode is settled.  The backstop only exists so a
+   device that never answers cannot leave the page dead. */
+var _switching = false;
+var _switchTimer = null;
+var _modeKnown = false;            // has the device told us which mode we are on yet (first report != a switch)
+var SWITCH_BACKSTOP_MS = 180000;   // 3 minutes
+
+function setModeSwitching(on){
+  _switching = !!on;
+  document.body.classList.toggle('switching', _switching);
+  if (_switchTimer) { window.clearTimeout(_switchTimer); _switchTimer = null; }
+  if (!_switching) return;
+  const pl = getId('playlist');
+  if (pl) pl.innerHTML = '<div class="plloader"><span class="loader"></span></div>';
+  const ple = getId('pleditorcontent');       // the editor must not offer the mode we are leaving either
+  if (ple) ple.innerHTML = '';
+  _switchTimer = window.setTimeout(function(){
+    _switchTimer = null;
+    setModeSwitching(false);
+    generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
+  }, SWITCH_BACKSTOP_MS);
+}
+
 function generatePlaylist(path){
   getId('playlist').innerHTML='<div class="plloader"><span class="loader"></span></div>';
   var xhr = new XMLHttpRequest();
@@ -440,7 +560,8 @@ function plAdd(){
       <input class="pleinput plename" type="text" value="" maxlength="140" />\
       <input class="pleinput pleurl" type="text" value="" maxlength="140" />\
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>\
-      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />';
+      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />\
+      <span class="pleinput plestatus"></span>';
   ple.appendChild(plitem);
   ple.scrollTo({
     top: ple.scrollHeight,
@@ -480,6 +601,7 @@ function undoPlaylistChanges(){
   clearImportReviewFlags();
   generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
   uncheckSelectAll();
+  if (validatorMode) setValidatorMode(false);   // in the Validator, Undo discards and returns to the editor
 }
 
 function loadCuratedForReview(mode) {
@@ -549,7 +671,9 @@ function submitPlaylist(){
   let fileuploadinput=getId("file-upload");
   fileuploadinput.files = container.files;
   doPlUpload(fileuploadinput);
-  toggleTarget(0, 'pleditorwrap');
+  // In the Validator, Save stays in the overlay and returns to the editor; elsewhere it closes as before.
+  if (validatorMode) setValidatorMode(false);
+  else toggleTarget(0, 'pleditorwrap');
 }
 function doPlUpload(finput) {
   if (!finput.files || !finput.files[0]) return;
@@ -916,7 +1040,8 @@ function addStationToEditor(name, url, ovol) {
     <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="140" />
     <input class="pleinput pleurl" type="text" value="${url}" maxlength="140" />
     <span class="pleinput pleplay" data-command="preview">&#9658;</span>
-    <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${ovol}" />`;
+    <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${ovol}" />
+    <span class="pleinput plestatus"></span>`;
   ple.appendChild(plitem);
 }
 
@@ -1060,6 +1185,8 @@ function toggleTarget(el, id){
         target.classList.remove("hidden");
         getId(target.dataset.target).classList.add("active");
         pleditorTimeout = null;
+        resetValidatorMode();     // the editor always opens in editor mode
+        updateGearIcon();
       }, 200);
       return; // Exit early, don't run the normal toggle below
     }
@@ -1072,6 +1199,100 @@ function toggleTarget(el, id){
     target.classList.toggle("hidden");
     getId(target.dataset.target).classList.toggle("active");
   }
+  // Both belong AFTER the hide: the gear reads whether the editor is open, and closing must strip the validator
+  // class or the next open comes up already in Validator (and the toggle then flips straight back).
+  if(id=='pleditorwrap'){
+    if(!pleditorOpen()) resetValidatorMode();
+    updateGearIcon();
+  }
+}
+/***--- playlist validator ---***/
+/* The editor DOM is reused, so the mode is one class on #pleditorwrap plus a gear that morphs in place.  Each
+   icon shows the mode you are IN: the list icon in the editor, the check icon in the Validator, and the ordinary
+   settings gear when the editor is closed.  Icons are placeholders and easy to swap. */
+var validatorMode = false;
+var validatorRunning = false;
+var GEAR_ICON = null;
+var ICON_EDITOR =
+  '<svg viewBox="0 0 24 24" class="stroke"><path stroke-width="2" d="M20,15 C19,16 21.25,18.75 20,20 C18.75,21.25 16,19 15,20 C14,21 13.5,23 12,23 C10.5,23 10,21 9,20 C8,19 5.25,21.25 4,20 C2.75,18.75 5,16 4,15 C3,14 1,13.5 1,12 C1,10.5 3,10 4,9 C5,8 2.75,5.25 4,4 C5.25,2.75 8,5 9,4 C10,3 10.5,1 12,1 C13.5,1 14,3 15,4 C16,5 18.75,2.75 20,4 C21.25,5.25 19,8 20,9 C21,10 23,10.5 23,12 C23,13.5 21,14 20,15 Z M7,12 L10,15 L17,8"/></svg>';
+var ICON_VALIDATOR =
+  '<svg viewBox="0 0 48 48" class="stroke"><path stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M5 10L8 13L14 7 M5 24L8 27L14 21 M5 38L8 41L14 35 M21 24H43 M21 38H43 M21 10H43"/></svg>';
+
+function pleditorOpen(){
+  const w = getId('pleditorwrap');
+  return !!w && !w.classList.contains('hidden');
+}
+function updateGearIcon(){
+  const g = getId('settingsbtn'); if(!g) return;
+  if(GEAR_ICON === null) GEAR_ICON = g.innerHTML;   // captured while it still is the settings gear
+  if(!pleditorOpen()){ g.innerHTML = GEAR_ICON; return; }
+  g.innerHTML = validatorMode ? ICON_VALIDATOR : ICON_EDITOR;
+}
+function setValidateButton(running){
+  const b = getId('plvalidatebtn'); if(!b) return;
+  b.textContent = running ? t('btn_cancel') : t('btn_pl_validate', 'Check All Streams');
+}
+function clearValidationStatus(){
+  // Rows only: the header carries .plestatus too, and a document-wide selector blanked its "Status" label.
+  const box = getId('pleditorcontent');
+  if(box) box.querySelectorAll('.plestatus').forEach(function(el){ el.textContent=''; el.classList.remove('pass','fail'); });
+}
+/* Back to a clean editor: drop both classes, restore the title, clear the marks and the running state. */
+function resetValidatorMode(){
+  validatorMode = false;
+  validatorRunning = false;
+  document.body.classList.remove('plvalidating');
+  const w = getId('pleditorwrap');
+  if(w){ w.classList.remove('validator'); w.classList.remove('validating'); }
+  const ttl = getId('pleditortitle');
+  if(ttl) ttl.textContent = t('ttl_playlist_editor', 'Playlist Editor');
+  setValidateButton(false);
+  clearValidationStatus();
+}
+function setValidatorMode(on){
+  validatorMode = !!on;
+  const w = getId('pleditorwrap'); if(w) w.classList.toggle('validator', validatorMode);
+  const ttl = getId('pleditortitle');
+  if(ttl) ttl.textContent = validatorMode ? t('ttl_playlist_validator', 'Playlist Validator') : t('ttl_playlist_editor', 'Playlist Editor');
+  clearValidationStatus();
+  updateGearIcon();
+}
+function setValidationRunning(on){
+  validatorRunning = !!on;
+  const w = getId('pleditorwrap'); if(w) w.classList.toggle('validating', validatorRunning);
+  document.body.classList.toggle('plvalidating', validatorRunning);   // reaches the settings gear, outside the wrap
+  setValidateButton(validatorRunning);
+}
+function onValidateButton(){
+  if(validatorRunning){ websocket.send('plvalidate=0'); return; }   // Cancel; the done message re-arms the button
+  if(!validatorMode) return;
+  clearValidationStatus();
+  uncheckSelectAll();
+  setValidationRunning(true);
+  websocket.send('plvalidate=1');
+}
+function handleValidationMessage(pv){
+  if(pv.start){ setValidationRunning(true); clearValidationStatus(); return; }
+  if(typeof pv.i !== 'undefined'){
+    const items = getId('pleditorcontent').getElementsByTagName('li');
+    const li = items[pv.i - 1]; if(!li) return;
+    const st = li.getElementsByClassName('plestatus')[0]; if(!st) return;
+    const pass = (pv.r === 'pass');
+    st.textContent = pass ? '\u2714' : '\u2716';
+    st.classList.toggle('pass', pass);
+    st.classList.toggle('fail', !pass);
+    if(!pass){
+      // Keep the row easy to remove: tick its checkbox, and mark the Name so a saved list records the fault.
+      const cb = li.getElementsByClassName('plcb')[0]; if(cb) cb.checked = true;
+      const nm = li.getElementsByClassName('plename')[0];
+      if(nm){
+        const note = '(' + t('msg_url_broken', 'URL broken?') + ')';
+        if(nm.value.indexOf(note) === -1) nm.value = (nm.value ? nm.value + ' ' : '') + note;
+      }
+    }
+    return;
+  }
+  if(pv.done){ setValidationRunning(false); return; }
 }
 function checkboxClick(cb, command){
   cb.classList.toggle("checked");
@@ -1102,10 +1323,9 @@ function submitWiFi(){
     xhr.open("POST",`http://${hostname}/upload`,true);
     xhr.send(formData);
     fileuploadinput.value = '';
-    getId("settingscontent").innerHTML='<h2>'+t('msg_settings_saved', 'Settings saved. Rebooting...')+'</h2>';
-    getId("settingsdone").classList.add("hidden");
-    getId("navigation").classList.add("hidden");
-    setTimeout(function(){ window.location.href=`http://${hostname}/`; }, 10000);
+    // The device imports the file and restarts, so poll /ready like every other reboot rather than guessing a
+    // fixed delay: the page comes back the moment the startup services are up, and never sooner.
+    rebootSystem(t('msg_settings_saved', 'Settings saved. Rebooting...'));
   }
 }
 function playItem(target){
@@ -1130,8 +1350,14 @@ function applyCommonPageMeta(){
 function changeMode(el){
   const cmd = el.dataset.command;
   el.classList.add('hidden');
-  if(cmd=='web') getId('modesd').classList.remove('hidden');
+  /* The two mode icons are a pair, and this is the only place a switch starts, so flip them HERE - blank the list,
+     put the loader in it and lock the page in the same tick, before the request is even sent.  These branches used
+     to be the wrong way round: each hid the icon just pressed and then showed that same icon again, so the flip
+     never happened locally and only the device's playermode message ever did it - which arrives after the card has
+     been verified, or after it has been indexed. */
+  if(cmd=='sd') getId('modesd').classList.remove('hidden');
   else getId('modeweb').classList.remove('hidden');
+  setModeSwitching(true);
   websocket.send("newmode="+(cmd=="web"?0:1));
 }
 function toggleShuffle(){
@@ -1147,6 +1373,14 @@ function playPreview(root) {
   if(streamUrl=='') { console.error("No stream URL available."); return; }
   
   sendStationAction(stationName, streamUrl, false);
+}
+/* A touch screen never fires :hover, so a button carrying .hold keeps its hover colours for a moment after the
+   press - long enough to be seen, short enough not to become a permanent highlight.  A second press restarts it. */
+const HOLD_MS = 2000;
+function holdPressed(el){
+  el.classList.add('pressed');
+  clearTimeout(el.holdTimer);
+  el.holdTimer = setTimeout(function(){ el.classList.remove('pressed'); }, HOLD_MS);
 }
 function continueLoading(mode){
   if(typeof mode === 'undefined' || loaded) return;
@@ -1190,6 +1424,7 @@ function continueLoading(mode){
           }
           websocket.send('getsystem=1');
           websocket.send('getscreen=1');
+          websocket.send('getscreensaver=1');
           websocket.send('getlocale=1');
           websocket.send('getweather=1');
           websocket.send('getmqtt=1');
@@ -1197,6 +1432,7 @@ function continueLoading(mode){
           getWiFi(`http://${hostname}/data/wifi.csv`);
           websocket.send('getactive=1');
           websocket.send('getbattery=1');
+          websocket.send('getmute=1');
           classEach("reset", function(el){ el.innerHTML='<svg viewBox="0 0 16 16" class="fill"><path d="M8 3v5a36.973 36.973 0 0 1-2.324-1.166A44.09 44.09 0 0 1 3.417 5.5a52.149 52.149 0 0 1 2.26-1.32A43.18 43.18 0 0 1 8 3z"/><path d="M7 5v1h4.5C12.894 6 14 7.106 14 8.5S12.894 11 11.5 11H1v1h10.5c1.93 0 3.5-1.57 3.5-3.5S13.43 5 11.5 5h-4z"/></svg>'; });
           initDangerZone();
         });
@@ -1251,22 +1487,39 @@ function continueLoading(mode){
     if(target.id === 'dangerzone_sw2') { toggleDangerZoneSwitch('dangerzone_sw2'); event.preventDefault(); event.stopPropagation(); return; }
     if(target.id === 'dangerzone_sw3') { toggleDangerZoneSwitch('dangerzone_sw3'); event.preventDefault(); event.stopPropagation(); return; }
     let command = target.dataset.command;
+    // The holder may be a wrapper - a button's label is often a div of its own - so a press that lands on a plain
+    // child still resolves to the element that carries the command.
+    if (!command) {
+      const holder = target.closest('[data-command]');
+      if (holder) { target = holder; command = holder.dataset.command; }
+    }
     if (command){
+      if (target.classList.contains('hold')) holdPressed(target);
       if(target.classList.contains("local")){
         switch(command){
           case "toggle": toggleTarget(target, target.dataset.target); break;
-          case "settings": window.location.href=`http://${hostname}/settings.html`; break;
+          case "settings":
+            // While the playlist editor is open the gear is the Validator toggle; otherwise it opens settings.
+            if(pleditorOpen()){ setValidatorMode(!validatorMode); }
+            else window.location.href=`http://${hostname}/settings.html`;
+            break;
           case "plimport": break;
           case "plexport": exportCurrentPlaylist(); uncheckSelectAll(); break;
           case "pladd": plAdd(); break;
           case "pldel": plRemove(); break;
           case "plsubmit": submitPlaylist(); break;
+          case "plvalidate": onValidateButton(); break;
           case "plundo": undoPlaylistChanges(); break;
           case "plshare": sharePlaylist(); break;
           case "fwupdate": window.location.href=`http://${hostname}/update.html`; break;
+          // In a new tab: the editor is used beside the settings page, and the device serves both from one server
+          case "editor": window.open(`http://${hostname}/editor.html`, '_blank'); break;
           case "webboard": window.location.href=`http://${hostname}/webboard`; break;
           case "setupir": window.location.href=`http://${hostname}/ir.html`; break;
           case "search": window.location.href=`http://${hostname}/search.html`; break;
+          // The page opens the mode itself, then replaces itself with "/"; when the mode is up the device
+          // redirects it to "/" anyway.
+          case "sdfilemanager": window.location.href=`http://${hostname}/sdmanager.html`; break;
           case "applyweather": applyWeather(); break;
           case "applytz": applyTZ(); break;
           case "applylocale": applyLocale(); break;
@@ -1276,8 +1529,8 @@ function continueLoading(mode){
           case "confirm-reboot": showDangerConfirm('dz_reboot'); break;
           case "confirm-format": showDangerConfirm('dz_format'); break;
           case "confirm-reset": showDangerConfirm('dz_reset'); break;
-          case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...'), 15, true); break;
-          case "format": websocket.send("format=1"); rebootSystem(t('msg_format_reboot', 'Format SPIFFS. Rebooting...'), 0, false); break;
+          case "reboot": websocket.send("reboot=1"); rebootSystem(t('msg_rebooting', 'Rebooting...')); break;
+          case "format": websocket.send("format=1"); rebootSystem(t('msg_format_reboot', 'Format LittleFS. Rebooting...'), 0, false); break;
           case "reset":  websocket.send("reset=1"); getId("settingscontent").innerHTML=`<h2>${t('msg_reset', 'Settings reset.')}</h2>`; setTimeout(() => location.reload(), 2000); break;
           case "shuffle": toggleShuffle(); break;
           case "ehdpsave": websocket.send(`ehdpname=${getId('ehdpname').value}`); break;
@@ -1445,7 +1698,7 @@ function doUpdate(el) {
     getId('update_cancel_button').hidden=true;
     getId('check_online_update').classList.add('hidden');
     var formData = new FormData();
-    formData.append("updatetarget", getId('uploadtype1').checked?"firmware":"spiffs");
+    formData.append("updatetarget", getId('uploadtype1').checked?"firmware":"littlefs");
     formData.append("update", binfile);
     var xhr = new XMLHttpRequest();
     uploadWithError = false;
@@ -1472,7 +1725,7 @@ function progressHandler(event) {
   getId("uploadstatus").textContent = t('msg_upload_pct', '{0}% uploaded | please wait...', Math.round(percent));
   getId("updateprogress").value = Math.round(percent);
   if (percent >= 100) {
-    getId("uploadstatus").textContent = t('msg_upload_writing', 'Please wait, writing file to filesystem');
+    getId("uploadstatus").textContent = t('msg_upload_writing', 'Please wait, writing file to filesystem...');
   }
 }
 function rebootingProgress(waitSeconds) {
@@ -1493,7 +1746,7 @@ function rebootingProgress(waitSeconds) {
 }
 function completeHandler(event) {
   if(uploadWithError) return;
-  getId("uploadstatus").textContent = t('msg_upload_complete', 'Upload Complete, rebooting...');
+  getId("uploadstatus").textContent = t('msg_upload_complete', 'Upload complete, rebooting...');
   rebootingProgress(60);
 }
 function errorHandler(event) {
@@ -1578,6 +1831,7 @@ function updateIndices() {
 }
 
 function startDrag(target) {
+	if (validatorMode) return;   // the Validator has no reordering - the rows are not draggable there
 	const li = getLi(target);
 	if (li) {
 		dragged = li;

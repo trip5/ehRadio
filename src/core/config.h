@@ -7,11 +7,14 @@
 #if defined(SPI_BUS_SECONDARY)
   extern SPIClass SPIB;
 #endif
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <Preferences.h>
+#include "options.h"
 #include "logging.h"
 #include "../locale/dsplocale.h"
 #include "../displays/widgets/widgetsconfig.h"
+
+extern uint32_t vuPsramBytes;
 
 #define PLAYLIST_FILE        "playlist.csv"
 #define SSIDS_FILE           "wifi.csv"
@@ -26,15 +29,35 @@
 #define VERSION_PATH         "/data/" VERSION_FILE
 #define TMP_PATH             "/data/" TMP_FILE
 #define INDEX_PATH           "/data/" INDEX_FILE
-#define PLAYLIST_SD_PATH     "/data/" PLAYLIST_SD_FILE
-#define INDEX_SD_PATH        "/data/" INDEX_SD_FILE
+
+
+#define SD_DATA_DIR          "/ehradio.data"
+#define PLAYLIST_SD_PATH     SD_DATA_DIR "/" PLAYLIST_SD_FILE
+#define INDEX_SD_PATH        SD_DATA_DIR "/" INDEX_SD_FILE
+#define PLAYLIST_SD_TMP_PATH SD_DATA_DIR "/" PLAYLIST_SD_FILE ".tmp"
+#define INDEX_SD_TMP_PATH    SD_DATA_DIR "/" INDEX_SD_FILE ".tmp"
+
+// --- LittleFS partition / mount configuration --------------------------------
+// FS_PARTITION_LABEL must match the Name column of the filesystem partition in
+// builds/partitions/*.csv (the SubType there is still "spiffs" for compatibility).
+#define FS_PARTITION_LABEL   "littlefs"
+#define FS_MOUNT_POINT       "/littlefs"
+#define FS_MAX_OPEN_FILES    10
 
 #define REAL_PLAYL   config.getMode()==PM_WEB?PLAYLIST_PATH:PLAYLIST_SD_PATH
 #define REAL_INDEX   config.getMode()==PM_WEB?INDEX_PATH:INDEX_SD_PATH
 
+#ifndef MAX_PLAYLIST_ENTRIES
+  #define MAX_PLAYLIST_ENTRIES 65535 // unint_16 maximum
+#endif
+
 #define WEATHERKEY_LENGTH 64
 #define MDNS_LENGTH 32
 #define EHDPNAME_LENGTH 32
+
+static constexpr size_t STATION_FIELD_LENGTH = 170; // Max length for station name, URL and title fields
+static constexpr size_t WEATHER_STRING_L = 512; // Weather string buffer
+static constexpr uint32_t NVS_SLOW_WRITE_MS = 50; // ms a single NVS commit may take before FUNCTIONLOG names the key
 
 #define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
 
@@ -51,24 +74,30 @@ struct theme_t {
   uint16_t background;
   uint16_t meta;
   uint16_t metabg;
-  uint16_t metafill;
   uint16_t title1;
   uint16_t title2;
   uint16_t digit;
+  uint16_t digitbg;
   uint16_t div;
+  uint16_t line;
   uint16_t weather;
+  uint16_t vuaxis;
+  uint16_t vupeak;
   uint16_t vumax;
   uint16_t vumin;
   uint16_t clock;
   uint16_t clockbg;
   uint16_t seconds;
+  uint16_t secondsbg;
   uint16_t dow;
   uint16_t date;
   uint16_t clockss;
   uint16_t clockbgss;
   uint16_t secondsss;
+  uint16_t secondsbgss;
   uint16_t dowss;
   uint16_t datess;
+  uint16_t textss;
   uint16_t buffer;
   uint16_t ip;
   uint16_t vol;
@@ -79,7 +108,6 @@ struct theme_t {
   uint16_t volbarin;
   uint16_t plcurrent;
   uint16_t plcurrentbg;
-  uint16_t plcurrentfill;
   uint16_t playlist[5];
 };
 struct config_t // specify defaults here (and macros in options.h) (defaults are NOT saved to Prefs)
@@ -117,12 +145,24 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   uint8_t   themeId = 0;
   bool      dspon = true;
   bool      numplaylist = NUMBERED_PLAYLIST;
+  bool      playlistPages = PLAYLIST_MODE_PAGED;
   bool      clock12 = CLOCK_TWELVE;
+  bool      volumepage = VOLUME_PAGE;
   bool      bufferbar = SHOW_BUFFERBAR;
   bool      vumeter = SHOW_VU_METER;
-  bool      volumepage = VOLUME_PAGE;
+  bool      vupeak = SHOW_VU_PEAK;
+  uint8_t   vustyle = VU_STYLE_DEFAULT;
+  uint8_t   systemFontId = DISPLAYFONT;
+  uint8_t   clockFontId = CLOCKFONT;
+  bool      pretextALLCAPS = PRETEXT_ALLCAPS;
+  bool      clockglow = CLOCKGLOW;
+  bool      digitsglow = DIGITSGLOW;
   uint8_t   brightness = SCREEN_BRIGHTNESS;
-  uint8_t   contrast = SCREEN_CONTRAST;
+  bool      dimmingEnabled = DIMMING_ENABLED;
+  uint16_t  dimmingTimeout = DIMMING_TIMEOUT;
+  uint8_t   dimmingBrightness = DIMMING_BRIGHTNESS;
+
+  // Screensaver
   bool      screensaverEnabled = SS_NOTPLAYING;
   bool      screensaverBlank = SS_NOTPLAYING_BLANK;
   uint16_t  screensaverTimeout = SS_NOTPLAYING_TIME;
@@ -130,9 +170,13 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      screensaverPlayingBlank = SS_PLAYING_BLANK;
   uint16_t  screensaverPlayingTimeout = SS_PLAYING_TIME;
   bool      screensaverFullDateTime = SS_FULL_DATETIME;
-  bool      dimmingEnabled = DIMMING_ENABLED;
-  uint16_t  dimmingTimeout = DIMMING_TIMEOUT;
-  uint8_t   dimmingBrightness = DIMMING_BRIGHTNESS;
+  bool      screensaverText = SS_INFO_TEXT;
+  bool      screensaverClockSmaller = SS_SMALLER_CLOCK;
+  bool      screensaverVU = SS_VU;
+  uint8_t   screensaverVUStyle = SS_VU_STYLE;
+  bool      screensaverVUpeak = SS_VUPEAK;
+  bool      sleeptimer = SS_SLEEPTIMER;
+  uint16_t  sleepSsTimeout = SS_SLEEPTIME;
 
   // Locale
   char      locale_webui[6] = WEBUI_LOCALE;
@@ -165,11 +209,10 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      autoupdate = false;
   bool      ehdp = EHDP;
   char      ehdpname[EHDPNAME_LENGTH] = "";
-  uint8_t   softapdelay = SOFTAP_REBOOT_DELAY;
   char      mdnsname[MDNS_LENGTH] = "";
 
   // MQTT
-  bool      mqttenable = false;
+  bool      mqttenable = MQTT_ENABLE;
   char      mqtthost[60] = MQTT_HOST;
   uint16_t  mqttport = MQTT_PORT;
   char      mqttuser[30] = MQTT_USER;
@@ -193,10 +236,30 @@ struct configKeyMap {
 };
 
 #if IR_PIN!=255
-  struct ircodes_t
+  /* IR code store: one named field per remote button, 3 codes each.
+     Persisted in its own NVS namespace ("ehradioir") using the irKeyMap table in config.cpp.
+     Buttons are identified by name (see data-irid in irrecord.html) - never by array index. */
+  struct irstore_t
   {
-    unsigned int ir_set = 0; // will be 4224 if written/restored correctly
-    uint64_t irVals[20][3];
+    uint64_t power[3];
+    uint64_t mute[3];
+    uint64_t up[3];
+    uint64_t down[3];
+    uint64_t prev[3];
+    uint64_t next[3];
+    uint64_t play[3];
+    uint64_t mode[3];
+    uint64_t hash[3];
+    uint64_t n0[3];
+    uint64_t n1[3];
+    uint64_t n2[3];
+    uint64_t n3[3];
+    uint64_t n4[3];
+    uint64_t n5[3];
+    uint64_t n6[3];
+    uint64_t n7[3];
+    uint64_t n8[3];
+    uint64_t n9[3];
   };
 #endif
 
@@ -229,7 +292,7 @@ class Config {
     #if IR_PIN!=255
       int irindex = -1;
       uint8_t irchck = 0;
-      ircodes_t ircodes;
+      irstore_t irstore;
     #endif
 
     volatile BitrateFormat configFmt = BF_UNKNOWN;  // volatile: cross-core/task access
@@ -238,8 +301,10 @@ class Config {
     volatile uint32_t sdResumePos = 0;
     volatile bool     wwwFilesExist = false;
     volatile uint16_t vuThreshold = 0;
+    uint32_t          _vuRefMs = 0;              // the reference's release clock; see vuRefTrack()
     volatile uint16_t screensaverTicks = 0;
     volatile uint16_t screensaverPlayingTicks = 0;
+    volatile uint16_t sleepTicks = 0;   // seconds the screensaver has been up, for the sleep timer
     volatile bool     isScreensaver = false;
     volatile bool     displayIsInverted = false;
     volatile int      newConfigMode = 0;
@@ -250,8 +315,21 @@ class Config {
     void initSDPlaylist(bool force = false);
     void initPlaylistMode();
     void loadTheme();
-    void saveIR();
+    void loadLayout();
+    #if IR_PIN!=255
+      void loadIR();
+      void saveIR();
+      void saveIR(uint8_t button);
+      uint64_t* irCodes(uint8_t button);
+      void clearIR(uint8_t button, uint8_t slot);
+      uint8_t clearDuplicateIR(uint8_t button, uint8_t slot);
+      int irButtonByName(const char* name);
+      uint8_t irButtonCount();
+      const char* irButtonKey(uint8_t button);
+      uint8_t irAction(uint8_t button);
+    #endif
     void defaultSettings(const char *val, uint8_t clientId);
+    void resetScreensaverTimers(uint16_t value);
     void processDeferredSaves();
     uint8_t setVolume(uint8_t val);
     void setTone(int8_t bass, int8_t middle, int8_t treble);
@@ -261,7 +339,7 @@ class Config {
     void setTitle(const char* title);
     void setStation(const char* station);
     void setBrightness(bool dosave=false);
-    void setDspOn(bool dspon, bool saveval = true);
+    void setDspOn(bool dspon, bool updateState = true);
     void bootInfo();
     void deleteOldKeys();
     void saveLastStationUrl(const char* url, uint16_t waitMs = 10000);
@@ -271,11 +349,36 @@ class Config {
     }
     void lastStation(uint16_t newstation) {
       if (getMode()==PM_WEB) store.lastStation = newstation;
-      else saveValue(&store.lastSdStation, newstation);
+      else saveValueButWait(&store.lastSdStation, newstation, 5000);
     }
-    uint8_t getMode() { return store.play_mode; }
+    uint8_t getMode() { return _sdOfflineSession ? PM_SDCARD : store.play_mode; }
+    bool vuSourceWanted() const {
+      const bool ss = isScreensaver;
+      return (store.vumeter && !ss) || (ss && store.screensaverVU);
+    }
+    // The meter's REFERENCE: the loudest reading since the last stop or title change, with a time-based release.  A
+    // reading raises it at once; every VU_REF_DECAY_MS it falls by VU_REF_DECAY_PCT of itself, but never below the live
+    // reading - so a sustained loud passage keeps it near the signal (the bar stays up) while a few seconds of quieter
+    // material bring it down far enough for the bar to empty.  Time-based deliberately: the old VS1053 decay counted
+    // `computeVUlevel()` calls, which made it chase the signal and pin the bar at full.  ONE implementation, called by
+    // both audio libraries' computeVUlevel(), so the rule cannot fork with them.
+    // See plans/vu-level-reference-and-255-ceiling.md.
+    void vuRefTrack(uint16_t left, uint16_t right) {
+      const uint16_t live = (left > right) ? left : right;
+      if (live > vuThreshold) vuThreshold = live;            // attack: instant, unthrottled
+      const uint32_t now = millis();
+      if (_vuRefMs == 0) { _vuRefMs = now ? now : 1; return; }  // first reading arms the clock
+      if ((uint32_t)(now - _vuRefMs) < VU_REF_DECAY_MS) return;
+      _vuRefMs = now;
+      const uint16_t ref = vuThreshold;
+      if (ref <= live) return;                                // nothing to release
+      const uint16_t step = (uint16_t)(((uint32_t)ref * VU_REF_DECAY_PCT) / 100u);
+      const uint16_t next = (step == 0) ? (uint16_t)(ref - 1) : (uint16_t)(ref - step);  // always make progress
+      vuThreshold = (next > live) ? next : live;              // never undershoot the live reading
+    }
     FS* SDPLFS() { return _SDplaylistFS; }
     void syncSDFS();  // update _SDplaylistFS after external play_mode changes (e.g. button hold)
+    void beginOfflineSdSession();  // run this session in SD Offline Mode
     bool isRTCFound() { return _rtcFound; };
     Preferences prefs; // For Preferences, we use a look-up table to maintain compatibility...
     static const configKeyMap keyMap[];
@@ -294,6 +397,7 @@ class Config {
       if (entry) prefs.getBytes(entry->key, field, entry->size);
     }
     bool saveRawValue(const configKeyMap* entry, const void* value, size_t size) {
+      const uint32_t _t0 = millis();
       prefs.begin("ehradio", false);
       size_t existingLen = prefs.getBytesLength(entry->key);
       bool keyExists = (existingLen == size);
@@ -309,17 +413,22 @@ class Config {
       }
       if (needSave) {
         prefs.putBytes(entry->key, value, size);
-        if (strcmp(entry->key, "mqttpass") == 0 || strcmp(entry->key, "weatherkey") == 0) {
-          FUNCTIONLOG("Config.key", "%s: *", entry->key);
-        } else if (size > 4) {
-          FUNCTIONLOG("Config.key", "%s: %s", entry->key, static_cast<const char*>(value));
-        } else {
-          uint32_t rawValue = 0;
-          memcpy(&rawValue, value, size);
-          FUNCTIONLOG("Config.key", "%s: %lu", entry->key, static_cast<unsigned long>(rawValue));
-        }
+        #ifdef CONFIG_KEY_DEBUG
+          if (strcmp(entry->key, "mqttpass") == 0 || strcmp(entry->key, "weatherkey") == 0) {
+            FUNCTIONLOG("Config.key", "%s: *", entry->key);
+          } else if (size > 4) {
+            FUNCTIONLOG("Config.key", "%s: %s", entry->key, static_cast<const char*>(value));
+          } else {
+            uint32_t rawValue = 0;
+            memcpy(&rawValue, value, size);
+            FUNCTIONLOG("Config.key", "%s: %lu", entry->key, static_cast<unsigned long>(rawValue));
+          }
+        #endif
       }
       prefs.end();
+      // An NVS commit can block when it has to compact a page, evidence is a long write time
+      const uint32_t _dt = millis() - _t0;
+      if (_dt > NVS_SLOW_WRITE_MS) FUNCTIONLOG("Prefs", "NVS write took %lums (%s)", (unsigned long)_dt, entry->key);
       return needSave;
     }
     template <typename T>
@@ -381,6 +490,7 @@ class Config {
   private:
     bool _bootDone = false;
     bool _rtcFound = false;
+    bool _sdOfflineSession = false;  // set at boot for SD Offline Mode; play_mode keeps its stored value
     FS* _SDplaylistFS = nullptr;
     uint32_t _lastStationUrlDueMs = 0;
 
@@ -399,14 +509,12 @@ class Config {
       }
     }
 
-    bool _wwwFilesExist();
     void _initHW();
     void setDefaults();
 
     uint16_t _randomStation() {
-      randomSeed(esp_random() ^ millis());
-      uint16_t station = random(1, store.countStation);
-      return station;
+      if (store.countStation < 2) return store.countStation ? 1 : 0;
+      return random(1, (long)store.countStation + 1);
     }
 };
 

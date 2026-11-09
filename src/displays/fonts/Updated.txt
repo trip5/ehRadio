@@ -1,5 +1,0 @@
-Fonts in this folder updated as of 2026.06.26
-
-Matrix Fonts from https://trip5.github.io/Matrix-Fonts/
-
-X11 from https://www.cl.cam.ac.uk/~mgk25/ucs-fonts.html

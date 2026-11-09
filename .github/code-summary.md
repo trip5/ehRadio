@@ -2,7 +2,10 @@
 
 ## Mandatory Maintenance Directive
 
-If a change affects code interactions (how files/modules interact), storage keys, WebUI contracts, locale/build/dependency behavior, or other external contracts,`.github/code-summary.md` MUST be updated in the same change set; bug fixes that restore expected behavior are exempt unless they also change code interactions or external behavior/contracts.
+If a change affects code interactions (how files/modules interact), storage keys, WebUI contracts,
+locale/build/dependency behavior, or other external contracts,`.github/code-summary.md` MUST be updated in the same
+change set; bug fixes that restore expected behavior are exempt unless they also change code interactions or external
+behavior/contracts.
 
 This file exists to reduce re-analysis cost for humans and AI agents.
 
@@ -25,38 +28,191 @@ Grouped (not one-by-one deep explained) areas:
 
 ---
 
+## The Two Audio Libraries (read together)
+
+`src/libraries/I2S_Audio/` and `src/libraries/VS1053_Audio/` are separate backends, selected by whether `VS1053_CS`
+is defined. They share their defect classes, and the same bug has repeatedly appeared in both - the fixes in the two
+`*-frankenstein-surgery-notes.md` files land under the same dates (`2026.10.11`, `2026-10-21`, `2026.10.24`).
+
+- **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+- **The VS1053 board tends to surface these first** - hardware decoder, DREQ-gated SPI feed, a shallower graft and
+  readable per-track counters - and its notes file carries the longer record (fixes from 2026-07 on).
+- **The I2S library is often the correct reference** for what the VS1053 graft lost, and sometimes the reverse: its
+  `2026.10.24` tail-of-file note predicted on the record that a VS1053 unit stopping at a track end would be the next
+  thing to look at, and that is what happened.
+- Anything a fix teaches about end-of-stream accounting, per-track state or the reader/consumer split applies to both;
+  the histories live in the two notes files, which are the place to look before theorising.
+
+---
+
 ## Fast Architecture Overview
 
 ### Build-time chain
 - `platformio.ini` selects environment, included libraries, and included source files.
 - `myoptions.h` selects hardware profile + defaults.
 - `src/core/options.h` resolves all defaults/fallbacks and feature flags.
-- `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts by re-running `builds/fix_releases.py` on CI and diff-checking `builds/releases/` (contains `firmware.txt`, `releases.md`, and `web_assets/`) against what was committed.
-- `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
-- `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to `dev`, enabling ruleset bypass configured for Deploy keys.
+- `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts by re-running
+  `builds/fix_releases.py` on CI and diff-checking `builds/releases/` (contains `firmware.txt`, `releases.md`, and
+  `web_assets/`) against what was committed.
+- Both release workflows also produce one `<board_env>_filesystem.bin` per board: `pio run -e <env> -t buildfs`, then
+  the image is copied out of `$BUILD_DIR/littlefs.bin` and deduplicated with an `fs_done` map, exactly like the
+  bootloader and partitions. Content is identical across variants, so one image per partition layout is enough. If
+  `buildfs` produces `spiffs.bin` instead, `board_build.filesystem` is wrong in that contributor's `platformio.ini`
+  and the step warns rather than shipping an image LittleFS cannot mount.
+- `builds/fix_releases.py` resolves each board's partition CSV (env -> `extends` chain -> `board_build.partitions` ->
+  the `littlefs` row) and writes a non-standard `filesystem` entry (`path`, `offset`, `size`) into every manifest.
+  ESP Web Tools ignores it; `docs/flasher.html` uses it to write the WebUI filesystem when "Full reinstall" is ticked,
+  which is why that path skips the first-boot format and the later download of the web files.
+- `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves
+  the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
+- `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to
+  `dev`, enabling ruleset bypass configured for Deploy keys.
 
 ### Runtime chain
 - `src/main.cpp` bootstraps system: config -> display -> player -> network -> server/telnet/controls.
 - WebUI/WebSocket input path: `netserver` -> `commandhandler` -> `config/player/display/network`.
 - State output path: `requestOnChange(...)` in `netserver` -> WebSocket JSON to browser.
 - Settings persistence path: `config.saveValue(...)` -> ESP Preferences namespace `"ehradio"`.
-- Web-stream resume path: `Config::setLastStationUrl(...)` -> debounced SPIFFS file `/data/laststation.url` -> `player.resumeLastWebSource()` for smartstart/reconnect/direct-URL resume.
+- Web-stream resume path: `Config::setLastStationUrl(...)` -> debounced LittleFS file `/data/laststation.url` ->
+  `player.resumeLastWebSource()` for smartstart/reconnect/direct-URL resume.
 
 ### Logging chain (serial + telnet)
-- `src/core/logging.h` / `src/core/logging.cpp` now define the common log path for runtime diagnostics.
-- The public usage pattern remains uppercase macros at call sites, but they now wrap function-backed implementations (`serialLog`, `functionLog`, `bootLog`, `bootLogX`, `errorLog`, `serialLogDot`, `audioLog`) so formatting happens in one backend instead of nested macro layers.
+- `src/core/logging.h` / `src/core/logging.cpp` define the common log path. Call sites keep the uppercase macros, which
+  now wrap function-backed implementations (`serialLog`, `functionLog`, `bootLog`, `bootLogX`, `errorLog`, `warningLog`,
+  `serialLogDot`, `audioLog`) so formatting happens in one backend.
 - Core macros:
   - `SERIALLOG(...)`: writes one formatted line to both serial and telnet sinks.
-  - `SERIALLOGX(...)`: writes one formatted line to both serial and telnet sinks without line-ending (useful after `BOOTLOGX`).
+  - `SERIALLOGX(...)`: writes one formatted line to both serial and telnet sinks without line-ending (useful after
+    `BOOTLOGX`).
   - `FUNCTIONLOG(category, ...)`: category-tagged wrapper over `SERIALLOG`.
-  - `BOOTLOG(...)` / `BOOTLOGX(...)`: boot-sequence logging helpers. `BOOTLOG` ends with a line-wrapper, `BOOTLOGX` does not.
+  - `BOOTLOG(...)` / `BOOTLOGX(...)`: boot-sequence logging helpers. `BOOTLOG` ends with a line-wrapper, `BOOTLOGX` does
+    not.
   - `ERRORLOG(...)`: error-category wrapper.
   - `SERIALLOGDOT()`: progress-dot helper for long-running loops.
   - `AUDIOLOG(category, ...)`: callback-safe logging wrapper for stack-sensitive audio callback contexts.
+  - `WARNINGLOG(...)`: warning-category wrapper (`[Warning]`), the middle level - see the two-level rule below.
+  - `WARNINGS_LOG` is the switch for that level, and it is a plain flag like every other debug switch here:
+    `#ifdef WARNINGS_LOG` / `#ifndef WARNINGS_LOG`, listed in `options.h` inside the `ALL_DEBUG_LOGS` block. So
+    `[Warning]` lines exist only in a debug build, which is the point: a shipped log carries `[ERROR]` and nothing
+    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h` (or `ALL_DEBUG_LOGS`). Two traps.
+    (1) A flag is on whether it is 1 or 0, so `#define WARNINGS_LOG 0` *enables* it - the way to leave it off is
+    simply not to define it. (2) The test sits in the body of `warningLog()` in `logging.cpp`, not around the macro in
+    `logging.h`: that header is included by translation units that cannot see `options.h`, where the flag would be
+    undefined and warnings would vanish from exactly those files in a debug build too - the trap
+    `ESPFILEUPDATER_VERBOSE` fell into. Declared unconditionally, one signature everywhere, one place to turn it on.
+- **Two levels, and what each one promises the reader.** `[ERROR]` is what is broken and unhandled: data lost, a mount
+  failed, a task could not be created, heap corruption detected. `[Warning]` is what the code already handled: a
+  fallback taken (`SD card not inserted` -> web mode), a retry running (`Recovery restarts spent`), a limit reached
+  (playlist or SD index full), or an event expected on this path (`Main loop stalled` during an ID3v2 tag read, a
+  dropped display request). The test for a site is in its own message text: "failed", "cannot" or "could not" with no
+  fallback behind it is an ERROR; anything self-healing is a Warning. Warnings stay on in every build, because the level
+  only helps if a tester can tell the two apart in the log they paste. Tester rule: a `[Warning]` is worth reporting
+  when it repeats or when the audio misbehaves with it; an `[ERROR]` is always worth reporting.
+  **Demoting a site to `Warning` therefore also takes it out of a normal build's log**, because warnings are a debug
+  switch. That is deliberate for an event the code handled, and wrong for anything the user has to act on - so a
+  demotion has to hold up on both counts: "the code dealt with it" AND "nobody needs to see it in a shipped log".
+- **`[Audio.info]` is not a log stream, and that is why it was never gated.** `AUDIO_INFO()` in the audio libraries is
+  `sprintf()` plus a call to the weak `audio_info()` callback - the library's event channel into the sketch.
+  `AudioHandlers::handleInfo()` is the consumer, and several messages change behaviour there: the codec report sets the
+  bitrate format, `BitRate:` sets the station bitrate and pushes it to the WebUI, `stream ready` clears the connecting
+  placeholder, `skip metadata` restores the station name. The message is therefore never suppressed - only the print, in
+  the handler. Three dispositions: the library's fault lines go through a `kInfoSeverity[]` table (`no decode progress`
+  -> `ERRORLOG`; `mp3 err `, `zero read:`, `ring overrun prevented` -> `WARNINGLOG`); metadata has its own switch
+  (`METADATA_LOG`, a flag, off by default, `[Metadata]` category) covering the ID3 fields in `handleId3Data()`, the ICY title in
+  `handleShowStreamTitle()` - including a title refused as non-printable, which is the answer to "no title on this
+  station" - the ICY station name in `handleShowStation()`, and the raw `StreamTitle=`/`StreamUrl=` copies that arrive
+  through `handleInfo()`; everything else is per-track chatter printed only under `AUDIO_DEBUG`. A new fault line has to
+  be added to that table to be heard.
+- **Two lines are gated at the source as well**, because they run on a timer rather than once per event: the `track 10s`
+  ring arithmetic in `Audio::loop()` sits inside `#ifdef AUDIO_DEBUG` so its sprintf never runs in a quiet build, and
+  the two `[SD]` trace lines (`connecttoFS`, `play pos ... card n/m`) are behind `SD_PLAY_TRACE_MS`, which now defaults
+  to **0** - set it to e.g. 30000 in `myoptions.h` for a soak, since that pair is what says whether the card reader or
+  the decoder stopped. `CONFIG_KEY_DEBUG` does the same for the `[Config.key]` value dumps in `config.h`.
+  - `BOOTLOG_TIME` (defaulted in `options.h` under `ALL_DEBUG_LOGS`, set in `myoptions.h` for debug builds) makes every
+    `BOOTLOG` line carry the time since boot, zero-padded to five digits, between the 16-character category field and
+    the message: `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false
+    in that one file alone while the rest of the build has the macro - a silent feature loss with a green build. Only
+    `bootLog()` stamps, selected by category plus newline (`appendNewline && category == "BOOT"`), because `bootLogX()`
+    writes no newline and a stamp there would land mid-line; the value is `millis()` at emit time and self-widens past
+    100 s, and telnet receives the same composed line. Boot logs are the boot-timing measurement: consecutive deltas
+    attribute a slow boot to its stages. It is also the switch for the three stage timing logs (`BOOTTIMELOG`,
+    `LITTLEFSTIMELOG`, `CONFIGTIMELOG`): undefined, their bodies compile to nothing, so the build has no stage lines and
+    loses the `[BOOT] ...ms:` prefixes too. Measured: 216 bytes, 52 of them call sites, which stay as empty functions in
+    the off build.
+  - `ESPFILEUPDATER_VERBOSE` is derived in `options.h`, immediately after `ESPFILEUPDATER_DEBUG` is settled there, not
+    in `logging.h`. It lived in `logging.h` once, where the library files that include that header without `options.h`
+    (`FT6336.cpp`, `es8311.cpp`, the four `audioVS1053Ex.cpp` variants) resolved it to `false` while the core resolved
+    it to `true` - one macro with two values in one build. All six call sites pass it to
+    `ESPFileUpdater::checkAndUpdate()` and include `options.h`; a seventh that forgets now fails to compile rather than
+    quietly logging nothing.
+  - Boot stage attribution: `BOOTTIMELOG(name)` closes each block of `setup()` with the stage's cost, e.g.
+    `[BOOT]          01950ms: checkLittleFSandVer                    377ms` - the timestamp is the running total to the end
+    of that stage and the message is that stage's share. The init paths announce completion with `BOOTLOGX` progress
+    lines, which carry no stamp by design (it would land mid-line before the dots), leaving the whole tail of `setup()`
+    unmeasured: about 4.7 s of a 23.4 s boot on the 128x64 VS1053 build. Add a call after every block in `setup()` that
+    can block; the first measures from power-on. `LITTLEFSTIMELOG` and `CONFIGTIMELOG` do the same for the LittleFS and
+    config paths, all three in `logging.cpp` behind declarations and macros in `logging.h`. Each keeps its own stamp, so
+    a marker measures against the previous marker of its own kind: the config and LittleFS stages that run inside a
+    `setup()` block would otherwise disturb the `setup()` deltas, and a shared stamp would redefine every number.
+    `LITTLEFSTIMELOGRESET()` and `CONFIGTIMELOGRESET()` restart the measurement at the entry to the functions whose
+    first stage would otherwise be measured from the previous marker (`checkLittleFSandVer()`, `Config::init()`,
+    `loadPreferences()`, `initPlaylistMode()`). The functions are declared whatever the build and compile to empty bodies
+    without `BOOTLOG_TIME`; the `verifyLittleFS` summary line's `, NNNms` is gated the same way.
+  - The log write path is shaped by `Serial` here being USB CDC, not a UART: `HWCDC::write()` takes its TX lock with a
+    timeout, blocks on the ring buffer, then waits 1 ms at a time for the host up to its TX timeout (100 ms default;
+    USBCDC 250 ms), after which it declares the host gone and clears `connected`. So one log line could stall the boot
+    for up to a timeout, twice over. Two changes: `emitLogMessage()` composes the CRLF into the buffer and issues a
+    single `Serial.write()`, and `setup()` applies `BOOTLOG_TX_TIMEOUT_MS` (options.h, default 5 ms) through
+    `Serial.setTxTimeoutMs()` under `#if ARDUINO_USB_CDC_ON_BOOT`. Not zero: at zero the first failed ring-buffer send
+    gives up immediately and `tries` hits zero, so a burst such as the 40-line config dump comes out truncated rather
+    than merely bounded. Measured cost before the change: about 4.6 ms per line, 186 ms for the config dump alone.
 - Contract detail:
   - `Telnet::printf(...)` is telnet-only transport and no longer mirrors to serial.
-  - Normal logs no longer route through `Telnet::printf(...)`; `logging.cpp` uses `Telnet::logLine(...)` / `Telnet::logRaw(...)` so the shared logging path avoids the prompt-aware telnet formatter and its extra stack use.
-  - Logs should use macros above; direct `Serial.print*`/`telnet.printf` is reserved for explicit transport-specific behavior (for example client-targeted telnet responses and OTA progress streaming).
+  - Normal logs no longer route through `Telnet::printf(...)`; `logging.cpp` uses `Telnet::logLine(...)` /
+    `Telnet::logRaw(...)` so the shared logging path avoids the prompt-aware telnet formatter and its extra stack use.
+  - Logs should use macros above; direct `Serial.print*`/`telnet.printf` is reserved for explicit transport-specific
+    behavior (for example client-targeted telnet responses and OTA progress streaming).
+
+### Crash report (the core dump, read back on the next boot)
+- A panic cannot be logged by us (nothing of ours runs after one), but a core dump
+  is recorded on every crash: `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y` with `DATA_FORMAT_ELF=y` is built into the
+  framework's prebuilt ESP32-S3 libraries, and every partition table in `builds/partitions/` ends with a 64 KB
+  `coredump` partition. `src/core/crashreport.h` / `crashreport.cpp` only read it back.
+- **The crash black box, `src/core/coredump.cpp` / `.h`.** `crashDumpReport()` prints the dump and leaves it in place;
+  `coredump::service()` is called from `loop()`, not `setup()` - a fixed call point in `setup()` always stamped the file
+  `clock unverified`, because SNTP answers after `setup()` has moved on. `service()` archives as soon as the clock is
+  usable, or without one after `CLOCK_WAIT_MS` (45 s), which is also the offline SD case where NTP never comes. It
+  writes `/data/coredump.N` and erases the partition only after that write succeeds; three failed writes give up until
+  the next boot, which then simply reports and retries. Nine files are kept: the numbers only grow, and the tenth write
+  deletes the lowest-numbered first; if that delete fails the write is abandoned rather than letting the ring grow.
+  **A version change clears the ring** (`coredump::clear()`, called from `checkLittleFSandVer()` when the stored
+  `ehradio.ver` differs from `RADIOVERSION`): a crash log is only meaningful against the firmware that produced it. A
+  *pending* dump is not discarded though - it is archived into the fresh ring, with its own `elf sha256` naming the build
+  that crashed. Dev builds reusing one `RADIOVERSION` do not trigger the clear, which is the accepted cost.
+  A file is one header line - the timestamp with `(clock verified)` or `clock unverified`, the reset reason this boot
+  started for, the mode and station the crashed boot was on, and the uptime at archive - then the same lines from
+  `emitReport()` (one emitter in `crashreport.cpp` feeds both, so they cannot drift), then two blank lines. The crashed
+  build is named by the `elf sha256` in the body, not by the header, because a header md5 would be the *current* build.
+  `/coredump` in `handleNotFound` returns every kept file as one `text/plain` stream built by `coredump::buildAllText()`,
+  whose own top line carries `RADIOVERSION`, the firmware name and the app md5 - so netserver never learns a file name.
+  There is no `COREDUMP_KEEP_DUMP` any more: keeping the dump made every boot re-archive the same crash, so nine boots
+  recycled the whole ring with copies of one fault. `esp_core_dump_summary_t` carries no core id (only `exc_tcb`,
+  `exc_task`, `exc_pc`, `exc_bt_info`), so the core is implied by the task name and the boot banner's core layout.
+- `crashDumpAvailable()` is `esp_core_dump_image_check() == ESP_OK`; `crashDumpReport()` calls
+  `esp_core_dump_get_summary()` and BOOTLOGs the crashing task, `exc_pc`, the exception cause and vaddr, up to 16
+  on-device backtrace PCs, and the crashing app's ELF SHA256 - all either paste-ready for
+  `xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf <pc>` or needed to know which build those addresses belong to.
+  It then erases the dump, or every later boot would report the same crash again. `COREDUMP_KEEP_DUMP` (options.h)
+  leaves it in flash for `esp-coredump`, and `COREDUMP_SUMMARY_AT_BOOT` (on by default) is the switch for the feature;
+  both it and `CONFIG_ESP_COREDUMP_*` must hold or the file compiles to empty stubs.
+- `main.cpp` calls it right after the 1 second pre-log delay, inside the same `CORE_DEBUG_LEVEL`/`ALL_DEBUG_LOGS` guard,
+  and that delay also fires when a dump is waiting (after a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT
+  reason, not `ESP_RST_POWERON`). The block runs early in `setup()`, so the crash is logged before the rest of the boot.
+- The summary API exists only in the ELF core-dump build of the IDF libraries, so `crashreport.cpp` is guarded by `#if
+  defined(COREDUMP_SUMMARY_AT_BOOT) && CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`; both
+  sdkconfig macros are 1 here, and the map file confirms `esp_core_dump_get_summary` links in from
+  `libespcoredump.a(core_dump_elf.c.obj)`.
 
 ### Primary shared state objects
 - `config` (`Config` singleton): persistent store + station/theme/runtime state.
@@ -75,8 +231,14 @@ Grouped (not one-by-one deep explained) areas:
   - `build_src_filter` excludes all by default then re-includes selected folders/files.
   - Board environments add display/audio library includes.
   - `extra_scripts` are used for localization/font replacement and gzip workflow.
+  - `[ehradio] build_flags` carries `-include src/core/options_overrides.h`, so that file is placed at the top of
+    **every** translation unit - our own sources, every managed library, and the framework's `.c` files. It exists
+    because libraries never include `options.h` (see its subsection below).
 - Risk:
   - Wrong env can compile without required modules because files are source-filtered.
+  - Editing `options_overrides.h` may not rebuild library objects: when the header was introduced, only `src/` TUs were
+    recompiled and every `libXXX` object was left alone. A changed *value* can therefore stay inert until the affected
+    env is cleaned (`pio run -t clean -e <env>`).
 
 ### `myoptions.h`
 - Board/profile selector and hardware wiring table.
@@ -87,7 +249,11 @@ Grouped (not one-by-one deep explained) areas:
 - Canonical fallback defaults and compile flags.
 - Includes `myoptions.h` when present.
 - **Owns all compile-time guardrails** inline, right next to each respective define.
-- Owns shared buffer sizing macros under `/* Maximum lengths of character buffers */`, including `MQTT_URL_SIZE` for stream/artwork URL buffers used by `player`, `audiohandlers`, and MQTT status payload sizing.
+- Holds only genuine user tweaks: hardware defaults, feature gates, and the one connection-attempt count worth
+  changing per site (`WIFI_ATTEMPTS`). Stable values that nobody tunes live with the code that reads them instead -
+  network timings in `network.cpp`, buffer sizes in `netserver.cpp` / `mqtt.cpp` / `config.h`, task delays in
+  `display.cpp` / `player.cpp`, and the two cross-cutting sizes (`STATION_FIELD_LENGTH` in `config.h`,
+  `MQTT_URL_SIZE` in `mqtt.h`).
 - Defines:
   - hardware defaults (pins, feature gates)
   - updater URLs (`FILESURL`, `UPDATEURL`, `CHECKUPDATEURL`) unless disabled
@@ -96,35 +262,110 @@ Grouped (not one-by-one deep explained) areas:
   - WebUI and localization defaults
   - curated list defaults
   - **Exception**: locale and language options are handled by locale.h
-  - **SPI architecture — Named Bus System** (auto-derived internals — do NOT define `SPI_BUS_SECONDARY`, `SPIA`, or `VS1053_SPIBUS` in `myoptions.h`):
-  - **Bus A** = `SPIA` (alias for `&SPI`, the default ESP32 SPI instance). Pins configured by `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` in `Config::init()` when `SPIA_SCK` is defined; otherwise `SPI.begin()` uses hardware defaults.
-  - **Bus B** = `SPIB` (`SPIClass SPIB(SPI_BUS_SECONDARY)` declared and initialized in `config.cpp`). Only exists when `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` uses symbolic constants: `VSPI` (ESP32) / `FSPI` (ESP32-S3/C3) for the primary bus, `HSPI` for the secondary bus on all targets.
-  - **Bus pin defines** (set in `myoptions.h`): `SPIA_SCK/MISO/MOSI` manually, or use shorthands: `SPIA_DEFAULT` (chip default pins), `SPIA_DEFAULT_XMISO` (chip default SCK/MOSI, MISO=255 — for display-only Bus A). `SPIB_SCK/MISO/MOSI` manually, or `SPIB_DEFAULT` (chip default secondary-bus pins). `SPI.begin()` / `SPIB.begin()` are only called when the respective SCK is defined and `!= 255`; I2C-only builds skip SPI init entirely.
-  - **Per-peripheral bus assignment** (char literals `'A'` or `'B'` — NOT strings): `SD_SPI`, `TS_SPI`, `VS1053_SPI`. `VS1053_SPI` resolves `VS1053_SCK/MISO/MOSI` from the matching bus pins in `options.h` (soft — does not override direct pin defines). SD and TS use the bus *object* directly (`SPIA`/`SPIB`) — no separate SCK/MISO/MOSI derivation needed.
-  - **`VSPI FSPI` shim** — defined when target is not ESP32 (`!CONFIG_IDF_TARGET_ESP32`) for third-party library compatibility.
-  - **VS1053 bus assignment** — `VS1053_SPIBUS` macro auto-derived in `options.h`. `VS1053_CS != 255` requires `VS1053_SCK` to be set (via `VS1053_SPI` or directly); `#error` if missing. Resolves to `SPIB` if `VS1053_SCK == SPIB_SCK`, otherwise `SPIA`. Used as `&VS1053_SPIBUS` in the `Audio` constructor in `player.cpp`.
-  - **SD bus selection** — `SDREALSPI` macro in `sdmanager.cpp`: `SPIB` when `SD_SPI == 'B'` and `SPIB_SCK` is defined, otherwise `SPIA`.
-  - **Touchscreen bus selection** — inline in `touchscreen.cpp` `init()`: `SPIB` when `TS_SPI == 'B'` and `SPIB_SCK` is defined; `SPIA` when `TS_SPI == 'A'`; `ts.begin()` (default `&SPI`) otherwise.
+  - **SPI architecture — Named Bus System** (auto-derived internals — do NOT define `SPI_BUS_SECONDARY`, `SPIA`, or
+    `VS1053_SPIBUS` in `myoptions.h`):
+  - **Bus A** = `SPIA` (alias for `&SPI`, the default ESP32 SPI instance). Pins configured by `SPI.begin(SPIA_SCK,
+    SPIA_MISO, SPIA_MOSI)` in `Config::init()` when `SPIA_SCK` is defined; otherwise `SPI.begin()` uses hardware
+    defaults.
+  - **Bus B** = `SPIB` (`SPIClass SPIB(SPI_BUS_SECONDARY)` declared and initialized in `config.cpp`). Only exists when
+    `SPIB_SCK` is defined. `SPI_BUS_SECONDARY` uses symbolic constants: `VSPI` (ESP32) / `FSPI` (ESP32-S3) for the
+    primary bus, `HSPI` for the secondary bus on all targets.
+  - **Bus pin defines** (set in `myoptions.h`): `SPIA_SCK/MISO/MOSI` manually, or use shorthands: `SPIA_DEFAULT` (chip
+    default pins), `SPIA_DEFAULT_XMISO` (chip default SCK/MOSI, MISO=255 — for display-only Bus A). `SPIB_SCK/MISO/MOSI`
+    manually, or `SPIB_DEFAULT` (chip default secondary-bus pins). `SPI.begin()` / `SPIB.begin()` are only called when
+    the respective SCK is defined and `!= 255`; I2C-only builds skip SPI init entirely.
+  - **Per-peripheral bus assignment** (char literals `'A'` or `'B'` — NOT strings): `SD_SPI`, `TS_SPI`, `VS1053_SPI`.
+    `VS1053_SPI` resolves `VS1053_SCK/MISO/MOSI` from the matching bus pins in `options.h` (soft — does not override
+    direct pin defines). SD and TS use the bus *object* directly (`SPIA`/`SPIB`) — no separate SCK/MISO/MOSI derivation
+    needed.
+  - **`VSPI FSPI` shim** — defined when target is not ESP32 (`!CONFIG_IDF_TARGET_ESP32`) for third-party library
+    compatibility.
+  - **VS1053 bus assignment** — `VS1053_SPIBUS` macro auto-derived in `options.h`. `VS1053_CS != 255` requires
+    `VS1053_SCK` to be set (via `VS1053_SPI` or directly); `#error` if missing. Resolves to `SPIB` if `VS1053_SCK ==
+    SPIB_SCK`, otherwise `SPIA`. Used as `&VS1053_SPIBUS` in the `Audio` constructor in `player.cpp`.
+  - **SD bus selection** — `SDREALSPI` macro in `sdmanager.cpp` (SPI transport only, i.e. when `SD_USE_MMC` is not
+    defined): `SPIB` when `SD_SPI == 'B'` and `SPIB_SCK` is defined, otherwise `SPIA`.
+  - **Touchscreen bus selection** — inline in `touchscreen.cpp` `init()`: `SPIB` when `TS_SPI == 'B'` and `SPIB_SCK` is
+    defined; `SPIA` when `TS_SPI == 'A'`; `ts.begin()` (default `&SPI`) otherwise.
 - **SD card defines** (set in `myoptions.h`, fallback `255` = disabled in `options.h`):
-  - `SD_CS` — chip-select pin; `255` disables SD entirely.
-  - `SD_SPI 'A'/'B'` — assigns SD to Bus A or B; SD uses the bus object directly, no per-pin derivation needed.
+  - `SD_CS` — chip-select pin; `255` disables SD entirely. **`254` is a sentinel meaning "SD present but on SDMMC"**,
+    set automatically by `options.h` when SDMMC pins are defined, so every pre-existing `SD_CS!=255` "SD exists" test
+    keeps working unchanged.
+  - `SD_SPI 'A'/'B'` — assigns SD to Bus A or B; SD uses the bus object directly, no per-pin derivation needed. Not
+    required when `SD_USE_MMC` is set.
   - `USE_SD` — feature presence macro, derived from `SD_CS!=255`.
+- **SDMMC transport (ESP32-S3 only)** — defining any of
+  `SDMMC_CLK`/`SDMMC_CMD`/`SDMMC_D0`/`SDMMC_D1`/`SDMMC_D2`/`SDMMC_D3` in `myoptions.h` defines `SD_USE_MMC` and switches
+  the card from SPI to the native SD host. `SDMMC_CLK`/`SDMMC_CMD`/`SDMMC_D0` are required; adding
+  `SDMMC_D1`/`SDMMC_D2`/`SDMMC_D3` selects 4-bit mode. Only all-six or first-three is accepted — a partial set, or any
+  non-S3 target with SDMMC pins, is a compile `#error`. `SDMMC_FREQ` (0 = driver default 40MHz high speed) overrides the
+  mount frequency. The header comment records that SD modules carrying a 74LVC125A/level-shifter cannot work, because
+  CMD must be bidirectional.
 - **I2S internal DAC**:
-  - `USE_AUDIO_ESP32_DAC` — defined directly in `myoptions.h` to use the ESP32 internal DAC (ESP32 only, not S3/C3). `I2S_INTERNAL` boolean is removed.
+  - `USE_AUDIO_ESP32_DAC` — defined directly in `myoptions.h` to use the ESP32 internal DAC (ESP32 only, not S3).
+    `I2S_INTERNAL` boolean is removed.
 - **Guardrail conventions** (maintain these when adding new options):
-  - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g. `TS_MODEL`, `RTC_MODULE`), bad logical cross-constraints (e.g. `BTN_PRESS_TICKS <= BTN_CLICK_TICKS`, `BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD`).
-  - `#warning` + `#undef` for out-of-range tunables in `/* USER DEFAULTS */` section (e.g. `SOUND_VOLUME`, `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
-  - `static_assert` with `__builtin_strcmp` for enumerated string options (e.g. `WEATHER_API`, `WEATHER_WIND_SPEED_UNITS`). **Update the `static_assert` whenever a new provider/value is added.**
-  - `/* PREVENT BOARD-DEFINED PIN RE-USE */` section lives after the `/* ESP DEVBOARD */` LED block (requires `LED_PIN` and `ESP_S3C3` to be defined first). Covers LED vs RST pin conflicts only — keep it narrowly scoped.
-- **What is intentionally NOT guarded**: booleans (compiler error is obvious), pin numbers (board-dependent range), free-form strings (`AP_SSID`, `MQTT_*`, URLs), color macros (R,G,B triplets), `AUTOBACKLIGHT(x)` (C macro function), `BATTERY_CURVE_MV/PCT` (already has `static_assert` in `battery.cpp`).
-- **PSRAM buffer sizing** — `PSRAM_BUFSIZE` macro controls the audio input buffer and FLAC reserved buffer sizes. Defaults differ by board
+  - `#error` for hard-invalid values: wrong board type, mutually exclusive decoders, enum/constant out of range (e.g.
+    `TS_MODEL`, `RTC_MODULE`), bad logical cross-constraints (e.g. `BTN_PRESS_TICKS <= BTN_CLICK_TICKS`,
+    `BATTERY_CRITICAL_THRESHOLD >= BATTERY_LOW_THRESHOLD`).
+  - `#warning` + `#undef` for out-of-range tunables in `/* USER DEFAULTS */` section (e.g. `SOUND_VOLUME`,
+    `SCREEN_BRIGHTNESS`): reverts silently to default but now emits a visible warning in the build log.
+  - `static_assert` with `__builtin_strcmp` for enumerated string options (e.g. `WEATHER_API`,
+    `WEATHER_WIND_SPEED_UNITS`). **Update the `static_assert` whenever a new provider/value is added.**
+- **What is intentionally NOT guarded**: booleans (compiler error is obvious), pin numbers (board-dependent range),
+  free-form strings (`AP_SSID`, `MQTT_*`, URLs), color macros (R,G,B triplets), `AUTOBACKLIGHT(x)` (C macro function),
+  `BATTERY_CURVE_MV/PCT` (already has `static_assert` in `battery.cpp`).
+- **PSRAM is mandatory** — `options.h` refuses any build without `BOARD_HAS_PSRAM` and accepts only `ARDUINO_ESP32_DEV`
+  / `ARDUINO_ESP32S3_DEV` (ESP32-C3 is rejected by name). Add `-DBOARD_HAS_PSRAM` to `build_flags` in `platformio.ini`.
+  The libraries keep their SRAM fallbacks as last-resort degradation, but a PSRAM-less build is no longer supported.
+- **PSRAM budget** — the per-consumer sizes and the per-build totals are tabulated at the top of `options.h`, right
+  after the board/PSRAM guards. The display framebuffer and VU canvas lines are TFT-only (an OLED build has neither);
+  the WebUI cache is opportunistic and falls back to LittleFS, so it is headroom rather than a hard requirement.
 - Buffer bar visual mapping:
   - `BUFFERBAR_VISUAL_FULL_PERCENT` controls where input-buffer fill is rendered as visually full.
   - default `82` means 82% raw fill maps to 100% bar width; set `100` to keep direct 1:1 mapping.
 
+### `src/core/options_overrides.h` (the force-included config)
+- **Why it exists**: third-party libraries are their own translation units and never include `options.h`, so a value
+  defined only there never reaches them. `AsyncTCP.h` guards each macro with `#ifndef`, so anything defined before it is
+  first included wins; without this header the library's own defaults (`CONFIG_ASYNC_TCP_RUNNING_CORE -1`,
+  `CONFIG_ASYNC_TCP_USE_WDT 1`, `CONFIG_ASYNC_TCP_QUEUE_SIZE 64`) were what ran.
+- **`options.h` must never be force-included**: it is not library-safe. It `#include <SPI.h>` (a library TU's compile
+  line lacks the SPI include path: `options.h:273:10: fatal error: SPI.h: No such file or directory`, the
+  `Wire.cpp`/`libf41` failure) and uses C++-only `static_assert` while `build_flags` also apply to `.c` TUs.
+- **Rules for the file**: preprocessor only, no framework/library includes, no types, no C++ syntax, and only values a
+  library must agree with us about. `es3c28p` compiles the framework's `esp32-hal-*.c` files through it, which proves it
+  stays C-safe.
+- **Contents**: the `myoptions.h` include (first, so user values beat every default here), the `VS1053_CS 255` default
+  (the core rule needs it; `myoptions.h` defines it only for VS1053 builds), the `NETWORK_CORE` derivation, and four
+  `CONFIG_ASYNC_TCP_*` overrides (queue size, running core, WDT, priority) **plus `CONFIG_ASYNC_TCP_STACK_SIZE 8192`**.
+- **`CONFIG_ASYNC_TCP_STACK_SIZE` is in WORDS, not bytes** - `AsyncTCP.cpp` passes it straight to `xTaskCreate`, so
+  the library default `8192 * 2` is 16 384 words = **64 KB**, of which a `[Core.HWM]` reading showed ~15 KB in use.
+  8192 words (32 KB) keeps more than twice that peak and hands 32 KB of internal heap back to the WebUI, which is the
+  resource its first page load runs out of. Going lower (4096 = 16 KB) needs an SD-upload HWM reading first, because
+  the file manager's upload and OTA handlers also run on that task. The same words/bytes confusion runs through our
+  own stack macros (`NETWORK_TASK_STACK_WORDS`, `WEB_BRINGUP_STACK_WORDS`): a `_BYTES` name here is wrong and has
+  already misled one reader.
+- **⚠ Editing this header does not rebuild the libraries.** A plain `pio run` after a change here reuses a stale
+  `AsyncTCP.cpp.o`, so the new value silently does not take effect (observed: only the project's own TUs recompiled).
+  After any change here, `pio run -e <env> -t clean` first, and confirm the log shows
+  `Compiling .pio/build/<env>/libXXX/AsyncTCP/AsyncTCP.cpp.o`.
+- **The `NETWORK_CORE` derivation is written to be evaluated twice**, with no marker macro: this header is compiled
+  first, so `options.h` then meets the same lines with `NETWORK_CORE` already set. The `#ifndef NETWORK_CORE` guard is
+  what makes the second evaluation a no-op. Keep the two copies identical.
+- **`myoptions.h` is the user channel**: values set there (e.g. `CONFIG_ASYNC_TCP_USE_WDT 0`) reach the libraries because
+  it is read here before any default - only in builds carrying the force-include (root `platformio.ini` and
+  `builds/trip5/platformio.ini`; the other `builds/*` templates do not, and there the classic `options.h` copy is live).
+- sdkconfig macros (`CONFIG_IDF_TARGET_ESP32S3`) are defined at force-include time, so a target check works here without
+  a board-macro proxy.
+- **The AsyncTCP core is pinned, not locked**: `CONFIG_ASYNC_TCP_RUNNING_CORE` defaults to `NETWORK_CORE` but both may be
+  overridden. Its task runs at priority 10, above every task we create, so which core it sits on decides what it can
+  preempt - on a VS1053 build it shares core 0 with the audio decode.
+
 ## Compile-Time Modularity and Build Variants (`#if` / `#ifdef` behavior)
 
-This codebase is strongly compile-time modular. Runtime behavior can differ significantly even with the same source, depending on the selected PlatformIO environment and macro definitions.
+This codebase is strongly compile-time modular. Runtime behavior can differ significantly even with the same source,
+depending on the selected PlatformIO environment and macro definitions.
 
 ### Where behavior is selected
 - `platformio.ini`:
@@ -143,18 +384,25 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   - I2S audio path vs VS1053 path are mutually exclusive — enforced via `#error` in `options.h`.
 - Display backend:
   - selected display model changes driver implementation and capabilities.
-  - **Resolution/interface system**: `DSP_MODEL` = controller chip, `DSP_WIDTH`/`DSP_HEIGHT` = panel resolution, SPI or I2C type may be detected by `I2C_SDA` and `I2C_SCL` pins defines. Resolution defaults per DSP_MODEL in `options.h`, overridable in `myoptions.h`.
-  - **dspcore.h**: one `#elif` per DSP_MODEL, sets feature flags (`PSFBUFFER`, `DSP_OLED`, `DSP_LCD`).
-  - **dspfont.h** (new): selects bootlogo, clock font, TIME_SIZE by resolution.
+  - **Resolution/interface system**: `DSP_MODEL` = controller chip, `DSP_WIDTH`/`DSP_HEIGHT` = panel resolution, SPI or
+    I2C type may be detected by `I2C_SDA` and `I2C_SCL` pins defines. Resolution defaults per DSP_MODEL in `options.h`,
+    overridable in `myoptions.h`.
+  - **dspcore.h**: one `#elif` per DSP_MODEL, sets the feature flags (`PSFBUFFER` for the TFT class, `DSP_OLED` for the
+    monochrome class).
+  - **dspfont.h** (new): selects the bootlogo by resolution, and holds the system-font and clock-font
+    tables (see "Display fonts/assets" below — the clock font and its size are runtime values, not
+    resolution-derived ones).
   - **dspconf.h** (new): selects `conf/display*conf.h` by resolution × display category.
   - Display `.h` files now delegate conf/font/bootlogo to these central files — no per-file branches for resolution.
   - Conf files no longer define DSP_WIDTH/DSP_HEIGHT (set upstream in options.h).
-  - **Removed enum values** (collapsed into resolution variants): DSP_ST7789_240, DSP_ST7789_76, DSP_SSD1306x32, DSP_SSD1305I2C, DSP_1602I2C, DSP_2004I2C, DSP_SSD1327_64. I2C variants detected by `I2C_SDA` and `I2C_SCL`.
+  - **Removed enum values** (collapsed into resolution variants): DSP_ST7789_240, DSP_ST7789_76, DSP_SSD1306x32,
+    DSP_SSD1305I2C, DSP_SSD1327_64. I2C variants detected by `I2C_SDA` and `I2C_SCL`.
   - ST7735 DTYPE still required for library; resolution auto-derived from DTYPE in displayST7735.h.
 - Network/update features:
   - some online update and service behavior is compiled out by feature flags.
-- MQTT, touch, RTC, SD, battery helper behavior:
+- Touch, RTC, SD, battery helper behavior:
   - each has compile gates that can remove handlers/routes or no-op logic.
+- MQTT is the exception: it is always compiled and gated at runtime by the `mqttenable` setting.
 
 ### Build-variant risk pattern
 - A fix validated in one env may not compile or behave in another env because:
@@ -178,26 +426,41 @@ This codebase is strongly compile-time modular. Runtime behavior can differ sign
   1. serial + LED + RGB + battery init
   2. `config.init()`
   3. `backlightControls.init()`
-  4. `display.init()`
-  5. `player.init()`
-  6. `battery.bootStatus()`
-  7. `network.begin()`
-  8. if no connectivity: start minimal server + controls + display start and return
-  9. if connectivity:
+  4. `display.init()` — the boot page comes up with its message line deliberately EMPTY
+  5. `player.init()` — a VS1053 build raises the `VS1053` cue from inside it, before the chip is touched
+  6. `display.putRequest(BOOTVERSION)` — the version string goes up only now, once, once the audio is up
+  7. `startup.checkLittleFSandVer()` — mount, health check, version marker, theme/layout id re-resolve
+  8. `battery.bootStatus()`
+  9. `network.begin()`
+  10. if no connectivity: start minimal server + controls + display start and return
+  11. if connectivity:
      - `config.initPlaylistMode()`
-     - `netserver.begin()`
-     - `telnet.begin()`
+     - `telnet.begin()` — early on purpose: a listening socket with no task of ours, so it costs nothing
      - controls init
      - display start
-     - optional MQTT init
+     - MQTT init when enabled in settings
      - optional smart-start playback
      - `startup.startupServices()`
      - `netserver.setBootReady(true)` only after setup work is actually complete
+     - **`netserver.begin()` deliberately does NOT happen here.** The WebUI is held back until the startup
+       services are out of the way, because `begin()` is where the request queue, the listener, mDNS *and* the
+       PSRAM WebUI file cache (~120 KB with .gz files; up to ~400 KB if only plain files) are allocated.
+       `Startup::loop()` starts it (see that section); the footer ADDRESS is the indicator, because
+       `Display::_footerIp()` paints only the conf's mode mark until `netserver.isListening()` and adds the address
+       with the `NEWIP` the bring-up sends. The AP and SDOFFLINE paths still start
+       it here — the captive portal is the only way in on a first boot, and offline mode runs no services at all.
+     - **The start runs on its own task, not on the loop** (`Startup::bringUpWebServer()`, spawned as
+       `webBringUpTask` at `WEB_BRINGUP_TASK_STACK_SIZE` on `NETWORK_CORE`): `begin()` reads every www file into the
+       PSRAM cache and measured **1763 ms** of main-loop stall (`Main loop stalled 1805ms, worst stage
+       startup 1763ms`), long enough to starve the audio refill and cost the stream. A failed create falls back to
+       running it inline (reported, never silent), and the file-local `webBringUpActive` stops `loop()` starting a
+       second one. `begin()` still sets `listening` before it returns, so `isListening()` remains the single
+       source of truth for the footer, the ehDP gate and every other reader.
 - `loop()`:
   - AP mode: Improv + captive DNS
   - normal: telnet loop
   - RGB loop
-  - `battery.loop()` + `battery.applyPowerPolicy()`
+  - `battery.loop()`
   - player loop (connected/SD ready)
   - controls loop
 
@@ -210,11 +473,13 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - The header declares a `class Foo` with the full public interface and private members/methods.
 - The `.cpp` defines all `Foo::` methods and declares the single global instance: `Foo foo;`
 - The header provides `extern Foo foo;` so callers can use `foo.method()`.
-- Hardware-conditional modules use a real class in the `#if` branch and a no-op stub class in the `#else` branch; `extern Foo foo;` is placed after the guard.
+- Hardware-conditional modules use a real class in the `#if` branch and a no-op stub class in the `#else` branch;
+  `extern Foo foo;` is placed after the guard.
 - **C-style free-function modules are not acceptable in `src/core/`.**
 
 ### Naming Style
-- **camelCase** for all identifiers: private members, local variables, private methods (e.g. `inferredCharging`, `lastVoltageMv`, `readAndUpdate`).
+- **camelCase** for all identifiers: private members, local variables, private methods (e.g. `inferredCharging`,
+  `lastVoltageMv`, `readAndUpdate`).
 - No underscore-prefixed names (e.g. `_myVar`, `_myMethod`) — use plain camelCase instead.
 - Public API methods follow existing verb-noun camelCase: `init()`, `getStatus()`, `setEncAcceleration()`.
 - File-scope `static const` constants also use camelCase (e.g. `pctSampleMax`, `emaAlphaQ`).
@@ -228,67 +493,326 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 ## `src/core/options.h`
 - See earlier build section.
 - `DSP_INVERT_TITLE` macro removed — replaced by runtime `config.store.inverttitle` boolean.
-- `DSP_TFT` added to `dspcore.h` for all TFT display models — used to gate color-theme reloading (monochrome displays skip it).
+- `DSP_TFT` added to `dspcore.h` for all TFT display models — used to gate color-theme reloading (monochrome displays
+  skip it).
+- VU visualiser tunables live here: `VU_REFRESH_MS`, `VU_FADE_MS`, `VU_PEAK_FREEZE_MS`, `VU_PEAK_FADE_DIV`,
+  `VU_PEAK_THICKNESS_MILLI`, `VU_SPECTRUM_MIN_PX`, `VU_SPECTRUM_SPACE_PX`, `VU_SPECTRUM_DB_FLOOR`,
+  `VU_SPECTRUM_MAX_CHANNELS`, `VU_HISTORY_MIN_PX`, `VU_CAPTURE_SAMPLES`, `VU_DUTY_FACTOR` and `VU_STYLE_DEFAULT`.
+  **`VU_CAPTURE_SAMPLES` must stay a power of two** — it is both the rolling sample window and the FFT size.
+  `VU_REFRESH_MS` is a *floor* on the redraw interval, i.e. the ceiling on the frame rate, and `VU_DUTY_FACTOR`
+  stretches that interval by the frame's measured draw cost (see the VU Widget Rendering section).
 
 ## `src/core/config.h`
 - Defines persistent struct `config_t store`.
 - `theme_t` no longer includes `theme.heap`; runtime input-buffer rendering uses `theme.buffer`.
 - New fields: `uint8_t themeId`, `bool inverttitle`. `color565()` method removed.
 - Defines station/theme structs and config API.
-- Defines key constants for SPIFFS paths and data file locations.
-- `theme_t` now includes screensaver-specific clock palette fields (`clockss`, `clockbgss`, `secondsss`, `dowss`, `datess`) so screensaver clock/date elements can use colors independent from normal PLAYER-mode clock colors.
-- `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (default 170, defined in `options.h`). These are RAM-only fields — not NVS-stored. `BUFLEN` has been retired; use `STATION_FIELD_LENGTH` for station metadata buffers across the codebase.
-- `SD_PATH_LENGTH` (256, defined in `sdmanager.h`) is used for SD filesystem path buffers where paths may exceed 170 bytes.
+- Defines key constants for LittleFS paths and data file locations.
+- `theme_t` now includes screensaver-specific clock palette fields (`clockss`, `clockbgss`, `secondsss`, `dowss`,
+  `datess`) so screensaver clock/date elements can use colors independent from normal PLAYER-mode clock colors.
+- `theme_t` carries a glow backdrop per widget: `clockbg` behind the clock and `digitbg` behind the big number
+  (`NumWidget`), so the two can glow in different colours. Both are `uint16_t` directly after their own ink
+  (`clock`, `digit`) in the same order in `ThemeData`, which is what keeps the `memcpy` sound.
+- `station_t` fields (`name`, `url`, `title`) are sized by `STATION_FIELD_LENGTH` (170, defined in `config.h`).
+  These are RAM-only fields — not NVS-stored. `BUFLEN` has been retired; use `STATION_FIELD_LENGTH` for station metadata
+  buffers across the codebase.
+- `SD_PATH_LENGTH` (256, defined in `sdmanager.h`) is used for SD filesystem path buffers where paths may exceed 170
+  bytes.
 - `Config::keyMap` declaration controls Preferences key mapping.
+- IR remote codes use a separate named store: `struct irstore_t` with one `uint64_t[3]` field per button (`power`,
+  `mute`, `up`, `down`, `prev`, `next`, `play`, `mode`, `hash`, `n0`…`n9`). It is persisted in its own NVS namespace
+  (`ehradioir`) through a dedicated key map in `config.cpp`; buttons are addressed by name, never by array position. The
+  old positional `ircodes_t` blob was removed.
+- Compile-time default IR codes come from the `IR_BUTTON_*` macros (0 fallbacks in `options.h`, values in
+  `myoptions.h`), carried in the `def` column of `irKeyMap[]`. A struct initialiser on `irstore_t` cannot supply them,
+  because `loadIR()` memsets the store before reading it: the defaults are seeded into slot 0 by `loadIR()` and
+  persisted in the same session, and only in the magic-mismatch branch. A store that already carries `IR_MAGIC` is the
+  user's own set and is never overwritten, so defaults exist only on an uninitialised store (fresh board, full NVS
+  erase, `setDefaults()`). `0` means no default, matching the empty-slot sentinel of `clearIR()`/`clearDuplicateIR()`.
 - `Config::saveValue(...)` API now has two simple overloads only:
   - typed: `saveValue(T* field, const T& value)`
   - string: `saveValue(char* field, const char* value)`
-- `Config` also owns a separate RAM-backed `lastStationUrl` resume buffer that is intentionally *not* part of `config_t` / Preferences; it is persisted through `/data/laststation.url` with a dedicated debounce path because previews/direct URLs can change more often than normal prefs.
+- `Config` also owns a separate RAM-backed `lastStationUrl` resume buffer that is intentionally *not* part of `config_t`
+  / Preferences; it is persisted through `/data/laststation.url` with a dedicated debounce path because previews/direct
+  URLs can change more often than normal prefs.
+- `config.store.dspon` is RAM-only runtime state by design and is deliberately **not** in `Config::keyMap`. The display
+  must always be on after power-on, so a standby/blank `false` must never be restored from NVS; persisting it would
+  present as a "bricked" (blank) device to a normal user. It is still reported to the WebUI through `GETSCREEN` and
+  drives the MQTT off-state token, but those read the live runtime value only.
+- `Config::vuSourceWanted()` is the one gate the audio libraries use to decide whether to compute VU/sample data:
+  `(store.vumeter && !isScreensaver) || (isScreensaver && store.screensaverVU)`. While awake the player page's
+  setting decides; while asleep only the screensaver meter's own option does. The split exists because the
+  screensaver meter is independent of the player page's, and gating the source on `store.vumeter` alone made the
+  screensaver meter read zero. `isScreensaver` is volatile, so the helper reads it once.
 - Legacy compatibility parameters (`commit`, `force`, and string `size_t N`) were removed.
-- String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short source strings.
-- Both overloads share a single internal write-if-changed path (`missing key` OR `size mismatch` OR `content changed`) before calling `prefs.putBytes(...)`.
-- Save-path writes now emit telnet+serial config logs by key name; sensitive keys (`mqttpass`, `weatherkey`) are masked as `*`.
+- String saves now normalize into a zero-filled fixed-size buffer before compare/write to avoid reading beyond short
+  source strings.
+- Both overloads share a single internal write-if-changed path (`missing key` OR `size mismatch` OR `content changed`)
+  before calling `prefs.putBytes(...)`.
+- Save-path writes now emit telnet+serial config logs by key name; sensitive keys (`mqttpass`, `weatherkey`) are masked
+  as `*`.
 
 ## `src/core/config.cpp`
 - Persistent storage/defaults/hardware bootstrap center.
+- **The two asset keep-lists hold bare basenames, and they are why a new asset is a two-place edit.**
+  `Config::wwwFiles[]` is simultaneously the PSRAM cache manifest, the `/www` prune whitelist and the list
+  `verifyLittleFS()` requires *in full* — it is an exact set match, so a file added here must reach every
+  device or the check reports the filesystem incomplete and the repair path runs. `Config::dataFiles[]`
+  holds the optional `/data` files and only feeds `pruneLittleFS()`, so it may name a file that does not
+  exist; `THEME_SLOT_FILES` and `LAYOUT_SLOT_FILES` add the ten `xtheme1..10.json` and the ten
+  `layout1..10.json` user slots there purely so the next cleanup does not delete them. Both lists are
+  compared against a basename, never a path.
+- `Config::loadTheme()` resolves through the theme registry, not the compiled table, and deliberately
+  tolerates an unresolved id: it runs from `_initHW()` before LittleFS is mounted, so a custom id cannot be
+  judged yet — see `src/displays/themeregistry.*`. `Startup::checkLittleFSandVer()` calls it again once the
+  slot files have been read, **and persists the correction when the resolved id differs from the stored one**.
+  That write is what stops a stale id from coming back to life: with the slot files gone (a reflashed
+  filesystem) a persisted `themeId` pointing at an empty slot would silently re-apply itself the moment
+  anything refilled that slot, changing the device's theme on a later boot for no visible reason. It has to
+  happen there rather than inside `loadTheme()`, whose earlier call cannot judge a custom id at all and would
+  therefore forget a perfectly good custom theme on every boot.
 - Main responsibilities:
   - load and validate Preferences (`cfgset` marker)
   - defaults/init logic
-  - SPIFFS mount and Config-owned required-file checks used during playlist-mode initialization
+  - LittleFS mount and Config-owned required-file checks used during playlist-mode initialization
   - version marker management (`/data/ehradio.ver`)
   - load/save the debounced Web-stream resume hint (`/data/laststation.url`)
   - playlist-mode initialization and file-presence checks before delegating playlist indexing/load helpers to `utility`
-  - canonical SPIFFS asset allowlists (`Config::wwwFiles[]`, `Config::dataFiles[]`) used by startup recovery and file-maintenance flows
+  - canonical LittleFS asset allowlists (`Config::wwwFiles[]`, `Config::dataFiles[]`) used by startup recovery and
+    file-maintenance flows
   - reset section handlers (`defaultSettings(...)`)
-- SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is defined and `!= 255`, and `SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI)` only when `SPIB_SCK` is defined and `!= 255`. I2C-only builds skip SPI init entirely. Both buses are initialized before `_initHW()` and before `display.init()` / `player.init()`. Both SPI buses are fully configured before any peripheral uses them. `SPIClass SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in `config.h`.
+  - named IR code storage in the dedicated `ehradioir` NVS namespace (`IR_MAGIC` 1812 stored under key `irset`, one key
+    per button via `irKeyMap[]`); helpers `loadIR()`, `saveIR()` / `saveIR(button)`, `irCodes()`, `clearIR()`,
+    `clearDuplicateIR()`, `irButtonByName()`, `irButtonCount()`, `irButtonKey()`, `irAction()`
+  - compile-time default IR codes: `IR_BUTTON_*` (0 fallbacks in `options.h`, values in `myoptions.h`) held in the `def`
+    column of `irKeyMap[]`, seeded into slot 0 of a reset store and persisted by `loadIR()`; a store that already
+    carries `IR_MAGIC` is never touched
+  - `deleteOldKeys()` also drops the legacy `ircodes` key and the former persisted `dspon` key from the `ehradio`
+    namespace (`dspon` is now runtime-only state and must not be restored on boot)
+- SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is
+  defined and `!= 255`, and `SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI)` only when `SPIB_SCK` is defined and `!= 255`.
+  I2C-only builds skip SPI init entirely. Both buses are initialized before `_initHW()` and before `display.init()` /
+  `player.init()`. Both SPI buses are fully configured before any peripheral uses them. `SPIClass
+  SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in `config.h`.
+- **A safe-mode boot pays a deliberate 1 s before anything else.** `setup()` holds `if (!config.store.bootStableMarker)
+  delay(1000)` and then dumps the config (`bootInfo`, ~196 ms at 115200), so the early stage measures ~1586 ms in safe
+  mode against ~590 ms settled - the NVS path itself costs ~412 ms and needs no optimisation. `bootStableMarker` is only
+  set `BOOT_STABLE_TIME` after the WebUI comes up, so rebooting the device before that puts the next one into
+  safe mode with that delay (worth knowing when timing boots).
 - SD-specific behavior:
   - `_initHW()` configures `SD_CARD_DETECT_PIN` as `INPUT_PULLUP` when available
-  - `initPlaylistMode()` short-circuits to `PM_WEB` without calling `sdman.start()` when `SD_CARD_DETECT_PIN` reports slot-empty during SD boot
+  - `initPlaylistMode()` short-circuits to `PM_WEB` without calling `sdman.start()` when `SD_CARD_DETECT_PIN` reports
+    slot-empty during SD boot
   - `changeMode()` short-circuits SD mode switches the same way, avoiding the SPI retry path when the slot is empty
+  - **SD Offline Mode is a session, not a stored mode** (2026.11.09). `_sdOfflineSession` (RAM only, never in `store`)
+    is raised in `Config::init()` from the one-shot `store.SDoffline` flag and by `Config::beginOfflineSdSession()` from
+    `Controls::checkButtonsHeldOnBoot()`; while it is set `getMode()` answers `PM_SDCARD`, `syncSDFS()` points at `sdman`,
+    and `initPlaylistMode()` skips its `play_mode` save. None of the three offline entry points (hold at boot, the
+    AP/LOST switch in `changeMode()`, the centre button on that screen) writes `playmode` to NVS any more, so the next
+    normal boot returns to the stored mode. Boot code must read `getMode()`, never `store.play_mode` - the two differ
+    for exactly that session.
 - Key interaction:
   - almost every module reads/writes through `config`.
 - Theme loading note:
-  - `Config::loadTheme()` now uses `memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData))` — loads from PROGMEM `_themes[]` array at runtime. No longer uses compile-time `COLOR_*` macros.
+  - `Config::loadTheme()` now uses `memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData))` — loads from
+    PROGMEM `_themes[]` array at runtime. No longer uses compile-time `COLOR_*` macros.
   - `applyInvertTitle()` removed from Config (moved to Display).
 
 ## `src/core/startup.h` / `startup.cpp`
 - Boot-only orchestration module following the standard core `class + global instance` pattern (`Startup startup;`).
+- **`loop()` is also where the WebUI starts, and the three service states are what decides it.** The condition is
+  `!netserver.isListening() && !webBringUpActive && network.status == CONNECTED && (_services != SVC_WILL_RUN ||
+  cardInUse())`, at the very top of `loop()` — above its `_bootStablePending` early return, which is why it cannot
+  live at the end of `setup()`. All three service parts are load-bearing. Waiting only for `SVC_DONE` would leave
+  **SD mode with no WebUI**: `SVC_WILL_RUN` means the task was *created*, and it parks in `while (cardInUse())`,
+  which is exactly when the WebUI is needed to switch back to web radio. `SVC_NONE` is the opposite trap — no WiFi,
+  no `UPDATEURL` or the web files missing means no services are coming, so nothing else would ever start the server.
+  `begin()` creates a fresh queue on every call, so `isListening()` is what keeps the trigger idempotent, and the
+  trigger sends `NEWIP` so the footer ADDRESS lands with the server rather than at boot - the mode mark is already on
+  that line by then, which is why the address is the part that means "the WebUI answered".
+- **The trigger only spawns the task; `bringUpWebServer()` does the work.** `begin()` + `startLoopTask()` + the
+  `NEWIP` request run on `webBringUpTask` (one-shot, `WEB_BRINGUP_TASK_STACK_SIZE`, `NETWORK_CORE`), because on the
+  loop they cost 1763 ms of stall and the audio refill goes with them. `webBringUpActive` covers the gap between
+  spawning and `listening` becoming true, and is cleared by the task; if the create fails the work runs inline and
+  says so, because a WebUI that starts late beats one that never starts.
+- **`SVC_DONE` is set the moment the last download returns**, clearing `_servicesBusy` with it. There is no settle
+  delay any more (`STARTUP_ASYNC_SERVICES_DELAY` is gone): it only postponed the WebUI behind the downloads, and the
+  window it was protecting is covered by the boot-stable proof below. `_servicesBusy` still brackets exactly the
+  downloads, which is what keeps the MQTT apply and the VU startup throttle held off for that window.
+- **Boot stability is proved by the WebUI coming up, not by the services finishing (2026-10-20).** The marker is set
+  `BOOT_STABLE_TIME` after `netserver.isListening()` is first seen true — one stamp (`_webUpMs`) plus one comparison,
+  and the reason reads `10 s after the WebUI came up`. This replaced three exits keyed on `_services`
+  (`SVC_NONE` from power-on, `SVC_WILL_RUN` while parked, `SVC_DONE` after the settle) for a reason the logs made
+  plain: the marker could be set *before* `netserver.begin()` had even finished, so it proved a boot whose riskiest
+  step — the bring-up and the first page load, which is the largest allocation burst in the session — had not run.
+  The services are no longer consulted at all, which is also what makes **SD mode survive a restart**: in SD mode they
+  stay parked for the whole session, and the WebUI comes up immediately, so the boot proves itself the same way.
+- **What still holds `_services`:** the enum stays because `servicesPending()` gates the radio-browser click (the
+  services hold) and `servicesBusy()` throttles the VU and the MQTT apply. Only the boot-stable decision stopped
+  reading it.
+- **The stamp covers every path with one line**: the deferred bring-up sets `listening` inside `begin()`, while the
+  AP/soft-AP and SD-offline paths call `netserver.begin()` from `setup()`; `loop()` stamps `_webUpMs` the first time
+  it sees the server listening, so all three converge without a per-path branch. `deferBootStable()` (called by
+  `network.cpp` on a stream loss, a Wi-Fi loss or a reconnect inside the boot window) restarts the countdown from now
+  if the server is up, and clears the stamp if it is not, so the proof restarts when the WebUI does.
+- **SD offline still never calls `checkSafeMode()`** (`network.offlineMode || config.store.SDoffline`), so
+  `_bootStablePending` stays false and the marker is not touched — the long-standing workaround, still deliberate.
+- **That same expression is the only thing that decides the offline boot;** the SD *mode* for the session comes from
+  `Config::_sdOfflineSession` (see the `config.cpp` notes), which is set from both halves of it before `setup()` reads
+  `offlineBoot` and clears `SDoffline`. Nothing along that path stores `play_mode`.
+- **The earlier design history is worth keeping:** the first version waited indefinitely for the SD park to end, so a
+  device that booted into SD playback never proved its boot and the next boot came up in Safe Mode once — and safe
+  mode forces web mode, meaning **SD mode could not survive a restart at all**. Keying the proof on the WebUI removes
+  that whole class of problem, because the WebUI comes up in SD mode too.
+- **Two earlier designs were replaced:** one fell back to the power-on count when `_servicesDoneMs == 0`, marking the
+  boot stable exactly as the services started; another kept a `BOOT_STABLE_BACKSTOP_MULT` timer that could call a boot
+  stable while the risky window was still open. Both are gone.
+- **The startup services were the suspected risk; a core-monitor log says otherwise.** The three downloads are
+  sequential, and each handshake costs ~21 KB transiently and hands it back: 143520 free before them, 122544 during
+  the first handshake, 131712 after it, 140844 after the settle. What collapses the stack is the WebUI's first page
+  load, which took that same boot from 140844 free to **9 KB free with a 2 KB largest block** — the state in which no
+  handshake, no 8 KB task stack and no response String can be allocated, and the stream cannot be re-read. That is
+  why the bring-up now runs off the main loop and the radio-browser click yields to it.
+  (This note used to cite `.github/code-issues.md` section 7; that section does not exist - the issue file stops at 4.)
+- Two accessors publish that state: `servicesBusy()` is true only inside the task body (the VU limiter and `mqtt.cpp`
+  want exactly that), while `servicesPending()` is `SVC_WILL_RUN` and so also covers the park and the countdown. The
+  wider one is what to hold another job back with - `netserver.cpp` holds its radio-browser click on it, then holds
+  it again for the WebUI's quiet window and drops it outright when `heapCanAffordTls()` finds no contiguous block.
 - Owns startup-time helpers that were previously mixed into `config.cpp`:
-  - boot-time version marker and required SPIFFS/WebUI file verification (`checkVerAndSpiffs()`)
+  - boot-time version marker and required LittleFS/WebUI file verification (`checkLittleFSandVer()`) — the verification
+    itself lives in `Utility::verifyLittleFS()`, see the LittleFS notes below
+  - **The partition-size lookup penalty belonged to SPIFFS; the migration to LittleFS removed it** (this supersedes the
+    old "prefer the 8 MB table" conclusion). Under SPIFFS on sh1106_vs1053_3buttons: a missing-name probe cost ~187 ms on
+    the 3.38 MB partition in `builds/partitions/default_16MB.csv` and ~87 ms on the 1.5 MB `default_8MB.csv`;
+    `SPIFFS.begin()` mount was 229 → 103 ms; the `netserver.begin()` file cache 797 → 382 ms - one 2.25x factor, three
+    measurements, because SPIFFS proved a name by walking the partition's lookup structures. LittleFS resolves a name by
+    walking the directory's entry chain and mounts from a superblock, neither of which scales with partition size (the
+    measured mount win, 229 → 27 ms, is exactly that). **Partition-table choice is therefore no longer a
+    filesystem-speed decision.** Size still governs free-block headroom and wear rotation (1.5 MB is ~384 blocks of 4 KB,
+    3.38 MB ~864), so the larger table is mildly better for wear and has more room for the ~300 KB peak demand
+    (`code-issues.md` section 3.2). The only size-sensitive call left is space accounting (`usedBytes()`/`totalBytes()`
+    traverse the filesystem rather than counting) - measure rather than assume if that matters.
+  - **Web-file verification is one listing pass, not N lookups.** `Utility::verifyLittleFS()` in `utility.cpp` lists
+    `/www` once, matching every listed name against `Config::wwwFiles` as it goes, so it stores no names at all — only
+    two bitmasks (plain seen, `.gz` seen) — and returns whether each required file is present in either form. Its single
+    write is the duplicate rule: a plain file whose `.gz` twin exists is removed. It replaced two identical per-file
+    probe loops (`requiredWebFilesExist()` in `startup.cpp` and `Config::_wwwFilesExist()`), which together cost **7.48
+    s of a 23.2 s boot** — 33 lookups each, run twice, because the second one re-answered a question
+    `checkLittleFSandVer()` had already answered. `config.wwwFilesExist` is now computed once there and reused by
+    `initPlaylistMode()`.
+  - **The filesystem is LittleFS, and four of its differences from SPIFFS are load-bearing** (migrated from SPIFFS; full
+    reasoning in `plans/spiffs-to-littlefs.md`):
+    - **The partition label is `littlefs` but the partition SubType stays `spiffs`.** LittleFS resolves its partition
+      through `esp_vfs_littlefs_register()`'s `partition_label`, so `FS_PARTITION_LABEL` / `FS_MOUNT_POINT` in
+      `config.h` are passed explicitly to `LittleFS.begin()` — the Arduino default is still the legacy label `spiffs`.
+      The CSV SubType cannot follow: `gen_esp32part.py` rejects `littlefs`, `esp_partition_subtype_t` has no `LITTLEFS`
+      value, and PlatformIO matches only the literal strings `spiffs`/`fat`/`littlefs` when locating the FS offset for
+      `buildfs`/`uploadfs`. Keeping `spiffs` (0x82) also keeps `Update.begin(size, U_SPIFFS)` resolving, so the
+      filesystem-image upload needs no custom `esp_partition` code.
+    - **Directories are real, so `/www` and `/data` must exist.** `checkLittleFSandVer()` calls `LittleFS.mkdir("/www")`
+      and `mkdir("/data")` on the common path taken by both a successful mount and a fresh format, because every
+      `/data/*` write (playlist, wifi, version marker) and every `/www/*` write needs its parent to exist. SPIFFS
+      inferred the directory from a path prefix; LittleFS does not. The built image happens to supply `/data` (the
+      source tree ships `data/data/wifi.csv` and `playlist.csv`), but the `format` command erases both directories,
+      hence the mkdir.
+    - **A root listing yields directory entries, not files.** `LittleFS.open("/")` returns only `www` and `data`, so
+      `verifyLittleFS()` lists `/www` directly and `pruneLittleFS()` walks `/www` and `/data` explicitly, comparing
+      basenames. The old "walk `/` once" shape would have reported every www file missing on every boot, and would have
+      pruned nothing.
+    - **`rename()` no longer overwrites an existing target.** Every call site removes the destination first
+      (`importWifi()`/`saveWifi()` and `cleanPlaylist()` in `utility.cpp`), and `ESPFileUpdater` does
+      `exists`→`remove`→`rename` internally, so the invariant holds — but any new rename must preserve it.
+    - Names that changed with it: `clearspiffs` → `clearfs`, the `updatetarget` value `spiffs` → `littlefs`,
+      `checkSpiffsandVer`/`verifySpiffs`/`pruneSpiffs` → `checkLittleFSandVer`/`verifyLittleFS`/`pruneLittleFS`,
+      `SPIFFSTIMELOG` → `LITTLEFSTIMELOG`. The emergency form in `netserver.h` deliberately stays **firmware-only** and
+      keeps its hidden `updatetarget=fw`: the `/update` handler can also target the FS partition via `U_SPIFFS`, but
+      that writes raw flash under a mounted LittleFS with no `LittleFS.end()` first and no image-size or partition-table
+      validation, so it is not offered on a recovery page. The hidden field also matters because `getParam()` returns
+      nullptr when the parameter is absent, which is why that dereference is now guarded. Build side,
+      `board_build.filesystem = littlefs` selects `mklittlefs`, and both gzip `extra_scripts` key off
+      `$BUILD_DIR/littlefs.bin` — a stale `spiffs.bin` reference there silently disables the compress/restore step.
+    - **There is no SPIFFS → LittleFS upgrade path.** A full flash (bootloader + partitions + firmware) is required; an
+      OTA firmware-only update leaves an unmountable partition because the in-flash partition table still carries the
+      old label. Saved `playlist.csv` / `wifi.csv` do not survive.
+    - **Boot-time FS cost, and the two fixes that followed the measurement.** Measured on the SH1106/VS1053 build,
+      LittleFS is 8.5x faster to mount (229 → 27 ms) and much faster on lookup-miss-heavy paths, but roughly 4–25x more
+      expensive per small file operation, so total boot regressed 15402 → 15747 ms. Two changes claw that back, and both
+      help under either filesystem: `StaticFileCache::loadOne()` no longer calls `exists()` before `open()` (open() is
+      the existence test, and a `size > 0` guard covers the core quirk the FS health check documents), and the FS health
+      check now runs only when `bootStableMarker` says the previous boot did **not** prove stable — the same condition
+      `checkSafeMode()` uses to enter Safe Mode. The single biggest regression was `netserver.begin` (the 17-file PSRAM
+      cache load) at 798 → 1284 ms.
+    - **The verify pass and the update churn are deliberate, not oversights.** `checkLittleFSandVer()` lists all 17 www
+      files via `verifyLittleFS()`, and then `netserver.begin()` opens them again in `loadAll()`. The second pass is
+      knowingly kept: presence must be known at `main.cpp:73`, before `initPlaylistMode()` reads `config.wwwFilesExist`
+      at `main.cpp:108` and before `loadAll()` runs at `main.cpp:110`, and the early `pruneLittleFS()` / version-marker
+      write inside `checkLittleFSandVer()` depends on it as well. Folding the two passes would mean reordering boot
+      stages across `main.cpp`, `startup.cpp`, `config.cpp` and `netserver.cpp` — reviewed and declined. Cost is 385 ms
+      under SPIFFS and 422–555 ms under LittleFS.
+    - **`ESPFileUpdater`'s `.meta` sidecars and the churn they cause are load-bearing.** Each updated file costs a
+      `.tmp` create plus appends, then `exists`→`remove`→`rename`, then a `writeMeta()` of `localPath + ".meta"` — and
+      the `NOT_MODIFIED` path still rewrites that `.meta` just to bump its timestamp, so **every boot rewrites one
+      `.meta` per checked URL even when nothing changed**. That is the intended mechanism for deciding whether a
+      download is needed, so it stays. LittleFS pays it synchronously (a metadata commit, often with a block erase)
+      where SPIFFS deferred the cost to GC — which is the whole of the perceived "slower file operations" difference.
+    - **`pruneLittleFS()` is an update-scoped reset, not a periodic cleaner — and deleting the `.meta` sidecars is part
+      of that by design.** Its trigger is `!config.wwwFilesExist || !LittleFS.exists(VERSION_PATH)` at
+      `startup.cpp:252`, so it runs in exactly three situations: a **firmware version change** (a mismatch sets
+      `wwwFilesExist = false`), a **new install** (no version file present), or **a missing www file while the version
+      still matches** (the version-match branch sets `wwwFilesExist = verifyLittleFS()`, so one absent asset alone is
+      enough). It never runs on a healthy boot — all 17 files verify present and the version file exists, making the
+      condition false, which the boot logs confirm. Because the version marker is rewritten on every prune, the
+      version-change case fires once per firmware change and not repeatedly. Clearing everything derived at that moment
+      is deliberate: besides the `.meta` sidecars it also removes `/data/index.dat`, `/www/searchresults.json`,
+      `/www/search.txt`, `/www/curated.json`, `/www/pl_import.json` and `/data/new_ver.txt`, all of which are
+      rebuildable — so a firmware change starts from a clean slate instead of mixing stale bookkeeping with new assets.
+      The only cost is that intact assets get re-fetched on that one boot. The third trigger is self-limiting for the
+      same reason: prune rewrites the marker with the same version, the files come back, and the next boot verifies
+      clean.
+    - **LittleFS has no fsck and needs none, and its one maintenance knob is unreachable.** Consistency is resolved
+      atomically at mount (the force-consistency step inside `LittleFS.begin()`), and reclamation is continuous, so
+      there is no repair or defrag pass to schedule — which is precisely why `begin(false)` falling back to
+      `begin(true)` is the complete recovery path, and why gating the read/write health check behind `bootStableMarker`
+      is safe. The closest thing the design has to periodic self-maintenance is `block_cycles`, the wear-levelling
+      relocation threshold, and it cannot be set from here: arduino-esp32 3.2's `LittleFSFS::begin()` exposes only
+      `formatOnFail`, `basePath`, `maxOpenFiles` and `partitionLabel`. The real ongoing risk is **free space**, not
+      corruption — see `.github/code-issues.md` section 3.2.
+  - **`pruneLittleFS()` is a repair, not a verifier, and must never run on the boot path.** It deletes everything
+    outside the `wwwFiles`/`dataFiles` keep lists — which includes `/www/searchresults.json`, `/www/search.txt`,
+    `/www/curated.json`, `/www/pl_import.json` and `/data/new_ver.txt` — so it stays on the missing-files and
+    version-mismatch paths (and the `clearfs` command). It was formerly `cleanupSpiffs()`, renamed so the pair reads as
+    what they are: one verifies, one prunes.
   - loading saved SSIDs from `/data/wifi.csv` into `config.ssids`
   - stale search-result cleanup under `/www/searchresults.*`
   - required WebUI asset download and recovery flow
   - version-file parsing for online-update detection
-  - startup background update scheduling (`startupServicesAsync`) — spawned as a FreeRTOS task on `NETWORK_CORE` at low priority:
-    - waits `STARTUP_SERVICES_DELAY` seconds before any work, letting audio buffer fill first
+  - startup background update scheduling (`startupServicesAsync`) — spawned as a FreeRTOS task on `NETWORK_CORE` at low
+    priority:
+    - starts immediately once the card is free (there is no pre-delay any more - see `BOOT_STABLE_TIME`'s note in `options.h`)
     - verifies WebUI locale JSON file; downloads if missing
     - checks for new firmware version via `new_ver.txt`; triggers OTA if `autoupdate` is enabled
     - downloads default `playlist.csv` from `PLAYLIST_DEFAULT_URL` if file is missing
     - updates `timezones.json.gz` and `rb_srvrs.json` from online sources
     - cleans stale search results older than 24 hours
+    - sets `SVC_DONE` and clears `servicesBusy()` as soon as the last download returns; `SVC_DONE` is what releases
+      the WebUI, and the boot-stable countdown no longer depends on any of it
     - deletes the `ESPFileUpdater` param and self-terminates via `vTaskDelete(NULL)`
-  - `deassertCsPins()` — called from `main.cpp` `setup()` before any device init. Sets all known SPI CS pins (`VS1053_CS`, `SD_CS`, `TFT_CS`, `TS_CS`) to `OUTPUT` + `HIGH` to prevent floating CS from causing bus contention during peripheral detection.
-  - safe mode boot crash-loop detection (`checkSafeMode`, `bootInSafeMode`, `markBootStable`, `loop`): reads NVS key `bootstablemark` at boot — if previous boot did not complete successfully, disables `smartstart` and `autoupdate` in memory only for this session so the device does not auto-reconnect to a crash-causing stream; marks boot stable after `BOOT_STABLE_TIME` seconds of uptime
+  - `deassertCsPins()` — called from `main.cpp` `setup()` before any device init. Sets all known SPI CS pins
+    (`VS1053_CS`, `SD_CS`, `TFT_CS`, `TS_CS`) to `OUTPUT` + `HIGH` to prevent floating CS from causing bus contention
+    during peripheral detection.
+  - safe mode boot crash-loop detection (`checkSafeMode`, `markBootStable`, `loop`): reads NVS key `bootstablemark` at
+    boot — if the previous boot did not complete successfully it sets `Startup::_safeMode` for this session, which
+    suppresses the automatic version-check/autoupdate and the automatic smartstart playback, so the device does not
+    auto-reconnect to a crash-causing stream. The stored `smartstart`/`autoupdate` values are deliberately **not**
+    overwritten: they feed the WebUI (`GETCONTROLS`, `GETSYSTEM`) and **Note the marker is now set by the state machine
+    above, not by a fixed uptime**: `BOOT_STABLE_TIME` after the startup services finish when they will run, or over
+    `BOOT_STABLE_TIME` from power-on when they will not run.
+  - `icon()` — the boot-mode glyph for the boot dots line: the SD pair (`\030\031`) when `network.offlineMode` or
+    `SDoffline`, PAUSE (`\034`) when the previous boot never proved itself, PLAY (`\035`) for smart start, VOL_75
+    (`\026`) otherwise. The boot screen is its **only** consumer, and the sampling rule still applies:
+    `Display::_bootScreen()` reads it while the screen is built, because `display.init()` in `setup()` runs *before*
+    `checkSafeMode()`, which is what clears `bootStableMarker` — a later read would report PAUSE on every boot. The
+    widget keeps the returned literal for the session, which is why the glyphs here must stay string literals.
 - Coupling:
   - drives `utility` for shared update/download helpers
   - reads Config-owned asset allowlists during required-file recovery
@@ -305,25 +829,248 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - AP fallback with DNS captive portal
   - Improv provisioning flow
   - WiFi reconnect/disconnect handlers
+  - ehDP discovery responder (`ehdp.loop()` from the 1 s tick), gated on `netserver.isListening()`: the reply
+    advertises UI port 80, so it must not answer while the WebUI is held back or not yet up. Keying on the server
+    rather than on the services state is also what keeps discovery working in the SD-parked boot, where the task
+    stays in `SVC_WILL_RUN` for the session but the WebUI is started immediately
   - periodic ticker logic for:
     - time sync interval
     - weather sync interval
     - screensaver timing
     - RSSI updates
-    - SD card hot-insert detection (when `SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255`): polls `SD_CARD_DETECT_PIN` every ~2 s in `divrssi` block; calls `config.changeMode(PM_SDCARD)` on insertion
+    - SD card hot-insert detection (when `SD_AUTOPLAY && SD_CARD_DETECT_PIN!=255`): polls `SD_CARD_DETECT_PIN` every ~2
+      s in `divrssi` block; calls `config.changeMode(PM_SDCARD)` on insertion
   - weather provider dispatch:
     - `OM1` Open-Meteo
     - `OW25` OpenWeather 2.5
     - `OW30` OpenWeather 3.0
   - weather cache and formatting logic
   - centralized runtime logging for reconnect/weather/boot progress/time-sync via `FUNCTIONLOG`/`SERIALLOG`/`BOOTLOGX`
-  - web-stream reconnect now resumes through `player.resumeLastWebSource()` so direct URL sources can recover via `/data/laststation.url` instead of always falling back to `lastStation`
-  - `retryStreamConnection` task (40 attempts × 15 s) can be externally cancelled by `commandhandler.cpp` `cancelStreamRetry()` when the user issues any playback-changing command; the task also cleans itself up when conditions change (user stops, WiFi drops, or playback resumes)
+  - web-stream reconnect now resumes through `player.resumeLastWebSource()` so direct URL sources can recover via
+    `/data/laststation.url` instead of always falling back to `lastStation`
+- **The boot Wi-Fi path (`network.begin()` → `wifiBegin()`).** With `config.store.wifiscanbest` it runs one synchronous
+  `WiFi.scanNetworks()` and orders the candidates by RSSI, pinning the BSSID; otherwise it walks the saved SSIDs in
+  order. Each candidate gets a **time-based** ceiling of `WIFI_ATTEMPTS * 500` ms (8 s) while polling `WiFi.status()`
+  every `WIFI_CONNECT_POLL_MS` and printing a dot. That ceiling has to cover association **and** the lease, because
+  `WL_CONNECTED` is raised only on `ARDUINO_EVENT_WIFI_STA_GOT_IP` — 0.5 s or 4.8 s after association on this hardware.
+  Association is therefore logged separately, from `WiFi.RSSI()` going non-zero (`Associated after Nms (RSSI x) -
+  waiting for the address`), and a candidate that hits the ceiling is retried **once** in place (`WiFi.disconnect(false,
+  false)`, wait for RSSI to clear up to `WIFI_SETTLE_MS`, `WiFi.begin()` again) before it is abandoned. Exhausting the
+  list returns false and `network.begin()` raises the SoftAP.
+  - **What the scan costs.** `WIFI_SCAN_DWELL_MS` (options.h, default **120**) is passed as `max_ms_per_chan`, but
+    `WiFiScan.cpp` hardcodes `scan_time.active.min = 100`, so it is a **ceiling**: per-channel cost is dominated by
+    fixed overhead (~320 ms of it, ~441 ms per channel measured at 120), which makes a 13-channel scan ~5.7 s.
+    `wifiBegin()` scans a **second** time at the IDF default 300 only when the configured dwell finds nothing, so the
+    old behaviour stays the last resort and only a failure there reaches the SoftAP — which is what makes a lower dwell
+    safe.
+  - **`WIFI_CONNECT_POLL_MS`** (options.h, default **100**) replaces the old hardcoded 500 ms poll, which quantised
+    every join measurement to half a second. The per-candidate ceiling is time-based rather than attempt-based precisely
+    so a shorter poll cannot silently shrink the 8 s budget.
+  - `WiFi.setSleep(false)` is applied in `setWifiParams()` **after** a successful connect; nothing clears the
+    modem-sleep policy before a connect.
+  - The `SCANNINGWIFI` message is sent with `display.putRequestDelayed(..., DSP_BOOTMSG_DELAY_MS)` (**2000** ms) so the
+    firmware version on the boot line stays readable instead of being replaced the moment the scan starts.
+  - **WARNING - do not re-add an asynchronous scan.** `WiFi.scanNetworks(true)` returns `WIFI_SCAN_FAILED` (-2) after
+    2.5-6 s on this build and leaves the radio unable to scan at all afterwards: every later synchronous scan returns 0
+    networks in 2-12 ms, and `scanDelete()` does not clear it, so the fallback cannot recover and the boot lands in the
+    SoftAP. Three variants failed identically - no driver call during the scan, dwell 120 or 300, and leaving the
+    modem-sleep policy alone. The ~860 ms it would save is not worth a radio that stops scanning.
+  - **WARNING - a pinned static address was tried on hardware and removed; do not re-attempt it.** The feature (an
+    `SMART_STATIC_IP` `#ifdef` in `network.cpp`) remembered the DHCP lease once a boot had proved itself, applied it
+    before the join and judged the join on the wire instead of waiting for `WL_CONNECTED`. It worked and it was fast
+    (~4.6-4.8 s to Ready against ~8.7 s on plain DHCP), but **this stack cannot prove an address is free**: lwIP here
+    has no ACD (`LWIP_ACD` / `LWIP_DHCP_DOES_ACD_CHECK` are absent from every target's `sdkconfig`, so it cannot be
+    switched on without rebuilding the prebuilt IDF libraries), and the hand-rolled ARP probe is defeated by lwIP itself
+    — **an ARP reply whose sender IP equals the netif's own address is treated as us**, so no foreign entry is ever
+    cached under our address and `etharp_find_addr()` can never see the competing host. With a PC holding that exact
+    address, first manually and then as a DHCP reservation, the radio still logged "nobody else holds it" and used it.
+    What the probe does prove is that the address is bound and the gateway answers; it does not prove uniqueness, and
+    the failure mode is a **silent LAN collision**, not a slow boot. An address is only safe as a router reservation by
+    MAC or one outside the DHCP pool, and the firmware cannot verify that — which is why it is gone rather than shipped
+    with a caveat. Facts the work left behind: `WL_CONNECTED` is set in exactly one place, on
+    `ARDUINO_EVENT_WIFI_STA_GOT_IP` (`WiFiGeneric.cpp:1095`); a `WiFi.config()` issued before the connect only fills
+    esp_netif's *stored* copy while the lwIP netif still reads `0.0.0.0`; and a **down** netif cannot transmit at all
+    (`etharp_request()` returning `ERR_OK` means "accepted for transmission", not "sent"). Also not to be re-tried:
+    re-applying the address after association, "kicking" the DHCP client to raise the netif, and priming every connect
+    attempt.
+  - **The join budget: two attempts per candidate, and the second is twice as big.** `WIFI_ATTEMPTS * 500` = 8 s has to
+    cover association *and* the lease, because `WL_CONNECTED` is GOT_IP and the late-GOT_IP mode measures 4.8 s on its
+    own — that mode is one lost DISCOVER, as lwIP retransmits at about +0, +4 and +12 s, so a window can be spent on
+    nothing but lost DISCOVERs and still be called a failure. Each candidate therefore gets exactly two windows: 8 s as
+    before, then a retry of `WIFI_ATTEMPTS * 500 * WIFI_RETRY_SCALE` (`network.cpp`, **WIFI_RETRY_SCALE 2** = 16 s).
+    Only after the second failure is the next candidate tried, and only after that the SoftAP — worst case ~25 s per
+    candidate against ~17 s before. The retry is a **real restart, not a re-association**: the shared helper
+    `wifiRestartForRetry()` does `WiFi.disconnect(true, false)` (radio off, stored credentials kept), waits for the
+    teardown (RSSI back to 0, bounded by `WIFI_SETTLE_MS`), then re-begins the same AP with the same channel/BSSID. That
+    matters because `WiFi.disconnect(false, false)` leaves the radio up, so the STA netif can stay up, esp_netif never
+    stops the DHCP client, and the retry inherits the accumulated DISCOVER backoff (next retransmit 16-32 s away)
+    instead of starting a fresh ladder. Both connect paths call the one helper so they cannot drift. The association
+    line (`Associated after Nms (RSSI x) - waiting for the address`) splits association from lease, and the retry logs
+    `No address after Nms - restarting the network and trying <ssid> once more`. The deferred boot-line message cannot
+    land on the AP screen — it fires at 2 s, long before any of this.
+  - **SoftAP fallback, and its reboot timer.** `raiseSoftAP()` brings up the AP, the DNS captive portal and Improv; the
+    optional auto-reboot is `if (SOFTAP_REBOOT_DELAY > 0) rtimer.once((uint32_t)SOFTAP_REBOOT_DELAY * 60, rebootTime);`,
+    in minutes. `SOFTAP_REBOOT_DELAY` (options.h, default **0** = never) is the only control: the WebUI field, the
+    stored `softapdelay` key (purged by `deleteOldKeys()`), the `softap` command and the `"softr"` field of the
+    netserver GETSYSTEM payload were all removed, so re-enabling the reboot means editing options.h/myoptions.h.
+  - **Build/size.** `sh1106_vs1053_3buttons` (8 MB partition) builds clean at **1,832,333** bytes flash and **72,236**
+    bytes RAM with `BOOTLOG_TIME` off — 308 bytes *smaller* than the version before the retry rework, because the shared
+    `wifiRestartForRetry()` helper replaced two inlined copies of the restart code. A build that dies at the `.bin` step
+    (e.g. the uploader holding `firmware.bin`) leaves a stale sconsign, so the next build can link stale objects and
+    report a plausible-looking size; delete `.pio\build\<env>\src\*.o` and rebuild rather than trusting it.
+  - `retryStreamConnection` task (40 fast attempts, then a slow infinite tail) is cancelled through
+    `MyNetwork::cancelStreamRetry()`, the single owner of `streamRetryTaskHandle` (called by commandhandler on
+    playback-changing commands, by `player.prev()`/`next()`/`toggle()`, and by `utility.startStandby()`); the task also
+    cleans itself up when conditions change (user stops, WiFi drops, or playback resumes)
 - Coupling:
   - pushes display updates (`display.putRequest(...)`)
   - calls player/netserver hooks
   - reads/writes `config.store`
-- Successful connect handling now stays internal to `network.cpp`; there is no remaining app-level weak `network_on_connect` callback.
+- Successful connect handling now stays internal to `network.cpp`; there is no remaining app-level weak
+  `network_on_connect` callback.
+
+## Network Recovery (the stall, the reset ladder, and the boot-stable marker)
+
+Everything follows from one measured fact: **`Audio::connecttohost()` runs on the main task**, so a failing
+stream connect blocks `loop()` for its whole timeout and the WebUI looks dead meanwhile.
+
+**Two routines, not one.** `wifiReconnectionTask()` owns the *link* (`WIFI_STA_DISCONNECTED`, gated by
+`network.beginReconnect`, cadence 5/10/30 then 60 s capped); `retryStreamConnection()` owns the *stream*
+(stream died with the link up, gated by `network.lostPlaying`, cadence 1/3/6/12/15 s for 40 attempts then
+60 s forever). Neither gives up, and a wedged stack raises no disconnect event - so the Wi-Fi routine never
+runs, the stream task can only replay the same failing connect, and that is why the forced reset exists.
+
+**The traps around that reset.** It is `WiFi.disconnect(true, false)` - never `eraseap = true` - and its budget
+must be a **file-static**, because `WiFiReconnected` recreates the task and a local gives each instance a fresh
+budget (four back-to-back teardowns, measured). The handle must be cleared before `vTaskDelete`, and
+`WiFiLostConnection` must use `network.lostPlaying || player.isRunning()`, never an assignment: during a reset
+nothing is playing, so an assignment wrote `false` and the Wi-Fi returned to a silent radio.
+
+**The ladder has a floor and a ceiling, and the reset is reached from two places** through one helper,
+`forceLinkReset()`. The floor is a ladder that cannot be created at all: the create needs
+`NETWORK_TASK_STACK_WORDS` (32 KB - see the stack section: the old "8 KB" was 4x smaller than the real
+allocation, because 8192 was passed to `xTaskCreate` as words) of contiguous heap, and the heap is lowest exactly
+when the stack is wedged, so the one rung that matters was
+unavailable when it was needed. A failed create used to be logged once (with the message swallowed, see the
+note in the guide) and forgotten, every 5 s forever, which is the incident that prompted this: the log showed
+`stream retry task is gone with a resume still owed` alternating with a bare `[ERROR] Network` for minutes
+while the heap sat at 7204-8424 bytes. Two failures in a row now escalate, and the reset needs no task, no heap
+and no scheduler. The ceiling is `STREAM_RESET_MAX` (3) resets and then **`ESP.restart()`**: a wedge that
+survives three resets, each followed by a successful Wi-Fi reconnect, cannot be cleared from software.
+
+**The reboot rung writes nothing to `bootStableMarker`.** The intentional-reboot paths set it true so the next
+boot is not safe mode; doing that here would mean a network wedge could never reach safe mode, and setting it
+false would mean one always could. Left alone it keeps its own meaning - a boot that never proved itself still
+lands in safe mode, and a device that has been up for hours still boots normally. The restart count is
+`RTC_DATA_ATTR` so it survives `esp_restart()` (which is the point) and a power cycle clears it;
+`RECOVERY_REBOOT_MAX` (2) consecutive restarts stops the escalation and returns to patient retries, because a
+device that wedges on every boot would otherwise reboot every ~100 s forever and safe mode would not catch it
+either: each boot *does* prove itself stable before the network fails. `RECOVERY_HEALTHY_MS` (10 min) of
+continuous playback clears the count so a later wedge gets the full escalation again.
+
+**The verdict is asked for on every failed attempt.** It used to be skipped when the connect returned in under
+`NET_REFUSAL_MS`: a fast failure was read as a refusal from the host, which does prove the path works - but a
+stack with an exhausted socket pool also fails fast, so the first two attempts of a wedge were waved through as
+"the host refused". The probe costs a gateway connect (~30 ms) or a bare-IP connect (≤700 ms), nothing beside
+an attempt, and only WEDGED is acted on: a station that is merely offline still gets the patient 15 s then 60 s
+tail forever, unchanged, because a reset would fix nothing there and costs a scan, a reassociation and DHCP.
+
+**A silent timeout and an exhausted pool are different wedges, and the durations tell them apart.** The boot log of
+the collapsed case reads `gateway FAIL 1607ms` (4 ports x 400 ms) and `internet TCP FAIL 702ms` (the full bound) -
+silent timeouts, i.e. a stack that cannot allocate or transmit, not one out of connection slots (which fails
+instantly and would have needed a bigger `CONFIG_LWIP_MAX_ACTIVE_TCP`, impossible without a pioarduino
+`custom_sdkconfig`). The heap was the answer there: `heapCanAffordTls(bytes)` (`network.cpp`) is the test that can
+see it - one **contiguous** block, the figure a handshake actually needs, which `ESP.getFreeHeap()` and the
+`MIN_MALLOC` threshold cannot express.
+With the probe always asked, a stack that never answers is identified on the **first** attempt, so the reset
+lands about 8 s after the stream is lost instead of about 18 s. The gateway leg tries a fixed port list
+(`kGatewayProbePorts`, `network.cpp`: 80, 53, 443, 8080) and stops at the first that answers, because a router's
+UI or DNS is frequently not on 80 and a wrong guess reads as "gateway silent" - a false WEDGED.
+
+**One spawner, and a ladder that cannot lose its task.** Everything that starts `retryStreamConnection` - the
+arm gate in `player.loop()`, `WiFiReconnected`, and now the self-heal - goes through **`spawnStreamRetry()`**
+(`network.cpp`). The check-and-claim is a critical section, because two callers could otherwise win the race and
+leave a stray task running with the handle already cleared; more importantly the `xTaskCreatePinnedToCore` result
+is checked, because `player.loop()` sets `network.lostPlaying = true` **before** creating the task and nothing
+else clears that flag except a fresh Wi-Fi reconnect event - so a silent failure closed the arm gate until a
+reboot. `ticks()` (the 1 s `Ticker` heartbeat, `ctimer.attach(1, ticks)`) self-heals the same way: if
+`lostPlaying` is set, no task is servicing it, `!beginReconnect` and the link is up, it re-spawns, rate limited
+by `STREAM_RETRY_RESPAWN_MS` (`network.cpp`), and escalates to a link reset once the re-spawns themselves keep
+failing. The `wifiReconnectionTask` spawn has the same shape: `WiFiLostConnection` and the self-heal in `ticks()`
+both go through `spawnWifiReconnect()`, a failed create is visible in the log, and the self-heal retries it every
+`WIFI_RECONN_RESPAWN_MS` (5 s) and escalates to `recoveryReboot()` after `WIFI_RECONN_SPAWN_FAIL_MAX` (2)
+failures. That matters because `forceLinkReset()` drops the link while the old stream task's 8 KB stack is still
+held, so the first create can fail on a fragmented heap with `beginReconnect` already true - and that path had no
+other way back, since the AP is only re-found on the next disconnect event.
+
+**A failed user play enters the same ladder.** `Player::_play()` and `playUrl()` call
+`MyNetwork::noteConnectFailure()` when `connecttohost()` fails; it probes first and, only on WEDGED, sets
+`lostPlaying` and takes rung 1 with `forceLinkReset()` - `GOT_IP` then restarts the ladder, which spends 2/3 and
+3/3 before `recoveryReboot()`. The station that failed is saved as the resume target first, so recovery plays the
+station the user chose rather than the previous one. A played-stream ladder probes once per attempt; this entry
+does the same, one probe per failed press.
+
+**A stream verdict is not a slow station.** Both libraries can refuse a URL outright: `setRefuse()` records one
+`streamRefuse_e` verdict (`UNSUPPORTED` - fMP4, encrypted HLS; `NOT_AUDIO` - a page, an API answer, an unknown
+content type; `NO_HEAD` - nothing usable arrived), logs one line naming the detected shape and the URL, and stops.
+`Player::loop()` polls `refuseReason()` once per tick behind a seen-guard. A permanent verdict (`UNSUPPORTED`,
+`NOT_AUDIO`) is **one-shot**: it was reached by reading the first answer, so `noteFatalStream()` runs at once - the
+message, one log line, no ladder, no `LOST` page - and the pending Radio-Browser click is cancelled. Only `NO_HEAD` is
+treated as a failed attempt and counted by the arm gate, because it is the genuinely ambiguous case. Note that
+`AUDIO_ERROR(...)` **is** the `audio_error` callback in both forks, so a library error line would land on the display;
+`AudioHandlers::handleError()` therefore logs and skips `setError` while `refuseReason()` is non-zero, leaving
+"Error connecting" as the only thing the user sees. The sniff itself (`sniffHead()`, positive signatures only,
+which is why an unusual but working stream is never refused) lives in each library at the HLS `firstBytes` block and
+at the plain-stream point where `f_stream` is set - **not** in `readAudioHeader()`, which a live stream never reaches.
+Separately, in `player.cpp`: the arm gate counts consecutive starts that never produced audio (`_startAttempts`,
+reset by 10 s of a ring over 4096 bytes, and **not** reset by the ladder's own `resumeLastWebSource()` - that goes
+through `_play()`, which is why `_ladderResume` exists) and gives up after `STREAM_START_MAX_ATTEMPTS` (3), and
+`STREAM_START_DEADLINE_MS` (30 s) stops an attempt that delivered nothing at all - nothing else watches a connection
+that is never closed, because `streamDetection()` only runs after the first audio byte. Verdicts and the deadline are
+both suppressed while `playlistValidator.active()`: the validator probes URLs on purpose, so a refusal there is its
+finding, never a station error. The validator judges by the same rules: `_sawAudio` (a codec decision plus bytes in
+the ring) is what makes a probe pass, a permanent verdict fails it at once without the retry budget, a probe with no
+evidence waits only to four times `PLAYLIST_VALIDATE_LISTEN_MS`, and `clearRefuse()` empties the verdict between
+probes so nothing outlives the sweep.
+
+**Why the VS1053 build depended on this ladder more than the I2S build.** Both libraries retry a dead stream
+themselves every 5 s (`streamDetection()` -> `connecttohost(m_lastHost)`), but only the VS1053 failure branch
+erased the host (`m_lastHost[0] = '\0'`), which turned every later library-level retry into `connecttohost("")` -
+a guaranteed failure for the rest of the session - while the I2S backend kept the URL and kept retrying it. I2S
+therefore had two independent recovery paths and VS1053 had **one**, which is why a stall here only ever showed on
+the VS1053 build as "the stream will not come back and other streams fail until a reboot". The erase is gone and
+`streamDetection()` now returns early when the host is empty or NULL.
+
+**Refusal vs wedge is decided by duration.** At or past the connect bound means a stale path; far below it means
+the peer refused and the link has just proved itself. Only the ambiguous case probes, and only
+`NET_STACK_WEDGED` resets: no link means the Wi-Fi routine owns it, a gateway TCP answer means the stack is fine
+and the host refused, and both probes silent while the driver reports connected means **WEDGED - reset at the
+first failure**. DNS is not part of it - it goes through the same stack, so it is the same evidence.
+
+**Manual Wi-Fi and the boot marker.** `captureCurrentAp()` runs at GOT_IP *and* at the end of
+`MyNetwork::begin()` (the handlers register after the boot connect), letting `wifiBeginFast()` reconnect by
+BSSID/channel with no scan and giving up after `WIFI_FAST_ATTEMPTS`, since a moved AP needs the scan and a reset
+does not. `WIFI_SETTLE_MS` applies only when `WiFi.mode()` reports a change, and an empty scan is retried once.
+`Startup::deferBootStable()` re-stamps the countdown while unproven, and no-ops once settled.
+
+**Instruments, all unconditional.** `MAIN_LOOP_STALL_MS` names the worst stage of a slow `loop()` (this is what
+identified `player+saves`), `NVS_SLOW_WRITE_MS` logs a slow NVS commit, `[Heap]` gives internal free **and the
+largest contiguous block** (what a TLS handshake needs), recovery logs under `Network`, and `Telnet::loop()`
+must never block. Three diagnostics exist for the WebUI's own cost, all under `CORE_MONITOR`:
+`netserver.begin N ms` (one line, the deferred start's total) with `Netserver |   begin phase: X at N ms` marks
+inside it (queue / routes / psram cache / webserver.begin / mdns / ota) for finding which phase owns the time;
+`[Core.HWM] [async_tcp] stack HWM: N bytes` on every websocket connect, plus one on the final chunk of both upload
+paths (`handleUpload()`, and `filemanager.cpp`'s `onUploadChunk()`), which is the reading
+`CONFIG_ASYNC_TCP_STACK_SIZE` is set against. **That macro is in words, not bytes** - `8192 * 2` is a 64 KB stack,
+of which the log shows ~14 KB used. Every cadence and threshold above is a macro in `options.h`, **except the
+connect bound**:
+`m_connectTimeout_ms` / `_ssl` in `src/libraries/I2S_Audio/Audio.h` (1200 ms), separate from
+`CONNECT_HTTP_HTTPS_TIMEOUT`, which doubles as the socket READ timeouts and must stay patient for slow streams.
+
+**The reload storm is the trigger, and the guard was withdrawn.** A reload opens a new websocket before the old
+closes (22 clients, 3 KB heap); the `MIN_MALLOC` guard in `onWsEvent()` went away because that websocket carries
+every setting to `script.js` (`setupElement`), so a refused client shows the page its defaults and the user
+thinks the radio forgot everything. The loader-side wait (`plans/network-recovery.md` §F11) was not built.
 
 ## `src/core/player.h` / `player.cpp`
 - `player.h` declares player command queue, playback API, and status.
@@ -336,18 +1083,93 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - volume conversion (`volToI2S`) including ES8311 path
   - SD/web mode specific playback behavior
   - error reporting and display/net updates
-  - command queue depth: `xQueueCreate(10, ...)` — increased from 5 to prevent queue overflow during rapid mode-switch sequences (SD→web transitions) where multiple commands (PR_STOP, PR_PLAY, PR_VUTONUS) arrive before the first finishes processing.
-  - direct playback lifecycle side effects for `rgbled` and `backlightControls` (start/stop + initial stopped-state sync)
-- VS1053 SPI: `Player::Player()` constructor passes `&VS1053_SPIBUS` to the `Audio(CS, DCS, DREQ, SPIClass*)` constructor. `VS1053_SPIBUS` is the `SPIB` or `SPIA` object resolved by `options.h`. No `SPIClass` declared in `player.cpp` or `player.h`.
+  - command queue depth: `xQueueCreate(10, ...)` — increased from 5 to prevent queue overflow during rapid mode-switch
+    sequences (SD→web transitions) where multiple commands (PR_STOP, PR_PLAY, PR_VUTONUS) arrive before the first
+    finishes processing.
+  - direct playback lifecycle side effects for `rgbled` and `backlightControls` (start/stop + initial stopped-state
+    sync)
+  - `mute()`: volume-0 toggle backed by the private `_muteVol` member; uses raw `getVolume()`/`setVolume()` so
+    `config.store.volume` and the displayed volume are deliberately untouched. Shared by the physical mute buttons, the
+    `mute` command, and the IR mute button — the `DSP_DUMMY` suppression lives only at the physical-button call site.
+    It **refuses to turn mute on while `config.store.volume` is 0** (already silent, and the way back would restore 0):
+    that one early return is the whole guard, because every caller comes through here. Unmuting is never refused.
+  - `isMuted()` is the only reader of `_muted`, and the WebUI mirrors it: `NetServer::loop()` compares the value
+    against `_muteSeen` and queues a `MUTESTATE` message on each transition, so the writers above (`PR_VOL`, a manual
+    `PR_PLAY`, `PR_STOP`, two error paths, `clearMute()` on a mode change) need no broadcast of their own.
+  - The volume line is laid out with **spaces**, not a control character: the number sits centred in a **three-cell
+    field** - `" 5 "`, `" 42"`, `"100"`, with an odd spare cell going to the left - so the speaker keeps a fixed x at
+    1, 2 or 3 digits and no digit count can shift the line. `voltxtFmt` supplies any suffix (`"%d%%"`), whose cells
+    are added on top of the three; `""` means no number at all. The old 2px `0x1E` spacer is gone from `display.cpp`,
+    `TextWidget::_draw()`, `TextWidget::setText()` and `DSP_PIXEL_SPACER`, so `icons.h` slot 30 is a free icon again.
+  - The panel's footer glyph follows the same state: `Display::_updateVolume()` draws `\037` when `player.isMuted()`
+    even though the stored volume is still above 0, and `mute()` queues `DRAWVOL` because nothing else repaints that
+    line. A mute that **ends** goes through the private `_clearMute()`, which clears the flag and queues `DRAWVOL` -
+    the station change, the stop, the volume change, `playUrl()` and both connect failures call it, and `clearMute()`
+    (a mode change) is exactly that call. `PR_PLAY` / `PR_STOP` do **not** repaint the volume line by themselves: the
+    first device test left the X on the panel after a station change had already unmuted the audio and the WebUI.
+  - `prev()` / `next()` / `toggle()` delegate retry cancellation to `network.cancelStreamRetry()` (previously duplicated
+    inline).
+  - **Shuffle used to be a uniform draw *with replacement*, and three defects followed from that shape.** `next()` called
+    `random(1, utility.playlistLength())` - Arduino's `random(min, max)` excludes `max`, so **the last track could never
+    be chosen** (and a one-track playlist drew station 0); consecutive draws shared no memory, so repeats were expected
+    rather than impossible (23 draws from 159 tracks contain ~1.6 duplicate pairs); and `prev()` had no shuffle branch,
+    so it replayed the current track. **All three are fixed (2026.10.25):** `_shuffleNext()` now deals from a **keyed
+    Feistel permutation with cycle-walking** over `1..n` - no repeat until the whole playlist has played, **zero bytes
+    per track** (one `uint32_t` counter is the entire state), and because a Feistel network is invertible `_shufflePrev()`
+    steps back through the same walk, so "the track that played three tracks ago" is `counter - 3` re-derived. The domain
+    is the smallest **even-bit** power of two `>= n`, so fewer than half of all counters are skipped and a step costs two
+    checks on average. **A shuffle bag was considered and rejected** (4 bytes per track = 4 MB at a million tracks), and
+    **seeding a PRNG once cannot do this**: reducing a large output space onto `n` values repeats by the birthday bound
+    whatever the period. See `plans/shuffle-without-repeats.md`.
+  - **`setReady()`: the text a mode shows before anything has started playing in it - the one place a mode entry decides
+    the title lines.** Called from `Config::changeMode()` (both directions, beside the `NEWSTATION`/`NEWTITLE` requests
+    it already sends), from `SDManager::trySdRemount()`, and from the SD manager's close. It clears the player error and
+    then writes one of three things: the no-SD-card text when the boot is SD-offline with no card mounted, `[ready]`
+    when `config.station.url` is non-empty, and **nothing** when there is no station at all - an emptied playlist or an
+    empty card keeps the blank title lines of the "ehRadio and nothing else" state, because `[ready]` there would
+    promise a start that cannot come. Each mode had grown its own copy of this idea (the pager build in `display.cpp`,
+    two in `sdmanager.cpp`, the stop branch in `commandhandler.cpp`) and the mode switch had none, so a switch kept
+    whatever the mode being left had written: a failed card file leaves `Error connecting to <file>`, a web stream
+    leaves its song title. The two remaining copies are deliberate - `display.cpp`'s runs before the playlist is loaded
+    (the url test would be meaningless) and `commandhandler.cpp`'s is a LOST/PLAYER state decision, not a mode entry.
+- VS1053 SPI: `Player::Player()` constructor passes `&VS1053_SPIBUS` to the `Audio(CS, DCS, DREQ, SPIClass*)`
+  constructor. `VS1053_SPIBUS` is the `SPIB` or `SPIA` object resolved by `options.h`. No `SPIClass` declared in
+  `player.cpp` or `player.h`.
 - Coupling:
   - updates display queue and websocket state
   - uses `config` station and mode state
-  - interacts with radio-browser click reporting (clicks are gated on `!network.lostPlaying` so automatic retry reconnections do not fire clicks; only explicit user-initiated plays do)
+  - interacts with radio-browser click reporting (clicks are gated on `!network.lostPlaying` so automatic retry
+    reconnections do not fire clicks; only explicit user-initiated plays do)
   - calls `rgbled` and `backlightControls` directly during playback start/stop
+- **A silent audio stop is now recorded, because nothing else can report one.** `Player::loop()`'s
+  `!isRunning() && _status==PLAYING` gate prints one `Player` line (pos, duration, InBuff fill, `autoAdvance`, mode,
+  and the card's `ready`/strike pair) before it stops. That gate also fires on **every normal SD track change**,
+  because a clean EOF clears `m_f_running` inside `Audio::loop()` a few statements earlier - so `advance 1` with `pos`
+  at the end of the file is a completed hand-over, `pos 0` is a dead file handle, and the line is the split between
+  them. The audio callbacks cannot supply this: `AUDIO_INFO` is only produced by code that is no longer running once
+  the library's `processLocalFile()` guard fails, and the EOF exit path's `Closing audio file` / `End of file` are
+  both gated on a valid `audiofile`, so a smeared handle prints nothing at all.
+- **The card heartbeat is `SD_PLAY_TRACE_MS`** (default 30000, `0` disables), an `#ifndef` in `player.h` like
+  `SDMAN_AUTO_EXIT_MS` rather than an `options.h` value, so a `myoptions.h` can change it: one `SD` line per interval
+  while a card file plays (`pos`, `buffer`, `card ready/strikes`), re-armed on every entry to playback. It is the only
+  record of *when* a silent stop happened, since the stop itself produces no line.
+- **`PR_CHECKSD` stops the file before it unmounts, and asks the card again before leaving the mode.** The probe
+  shares the bus with the file being read, so three misses mean "busy" as easily as "gone": the branch closes the
+  audio file first (`stopSync()`, 50 ms settle), re-probes once with nothing reading the card, and only then decides -
+  a card that answers resumes the station with `PR_PLAY, lastStation()`, a card that does not drops to `PM_WEB`
+  through `changeMode()` (which unmounts in its own order), and `SDOFFLINE` handles it locally because `changeMode()`
+  returns immediately in that mode. **Rule for new code: the audio file is closed before `sdman.stop()`, always** -
+  unmounting under an open `File` leaves the library's guard returning silently with `m_f_running` still true.
+- **`lastSdStation` is a deferred save.** Both write sites - the `lastStation()` setter in `config.h`, which
+  `next()`/`prev()` reach from inside the audio EOF callback, and `_play()`'s own save - use
+  `saveValueButWait(..., 5000)`. An immediate `saveValue` there put an NVS commit (and its page compaction) on the
+  main loop at every track change; `plans/sd-playback-silent-stop.md` has the measurements and the remaining hole
+  (NVS still runs on the main task when the deferred slot fires).
 
 ## `src/core/audiohandlers.h` / `audiohandlers.cpp`
 - Callback bridge used by the audio libraries.
-- `audiohandlers.h` now declares the `AudioHandlers` module and the required free `audio_*` callback symbols; `audiohandlers.cpp` owns the implementation as a normal core translation unit.
+- `audiohandlers.h` now declares the `AudioHandlers` module and the required free `audio_*` callback symbols;
+  `audiohandlers.cpp` owns the implementation as a normal core translation unit.
 - Converts decoder callbacks into:
   - metadata updates
   - title/station updates
@@ -360,26 +1182,275 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - accepts `audio_icylogo(...)` as a fallback image source
   - exposes the filtered `image_url` to MQTT through `audioHandlers` getters
 - Uses shared utility helpers for string normalization instead of keeping those helpers in `config.cpp`.
-- Audio info/bitrate/ID3 notifications are emitted through shared logging macros so telnet+serial output stays consistent with the rest of the firmware log contract.
+- Audio info/bitrate/ID3 notifications are emitted through shared logging macros so telnet+serial output stays
+  consistent with the rest of the firmware log contract.
+- **The title line is two halves assembled from two sources**: `_song` and `_second`, each holding its text, the
+  time it arrived and which source wrote it. The playlist route is `handleShowStreamTitle()` (an `#EXTINF`/icy
+  string, split at its first `" - "`); the ID3 route is `handleId3Title()` into the song half and
+  `handleId3Artist()` into the second, with `handleId3Album()` accepted there only while no artist is known for
+  the item. **ID3 outranks the playlist for the same item**, so an `#EXTINF` line that arrives first is replaced
+  the moment the matching ID3 tag arrives. A half older than `META_SETTLE_MS` (1500 ms, a file-local constant and
+  deliberately not an `options.h` define) is never paired with a newer partner - that is what keeps a value from a
+  previous item, or a previous source, out of the pair - and before the window expires a lone half is held rather
+  than shown, so the panel never displays a state that is about to complete. Publication is one
+  `config.setTitle()`, only when the composed string differs from the title field, and the due check is
+  `audioHandlers.tick()` from `Player::loop()`: no task, no timer, no new heap. In `PM_SDCARD` the window is zero
+  and pairing is unconditional, which reproduces the old title/album behaviour exactly, and an SD artist still
+  names the station. `resetMetadata()` clears both halves and is called from `Player::_play()` and
+  `Player::playUrl()`; `handleBeginSdRead()` keeps its own clear.
+- **The artist has no destination of its own.** The second line is carried inside the title string, and
+  `Display::_titleTexts()` splits `config.station.title` at its first `" - "`, so a stream that sends an artist but
+  never a song shows it in the first line.
+- **An HLS stream now recovers from a segment gap on its own.** The library's media-sequence counter is a function
+  static whose only reset came from a fresh connect, and the resynchronisation that would have re-derived it sat
+  after the parsed playlist had been cleared - so it could never run. A two-segment gap therefore wedged the
+  stream permanently: silence, a manifest request per poll period, and no `[Network]` line, because the audio
+  library still reported itself running and our retry ladder's arm gate (`!player.isRunning()`) stayed shut. A
+  pause/play was the only cure. The accept loop now rebuilds the connect state when both of its probes miss, and
+  the manifest poll waits instead of spinning. The library-side detail, including the identical VS1053 change and
+  the VS1053 `TIT2` wiring, is in the frankenstein-surgery notes.
 
 ## `src/core/display.h` / `display.cpp`
 - `display.h` declares Display class and display mode/change API.
+- The screensaver's two extra widgets are `Display::_ssvu` and `Display::_sstext` - the only widgets no layout
+  provides. `_screensaverWidgets()` brings them up on **every** entry into `SCREENSAVER`, not once at boot,
+  because the meter's segmentation comes from the active layout's `bandsConf` and the info line's size from
+  the first conf that states one (`ssTextSize()`: `weatherConf`, then `title1Conf`, then `playlistConf`, then
+  `metaConf`), and the WebUI stays reachable while the device is asleep. While the meter is up the clock is
+  `lock()`ed (both `ClockWidget::draw()` and `_draw()` bail on `_locked`), and `_time()` skips its random walk on
+  the same recorded answer: its gate is `config.isScreensaver && !_ssMeterUp`, **not** the `screensaverVU` option,
+  so the clock walks whenever it is what the screensaver shows - VU-on with nothing playing included, which is the
+  case that shipped parked - and never while the meter owns the panel. `_ssContentH()` is the panel less the line's
+  strip - one text row, plus `ssGap()` (1% of the panel height, rounded up) above it and `ssBottomGap()` below
+  (`max(ssGap(), TFT_BORDER)`, because the whole screensaver page keeps the bezel border from the glass and the line
+  was the last thing that did not) - and that figure is the floor the walking clock is clamped to. The gap ABOVE
+  stays proportional on purpose: it separates the line from the meter or the clock, which is spacing rather than a
+  bezel, so the strip is only as tall as it needs to be; a panel whose border is 1 or 2 keeps its old strip exactly.
+  `_sstext` is created and
+  re-init'd like any other scroll line, so it carries the shared mark at its wrap, and `_screensaverLine()` joins the
+  line's own parts with that same helper - the two cannot differ, and the character lives in one file (see the
+  widgets.cpp note below). **The line runs at three quarters of the weather row's speed**:
+  `_screensaverWidgets()` scales `scrolldelta` by 3/4 where it divides exactly (a multiple of 4) and otherwise
+  stretches `scrolltime` by 4/3 - the step is preferred because it keeps the finer motion, but the OLEDs' 1 px step
+  (and the TFTs' 2 px) would truncate to 0 or to half the speed, so those take the interval path. The start delay
+  and both buffer sizes are `weatherConf`'s own, unmodified. **The line is one state or the other, never both**:
+  while `player.isRunning()` it is the station name and the two title halves and the weather is deliberately left
+  out (a single-row strip that mixes a forecast into a track name pushes the track off it), and over silence it is
+  `network.weatherBuf` alone - the same split `ssLineHasText()` refuses the strip on. Both transitions re-build it
+  through `config.setTitle()` -> `NEWTITLE` -> `_title()`, so the composition follows the transport with no extra
+  refresh path. **It is CENTRED, and scrolls only when it cannot fit.** `_screensaverWidgets()` gives the strip the
+  player page's own box - `offset = TFT_BORDER`, `width = dsp.width() - TFT_BORDER * 2` - and `align = WA_CENTER`,
+  which `TextWidget::_realLeft()` already answers for any widget with a span, so the centring needed no widget code
+  at all. The inset is what makes it true: `ScrollWidget::init()` caps the width at `MAX_WIDTH`
+  (`DSP_WIDTH - 2*TFT_BORDER`), so `offset = 0` with the panel's full width would centre the text `TFT_BORDER` LEFT
+  of the panel's centre. A line that fits is drawn once and sits still; only a line wider than the span scrolls, at
+  the three-quarter speed above, and only then does its mark appear at the wrap. A former
+  `ScrollWidget::setTextLooped()` repeated short lines until they overflowed so that everything moved; it is gone,
+  and `plans/screensaver-line-loop.md` is superseded by `plans/screensaver-line-centre.md`. The composition above
+  it, `ssRowH()` and `_ssContentH()` are untouched, so the strip's height and the clock's walk floor do not move -
+  it is the text's PARTS that size the strip. Every other row in the firmware still
+  calls plain `setText()`. **A part the line would only repeat is left out:** an untagged SD file's "station name"
+  IS its filename, and its two title halves are that filename cut at the first `" - "`, so `nameRepeatsTitle()` in
+  `display.cpp` re-joins the halves and compares them with the name extension-stripped and case-insensitively (one
+  side is a filesystem name, the other came back through the audio library's tag path) - skipping the meta only when
+  they match, so `03 - Song Title.mp3` reads `03 * Song Title`. That skip is the SCREENSAVER's alone: the player
+  page's meta line still shows it. The partial duplicate `handleId3Artist()` creates in SD mode - the name
+  overwritten by the artist tag, i.e. `The Beatles * The Beatles * Something` - is deliberately not covered; the
+  same predicate against `t1` would close it. See `plans/screensaver-panel-ownership.md`,
+  `plans/screensaver-line-scroll.md`, `plans/screensaver-line-centre.md`,
+  `plans/screensaver-line-duplicate-name.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+- **The line's buffer is `COMPOSED_LINE_BUFF`** (`WEATHER_STRING_L + 2`, 514 bytes), passed to `_sstext` twice -
+  at construction and again in the `init()` of the else branch, because `init()` re-mallocs both string buffers at
+  the size it is given. The weather row takes the same size, for the same reason and in the same two places plus its
+  own `_layoutChange()` re-init. This is what lets the composed line (name + title, or the forecast) arrive whole:
+  the default widget buffer is `WIDGET_BUFF_SIZE` (172) and everything used to be 140, i.e. 138 bytes in a
+  `ScrollWidget`, which silently cut both. See `plans/widget-text-buffer-sizes.md`.
+- **A track change blanks the info line for one second** (`SS_LINE_HOLD_MS`, 1000 ms).  The trigger is the
+  `SSHOLD` request, queued at the TOP of `Player::_play()` - after its guards, before `setDefaults()`,
+  `loadStation()` and the title write - and handled in `Display::loop()` under `if (config.isScreensaver)`.  It has
+  to be ahead of that title write: the write is the first thing that repaints the line, and over the gap
+  `player.isRunning()` (the audio engine's `m_f_running`, which let go at EOF) is false, so the line would be
+  repainted with the WEATHER.  An earlier version triggered on `NEWSTATION`, which `_play()` queues *after* the
+  title, and that is exactly why the forecast still flashed at the start of the pause after EOF.  The
+  `isScreensaver` gate keeps the request inert wherever the strip does not exist, and excludes a manual skip for
+  free: `screenSaverExit()` queues its `NEWMODE, PLAYER` first, so the device is awake by the time `SSHOLD` is
+  handled.  Without the hold an SD boundary rewrites the line two or three times as the title is cleared and
+  re-filled (the visible reset) and flashes the forecast over the gap.  `Display::_ssHoldLine()` in
+  `display.cpp` blanks the widget with `setText("")` - the whole span on both draw paths, because `_windowRect()`
+  widens an empty line to the span - and sets `_ssHoldUntil`; `_screensaverLine()` refuses on that deadline, so
+  every writer is covered (`NEWTITLE`, `NEWWEATHER`, `SHOWWEATHER`, and an `SSREBUILD` re-init), and
+  `Display::loop()` is what clears it and repaints once, because the requests that would have painted the line are
+  exactly the ones being refused.  `_switchMode()` clears the deadline in both screensaver branches - a fresh entry
+  is not a track change and leaving takes the page away - while `_enterScreensaver()` deliberately does not, since
+  `SSREBUILD` re-enters through it.  The strip keeps its height while blank, so `_ssContentH()` and the clock's
+  walk floor do not move.  See `plans/screensaver-line-hold.md`.
+- **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
+  `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
+  both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
+  return) and from `_layoutChange()` via `SHOWVUMETER`. The weather widget belongs to the player page alone and
+  must never be drawn over the screensaver - `_screensaverLine()` is what carries it there. That method is
+  guarded on `_ssStripH()` first and on the lock second, because a *refused* strip is locked rather than inactive
+  and `ScrollWidget::setText()` paints on `_active` alone - so a new metadata string (`NEWTITLE` -> `_title()`) or
+  a weather refresh would otherwise paint the line the strip was refused for, leaving the content area sized as if
+  the strip were gone. The clock's answer while asleep is the recorded `Display::_ssMeterUp`, set by
+  `_screensaverWidgets()` on the one path that locks the clock for the meter, so the two cannot disagree; a
+  derived predicate was rejected because the canvas-allocation failure path - where the clock is what the
+  screensaver shows - is precisely the case a derived answer gets wrong.
+  **The clock's POSITION is the walk's too.** `_layoutChange()` skips every `moveBack()`/`applyMove()` on the
+  clock while `config.isScreensaver` (`ssOwnsPanel`), because `PSTART`/`PSTOP` arrive during playback as well: an
+  SD EOF track change queues `PSTART` from `_play()`, which deliberately stays in the screensaver, and the old
+  unconditional `moveBack()` there dragged the wandering clock to `clockConf` and parked it until the next
+  `SCREENSAVERMOVE` (`options.h`) step - the reported snap on every track change. Placing the clock is
+  `_enterScreensaver()`'s and `_screensaverClockTarget()`'s business. `_moved` stays true, so the hand-back in
+  `_switchMode(PLAYER)` still restores the conf position; the lock and `hideWeatherIfChanged()` in that function
+  are untouched, because `_clockHidden()` already answers for `config.isScreensaver`.
+  See `plans/screensaver-line-weather-and-clock-snap.md`.
+- **A user action wakes the panel, and the wake is explicit.** The screensaver is only ever left by a
+  `NEWMODE, PLAYER`, which is issued from two places: `Controls::screenSaverExit()` - which every panel handler
+  (encoder, buttons, IR) runs first, clearing the display queue, restarting the countdown and queueing the mode -
+  and `_play()`'s success branch ([`player.cpp`](../src/core/player.cpp:345)), **but only when `_play()` was not
+  reached from the EOF callback**. `Player::_autoAdvancePlay` is re-derived from `autoAdvance` on every `PR_PLAY` -
+  the only call site of `_play()` - and it gates three things there: `setDspOn(1)` (which calls `display.wakeup()`,
+  so it lit a **blanked** panel), `resetScreensaverTimers()` (which restarted both the screensaver and the sleep
+  countdown) and the `NEWMODE, PLAYER` above. Without that gate an SD playlist woke the panel, exited the
+  screensaver and restarted its timers **on every track boundary**, then re-entered it after the playing timeout -
+  a wake/exit/re-enter loop per track, and a sleep timer that could never expire. Every user path is unaffected
+  because they all reach `screenSaverExit()` first, and `autoAdvance` is set nowhere except
+  [`handleEofMp3()`](../src/core/audiohandlers.cpp:328). The WebUI has no handler of its own,
+  so its transport commands (`toggle`, `prev`, `next`, `playstation`/`play`, `start`, `stop`, `burl`/`playurl`) now
+  call `Controls::screenSaverExit()` from `CommandHandler::exec` as well. That was the pause gap: pause is
+  `player.toggle()` with `_status == PLAYING` -> `PR_STOP` -> `_stop()`, which queues only `DBITRATE`/`PSTOP` and so
+  never reached a mode change, leaving the screensaver up with a dead meter (next/prev/play exit only because they
+  reach `_play()`). Volume and mute deliberately do **not** wake - a level change is not a transport action - and
+  the helper is a no-op once the mode is not a screensaver, so the panel paths that already ran it are unaffected.
+- **The screensaver's background is always black (0), never `config.theme.background`.** The clock, the info line
+  and the meter all erase to black while `isScreensaver`; only their *ink* colours come from the theme
+  (`config.theme.textss` for the caption, the four VU colours for the meter). The info line's background and the
+  meter's were the theme's for a while, which laid a coloured band behind the caption and a themed box behind the
+  bands; both now pass `0` - in `_screensaverWidgets()` and in `VuWidget::initScreensaver()`.
+- `SHOWWEATHER` and `NEWWEATHER` recompose the screensaver rather than the player page while
+  `config.isScreensaver`: `SHOWWEATHER` queues `SSREBUILD` only when the strip's existence changes with the
+  flag (otherwise it refreshes only the line, so a toggle costs no panel clear), and `NEWWEATHER` rebuilds when
+  there is no strip yet but `_ssStripH()` has become true - nothing playing and no weather cached at entry,
+  where only a rebuild can create the widget - and otherwise updates the line as before.
 - Render queue + display task + widget/page orchestration.
+- **The render queue cannot refuse a request.** `displayQueue` is 10 slots of `requestParams_t` (two ints: about 160 B
+  with FreeRTOS's queue header, internal heap), and a `putRequest()` that finds it full waits `DSQ_SEND_DELAY` (200 ms)
+  and then **evicts the OLDEST item** (`xQueueReceive` with a 0-tick timeout) to take its place - logged with the
+  victim's type and counted in `_evictedRequests`; `_droppedRequests` now only counts the case where even that failed,
+  which should be unreachable. The oldest is the right victim because everything in this queue is "make the screen look
+  like X now": the handlers re-read live state when they run (`_title()` re-reads `config.station.title`, `NEWWEATHER`
+  re-reads `weatherBuf`) and the paired ones are last-wins (`PSTART`/`PSTOP` -> `_layoutChange(true/false)`, `NEWMODE`,
+  `APPLYSTATE`, `SHOWVUMETER`, `DRAWVOL`), so losing the older half of a pair is harmless. `SDINDEXSTART`/`SDINDEXDONE`
+  still wait for room (`DSQ_CRITICAL_WAIT`) rather than queue behind an eviction. This replaced drop-the-newcomer, which
+  lost a `NEWTITLE` outright on a saturated queue and left the previous track's title on the panel - the Big Text
+  "title 2 pixels around the weather" report. See `plans/big-text-title2-weather-overlap.md`.
+- **`playerQueue` is split by TYPE instead**, because its entries are commands with side effects and an order:
+  `PR_CHECKSD`/`PR_VUTONUS` are skipped outright when the queue has one free slot or fewer (idempotent, re-issued two
+  seconds later - the field's `dropped cmd=7` was one of these), while `PR_PLAY`/`PR_STOP`/`PR_PREV`/`PR_NEXT`/
+  `PR_TOGGLE`/`PR_VOL`/`PR_BURL` keep trying for `PLQ_CRITICAL_WAIT` (500 ms) before giving up. With the ticks kept out
+  of a queue that is nearly full, it can only fill with commands, which is what makes that wait a rare path rather than
+  a stall for whoever enqueued.
 - **Theme/layout/invert runtime switching** — major refactor:
-  - `_applyState()` — central state function: loads layout from PROGMEM, loads theme from PROGMEM (TFT only), applies invert (color swap + `metaBGConf_ptr` switch), reinitializes widgets, redraws. Called by all three commands (`theme`, `layout`, `inverttitle`).
+  - `_applyState()` — central state function: loads layout from PROGMEM, loads theme from PROGMEM (TFT only), applies
+    invert (color swap + `metaBGConf_ptr` switch), reinitializes widgets, redraws. Called by all three commands
+    (`theme`, `layout`, `inverttitle`).
   - `_setLayoutPointers()` — extracted 30-pointer setup shared by init and runtime paths.
   - `applyLayout()`, `applyTheme()`, `applyInvertTitle()` — thin wrappers that set config then call `_applyState()`.
-  - `inverttitle` is runtime boolean (`config.store.inverttitle`). On TFT: swaps meta↔metabg colors + switches to `metaBGConfInv` layout. On OLED: color swap only. Uses conditional rendering at widget init time — no theme mutation.
-  - `getThemeListJson()` / `getLayoutListJson()` — serve dropdown data to WebUI from PROGMEM `_themeNames[]` / `_layoutNames[]`.
-  - `#ifndef HIDE_*` compile guards removed from `_reinitWidgets()` and `_buildPager()` — all widget init now uses runtime null-checks.
+  - `inverttitle` is runtime boolean (`config.store.inverttitle`). On TFT: swaps meta↔metabg colors + switches to
+    `metaBGConfInv` layout. On OLED: color swap only. Uses conditional rendering at widget init time — no theme
+    mutation.
+  - `getThemeListJson()` / `getLayoutListJson()` — serve dropdown data to WebUI from PROGMEM `_themeNames[]` /
+    `_layoutNames[]`. On a non-TFT build (`!DSP_TFT && !DBGWUI`) the theme list stops at `THEME_BUILTIN_COUNT`:
+    custom slots are display themes with no WebUI palette, so the "WebUI Theme" dropdown offers the built-ins only.
+  - `#ifndef HIDE_*` compile guards removed from `_reinitWidgets()` and `_buildPager()` — all widget init now uses
+    runtime null-checks.
   - `_buildPager()` no longer calls `_reinitWidgets()` — state application is handled by `_applyState()`.
   - `_start()` calls `_buildPager()` then `_applyState()` — widgets created then initialized with correct state.
   - `DSP_INVERT_TITLE` compile-time macro eliminated.
 - Buffer bar terminology was aligned to actual behavior:
   - `_heapbar` -> `_bufferbar`
   - `heapbarConf` -> `bufferbarConf`
-- Input-buffer bar values still come from `player.inBufferFilled()`; only visual normalization changed via `BUFFERBAR_VISUAL_FULL_PERCENT`.
-- Battery widget support is runtime-guarded: `_battery` null-check at every call site. Display configs that don't support battery leave `batteryConf` zeroed (height=0) — no compile-time guard needed.
+- Input-buffer bar values still come from `player.inBufferFilled()`; only visual normalization changed via
+  `BUFFERBAR_VISUAL_FULL_PERCENT`.
+- Battery widget support is runtime-guarded: `_battery` null-check at every call site. Display configs that don't
+  support battery leave `batteryConf` zeroed (height=0) — no compile-time guard needed.
+- **Which confs may be empty, and what happens then.** `height == 0` is a valid "none" for `apTitleBGConf` (the boot
+  band, so `{ }` is how a panel declines one — `displayOLED128x32conf.h` does) and for the two reference lines
+  `underLineConf` / `overLineConf`: **no widget is made for an empty conf**, and `_syncLineRule()` in `display.cpp` can
+  still create it later, when a layout switch brings one in. That is what `Page::addWidgetFirst()` is for — a lazily
+  created under line would otherwise be appended and painted over the text it exists to sit beneath. By contrast
+  `metaBGConf`, `metaBGConfInv` and `playlBGConf` are allocated unconditionally on purpose: their confs are re-pointed
+  behind the widget's back (`_applyMetaInvert()`, and `_plbackground`'s per-mode `setHeight()`), so a zeroed conf there
+  is a state rather than an absence. Everywhere else zeros simply draw nothing, a zero rect being one cheap `fillRect`.
+- **The meta fill pair belongs to `LayoutData`; the boot band to `BootData`.** `metaBGConf` / `metaBGConfInv` are
+  alternatives selected by *invert title* (`Display::_applyMetaInvert()`, `display.cpp`), never both, and with **no
+  fallback**: an empty `metaBGConfInv` means invert mode draws no bar, which is how a layout declines one. Both are
+  plain fills drawn in `config.theme.metabg`, except that **when the title is inverted** the band uses
+  `config.theme.line` instead (the rule under the meta). The OLED drivers point `line` at a foreground shade
+  (`oledcolorfix.h`, `displaySSD1322.cpp`), so a band there reads as a solid block rather than a tint — hence the OLED confs carry a
+  hairline or `{ }` in `metaBGConf` and the bar in `metaBGConfInv`, the reverse of a yoRadio conf. `_apScreen()` and
+  `_sdmanScreen()` draw `_bootConfig.apTitleBGConf` and ignore *invert title*, so a setup screen is independent of the
+  selected layout (its text geometry already came from `_bootConfig`). `conf_tool.py` normalises an imported pair by
+  height for an OLED target, derives `.apTitleBGConf` from it, and asks OLED-or-TFT only when it is creating a new conf,
+  since a source file cannot say which family it was written for. **`metaBGConf`/`metaBGConfInv` are deliberately absent
+  from `BootData` and `apTitleBGConf` absent from `LayoutData`**: same-named fields in both structs would make
+  `emit_import_entry()` treat them as boot-only and blank them in every imported layout.
+- **The big-number screen is one code path, and it owns the panel while it is up.** `VOL`, `NUMBERS` and `SDCHANGE`
+  all draw through `Display::_showNumbers(header, value, fmt, dialogPage)`, which also performs the shared-row tidy-up
+  the volume screen has always done: it locks and clears the weather (that line shares the bottom row with the IP text
+  on several layouts), hides the battery and re-activates the RSSI (the other shared row), and repoints the IP line.
+  `dialogPage` selects the variant - true switches to `PG_DIALOG`, where the panel wipe leaves the number alone with
+  the header on the meta line; false is the volume overlay, drawn over the live player page. A negative value blanks
+  the number widget, which is how `SDCHANGE` starts before `SDFILEINDEX` delivers a count. Checking a layout's number
+  geometry from the volume screen therefore covers all three.
+  `_ownScreen()` is what makes that safe: it is true for `SDCHANGE`, `NUMBERS` and `VOL` with `volumepage` on, plus
+  the active file manager, because a page switch only stops the *page pass* - the clock is drawn directly by
+  `_layoutChange()`/`redrawIfVisible()`, and the self-drawing requests write to widgets that live on `PG_PLAYER`, so
+  neither obeys the page system. The volume *overlay* is deliberately excluded: it shares a live player page, so its
+  title, RSSI and battery have to keep updating, and the row tidy-up is what keeps the number legible there.
+  One request is exempt from that drop, and the exemption lives in `_drawsOverOwnScreen()` rather than in the list:
+  `DRAWVOL` *is* the volume screen's content - `_volume()` updates the volume bar, the footer text and the number
+  itself - so it passes while `VOL` or `NUMBERS` is up and stays dropped on the manager and the card-change screen,
+  where the player's volume row would paint over them. Dropping it for the volume page was a real regression: the
+  number and the bar froze for as long as that page was up, because the only thing that refreshes them is that
+  request. That is also why the predicate is a member function now - it has to know which screen is up.
+  One request is exempt from that drop, and the exemption lives in `_drawsOverOwnScreen()` rather than in the list:
+  `DRAWVOL` *is* the volume screen's content - `_volume()` updates the volume bar, the footer text and the number
+  itself - so it passes while `VOL` or `NUMBERS` is up and stays dropped on the manager and the card-change screen,
+  where the player's volume row would paint over them. Dropping it for the volume page was a real regression: the
+  number and the bar froze for as long as that page was up, because the only thing that refreshes them is that
+  request. That is also why the predicate is a member function now - it has to know which screen is up.
+- **A page switch does not stop a widget drawing itself.** `Pager::setPage()` fills the panel with the background and
+  activates one page, which stops the *pager* drawing the others - but a widget asked to draw directly paints wherever
+  it is, because nothing tells it that its page went inactive. The SD File Manager is the case that exposes it:
+  `enter()` stops the player, and that stop (`PSTOP`/`SHOWVUMETER` → `_layoutChange()`) re-evaluated `_clockHidden()`,
+  which hid a yielded Big-VU clock only while `player.isRunning()` was true; the clock was therefore unlocked and
+  redrawn over the manager's page, and then never ticked again, `case CLOCK` being gated to `PLAYER`/`SCREENSAVER`.
+  The manager therefore *owns* the screen: `_clockHidden()` and `_weatherHidden()` return true while
+  `filemanager.active()`, `drawsOverManagerScreen()` in `Display::loop()` drops `PSTART`, `PSTOP`, `SHOWVUMETER`,
+  `SHOWWEATHER`, `NEWWEATHER`, `NEWTITLE`, `NEWSTATION`, `DRAWVOL`, `SHOWBUFFERBAR`, `DSPRSSI`, `DSPBATTERY` and
+  `NEWIP` while it does, and `_switchMode(PLAYER)` calls `_layoutChange(player.isRunning())` after its page switch so
+  the dropped state is re-derived from the live player on the way back. The card-change wait screen (`SDCHANGE`) needs
+  the same treatment for the same reason - it is a holding pattern whose only changing content is the index counter -
+  so both screens are now decided in one place, `Display::_ownScreen()` (`_mode == SDCHANGE || filemanager.active()`),
+  and `drawsOverManagerScreen()` became `drawsOverOwnScreen()`. `_ownScreen()` drives that drop and the hiding of both
+  the clock and the weather, which matters because their refresh paths are not mode-gated (the title, the IP line and
+  the RSSI/battery icons have their own paths too), and neither the clock nor the weather is advanced outside
+  `PLAYER`/`SCREENSAVER`: a widget left visible would be painted once by the page pass and then sit frozen for the
+  whole wait - including the common case where the index is valid and no counter ever appears. Leaving the mode
+  redraws the clock in full, because `_layoutChange()` prints it when a widget comes back from hidden.
+- **A re-index that is not the boot scan owns the panel through a QUEUED hold.** `SDINDEXSTART` / `SDINDEXDONE`
+  (`common.h`) bracket it: the File Manager's close-time walk and `SDManager::trySdRemount()` send START *before* their
+  `NEWMODE SDCHANGE`, and DONE both clears the flag and performs `_switchMode(PLAYER)` in one display-task action.
+  `_switchMode()` refuses every mode except `SDCHANGE` while `_indexHold` is up, naming the refused mode in one
+  `[Warning]`. The flag had to live on the display task rather than in `FileManager`: an out-of-task flag would still
+  be set when this task processed the walk's own final PLAYER request, and the guard would refuse its own exit. This is
+  what stops the scan screen vanishing a split second into a walk - the walk pumps `player.loop()` for its whole
+  duration, so a play that finally starts, a `PR_CHECKSD` resume, `WiFiReconnected()` or the `returnPlayer()` ticker
+  can all queue a `NEWMODE` in that window, and the counter is only sent while the mode is `SDCHANGE`, so the count
+  stopped with the screen. Both requests are exempt from the queue's drop-on-full rule (they retry for
+  `DSQ_CRITICAL_WAIT`), because a dropped DONE would leave every later mode change refused and the controls inert.
 - Main responsibilities:
   - initialize rendering task and widgets
   - mode switching (`PLAYER`, `VOL`, `STATIONS`, `LOST`, `UPDATING`, screensaver)
@@ -391,6 +1462,35 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - reads `network` time/weather, `player` status
   - title changes now directly trigger `rgbled.trackChange()` and `backlightControls.restart()` instead of a weak hook
 
+## `src/core/playlistvalidator.cpp`
+- Owns the WebUI **Playlist Validator**: a sequential stream check driven from the main loop (the task that owns
+  the audio object), never from a second task.
+- `start()` stops playback synchronously, mutes via `Audio::getVolume()`/`setVolume()` (not the `Player::mute()`
+  toggle), sets the title indicator and queues `NEWMODE VALIDATING`; `loop()` walks the stations one at a time -
+  `Utility::loadStation(id)` then `Audio::connecttohost(url)`, so a redirect passes and a 404/connect failure
+  fails. A failure is retried up to `PLAYLIST_VALIDATE_ATTEMPTS`; a pass listens `PLAYLIST_VALIDATE_LISTEN_MS`
+  (both in `options.h`). `stop()` and the natural finish share one `_restore()` - unmute, clear the title, put
+  the saved station back and return to `PLAYER`.
+- Progress is reported over the WebSocket as **`PLVALIDATE`** (`{"plvalidate":{"start":1,"count":N}}`,
+  `{"plvalidate":{"i":N,"r":"pass"|"fail"}}`, `{"plvalidate":{"done":1}}`), read live from the module in
+  `NetServer::processQueue()`.
+- While active it owns the panel: `VALIDATING` is a dialog mode that reuses the OTA progress bar, `Controls`
+  ignores input, `commandhandler` refuses **every command except `plvalidate` and the read-only `get*` getters**
+  (a whitelist, so a command added later is refused by default) while blocking `plvalidate` itself in
+  HTTP/MQTT/Telnet, `audiohandlers` drops station/title/error updates so incoming metadata cannot paint over the
+  indicator, and `Player::loop()`'s stream-death branch is suppressed.
+- `_restore()` calls `Display::clearProgress()` so the progress bar - which lives on the shared dialog page the
+  volume overlay reuses - is blanked on both a natural finish and a Cancel.
+- `updateProgress()` clamps the ratio into 0..1 **before** the `float` -> `int` cast and bounds the bar width to
+  its own `char buf[68]`. Without the clamp the conversion is undefined for an out-of-range or NaN ratio, so GCC's
+  `-Wstringop-overflow` cannot bound the `memset` size and reports a hypothetical ~4 GB one; the width bound is
+  needed because the 2..64 clamp it would otherwise rely on is applied to the `int _updBarWidth` member in
+  `_showDialog()`, another function.
+- The panel indicator is localized: `L10N_LBL_VALIDATING` (`"VALIDATING"`, `display/en_US.json`) is used by
+  `display.cpp`'s `VALIDATING` branch, and the WebUI meta string comes from `Player::validatingLabel()` - an
+  accessor because `playlistvalidator.cpp` must not include `dsplocale.h` (a second copy of every locale table).
+  The WebUI keys carry English fallbacks in the sources and are translated by the maintainer's tools (Rule #8).
+
 ## `src/core/netserver.h`
 - Declares request enums, websocket/server globals, `StaticFileCache` class, `CachedFile` struct, and NetServer API.
 - `StaticFileCache` — PSRAM-backed cache for static WebUI files (files from `Config::wwwFiles[]`).
@@ -398,89 +1498,815 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - Contains embedded fallback HTML templates (`emptyfs_html`, `index_html`, `emergency_form`).
 
 ## `src/core/netserver.cpp`
+- HTTP sleep queries treat `sleep` as an optional wake-up duration and `after` as an independent delay before
+  deep sleep (both minutes); an omitted or zero wake duration leaves the timer wake source disabled. The HTTP
+  handler folds the two into one comma-encoded `sleep=sfor,after` command and skips the bare `after`.
 - HTTP + WebSocket + upload/update + search/curated orchestration.
+- **`PLVALIDATE`** (a new `requestType_e`) carries the Playlist Validator's progress: start/count, one `{i, r}`
+  per station, then done. See `src/core/playlistvalidator.cpp`.
+- **`MUTESTATE`** (a new `requestType_e`; not named `MUTE`, which `icons.h` already owns) carries
+  `{"payload":[{"id":"mutebutton","value":0|1}]}` read from
+  `player.isMuted()`. It is queued when `NetServer::loop()` sees the state differ from `_muteSeen` — one place that
+  covers every writer of `Player::_muted` — and sent to a client as it connects. It is also answered on demand by the
+  `getmute` command, which the player page sends after `player.html` is injected because the connect-time message
+  arrives before the markup that it paints exists.
+- **The theme editor's API sits at the end of `handleNotFound()`, behind `#if defined(DSP_TFT) || DBGWUI`.**
+  Eight routes serve `/editor.html` and nothing else links to them: `GET /theme-elements.json` (one object per
+  element — its key and its label — in table order), `GET /themeall.json` (every id, empty slots included, because the editor's source
+  dropdown must be able to offer one), `GET /themeactive.json` (the id in use, one number), `GET
+  /themedata.json?id=N`, `GET /xtheme.json?slot=N` (one slot as a download, offered to the browser as
+  `ehRadioTheme-<name>.json`), `GET /xthemeall.json` (every filled slot in one, in order, as
+  `ehRadioThemes-Backup.json`), `POST /xtheme` (`action=save|delete`) and `POST /themeapply`. The theme travels as ONE
+  `data=` field holding the same document the slot files use, so `themeParseTheme()` is the only parser and
+  there is no second shape to keep in step — and for the same reason **Save is also the import**: the export
+  writes what a save would have written, so feeding it back through Save restores the slot. `POST /xtheme`
+  also takes an optional **`use=0`**, which writes and installs the slot *without* selecting it; that is what
+  the page's bulk import uses, because ten sequential saves would otherwise leave the device sitting on the
+  last theme imported. The routes sit outside the WebUI's `group_*` conventions on purpose, and only the page
+  consumes them: the options page's Danger Zone links to `/editor.html`, but it calls none of these. The two
+  exports exist because the slot files are the only copy of a custom theme, and a LittleFS reflash takes all ten
+  with it.
+- **The layout editor's API follows it, behind `#ifndef DUMMYDISPLAY`.** `GET /layout-elements.json` (the
+  groups plus one object per `LayoutData` field — its key, label, type, group, flags and its own cells),
+  `GET /layoutall.json` (every id, `""` for an empty slot), `GET /layoutactive.json` (the layout in use plus the
+  editor's own `widgetsEditor` switch, which is runtime-only and so has to come back with the layout),
+  `GET /layoutdata.json?id=N`, `POST /layoutapply`, `POST /editorwidgets` (`on=0|1`), `POST /xlayout`
+  (`action=save|delete`, with the same optional `use=0`), `GET /xlayout.json?slot=N` as
+  `ehRadioLayout-<name>.json` and `GET /xlayoutall.json` as `ehRadioLayouts-Backup.json`, plus `GET /conf.js` — the
+  build's conf constants and the two flags the page
+  hides its halves with. The guard differs from the theme half on purpose: a layout is a set of pixel positions
+  rather than a palette, so an OLED uses it too, and only a build with no display is out — which is exactly
+  where `layoutregistry.cpp` compiles nothing. A save or an apply is refused when the document names another
+  panel size (`"screen"` against `DSP_WIDTH`x`DSP_HEIGHT`) or when a `CONF_REQUIRED` field is empty; a widget
+  merely off the panel edge is accepted, because only the page can judge whether that was deliberate.
+- **`/themeall.json` sends an empty string for a slot that holds nothing, not a label.** The editor's two
+  dropdowns describe the same slot differently — the source has to say "this is a custom slot", the target
+  has to say "this is already taken" — so the decoration is the page's job and the firmware sends only the
+  name. An empty string is then the single, unambiguous "nothing here" the page reads, with no marker string
+  for the two sides to disagree about. (`/themes.json`, which the options page uses, instead omits empty
+  slots entirely — a different list for a different consumer.)
+- **`themeapply` previews and writes nothing; `xtheme action=save` commits and does everything.** The
+  preview parses into `themeStaging()` and queues `THEMEPREVIEW`, and the display task takes the staged
+  colours from there — no file, no NVS, no `themeId`. The page sends that request on a debounce as you
+  edit, which is the whole of the "live" behaviour and has no control of its own. Save is the editor's one
+  committing action: it writes the slot, then sets `themeId` to it, persists that and calls
+  `display.applyTheme()` — the ordinary theme path, the same one the WebUI dropdown uses — so the panel
+  shows it and options.html agrees about which theme is in use. It therefore resets the pre-sleep countdown
+  exactly as any theme change does. Delete is the other NVS write: when the slot being removed is the theme
+  in use, `themeId` falls back to 0 and is persisted, because a stored id with no theme behind it is the one
+  state that cannot be left behind. `GET /themes.json` picks up a save or delete by itself —
+  `Display::getThemeListJson()` rebuilds when the registry's generation has moved.
 - Main responsibilities:
-  - static file serving from PSRAM cache (via `StaticFileCache`) — no SPIFFS reads during HTTP serving
-  - fallback to SPIFFS for dynamic files not in cache (`searchresults.json`, `curated.json`, etc.)
-  - `handleNotFound`: checks PSRAM cache first for GET requests, cache-busting `?v=` stripping removed (max-age=60 handles freshness)
+  - static file serving from PSRAM cache (via `StaticFileCache`) — no LittleFS reads during HTTP serving
+  - fallback to LittleFS for dynamic files not in cache (`searchresults.json`, `curated.json`, etc.)
+  - `handleNotFound`: checks PSRAM cache first for GET requests, cache-busting `?v=` stripping removed (max-age=60
+    handles freshness)
   - `handleIndex`: serves `player.html` from PSRAM cache for `GET /`
   - route handlers (`/`, `/search`, `/update`, `/locale.json`, `/ready`, etc.)
+  - `/visuals.json` — the VU style list, built **at request time** from one static `{ id, label, needsPcm }` table, so
+    the WebUI select can only offer what the running build can draw: waveform and Lissajous are omitted on a VS1053
+    because they need PCM, and the labels for every other style are identical on both backends. The ids are `vuStyle_e`,
+    the same numbers that travel in `vustyle=<n>` and come back in `GETSCREEN`. There is deliberately **no box-based
+    filtering**
   - `fileCache.loadAll()` called in `begin()` before `webserver.begin()`
   - `invalidateCache()` public method exposed for `utility.cpp` runtime updates
   - `Cache-Control: max-age=60` for all cached static files (was 3600)
-  - `/settings.html`, `/update.html`, `/ir.html` no longer served via `index_html[]` — handled by PSRAM cache fallthrough
+  - `/settings.html`, `/update.html`, `/ir.html` no longer served via `index_html[]` — handled by PSRAM cache
+    fallthrough
   - websocket command parsing and outbound updates
   - state request queue processing (`GETSYSTEM`, `GETSCREEN`, `GETLOCALE`, etc.)
+  - IR websocket helpers: `irToWs()` (protocol + code) and `irValsToWs()` (the active button's 3 codes, read through
+    `config.irCodes()`)
   - online update check/start tasks
   - radio-browser search and curated task management
-  - exact-match-first preview/add handling on `/search`; unmatched preview now uses the same direct URL playback path as `playurl` instead of a mutating playlist scan
+  - exact-match-first preview/add handling on `/search`; unmatched preview now uses the same direct URL playback path as
+    `playurl` instead of a mutating playlist scan
   - centralized logging for search/curated/playback/radio-browser-click/update/not-found paths via `FUNCTIONLOG`
+  - radio-browser click reporting holds the queued click while the startup services are pending instead of letting the
+    heap check drop it. `processRadioBrowserClick()` leaves `clickDelayActive` set and re-tests every pass, capped at
+    `RADIO_BROWSER_SEND_CLICK_DELAY + rbClickServicesWaitMs` (60 s, the same protection `Mqtt::servicesWaitLimitMs`
+    gives its re-apply). The click is still dropped outright while the card is off limits (`PM_SDCARD`, or the SD File
+    Manager) - the older `Abandoning click` rule, extended to the manager.
+  - **the gate is the contiguous block, and nothing else.** The services were never the peak: the first page load took
+    one boot from 140844 free to 9 KB free / 2 KB largest, and this task's 8 KB stack plus a TLS handshake were being
+    started straight into it. So the spawn is dropped - not held - when `heapCanAffordTls(rbClickTlsMinBlock)`
+    (40 KB contiguous, the `ESPFILEUPDATER_MIN_HEAP_FOR_SSL` figure) says the handshake cannot fit; the log carries
+    both numbers. The old `ESP.getFreeHeap() <= MIN_MALLOC` test (24 KB of *total* free) could not answer a
+    contiguity question, which is what let the lookup start against a fragmenting heap.
+  - **There is deliberately no time window.** A 30 s "WebUI quiet" hold existed briefly and was removed: it was
+    purely wall-clock from `NetServer::begin()` (never a dependency on a browser, despite how the log line read), it
+    expired too late to protect a page load opened at 30.5 s and too early for one opened at 29 s, and it delayed a
+    played-station statistic by half a minute on a device nobody visits. The block check is the real protection and
+    it costs nothing when the heap is healthy.
+  - the RSSI payload carries the raw dBm (`rssi`, kept for the bars' tooltip) and the bar count (`rssibars`, from
+    `rssiLevel()`), so the WebUI holds no scale of its own
+  - `GETBATTERY` sends `volt: NmV, percentage: N%`. While `widgetsEditorEnabled` is on it synthesises that same
+    string at a flat 50% instead of reading `Battery`, voltage interpolated across the presence window, so the WebUI
+    battery row can be laid out with no battery fitted. `BATTERY_FORCE_DISPLAY` was removed for it: that macro was
+    only ever the widget-testing switch, and this one does not need a rebuild
 - Coupling:
   - uses `cmd.exec(...)` from commandhandler
   - emits JSON consumed by `data/www/script.js`
-  - `GETSCREEN` now also carries `invtitle`, `layout`, `theme` fields for WebUI dropdown state
-  - Virtual endpoints `/themes.json` and `/layouts.json` serve dropdown data from PROGMEM arrays
+  - `GETSCREEN` now also carries `invtitle`, `layout`, `theme` **and `vustyle`** fields for WebUI dropdown state
+  - `GETSCREENSAVER` is the Screensaver category's own payload - it carries `scre`..`scrpeak` plus `scrtimer`
+    and `scrtimeout`. `GETSCREEN` keeps only the Screen values, and `script.js` requests both on page load.
+    `getscreensaver` is blocked for HTTP/MQTT/Telnet like the other getters and is in the playlist-validator
+    passthrough whitelist.
+  - Virtual endpoints `/themes.json` and `/layouts.json` serve dropdown data from PROGMEM arrays; `/visuals.json` is the
+    first *runtime* one (built per request, not from PROGMEM), and the WebUI loads it through `loadVisuals()` +
+    `populateNamedDropdown('vustyle', data)`
 - Readiness detail:
-  - `/ready` returns `{"ready":true}` only when `netserver.bootReady` is true, required web files exist, and network state is stable (`CONNECTED` + `WL_CONNECTED`, or `SDREADY`).
+  - `/ready` returns `{"ready":true}` only when `netserver.bootReady` is true, required web files exist, and network
+    state is stable (`CONNECTED` + `WL_CONNECTED`, or `SDREADY`).
 - OTA note:
   - OTA start/end/error callbacks use `FUNCTIONLOG`.
   - OTA progress now uses `FUNCTIONLOG` (line-oriented output, no raw `\r` streaming path).
+- **`GETACTIVE` carries `group_tft` on the TFT class** (`#if defined(DSP_TFT) || DBGWUI`, the guard the theme routes
+  themselves use, because `DSP_TFT` is exactly the build where a theme can be edited). The options page's editor
+  button carries it on the two label divs that make its wording, so the button reads "Theme Editor & Layout Editor"
+  where it is emitted and "Layout Editor" alone on a mono build. The token is emitted inside the
+  `network.status == CONNECTED` block like every other display group, so in SoftAP the editor link is not offered.
+  **The name is a deliberate reuse:** `group_tft` was deleted in the font-overhaul round, where it meant "not the
+  dummy display" and could never be false on a real build - see [`plans/font-overhaul.md`](../plans/font-overhaul.md).
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
+- **`DSP_TFT` / `DSP_OLED` exist only in a translation unit that includes `../displays/dspcore.h`,** the driver
+  dispatcher that defines them from `DSP_MODEL`; `display.h` does not pull it in. The `theme` command guards its
+  `display.applyTheme()` with `#if defined(DSP_TFT)` because OLED has no display palette (there the id is only the
+  WebUI choice). That guard once sat in this file without the include, so it was silently false on a TFT too: the id
+  was saved and the dropdown moved, but the panel kept its colours until the next full state apply - which is why a
+  font change appeared to "apply" a theme that had never been applied. `DBGWUI` is a local `#define` inside
+  `GETACTIVE` in `netserver.cpp` and is always 0 in any other file.
+- The three screensaver-composition commands (`screensavertext`, `screensavervu`, `screensavervustyle`) are the
+  only members of the screensaver family that also ask for `GETACTIVE` again, because they change which rows
+  the Screen section shows. `GETACTIVE` sends `group_vu_ss` unconditionally inside the VU `#if` (the VU
+  Screensaver checkbox, which needs no VU box in the layout), `group_vu_ss_style` only while `screensaverVU`
+  is on (the style picker *and* the meter's own peaks/axis switch, which share the group because both belong
+  to the screensaver's meter), and withdraws `group_full_time` while it is on; `group_vu` keeps its own
+  meaning, "the active layout has a VU box". `GETSCREENSAVER` carries `scrtext`, `scrvu`, `scrstyle`,
+  `scrpeak`, `scrtimer` and `scrtimeout`; the Screen values stay in `GETSCREEN`.
+- `screensavervupeak` is deliberately not `vupeaks`: `screensaverVUpeak` is a store of its own, and the
+  widget reads it through `VuWidget::_vupeak()` whenever the instance is the pinned one - the same split
+  `_style()` makes for `screensaverVUStyle` against `vustyle`. It owns the peak markers and every axis or
+  reference line in every style, which is why the label is "VU Meter Peaks / Axis" on both rows.
+- A screensaver setting is applied where it is visible. Every `screensaver*` command shares one helper that,
+  while the device is already in `SCREENSAVER` or `SCREENBLANK`, queues an `SSREBUILD` carrying the mode the
+  blank switches now describe - the same choice [`network.cpp`](../src/core/network.cpp) makes when the
+  countdown fires - instead of waking the device to the player. `SSREBUILD` calls
+  `Display::_enterScreensaver()` directly rather than going through `_switchMode()`, which cannot serve it:
+  the first guard on that function's fifth line drops a request for the mode the device is already in, and the
+  second drops any request while the network is transient, and either one leaves the old picture running.
+  `_enterScreensaver()` holds what `_switchMode()`'s screensaver branch used to do, including lighting the
+  panel again so a rebuild out of `SCREENBLANK` shows the picture rather than a dark screen. The two enable
+  switches (`screensaverenabled`, `screensaverplayingenabled`) still return to the player, because with the
+  governing one off the screensaver should not be up at all - and that exit is the route that resets
+  `screensaverTicks`/`screensaverPlayingTicks`. The cost is the panel clear a rebuild goes through, one full
+  blit of black before the rebuilt picture; that clear is what owns the whole panel when a box shrinks.
+- The Screensaver settings are their own reset category: `defaultSettings("screensaver")` holds every
+  `screensaver*` default plus the two deep-sleep settings, while `defaultSettings("screen")` keeps only the
+  Screen ones. Both branches end with `GETACTIVE` for the layout-driven groups (`group_full_time`,
+  `group_smaller`, `group_vu_ss_style`), which depend on Screensaver values too. The value payloads are
+  separate - `GETSCREEN` for Screen and `GETSCREENSAVER` for Screensaver - so the all-reset order no longer
+  decides which defaults the WebUI sees. The Screensaver branch queues an `SSREBUILD` while the device is
+  asleep so the reset is visible at once.
+- **`sleeptimer` / `sleepSsTimeout`: a deep-sleep timer beside the screensaver timers.** `sleeptimerenable` and
+  `sleeptimeout` (5..1080 minutes) are the only screensaver commands that do not call `screensaverHelper()`,
+  because the picture does not change. `config.sleepTicks` is a third idle counter: `ticks()` increments it
+  while `store.sleeptimer` is true and the device is in `PLAYER` or the screensaver, and calls
+  `utility.doSleepW()` once it passes `sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY`. It does not wait for a
+  screensaver to appear and neither screensaver enable switch gates it, so a 5-minute sleep timeout with a
+  120-minute screensaver timeout deep-sleeps first, while 30 against 5 deep-sleeps 30 minutes from the same
+  start rather than 35. The block is inside `#ifndef DEEP_SLEEP_DISABLE`, and `GETACTIVE` offers the rows
+  through `group_deepsleep` without looking at the screensaver switches. While `filemanager.active()` is true,
+  `ticks()` holds all three counters at 0 every second: SD File Manager mode has its own `SDMAN_AUTO_EXIT_MS`
+  timeout, and that exit is what lets the countdowns resume.
+- **All three idle counters reset together.** `Config::resetScreensaverTimers(value)` sets
+  `screensaverTicks`, `screensaverPlayingTicks` and `sleepTicks`; the six existing reset sites call it
+  (`ticks()` on a connecting stream, IR presses, `screenSaverExit()` and `touch()` with 0; `_switchMode()` and
+  a station start with `SCREENSAVERSTARTUPDELAY`). The two sleep commands still zero `sleepTicks`, so enabling
+  or changing the value starts a fresh countdown.
 - Central command router for WS, URL params, MQTT, and telnet fallback paths.
 - Main responsibilities:
   - map `key=value` commands into config/player/display/network actions
   - request websocket state snapshots
   - persist settings with `config.saveValue(...)`
-  - source-aware command policy (`WebSocket`, `HttpUrl`, `Mqtt`, `Telnet`) and shared non-WebUI blocklist checks for HTTP/MQTT/Telnet ingress
-  - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`, `dim`/`brightness`, `dspon`/`screenon`)
-  - player-command parity helpers (including exact-match-first direct URL playback command routing for `playurl` / `burl`)
+  - source-aware command policy (`WebSocket`, `HttpUrl`, `Mqtt`, `Telnet`) and shared non-WebUI blocklist checks for
+    HTTP/MQTT/Telnet ingress
+  - `Commands.md` at the repository root is this file's own reference, deliberately **in the same order and the same
+    blocks** - that promise is what makes an audit a walk down two lists. `isBlockedForSource()` is the only
+    authority for its *Blocked in HTTP/MQTT/Telnet* column. Beware the names that are not commands:
+    `config.cpp`'s `CONFIG_KEY_ENTRY` keys are what a setting is stored under, and `vumeter` / `vupeak` happen to
+    exist as both. Six commands had gone undocumented before the 2026-10-07 audit
+    (`plans/commands-md-audit.md`), which is why the procedure below ends with them.
+  - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`,
+    `dim`/`brightness`, `dspon`/`screenon`)
+  - player-command parity helpers (including exact-match-first direct URL playback command routing for `playurl` /
+    `burl`)
   - trigger curated operations and locale update tasks
-  - cancel the stream retry task (`cancelStreamRetry()`) before executing user-initiated playback commands (`stop`, `playstation`, `prev`, `next`, `toggle`, `turnoff`, `burl`, `mode`, `submitplaylist`) so explicit user actions always interrupt automatic reconnection loops
+  - cancel the stream retry task (`network.cancelStreamRetry()`) before executing user-initiated playback commands
+    (`stop`, `playstation`, `prev`, `next`, `toggle`, `startstandby`, `burl`, `mode`, `submitplaylist`) so explicit user
+    actions always interrupt automatic reconnection loops
+  - `stopstandby` / `startstandby` delegate to `utility.stopStandby()` / `utility.startStandby()`; the `mute` command
+    maps to `player.mute()`
+  - IR recorder commands: `irbtn` resolves a button **name** via `config.irButtonByName()` (`-1` stops recording and
+    saves), `chkid` selects the slot, and `irclr` clears a slot through `config.clearIR()`
 - Critical coupling file for setting changes.
-- New commands: `theme` (theme switching), `layout` (layout switching), `inverttitle` (invert title toggle). All persist via `saveValue` and trigger `display._applyState()`.
+- New commands: `theme` (theme switching), `layout` (layout switching), `inverttitle` (invert title toggle). All persist
+  via `saveValue` and trigger `display._applyState()`.
+
+## `src/displays/conf/conf_tool.py`
+- **One tool, four modes** (it replaced `importlayout.py`, which is gone): `--clean` repairs every `display*conf.h` in
+  its own directory; `--import <file> --name "X" [--target file.h]` converts a community yoRadio conf file, creating
+  the file when the target does not exist; `--fromjson <layout.json>` writes a layout saved by the on-device editor
+  back into an existing conf; `--check` reports intersecting rectangles; `--dry-run` in the writing modes. There is
+  deliberately no bare invocation - no mode prints a two-line pointer and exits 2, and `-h`/`--help` prints the module
+  docstring, which is the only copy of the help.
+- **A layout is placed by its NAME, and an existing name is updated rather than duplicated.** `place_entries()` (used
+  by both writing passes) compares each label against the entry names in `_layouts[]` - truncated to 50, trimmed,
+  case-insensitive (`name_key()`), because the editor's name field is free text - then regenerates a match **where it
+  stands** via `entry_spans()`: same index, `_layoutNames[]` untouched, so a persisted `config.store.layoutId` still
+  means the same layout and the entry keeps the conf's own spelling. Only a name that is not there is appended, entry
+  and name together at the end. An existing name is **asked about first** (`Update "X"? [y/N]`), and `n` writes
+  nothing at all; `--name "<something else>"` is how a copy is made. The prompt also names the hand-written comments
+  the replaced entry will lose (excluding the tool's own `// unused` and `NEEDS EDITING` markers): the entry is rebuilt
+  from values, so a note like `// clock disappears when VU is on` or a commented-out alternative has nowhere to come
+  from. This is the edit round trip the layout editor was built for - export the slot, re-import it, answer `y`.
+- **Two guards an update makes mandatory.** `check_target_size()` refuses a conf whose `{W}x{H}` (from its name, or
+  from `DSP_WIDTH`/`DSP_HEIGHT` when it is named to another scheme) is not the layout's size, so a 128x64 document
+  cannot overwrite a 480x320 layout; `--fromjson` also refuses a document with no `metaConf`/`playlistConf`, the two
+  load-bearing lines `--clean` will not repair.
+- **Target resolution is shared** (`target_conf()`): `--target` first (the `.h` may be left off), then the size, then
+  the OLED/TFT token in the **source file's own name** (`_family_hint()` - `..._OLED128x64.json`), then a question.
+  That hint exists because 128x128 is the one size with both a `displayOLED128x128conf.h` and a
+  `displayTFT128x128conf.h`; with no conf at a size, `--import` asks and creates, while `--fromjson` stops, since a
+  document carries no `#define`s, no `BootData` and no `STRINGS` and so cannot create a file. `--import` on a `.json`
+  now says to use `--fromjson` instead of "is this a valid conf file?".
+- **The master is `widgetsconfig.h`.** `struct LayoutData` and `struct BootData` supply the field order, each field's
+  type (which decides `{ }` versus `false`), the section headers, and the per-field comments. The tool keeps no list of
+  its own, so a field added to the struct reaches every conf on the next run. The hand-maintained `LAYOUT_FIELDS` in the
+  old importer was already stale - no `underLineConf`, `overLineConf` or `rotateVU` - and that is exactly how the files
+  drifted.
+- **The conf-file invariant, now enforced:** `_layoutNames[]` and `_layouts[]` are the same length and order (the index
+  is the layout's position in both, and is persisted in `config.store.layoutId`); every layout entry writes every
+  `LayoutData` field and `_bootConfig` every `BootData` field, booleans as `false` and structs as `{ }`; fields are in
+  declaration order, which the compiler requires of a designated initialiser; and the section headers (`SCROLLS`,
+  `SLIDER BARS`, `LINES + RECTANGLES`, `WIDGETS`, `CODEC BADGE`, `VU BANDS`, `MOVES`, `TRANSFORMS`) come from the
+  master. The five booleans are per layout and always written, so only their value carries meaning.
+- **Comments survive the rewrite.** Trailing comments are kept verbatim (`// unused`, `// <--------- NEEDS EDITING!`,
+  `// clock disappears when VU is on`); a commented-out alternative stays on the side of its field - the `//
+  .bufferbarConf = {...}` under `{ }, // unused` and the `//.clockConf` above the live line are both in the shipped
+  files; a note above a field travels with the field below it unless a blank line ends the group, in which case it
+  belongs to the field above; a comment naming a field travels with that field; `// ??? (Unused by ehRadio) ...` travels
+  with the field it followed.
+- **A missing `metaConf` or `playlistConf` is never repaired.** Dialogs write into the meta line and the playlist page
+  is built on `playlistConf`, so the tool warns loudly, leaves that entry byte-identical, and lists the file as NEEDS
+  HAND EDITING. No layout is ever removed: that would shift every index after it and the index is persisted.
+- **Writes are two-stage.** Both modes write `<file>.new.h` (the `.h` extension so it reads in the editor), print a
+  per-file report and a summary, and install only on `Update <file>? [y/N]`; declining offers to delete the temps;
+  `--dry-run` writes the same temps but never installs. `--clean` is idempotent - a second run reports every file
+  unchanged, which is also how to confirm that an updated entry is a conforming one.
+- Import mode keeps the old format's behaviour: `BOOMBOX_STYLE` yields two entries, the BoomBox one with `vuConf`'s
+  `align` set to `WA_CENTER` by `force_vu_boombox()` (it used to emit `.boomboxVU = true`); `HIDE_*` zeroes a config and
+  keeps the original commented beneath it; `HIDE_IP_ONLY_MAIN_SCREEN` and `RSSI_DIGIT` become `true` switches; the
+  `BITRATE_FULL`/`TITLE_FIX` block is stripped and substituted; an obsolete `fadespeed` sixth value is dropped from
+  `bandsConf` (a sixth plain integer only, so an expression is never lost); OLED targets get
+  `metaBGConf`/`metaBGConfInv` swapped; and anything the source did not provide is written as `{ }` with `//
+  <--------- NEEDS EDITING!`.
+- Docs: [`conf_tool.md`](../src/displays/conf/conf_tool.md) covers all four modes, including *A name that already
+  exists is updated, not duplicated*, [`layout_key.md`](../src/displays/conf/layout_key.md) documents every field and
+  states the write-every-field, keep-the-headers and index-is-persisted rules. Reasoning:
+  `plans/conf-tool-json-update.md`.
+
+## `src/displays/conf/conf_index.h`
+- **The conf file's own table, described for the layout JSON parser and the editor page.** `dspcore.h` includes it at
+  its TAIL, after the driver chain, because the `CONF_*` names at the bottom are the selected conf file's macros
+  and the panel's own pace (`DSP_WIDTH`, `DSP_HEIGHT`, `TFT_BORDER`, `MAX_WIDTH`, `SCROLLPX`, `BOOTLOGOTOP`) - the
+  editor's "Display type" line explains the pace with `SCROLLPX` instead of telling an author to
+  type a scroll delay, because a layout no longer has one.
+- **`CONF_HAS_CONF_MACROS` is guarded on `DSP_TFT` / `DSP_OLED`, not on `DUMMYDISPLAY`.** Those two are what prove a
+  conf file was included; in a build with no display there is no `TFT_BORDER` or `MAX_WIDTH` to read, so every
+  constant falls back to 0.
+- **Seven shapes, one per struct** — `CT_WIDGET`, `CT_SCROLL`, `CT_FILL`, `CT_BITRATE`, `CT_BANDS`, `CT_MOVE`,
+  `CT_BOOL` — each with its own cell list in `_confCells[]` / `_confCellCounts[]`, indexed by `confType_e`. It is seven
+  rather than two because `bandsConf`, `moveConf` and `fullbitrateConf` share no cell with a widget or a scroll.
+  `CT_BOOL` is one number under the field's own key and has no cells; a cell's `kind` is a number box, the align
+  dropdown, or a checkbox.
+- **`_confFields[]` is every member of `LayoutData`, in declaration order, each carrying `offsetof`.** The offset comes
+  from the struct, so a field and its reader cannot drift, and the order is the order of both the designated
+  initialisers in the conf files and the cards on the editor page.
+- **`LAYOUT_FIELD_COUNT` in `widgetsconfig.h` is asserted against the table** (`CONF_FIELD_COUNT`), so adding a
+  `LayoutData` field fails the build here rather than orphaning a key in every layout file already on disk. It is **30**:
+  round 4 removed `boomboxVU` and `rotateVU` (the VU's orientation is `vuConf.align` now). Flags: `CONF_REQUIRED`
+  (`metaConf`, `playlistConf`), `CONF_FONT_INDEX` (`numConf`, `clockConf` — fontsize is a clock size index there, so 0
+  is meaningful), `CONF_OUTLINE_FRAME` (the two sliders), `CONF_ALIGN_ORIENT` (`vuConf` — its align cell renders as the
+  Orientation dropdown Default / Boombox / Rotate 90 rather than Left / Centre / Right), and `CONF_CELL_BIT` (the
+  per-cell unused marker, so a fill stops offering a font size and an align).
+- **No notation is ever stored.** The constants exist so the page can state the panel's own numbers and validate a
+  value against the panel. Round 8 removed the last two ways notation could leak back: the per-cell macro tooltip
+  (the values are now one line under `Display type`) and `conf_tool.py`'s revival of a number into a macro name,
+  which is why a `bandsConf` cell meaning "how many bands" could come back as `TFT_FRAMEWDT`. `plans/layout-editor.md`
+  carries the reasoning and the alternatives.
+
+## `src/displays/layoutregistry.h` / `layoutregistry.cpp`
+- **`widgetsEditorEnabled` is the editor's own switch, and it is runtime-only.** It is a file-scope `bool` in
+  `display.cpp`, **defined ABOVE the `#ifndef DUMMYDISPLAY` block** — not inside it, because `netserver.cpp`'s
+  `GETBATTERY` reads it and that route exists in every build, display or not — `extern` in `widgetsconfig.h`
+  because `widget_vu.cpp` reads it too, and a reboot clears it - so a
+  session cannot leave the device showing a battery it does not have. It lifts the three hardware gates that would
+  otherwise hide a widget the user is trying to position: battery (`battery.isInitialized()` and the 50% fake),
+  weather (`_weatherHidden()` returns false), and the VU (`vuLive()`/`vuDraws()` treat the meter as on AND
+  `VuWidget::_style()` returns `VU_STYLE_BARS`, because a layout is laid out against the bar). `POST /editorwidgets`
+  sets it and queues `APPLYSTATE`, since a gate the display task cannot see has to be re-inited to move.
+- **The layout registry: one flat list of ids serving the compiled `_layouts[]` table and ten user slots**
+  reserved for `/data/layout1..10.json`. Same shape as the theme registry, and the same reason for it —
+  `config.store.layoutId` is persisted, so the id set has to be stable and "is anything at this id" must be
+  a separate question from "how many ids are there". Readers ask for a COPY or a name, never for the table.
+- **`layoutCount()` is the compiled table plus `LAYOUT_SLOT_COUNT` (10), always.** `layoutFilled(id)` is the
+  only test a caller needs before using an id; `layoutName(id)` returns `""` past the end; `layoutCopy(id,
+  dst)` returns false and writes nothing for an empty slot, so a caller can keep what it had rather than
+  apply a zeroed layout. A slot is filled when its name is non-empty — the loader supplies a default name
+  for a file carrying none, so that one test cannot disagree with "a file was read successfully".
+- **The compiled table's length is a file-local constant rather than a macro**, because `_layouts[]` and
+  `_layoutNames[]` exist only where the conf file was included: this header has to stay includable without
+  them. A build with no display has neither, and the whole implementation sits behind `#ifndef
+  DUMMYDISPLAY`, where `display.h`'s own stub class answers instead and never reaches this file.
+- **`layoutCount` is no longer a global variable** (`widgetsconfig.h` no longer declares one, and
+  `display.cpp` no longer defines one). `Display::getLayoutListJson()` caches on `layoutGeneration()` the
+  way the theme list caches on `themeGeneration()`, and the list is **sparse** — filled ids only, keyed by
+  the real id — which is what lets `options.js` show a saved layout with no JavaScript change. The loop it
+  replaced indexed `_layoutNames[i]` for `i < layoutCount`, which would have read past that array once the
+  count grew past the table's length.
+- **Storage cost, measured:** ten `LayoutData` is 3920 bytes, because `sizeof(LayoutData)` is **392** —
+  `enum WidgetAlign` has no fixed underlying type, so it is 4 bytes rather than 1. With ten 33-byte name
+  buffers the slots cost about **4.25 KB of RAM**, and the second copy of the selected conf table that this
+  translation unit includes costs about **1.6-2.0 KB of ROM**. Giving the enum `: uint8_t` would return
+  roughly 800 B of the RAM.
+- **One document shape, one parser, one writer, and the theme files' own rule: known keys, missing keys zeroed.**
+  `layoutParseDoc()` reads `{ "name", "screen", "layout": { "<field>": { "<cell>": n } } }` and `layoutDocFor()`
+  writes it back by hand, so the keys come out exactly as `conf_index.h` spells them. The parser is liberal where
+  the theme one is: the records may sit at the top level instead of under `"layout"`, and a cell is written by
+  INDEX into the type's cell list, so the shape of a record lives in exactly one place and the clamps are the
+  storage's own widths (a `uint8_t` cell cannot hold 300, and `MoveConfig::width` is signed).
+- **`screen` is checked, and a mismatch makes the slot read as EMPTY.** A document naming a different panel size
+  is a set of pixel positions for another screen, so it is refused at load and again at Save and Apply; a
+  document carrying no `screen` at all is accepted, because that is what a hand-written file looks like.
+- **The two-phase resolve is the theme one, and `layoutValidId()` is why it must be.** `Config::loadLayout()` runs
+  from `_initHW()` before LittleFS is mounted, so a custom id cannot be judged there; `Startup` reads the slots
+  after the pruning, re-resolves, and persists the correction when it changed.
+- **`layoutRequiredOk()` answers the one question a layout can fail** — whether a `CONF_REQUIRED` field is empty,
+  which today means `metaConf` or `playlistConf`. `layoutStaging()` is the one scratch layout a preview is parsed
+  into; `layoutSaveSlot()` writes the whole document and installs it in RAM at once, so a save reaches the
+  display task without a reboot, and a short write REMOVES the file rather than leaving a half layout behind;
+  `layoutDocForAllSlots()` is Backup All — the filled slots in order, or one slot's own document when exactly one
+  is filled.
+- **`Display::_applyState()` takes an `applyMode_e` instead of a bool**, because the two previews stage different
+  halves: `APPLY_STAGED_THEME` takes the staged colours and keeps the stored layout, `APPLY_STAGED_LAYOUT` takes
+  the staged layout and keeps the live theme. A single "in place" flag cannot say which half is staged, and
+  reading the stored one on a preview path is the bug the first theme preview shipped.
+- **One document shape, one parser, one writer, and the theme files' own rule: known keys, missing keys zeroed.**
+  `layoutParseDoc()` reads `{ "name", "screen", "layout": { "<field>": { "<cell>": n } } }` and `layoutDocFor()`
+  writes it back by hand, so the keys come out exactly as `conf_index.h` spells them. The parser is liberal where
+  the theme one is: the records may sit at the top level instead of under `"layout"`, and a cell is written by
+  INDEX into the type's cell list, so the shape of a record lives in exactly one place and the clamps are the
+  storage's own widths (a `uint8_t` cell cannot hold 300, and `MoveConfig::width` is signed).
+- **`screen` is checked, and a mismatch makes the slot read as EMPTY.** A document naming a different panel size
+  is a set of pixel positions for another screen, so it is refused at load and again at Save and Apply; a
+  document carrying no `screen` at all is accepted, because that is what a hand-written file looks like.
+- **The two-phase resolve is the theme one, and `layoutValidId()` is why it must be.** `Config::loadLayout()` runs
+  from `_initHW()` before LittleFS is mounted, so a custom id cannot be judged there; `Startup` reads the slots
+  after the pruning, re-resolves, and persists the correction when it changed.
+- **`layoutRequiredOk()` answers the one question a layout can fail** — whether a `CONF_REQUIRED` field is empty,
+  which today means `metaConf` or `playlistConf`. `layoutStaging()` is the one scratch layout a preview is parsed
+  into; `layoutSaveSlot()` writes the whole document and installs it in RAM at once, so a save reaches the
+  display task without a reboot, and a short write REMOVES the file rather than leaving a half layout behind;
+  `layoutDocForAllSlots()` is Backup All — the filled slots in order, or one slot's own document when exactly one
+  is filled.
+- **`Display::_applyState()` takes an `applyMode_e` instead of a bool**, because the two previews stage different
+  halves: `APPLY_STAGED_THEME` takes the staged colours and keeps the stored layout, `APPLY_STAGED_LAYOUT` takes
+  the staged layout and keeps the live theme. A single "in place" flag cannot say which half is staged, and
+  reading the stored one on a preview path is the bug the first theme preview shipped.
+
+## `src/displays/themeregistry.h` / `themeregistry.cpp`
+- **The theme registry: one flat list of ids serving two sources.** Ids `0..12` are the compiled `_themes[]`
+  table, ids `13..22` are the ten user slots whose files live in `/data/xtheme1..10.json`. Readers ask for a
+  copy (`themeCopy()`) or a name, never for the table, and the rest of the firmware only ever sees
+  `config.theme` — which is why blending the two sources needed no changes outside `config.cpp` and
+  `display.cpp`.
+- **`themeCount()` is a constant 23, and "is anything there" is a separate question** (`themeFilled()`).
+  `config.store.themeId` is persisted, so a count that shrank — or an id that moved because a file was
+  deleted — would silently re-point the device at a different theme. `themeAt()` returns `nullptr` for an
+  empty custom slot, so nothing can dereference one.
+- **`themeValidId()` has a two-phase rule, and it exists purely because of boot order.**
+  `config.loadTheme()` runs from `_initHW()`, before LittleFS is mounted, so a custom id cannot be judged on
+  that pass — answering "0" would forget the user's choice for the whole session. Until `themeLoadSlots()`
+  has read the files the custom ids are therefore left alone, the caller falls back to built-in 0 for the
+  palette, and `Startup::checkLittleFSandVer()` re-runs `loadTheme()` once the slots are known.
+- **The element table is reached only through `themeElementKey()`, `themeElementLabel()` and
+  `themeElementCount()`.** The table in `themes.h` pairs each field's wire key with a human label, and these
+  three are the only way in, so `elementIndex()`, `themeJsonFor()` and the WebUI route never index it and
+  cannot disagree about what an element is called. Past the end they return `""` rather than trapping, so a
+  loop over the count needs no guard at each use.
+- **One document shape, one parser, and one rule: known keys, missing keys zeroed.** `{ "name": "...",
+  "colors": { ".key": 565 } }` is the slot file, the Save body and the Apply body alike. Reading iterates the
+  document's own members and matches each key against `_themeElementNames` rather than looking up each of our
+  keys in turn — which keeps any key text legal, brackets and dots included, and makes an unknown key simply
+  ignorable. A key the document leaves out comes back **black**, in every context: there is no
+  inherit-from-a-base rule any more, because it made a partial file mean different things in different places
+  (the loader inherited from built-in 0, the preview from the theme in use) and the editor always sends all 43
+  keys, so it only ever mattered to a hand-made file. There is no `version` field either — the keys are the
+  contract, so nothing has to negotiate one. An `[r,g,b]` array is still accepted in place of a 565 integer.
+- **`themeJsonForAllSlots()` is the Backup All writer, and a backup is a SET of themes.** It emits the filled
+  slots in slot order and nothing else — no `null` for an empty slot and nothing padded on the end — or, when
+  exactly one slot is filled, that slot's own document, so the two export buttons agree on a one-theme device.
+  There is no placeholder because there is no layout in the file: a restore packs these themes into whatever
+  slots are free, so declaring an emptiness would describe an intent the reader does not honour.
+- **`themeJsonFor()` REPLACES the buffer it is given; it does not append, and the array writer depends on
+  knowing that.** Each element is built into its own `String` and then appended. Handing it the array's own
+  buffer overwrote the `[` with the first theme and then each element overwrote the one before, leaving the
+  last filled slot's document followed by a stray `]` — invalid JSON, and invisible until two slots were
+  filled because with one the array path returns before the second call happens. The contract is stated on
+  both functions so the next caller cannot repeat it.
+- `themeJsonFor()` builds the output by hand rather than with a serializer, so the keys are emitted exactly as
+  `themes.h` spells them. `themeStaging()` is the one scratch theme a preview is parsed into and
+  `themeStagingCopyTo()` is how the display task collects it; a second POST overwriting it is harmless, since
+  it carries newer colours for the same repaint and a torn read could only mix two of the user's own palettes.
+- **A knowingly accepted cost:** the built-in tables are `const` at namespace scope, so including `themes.h`
+  here makes a second copy for this translation unit (about 2 KB of flash). Giving them one definition would
+  mean restructuring a header that `theme_tool.py` generates into.
 
 ## `src/displays/themes.h`
-- **NEW FILE** — Runtime theme switching data.
-- `ThemeData` struct: 33 `uint16_t` color fields + `playlist[5]` — mirrors `config.h` `theme_t`.
-- `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported).
-- `const char _themeNames[][32] PROGMEM` — display names for WebUI dropdown.
+- Runtime theme switching data, loaded from PROGMEM at runtime.
+- `ThemeData` struct: 37 `uint16_t` colour fields + `playlist[5]` — 42 in all, and it mirrors `config.h`'s
+  `theme_t`, which is what lets `memcpy` carry one into the other.
+- `const ThemeData _themes[] PROGMEM` — array of theme presets (default + imported), reached only through the
+  theme registry.
+- `const char _themeNames[][64] PROGMEM` — display names for WebUI dropdown.
 - `RGB(r,g,b)` macro packs 8-bit RGB into RGB565 `uint16_t`.
-- Populated by `importtheme.py` script.
+- **`_themeElementNames[] PROGMEM` is the contract with the theme files and the editor.** One entry per
+  `uint16_t` field of `ThemeData`, in declaration order, each pairing a `key` with a `label`. The key is the
+  wire and file name — `playlist` is 0-based (`.playlist[0]` is the first entry) so the file and the struct
+  agree directly — and the label is what a human reads, which the editor shows by default with the key a click
+  away. A label is never parsed, matched or stored, so renaming one cannot touch a byte of a theme file. **One
+  element per line is the point:** two parallel tables would let a key be added without its label and shift
+  every entry after it, while a count-based check still passed. A `static_assert` ties
+  `sizeof(ThemeData)/sizeof(uint16_t)` to the table's length: adding a field to the struct fails the build
+  until an entry is added here, rather than silently orphaning that key in every theme file already on disk.
+- **Every colour in `_themes[]` is written on the 565 steps** — `level * step`, so red and blue are
+  multiples of 8 and green of 4, the same numbers `editor.html` shows. This is a spelling of the same colour
+  and not a change to it: `(r >> 3) * 8` packs back to the same 565 that `r` did, so the 502 literals
+  `theme_tool.py -q` moved in the shipped file compiled to a **byte-identical firmware** in all
+  three environments.
+- Populated by `theme_tool.py -i`, which takes either an old-style `#define COLOR_*` file or a WebUI JSON
+  export (one theme or a whole backup), routes both through the same fallback rules, and snaps everything it
+  writes onto those steps. See [`theme_tool.md`](../src/displays/theme_tool.md).
+- **`.line` and `.vuaxis`: the two entries with no old-format source, both derived from `.div`.** `line` sits between
+  `.div` and `.weather`, `vuaxis` between `.weather` and `.vupeak`, and their place in the entry is fixed because the
+  entries are designated initialisers. The rules are part of the palette now, not values to eyeball: **`.line` =
+  `.div`** (the divider's ink) and **`.vuaxis` = `.div` × 0.25** (truncated per channel, like every other computed
+  colour).
+  - `.vuaxis` was originally set to `.clockbg` in all 13 themes; that is what the merged tree carried, and it is wrong
+    in principle and in fact: the axis is a *reference line* and `.clockbg` is a *background* shade, so the copy left
+    the axis nearly invisible in Graphite (10,10,10), UltraPerfect (0,0,0), White and Black (229,229,229 on a 255
+    background), Ocean (0,0,62 on 0,0,91) and vip-cxema (29,29,0). A quarter of the divider keeps contrast on black and
+    on white alike (63 for a white divider, 22 for Graphite's 91).
+  - Consumers, which is why both had to be wired as well as recalculated: `.vuaxis` is the seventh argument of
+    `VuWidget` and colours every reference line it draws (centre cross, bar baseline, histogram line, Spectrum divider
+    and mirror divider) — `display.cpp` was constructing and re-initialising the widget with **six** arguments, which
+    does not compile against the seven-parameter signature in `widget_vu.h`, and the colour reached nothing. `.line`
+    colours `_underline` / `_overline`, the two `FillWidget`s built from a layout's `underLineConf` / `overLineConf` in
+    `_buildPager()` and re-initialised on a layout switch beside the other fills; the merge declared the members and
+    added them to the player page but never created them, so they were always null.
+  - Reduced palettes override the rule, deliberately: `displaySSD1322.cpp` sets `.line = GRAY_9` (equal to its `.div`)
+    and `.vuaxis = GRAY_3`, since a four-shade grey palette has no quarter of `GRAY_9`, and `oledcolorfix.h` sets both
+    to `TFT_FG` because a one-bit panel has a single ink.
+  - **The two lines are one widget type at two depths, and the depth is where each one is added.** `underLineConf` and
+    `overLineConf` are `FillConfig`s rendered by `FillWidget` in `theme.line`, and either can be a frame rather than a
+    fill (they honour `outlined`). A page draws in two stages: `Page::setActive()` walks its own `_widgets` then its
+    `_pages` in insertion order (`pages.cpp:103`). So the **under line** is added with `addWidgetFirst()` (the first
+    widget of `PG_PLAYER`, behind the meta band and the text), while the **over line** goes to `_overLinePage`, attached
+    to `PG_PLAYER` after `_footer`, which makes it the last thing that page draws, footer row included. Consequences:
+    the footer cannot cross the over line, and a widget `_reinitWidgets()` creates on a layout switch (VU, title2,
+    weather, volbar, bufferbar) lands below the over line too. `_overLinePage` is a child of `PG_PLAYER`, not of
+    `_footer`, because the footer is shared with `PG_DIALOG`. `Page::loop()` descends only into `_widgets`, never into
+    `_pages`, so nothing in a sub-page can be self-updating - which is why the footer holds only bars and text.
+  - **`outlined` in `FillConfig` now means the shape for a fill, and still means "frame plus inset" for the two
+    sliders.** `FillWidget::_draw()` (`widgets.cpp:31`) reads it and draws `drawRect` instead of `fillRect`, in the same
+    colour the widget was constructed with - `theme.line` for the two reference lines, `theme.metabg` for the meta
+    band and the boot band, `theme.plcurrentbg` for the playlist highlight - and leaves the interior alone on purpose,
+    because a frame that cleared its inside would erase the widgets it exists to enclose. `false` is what every conf in
+    the tree writes, so no existing layout changed; and since a rectangle one pixel thick is its own outline, `outlined`
+    does nothing visible to a hairline, which is the one thing to tell a layout author. `SliderWidget::init`
+    (`widgets.cpp:418`) keeps its own reading, used twice: the `drawRect` frame in `_draw()` and the inset `innerWidth =
+    _width - _outlined * 2` in `_drawslider()`. `SLIDER BARS` is exactly those two fields, and they take two theme
+    colours (`volbarin`/`volbarout`) where a fill takes one. The master's section comment in `widgetsconfig.h` - both
+    copies, the `BootData` one and the `LayoutData` one - now reads `outlined` instead of `false`, as do all 37
+    occurrences across the 14 conf files; the tool copies the master's headers verbatim, so a newly imported conf gets
+    the corrected comment without any change to `conf_tool.py`.
+  - **`metaBGConfInv` is consumed by a pointer swap, not by a second widget.** When `config.store.inverttitle` is on,
+    `_applyState()` re-points `metaBGConf_ptr` at `metaBGConfInv` (falling back to `metaBGConf` when the inv conf is
+    empty) and the single band widget is re-initialised from the inv geometry drawn in `config.theme.line` - so it reads
+    as the rule under the station name instead of a band. What is dead is the exported `metaBGConf_ptr`'s sibling
+    `metaBGConfInv_ptr`: it is assigned in three places (the
+    initialiser, the null block for builds without a display, and `_setLayoutPointers()`) and never read, because the
+    swap goes through `metaBGConf_ptr`. Recorded, not fixed.
 
-## `src/displays/importtheme.py`
-- **NEW SCRIPT** — imports old-style `#define COLOR_*` theme files into `themes.h`.
+## `src/displays/theme_tool.py` - the import mode (`-i`)
+- Imports old-style `#define COLOR_*` theme files and ehRadio JSON exports into `themes.h`, **and** writes
+  the `themes.css` block that entry belongs to, so the two sides of a theme never arrive separately.
 - Handles `#ifdef`/`#ifndef` branching to generate multiple theme variants (permutation).
 - Smart fallbacks for missing colors (e.g., `.dow` ← `.date`, `.battery` ← `.rssi`).
 - Meta fallback for everything else (uses `.meta` color instead of zeros).
+- `FIELD_ORDER` carries `line` (after `div`) and `vuaxis` (after `weather`), matching the struct: the emitted entries
+  are designated initialisers, so the order is load-bearing.
+- `COMPUTED_FALLBACK` derives the two new entries from `div` — `line` at 100%, `vuaxis` at 25% — and both are listed in
+  `DERIVED_RULES`, which exempts them from the `// needs fixing?` marker that every other computed fallback keeps. They
+  are rules, not guesses; the rest are still eyeballed.
 - Name truncation at 31 chars for `_themeNames[][32]`.
-- `--dry-run` writes to `.new.h`.
+- `-n` sets the starting index; without it the entry is appended after the last one.
+- **`--fix` is `--import`'s mirror and edits in place.** `-i` appends an entry and invents or confirms its name;
+  `-f` replaces the *values* of ONE entry that already exists and takes the name from `_themeNames[index]` instead
+  of asking - `--name` is ignored there and `_themeNames[]` is never written. `replace_theme_entry()` splices
+  `emit_theme_entry()`'s output over the span `parse_entries()` reports, re-terminated with the file's own EOL,
+  because the emitter builds with `\n` and `write_text()` does not translate. The input must hold a single theme: a
+  `Backup All` array is refused, since a fix replaces one slot. `themes.css` is left alone unless the closing
+  `[y/N]` prompt is answered yes, which calls `sync_one_block()` - `build_palettes` → `theme_deltas` →
+  `collapse_families` → `render_block` for that id alone, replacing the block or adding it if themes.css lacks one.
+  That is the one case where re-deriving after a hand edit is right: the entry just corrected is the newer truth.
+- **`parse_entries()` spans begin at the entry's indentation, never at the preceding line terminator.** The pattern
+  `(?m)^\s+\{\s+//` is matched against a *slice* of the file, so `^` can match at a leading newline and `\s+` then
+  swallows it; the start is advanced past any `\r`/`\n` before it is recorded. Every consumer splices with these
+  spans, so this is load-bearing: a span that includes the previous terminator welds two entries into
+  `},    {   // Name` the moment the entry is replaced - which is what `--fix` did before the normalisation, and
+  nothing noticed because the file still compiled and every colour was still right. `mode_delete()` consumes the
+  terminator as a unit (`\r\n` or `\n`), since taking only the `\n` of a CRLF leaves a stray `\r` and eating every
+  terminator in sight welds the neighbours. `mode_audit()` reports any entry whose start is not preceded by a line
+  break, with the line number and whether it shares the line with the `_themes[]` declaration or the entry before.
+
+## `src/displays/theme_tool.py` - the palette files and the other modes
+- **Three files hold the palette.** `data/www/style.css` keeps `:root` - the hand-authored design, its nine
+  families and their aliases - plus every rule, and *imports* `data/www/themes.css` on its first line.
+  `themes.css` holds one `:root[data-theme="N"]` block per display theme, each a short list of what differs from
+  `:root`, and nothing else. `src/displays/themes.h` stays the authority for how many themes exist and their
+  names. Nothing writes `:root`; every tool treats `style.css` as read-only input.
+- **`--theme-name` is a declaration, not a comment**, because a page can read a stylesheet's VALUES but never its
+  text. It is what lets `webui_tool.html` list the themes, and therefore what lets that page rebuild the file
+  without ever seeing it. `themes.h` wins whenever the two disagree: `-i` rewrites every `--theme-name` from it
+  on each run.
+- **One file, one set of readers and writers**: paths, EOL-preserving read and write,
+  `parse_master()`, `parse_blocks()`, `render_block()`, `render_file()`, `apply_edits()`, alias resolution,
+  `ROLE_ORDER`, `find_families()`, `collapse_families()`, the `themes.h` readers, and the sync check. Three
+  scripts import it, so no two of them can disagree about how a file is read or written.
+- **`check_sync()` is the contract, `require_sync()` is the door.** The blocks must be exactly
+  `0 .. len(_themeNames)-1`, in order, no duplicates, no gaps; anything else is a hard stop that names the ids and
+  tells you to hand-edit until they line up. A name that differs is a warning and never a stop, because themes.h
+  is the authority and the name is only a cache. A bare run (or `-a`) is exactly this report plus the quantise
+  status and nothing else; every other mode calls the same check before touching anything.
+- **`:root` is the anchor.** A block is a diff against `:root`, so there is no second reference to name:
+  no `--anchor` flag, no `mode=`/`anchor=` marker, no empty-block convention - block `[0]` carrying declarations
+  is normal. To retune the design: `--inflate`, edit `:root`, `--deflate`.
+- **Maintenance modes**, over `themes.css` with the master from `style.css`, never reading
+  `themes.h`: `--inflate` gives every block every role it lacks, at the colour it **already has in that block**,
+  never the master hex, so a head's cascade survives being frozen; `--deflate` drops every declaration whose
+  resolved value is exactly the `:root` one; `--deflate-lossy` does the same within `NEAR_MASTER`, one `[y/N]` per
+  role per theme, default No. `--dry-run` reports instead of writing. Run over a canonical file `--deflate` must
+  report nothing to do - that is the file's form check.
+- **`--inflate` then `--deflate` returns the file byte for byte**, given the file is already in the canonical
+  alphabetical form every tool writes. It is not a no-op on a hand-ordered block: it normalises the order, which
+  is the one thing a round trip can change.
+- **Declarations are alphabetical everywhere, and there is no sort mode.** `ROLE_ORDER` is alphabetical and
+  `render_block()` writes `sorted(props)`, so every block any tool creates or rewrites is alphabetical, including
+  hand-added properties. `:root` is the one exception by design: grouped by family (standalone first, then
+  `surfaces`, `edges`, `fills`, `outlines`, `highlights`, `actives`, `labels`, `infotexts`, `maintexts`),
+  alphabetical inside each group.
+- **The nine `:root` family heads are NOT roles, but a block may declare one.** `ROLE_ORDER` lists members only,
+  so no palette is generated for a head. `find_families()` derives the map from `:root` itself - a head is a name
+  another declaration points at that is not a role - so a hand-added family needs no list maintained anywhere. A
+  theme can write `--outlines: #e3d25f` and move seven outline roles in one line, and `--deflate` folds members
+  back into that line (the value most of them agree on wins; a member that differs stays declared as a deliberate
+  split; a tie between two colours goes to the first member in family order, because the block has to be spelled
+  and a head plus splits is never longer). `webui_tool.html` breaks the same tie the same way.
+- **Values may be `var(--other)`.** `resolve_value()` follows aliases block-first and then `:root`, so every
+  comparison is on hex; a block that spells out `#262626` where `:root` says `var(--fills)` is redundant.
+- `validate_props()` **checks that every palette declaration begins its line** (indentation only) and fails with
+  the file and line number and the offending prefix. A stray character in front of `--role:` makes the
+  declaration invalid CSS that the browser drops silently - the role then falls back to its alias, which presents
+  as a colour that "does not apply" and is otherwise a long hunt.
+- There is no lock and no `--update` any more: a theme is finished by not editing it, and every mode processes
+  every block. The three hand-owned colours (`--page-bg`, `--list-bars`, `--playlist-hover`) are never generated,
+  because no display theme carries a colour meaning "the browser window" or "the zebra stripe".
+
+## `src/displays/webui_tool.html`
+- Dev-only **theme builder and sampler**: one page showing every kind of coloured element from the player,
+  playlist editor, settings (Controls), search, curated lists, IR recorder and the equaliser popup, plus the
+  loader/progress states, with the whole palette beside it. Fake data; the only script is the builder described
+  below, and it never
+  touches `style.css`. It exists because a palette edit in DevTools dies on page navigation (the next page
+  reloads the stylesheet) and because a theme block is the real deliverable.
+- **Three columns on a wide screen:** a sticky help column (`.helpcol`, 420-560 px, with its own scrollbar)
+  carrying the text and the variable table, and `.samples` split into two page columns (`.sample`), the playlist
+  editor spanning both because `#pleditor` needs 880 px. Under 1580 px the samples fold to one column; under
+  980 px the help moves to the top and stops being sticky. Each sample is its own `.pagewrap` app column, so the
+  page-bg shows between them; `.narrow` keeps settings/search/curated at 580 px and the editor centres at 960.
+- **The help note is folded away by default**, because the explanation is not what you open the tool for: `#whyq`
+  (the "Why does this file exist?" line) toggles `#whybody`, which wraps everything from the first paragraph to the
+  table. Hovering underlines it and brightens it to `#ffffff`, and a caret (`\25B8` / `\25BE` from CSS content)
+  reports the state, because the two hover hints cannot.
+- **A sample is a `div`, never a `section`, and its frame is hardcoded.** `style.css` has a bare `section {}` rule -
+  the settings card, with a `--panel-border` ring, card padding and
+  `background-image: linear-gradient(--panel-background, --panel-gradient)` - and `section` exists nowhere but
+  options.html's cards and editor.html's `#themebox`/`#laybox`. While the frames were `<section class="sample">`
+  they inherited that wash, which read as if the whole WebUI were gradiented. The Settings sample keeps its real
+  `section#group_controls`, so the gradient is still previewed where it actually appears. The frame is a fixed
+  `#323232` ring on a `#000` cell (`--page-bg` holds `#000000` by default and is hand-owned), so no palette
+  variable paints a frame - the same rule as the help column: the instrument never borrows the subject's colours.
+- The real pages are exactly one screen tall and scroll their own boxes, so the harness relaxes a few heights -
+  `#playerwrap`, `#equalizerwrap`, `#playlist`, `#pleditor`, `#pleditorcontent`, `#settingswrap`, `#searchcontent`,
+  `#curatedcontent` go `height: auto`, the two lists are capped at 340 px, and `#pleditorwrap` becomes
+  `position: static` (on the device it is an absolute overlay). Those rules are layout only and define no colour.
+- Links the real stylesheet (`../../data/www/style.css`) and carries **no `data-theme`**, so the page's base is
+  the real `:root` and theme 0 is just another slot - it is not the default and its notes say nothing special.
+  The loader sets that attribute for one synchronous read and restores it.
+- **The dropdown is the block a save writes; Load only fills the table from it.** Two separate things: `CURRENT` is
+  where the colours on screen came from (set by Load, cleared by Reset), while the *slot* is
+  `parseInt(themePick.value)` - whatever the dropdown names, whether or not Load was pressed. `blockText()` takes the
+  slot's id and `--theme-name`, `allValues()` skips the slot when it reads the other blocks, and `buildFile()`
+  injects `modelDeltas()` into the slot, so retargeting moves the box's header and the save's destination together
+  and never touches the colours. That is what makes "load a palette you like, pick the block to overwrite, Save"
+  work. The box used to hardcode `X` and a placeholder name because it had no way to know which block it was, and
+  `themePick`'s `change` handler only cleared the note; it now repaints the box. The loadnote says where a save
+  would land whenever the slot is not `CURRENT`, that being the one moment it lands somewhere the colours did not
+  come from.
+- **The tool's own chrome is hard-coded on purpose.** The help column, the table, the output block and the sample
+  captions are the instrument, not the subject: they read `--tool-*`, a fixed dark palette declared in the harness
+  `<style>`. They used to borrow the theme, and theme 6 (black text on a light page) made the editor unreadable
+  mid-edit. Everything inside `.pagewrap` - every sample - and the circle fills still come from `style.css`, so the
+  preview is still the real thing. The IR remote graphic is the one sample that is fixed by the stylesheet itself,
+  and the recorder rows beside it are palette-driven in both states, so the button roles are compared pressed
+  against unpressed. The **equaliser popup** (`#equalizer` and its four bands) is a sample of its own beside the
+  Player: on the device `#equalizerbg` is an absolute overlay inside `#playerwrap`, and an **id rule beats any
+  class**, so a `.sampler-eq` override never applied and the popup simply covered the player. It is now
+  `#samplereq`, a framed panel that takes the free grid cell to the right of the Player (the editor spans both
+  columns, so that cell is empty), with inline slider gradients like the player's own volume bar. It is the only
+  place `--eq-label-text` is ever painted, and it also shows `--meter-fill` / `--meter-track` and the `.fb` OK.
+- The sample markup reuses the production ids and classes (`#playerwrap`, `#playlist`, `#pleditor`,
+  `#settingscontent`, `#searchcontent`, `#curatedcontent`, `#irremote`, the `.gb`/`.fb`/`.pleitem` families). Both
+  dropdowns carry real data: the thirteen names from `_themeNames[]` and real `timezones.json` pairs. The IR sample
+  shows the recorder forced open with two rows, one `.irradio.active` + `.irrecordvalue.active` and one at rest, so
+  the pressed and unpressed key colours are judged side by side.
+- The table in the help column is also the editor. It lists all 62 declarations grouped the way `:root` is: the
+  nine standalone colours first, then the nine families, each opened by a bold head row (`tr.fam[data-head]`)
+  with its members beneath (`tr[data-role]`), one combined line each saying where it shows and what it does.
+- **The circles are the controls.** Every row carries a `button.circle` (a head's has a double ring), coloured
+  from the live palette, and it opens one shared `<input type="color">` parked at the circle that was clicked.
+  The choice is written as an **inline custom property on `<html>`** - the strongest origin, one element below
+  `:root` - so the preview repaints while every rule, hover and layout still comes from `style.css`; **Reset
+  all** just removes those properties. Reading the starting colours is `getComputedStyle`, with a `var()` walk
+  for a browser that hands back the token stream instead of the substituted value.
+- **A head moves its followers, and the collapse rule is the other half.** Setting a head (`state.heads`) changes
+  only the members still following it - a split keeps its own colour, so tuning a family member by member does not
+  need a head pick undone afterwards, and a pick while nothing follows the head sets a colour no member uses until
+  `Optimize` regroups the family. Setting a member (`state.members`) splits only that member and marks the row
+  `splitrow` with an arrow that rejoins it. When fewer than two members still follow a head, its colour is handed
+  to the last followers and the head is forgotten - which is why the copied block drops the head line at exactly
+  the same point `theme_tool.py --deflate` would.
+- **Two arrows per row, and the ROW decides what each resets.** `button.rejoin` &#8635; goes back to `:root`,
+  and `paint()` reveals it by adding `setrow` to the row. `tr[data-head]` clears the head **and** every split in its
+  family; `tr[data-role]` clears that one role. The key is read from the row's own `data-head` / `data-role` -
+  **never from a second attribute on the button**, because a rename then has one place to go wrong instead of two
+  (the first version kept `data-reset="text2"` beside `data-head="infotexts"` and the arrow silently looked for a
+  head that no longer existed). The standalone roles have no group colour to reset, so each keeps only its own
+  arrows beside its own circle. **`setrow` follows any override** - standalone included - while `splitrow` needs a
+  family to be split from. Family head rows are boxed - `tr.fam td` draws top and bottom, the first and last cell
+  close the ends - so a group reads as a sub-heading.
+- **`button.reload` &#9100; is the second undo: back to what the loaded theme gave the row.** `LOADED` is a
+  `{heads, members}` snapshot taken at the end of `loadTheme()`, refreshed after a save, and cleared by
+  `Reset all to :root` - so it always means "the last file in or out", and the arrow disappears when nothing has
+  been loaded. `paint()` adds `loadrow` when `valueIn(state, name) !== valueIn(LOADED, name)`, and `valueIn()`
+  resolves member, own head, family head, then `:root`, so a split, a head line and plain inheritance compare
+  exactly as `valueOf()` paints them. On a head row `reloadFamily()` restores the head line the theme carried, or
+  the individual splits it had, rather than one head colour. **Where the block never named a role the two arrows
+  coincide** - the loaded value IS the `:root` one - which is correct rather than a bug. Both arrows sit after the
+  circle and are `display: none` until their row class appears, so one showing never moves the circle.
+- **A jump is marked by a rainbow, not by an accent colour.** `jump()` rings the element it lands on with
+  `.jump-hit`, whose `jump-rainbow` keyframes step the hue 60 degrees at a time for three 0.8 s cycles while the
+  glow and the outline offset pulse with it; the class lives 2.5 s. The ring is deliberately a colour no palette
+  can contain, because `--tool-accent` sat close enough to a theme's own colour to be mistaken for it. A repeat
+  jump restarts the animation (class off, forced reflow, class on) and clears the element's own `jumphitTimer`, so
+  a second click cannot inherit the first one's deadline. `prefers-reduced-motion` drops the animation and keeps a
+  still magenta ring. An outline takes no space, so none of it disturbs the layout it is pointing at.
+- **Copy / paste uses a clipboard of the page's own, and the pair belongs to one row.** Hovering a `td.sw` makes
+  that row `hot` - a 3 s timer refreshed by movement *inside the cell*, so reaching for the icon beside the circle
+  does not hide it, and hovering another swatch moves it there - which reveals `button.clipbtn` (&#128464;).
+  `button.pastebtn` (&#8614;) waits for `#roles.hasclip`, set by the first copy, and Esc empties the clipboard.
+  Both carry no name: `tr.dataset.role || tr.dataset.head` decides, as with the reset arrow. Their two slots are
+  reserved with `visibility: hidden`, never `display`, because a pair that appeared on hover would shove the
+  circle sideways under the pointer aiming at it. A copy reads `valueOf()` (what the circle shows, so a follower
+  copies its family colour) and a paste goes through the same `setValue()` the picker's `input` handler calls, so
+  the head lock and the last-follower collapse are written once and cannot drift. The clipboard colour is also
+  published as `--clip` on the table, and while `hasclip` holds it is the **paste** arrow's glyph colour, with a faint
+  white glow so a near-black value stays readable on the tool's dark panel. **The copy chip keeps the tool's dim
+  grey** - a copy icon drawn in the colour read as if it held one itself, which is what made the pair confusing.
+  Hover lights the chip's border in `--tool-accent` exactly as the reset arrow does, and leaves the glyph alone so
+  the colour stays visible.
+- **`Stash all` / `Load from stash` is a temporary save of the model, not of the file.** `STASH` is one
+  `{heads, members}` snapshot taken with the same `snapshot()` the picker rollback uses, and a load assigns it back
+  whole and calls `apply()`, so colours changed after the stash are **undone** rather than merged into it. Nothing
+  clears it - not `Reset all`, a theme `Load` nor a `Save` - and `LOADED` is left alone, a stash being neither a
+  file in nor a file out; that is what lets a palette be stashed under one theme and written into another block.
+  `#loadStashBtn` starts `disabled`, the note counts `Object.keys(modelDeltas()).length` colours, and the limit is
+  that it lives in page memory only, so a reload loses it.
+- **`Optimize` re-spells a family; it never recolours one.** A block is a head line plus one line per member that
+  differs from it, so the cheapest spelling of a family is its most-used colour in the head. `planFamily(f, valOf,
+  st)` prices "no head" and every distinct colour as a candidate through `familyDeltas()` - the function that
+  writes the block, so the head-with-one-follower rule is priced as the line it really is - widest group first,
+  strict improvement only, so a candidate that ties with the current labelling is not adopted. `optimiseFamilies()`
+  adopts the winner in each family that gets shorter; no colour moves, so only the head and split marks and the
+  block change. `refreshOptimise()` runs at the end of `apply()`, keeping the button disabled unless a family would
+  shed a line, and `loadTheme()` reuses the same pass, so a loaded theme arrives in the spelling the button would
+  have produced. `modelDeltas()` is a merge of `familyDeltas()` per family plus the standalone loop.
+- **Every block in a save is spelled by that pass, and that is what keeps a re-save stable.** `valueDeltas()` - the
+  path that writes the themes not being edited, from values alone - used to carry its own copy of the fold rule and
+  refused a head on a tie (the `collapse_families()` rule), so a family split 3-3 was written as six member lines:
+  theme 9's `maintexts` lost its `#ffffff` head that way, two lines longer, on a save made with another theme
+  selected. It now builds a fully split state and asks `planFamily()`, deciding a tie by the widest group instead
+  of dodging it - a block has to be spelled either way, and a head plus splits is never longer. `collapse_families()`
+  follows the same rule, so `--deflate`, `-i`, `--theme` and a save here all write the same shortest block.
+- **Cancel is a real cancel, and accept wins the race.** A native colour dialog fires `input` on every drag (that
+  is the live preview) but `change` only when it is accepted, so the circle click snapshots `{heads, members}`,
+  `input` marks the session dirty (an `input` whose colour equals the current one is ignored - opening the dialog
+  can fire exactly that), and `change` accepts it. The close is seen on `blur`, on `window.focus` and on an
+  outside `pointerdown`, but those can arrive **before** `change`, so the rollback is deferred one 200 ms tick and
+  abandons itself if `session` has been replaced in the meantime; a session that is still clean (nothing dragged)
+  is never rolled back at all, which keeps an early blur from killing the preview. Every path ends in `apply()`.
+- **A line must say something.** `blockText()` drops any line whose colour equals the one that role would inherit
+  *without* that line - `defaults[head]` for a head, the printed head (or `defaults[member]` when no head line is
+  printed) for a member - so a value left behind by a cancelled picker, or a lock that happens to match `:root`,
+  never reaches the pasted block. The single-follower case still emits the follower explicitly, and only when it
+  differs from its own default, so "all but one unlocked" keeps working.
+- **Clicking a name jumps** to the first element that uses that colour: a `LOOK` map of role -> selector, a
+  head falling through to one of its members, and `#samples .sample` as the last resort. Each sample also has an
+  id for deep links: `#sample-player`, `#sample-eq`, `#sample-editor`, `#sample-settings`, `#sample-search`,
+  `#sample-curated`, `#sample-ir`, `#sample-states` (prefixed because the production markup already owns `#search`).
+- **The loader takes a numeric id, not a list.** No theme names live in the page: it cannot read a linked
+  stylesheet's rules on a `file://` page and `themes.h` is not reachable, so a hardcoded list would rot as soon as
+  a slot appeared. Typing an id and pressing Load sets `data-theme` for one synchronous read of all 65 names,
+  restores the attribute, splits every role that differs from `:root`, and then runs the same `optimiseFamilies()`
+  the button runs - so a loaded theme arrives in its shortest spelling. The note reports
+  how many colours differed, or that the id came back as the `:root` palette (no block, or an empty one).
+  **Reset all to :root** clears the state, which is exactly "the root numbers". **Copy to Clipboard** emits
+  `:root[data-theme="X"] { /* Name here - and replace the X! */ ... }`, with `execCommand` as the fallback when
+  the async clipboard is unavailable on a `file://` page.
+- The logo is a **snapshot of `data/www/logo.svg` inlined** into `#logo`, not an `<img>`. The SVG paints itself with
+  `var(--logo)`, `var(--logo-shadow)` and `var(--logo-text)`, and only an inline SVG inherits the page's custom
+  properties - an `<img>` is a document of its own, which is why the device inlines it in `loadLogoThen()` too. It
+  appears once, in the Player sample, which is enough to judge the three logo roles; if the artwork changes, paste
+  the new file over the logo block again.
+- Never served: it lives outside `data/www` and is not in `Config::wwwFiles[]`, so it cannot reach the firmware image.
 
 ## `src/core/controls.h` / `controls.cpp`
-- `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`, `setIRTolerance()`, `flipTS()`, `controlsEvent()`.
+- `controls.h` declares `class Controls` with public interface: `init()`, `loop()`, `setEncAcceleration()`,
+  `setIRTolerance()`, `flipTS()`, `controlsEvent()`.
 - `extern Controls controls;` provides the global instance; callers use `controls.init()`, `controls.loop()`, etc.
 - All internal helpers (`onBtnClick`, `encodersLoop`, `irLoop`, etc.) are private class methods.
-- Static trampoline methods (`_btnClickCb`, etc.) used for `OneButton` callbacks (function-pointer API; cannot capture `this`).
-- `readEncoderISR` / `readEncoder2ISR` remain free functions with `IRAM_ATTR` (ISR constraint; access file-scope `encoder`/`encoder2` directly).
+- Static trampoline methods (`_btnClickCb`, etc.) used for `OneButton` callbacks (function-pointer API; cannot capture
+  `this`).
+- `readEncoderISR` / `readEncoder2ISR` remain free functions with `IRAM_ATTR` (ISR constraint; access file-scope
+  `encoder`/`encoder2` directly).
 - Physical controls integration:
   - OneButton
   - rotary encoders
   - touchscreen gestures
   - IR remote decoding
-- Converts hardware input events into same core actions used by WebUI (`controlsEvent`, player commands, display mode changes).
+- Converts hardware input events into same core actions used by WebUI (`controlsEvent`, player commands, display mode
+  changes).
 - `Controls::loop()` now calls `backlightControls.controlsLoop()` directly for non-PLAYER backlight wake behavior.
 - IR record debug text now routes through centralized logging macros.
+- IR dispatch is name-based: `irLoop()` iterates `config.irButtonCount()`, matches codes from `config.irCodes(button)`,
+  then switches on the behaviour id from `config.irAction(button)` (`IRACT_POWER`, `IRACT_MUTE`, `IRACT_UP`,
+  `IRACT_DOWN`, `IRACT_PREV`, `IRACT_NEXT`, `IRACT_PLAY`, `IRACT_MODE`, `IRACT_HASH`, `IRACT_DIGIT`). Digit buttons
+  derive their value from the `n0`…`n9` key. The old positional `IR_UP`…`IR_HASH` enum is gone. Power/mute/mode are
+  local actions and are allowed while offline or showing `LOST`.
+- Physical mute (`EVT_ENC2_SW` / `EVT_BTN_MODE` double-click) calls `player.mute()` and keeps the `DSP_MODEL ==
+  DSP_DUMMY` no-op guard at the call site.
+- Learning a new IR code calls `config.clearDuplicateIR()`, which zeroes that same code in every other button and slot
+  so only the newest copy survives (a code can no longer be shadowed by an earlier duplicate at match time). Empty slots
+  hold `0` and are never matched. The clear happens in RAM; it is persisted by the existing `saveIR()` on recording
+  stop, and `irValsToWs()` is re-sent only when something was actually cleared.
 - Screensaver wake hardening:
-  - `controlsEvent()` now flushes pending display requests (`display.resetQueue()`) and zeroes screensaver tick counters before queueing `NEWMODE, PLAYER` when waking from `SCREENSAVER`/`SCREENBLANK`, preventing one-detent rotary wake races where a stale queued screensaver mode request could immediately re-apply.
+  - `controlsEvent()` now flushes pending display requests (`display.resetQueue()`) and zeroes screensaver tick counters
+    before queueing `NEWMODE, PLAYER` when waking from `SCREENSAVER`/`SCREENBLANK`, preventing one-detent rotary wake
+    races where a stale queued screensaver mode request could immediately re-apply.
 
 ## `src/core/telnet.h` / `telnet.cpp`
 - Telnet and serial command handling.
 - Responsibilities:
   - manage client sessions
-  - read input lines with CR/LF-pair handling so Enter submits immediately across CR/LF client variants and empty Enter events are preserved
+  - read input lines with CR/LF-pair handling so Enter submits immediately across CR/LF client variants and empty Enter
+    events are preserved
   - apply explicit 2000 ms stream timeout configuration for serial and per-client telnet streams
-  - normalize command strings (`key=value`, `key value`, `key(value)`) plus minimal payload-shape handling (`play` value-shape handling)
+  - parse command strings through `utility.parseCommandLine(...)` (`key=value`, `key value`, `key(value)`, bare URL,
+    bare key), which also applies the trimming, one layer of wrapping quotes and the `play` value-shape handling
   - route commands through `cmd.exec(...)` with source `Telnet`
   - keep command handling output-minimal (no telnet-specific reporting command table)
 - Important:
@@ -490,68 +2316,249 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `help`, `quit`, and `bye` are handled locally in telnet before commandhandler dispatch
   - `quit` / `bye` silently disconnect only the issuing Telnet client
   - empty input lines now re-show prompt (`> `), aligning interactive UX with common telnet clients
+  - `Telnet::printf(...)` normalizes line endings through `utility.normalizeToCRLF(...)` (the old file-local
+    `normalize_to_crlf`)
+  - telnet no longer defines any private string helper: the local `normalize_to_crlf`, `trimInPlace`,
+    `stripWrappingQuotes`, `startsWithHttp` and `parseTelnetCommand` were duplicates of `utility.*` and are gone. The
+    one genuinely telnet-only rule - command `mode` with value `2` is rewritten to `-1`, because telnet's help text
+    calls 2 "cycle" - stays at the call site immediately after the shared parse rather than leaking into the shared
+    helper
 
 ## `src/core/mqtt.h` / `mqtt.cpp`
-- MQTT integration if `MQTT_ENABLE` compile flag exists.
-- `mqtt.h` declares `class Mqtt` with `init()`, `loop()`, `publishStatus()`, `publishVolume()`, `publishPlaylist()`.
-- `extern Mqtt mqtt;` (inside `#ifdef MQTT_ENABLE`) provides the global instance.
-- Private static callback methods (`_connectCb`, `_onConnect`, `_onDisconnect`, `_onMessage`) used for AsyncMqttClient API (static required by library callback interface).
+- MQTT is always compiled in and gated at runtime by `config.store.mqttenable` (WebUI Settings > MQTT). The old
+  `MQTT_ENABLE` compile *gate* is gone - nothing in the firmware is conditional on it. The macro of that name now only
+  supplies the *default value* of that setting (`options.h`: `#ifndef MQTT_ENABLE` / `#define MQTT_ENABLE false`, beside
+  the `MQTT_HOST/PORT/USER/PASS/TOPIC` defaults), so a `myoptions.h` can have MQTT on for a factory-fresh device without
+  touching code.
+  - It reaches the stored value from `config.h` (`bool mqttenable = MQTT_ENABLE;`), i.e. it only applies when NVS has no
+    `mqttenable` key yet. An already-provisioned radio keeps whatever the WebUI saved, which is the same behaviour as
+    the other `MQTT_*` defaults.
+  - Known wart: `Config::defaultSettings("mqtt")` in `config.cpp` still writes `saveValue(&store.mqttenable, false)`
+    explicitly, so a WebUI "reset mqtt" turns MQTT off regardless of the macro. Every neighbour in that function uses
+    its macro (`EHDP`, `MQTT_HOST`, `MQTT_PORT`, ...), so that one call should be `(bool)MQTT_ENABLE` to agree with
+    `config.h`.
+- Client library: `elims/PsychicMqttClient` (`platformio.ini`, `^0.2.4`), which wraps the ESP-IDF `esp_mqtt_client`. The
+  first attempt used `bambo1543/MqttClientBinary`, a fork of it that had not been updated in two years; the upstream
+  tree is the maintained one and its API is the closer match to the `AsyncMqttClient` this replaced. Reconnects are
+  owned by the library, so there is no FreeRTOS reconnect timer.
+- `mqtt.h` declares `class Mqtt` with `init()`, `publishPlaylist()` and `loop()` public; every publisher is private
+  because only `loop()` calls them. `publishPlaylist()` is the one request another module raises, because a playlist's
+  contents change while its topic stays the same.
+- `extern Mqtt mqtt;` provides the global instance.
+- **Publishing is state-driven and settled, not request-driven.** `loop()` compares the live values (station id, the
+  derived state token, name, title, artwork URL) against two stored `StatusSnapshot`s - `reported` (what the broker
+  holds) and `candidate` (the current combination, waiting to settle) - and publishes the candidate only once it has
+  stayed unchanged for `MQTT_STATUS_SETTLE_MS` (`mqtt.cpp`, 1500 ms). A station switch mutates those inputs at
+  different moments - the index moves in `utility.loadStation()`, the title becomes `[connecting]`, the stream's ICY
+  headers overwrite the name, artwork and title land last - so publishing every combination would tell consumers stories
+  that were never true for longer than a moment (the classic one: the new station name carrying the previous station's
+  title). The state token is derived from `dspon`, the player status and the connecting placeholder and lives *inside*
+  that snapshot, so a play/pause or a standby change restarts the same single window instead of needing a settle
+  mechanism of its own; `mode`, `ip`, `volume` and the playlist revision are tracked separately and publish as soon as
+  they differ. Force requests skip the wait: `_onConnect` requests a status refresh and raises `rearmRequested`, which
+  `loop()` answers with `resetReported()`, so a reconnect republishes everything the broker may have lost. This replaced
+  the old model where a publish only happened because some other subsystem raised a
+  `TITLE`/`ARTWORK`/`STATION`/`MODE`/`VOLUME` request - that left the retained topics stuck on a transient snapshot
+  whenever the settled state produced no further request, and it republished identical payloads repeatedly.
+  `resetReported()` also runs when MQTT is disabled, so a later enable republishes everything.
+- `publishRetained(payload, qos, async)` is the only caller of the library's `publish()`: retained, explicit payload
+  length, and it refuses an empty payload. An empty *retained* message means "delete the retained topic", so publishing
+  one would wipe the state every consumer sees (Home Assistant loses the track name and artwork). This also covers the
+  `length = 0` trap - the library forwards that to `esp_mqtt_client_enqueue()`, which then produces a zero-byte body.
+  Everything publishes QoS 0 asynchronously except availability, which needs an acknowledgement.
+- **Availability is its own topic with a last will.** `applySettings()` arms `setWill(<root>availability, 1, true,
+  "offline", ...)` next to `setServer()`, and `_onConnect` requests the retained `online`, so a power cut, a crash or
+  deep sleep makes the broker publish `offline` by itself. A deliberate disconnect cannot rely on that, because a clean
+  DISCONNECT suppresses the will, so the disable and reconfigure paths call `publishOfflineBeforeDisconnect()` first -
+  QoS 1 with `async = false`, so it is acknowledged before the client is stopped beneath it. `availabilityTopic` is a
+  member for the same reason as `serverUri`: the library keeps the pointer. `loop()` also announces `online` whenever
+  the session is connected and `lastReportedAvailability != 1`, so the announcement cannot be lost to a missed request:
+  the first build of this shipped without that request in `_onConnect` at all, which left the previous session's
+  retained `offline` in place forever while the device was plainly online, and Home Assistant dutifully showed it as
+  Unavailable.
+- The published topic set is one fact per topic, all retained, each published only when its value changes: `status` (the
+  JSON attributes: `station`, `name`, `title`, `image_url`, `max_volume`), `state` (the bare token: `off`, `playing`,
+  `idle`, `buffering`), `mode` (0 web radio / 1 SD card), `ip`, `volume`, `playlist` (a CRC32 revision of the active
+  playlist file) and `availability`. The `status` and `on` numbers that used to sit inside the JSON are gone now that
+  `state` exists, and `title` deliberately keeps the display text including its translations - the token is what a
+  consumer or an automation binds to.
+- `publishPlaylistNow()` is the only publisher that touches the filesystem (`config.SDPLFS()->open(REAL_PLAYL)` +
+  `fileCRC32()`), so it runs on the loop task when `playlistRequested` is set rather than inside the request, which
+  arrives from the AsyncTCP task. It publishes `none` when the file is missing. The state token asks
+  `player.isConnecting()` rather than comparing the localized "connecting" placeholder here, because `dsplocale.h`
+  defines its tables inside the header and including it in one more translation unit embeds another full copy of every
+  locale - that mistake cost 48 KB of flash before it was moved behind the player.
+- An empty title is treated as *no news* rather than as a value: at publish time `wouldEraseTitle()` holds the update
+  when it would replace a title already reported for the same station with an empty one (`holdStatus()` consumes the
+  change via `markReported()` so it is not re-evaluated every pass). The device blanks its title for an instant around a
+  (re)connect - the play path in `player.cpp` re-runs `setTitle("")` after the first metadata has landed - and a display
+  redraws a moment later, but a retained topic would keep that blank until the next song. The settle window already
+  hides most of these; this covers a blank that lasts.
+- **Task model (important)**: the entry points other modules call - `init()` and `publishPlaylist()`, plus the private
+  publish helpers that `loop()` itself uses - only record a request (`applyRequested` plus one flag per published
+  topic), because their callers are the AsyncTCP task (`async_tcp` runs the WebSocket/HTTP handlers and is enrolled in
+  the task watchdog) and the WiFi event task. `Mqtt::loop()` is the single owner of the client library and is serviced
+  by `netserverLoopTask` via `NetServer::loop()` (priority 2, core 0, 1 ms cadence, not watchdog-enrolled). Blocking
+  `async_tcp` past the 5 s watchdog window panics the board, so `init()` must never connect inline.
+- Settings changes take effect live: the `mqtt*` option commands (`mqttenable`, host, port, user, pass, topic) and the
+  WiFi-reconnect path only request a re-apply - no reboot needed. The debounce is measured from the **last request**
+  (`applyDebounceMs`, 500 ms), so the six commands of one WebUI "Apply Changes" collapse into a single reconfiguration
+  with the final values. Measuring it from the last apply instead connected with the values from before the rest arrived
+  and then connected again with the right ones, and that second `connect()` hit an already-started client - which is the
+  library's `ESP_ERROR_CHECK_WITHOUT_ABORT ... esp_mqtt_client_start` line. An apply whose URI and credentials are
+  unchanged against a session that is already up is skipped outright; since `connected()` is still false while a client
+  is coming up, `clientStarted` is tracked separately so a reconfigure always stops the old client first. The apply also
+  waits while `Startup::servicesBusy()` is true (bounded by `servicesWaitLimitMs`, 60 s): the startup downloads are
+  three concurrent TLS sessions, and a TLS handshake needs a large contiguous block of internal RAM, so creating the
+  MQTT task stack and its client buffer in the middle of them competes with the boot path the Network Recovery notes
+  call the riskiest one. Booting is unaffected - `main.cpp` requests MQTT before the services start, so the allocations
+  land in the baseline heap rather than interrupting a download.
+- IDF transport logging is silenced unless `MQTT_DEBUG` is defined in `myoptions.h`: the `MQTT_CLIENT`,
+  `TRANSPORT_BASE`, `TRANSPORT_SSL` and `esp-tls` tags are set to `ESP_LOG_NONE` on the first apply. A broker that is
+  unreachable or on the wrong port otherwise logs an error burst on every retry attempt, while the `[MQTT]` lines
+  already say what is happening - `Connecting to mqtt://host:port` names the target (that is how a wrong port is
+  spotted) and `Connected`/`Disconnected` report the session. The same silencing also hides raw `esp-tls` detail from
+  the stream and the updater, which still report their own failures.
+- Library-specific details that shape this code:
+  - `setServer()` takes a URI, not host+port, and keeps the pointer, so the `serverUri` member builds `mqtt://host:port`
+    (or passes `mqtthost` through unchanged when it already contains `://`); an empty host means "do not connect".
+  - `_onMessage` is registered through `onMessage(char* topic, char* payload, int retain, int qos, bool dup)`. The
+    fork's `onMessageBinary(...)` overload does not exist upstream, and upstream already reassembles multipart messages
+    before dispatching.
+  - The payload arrives NUL-terminated but with no length, so `_onMessage` measures it with `strlen()` (a zero-length
+    message returns immediately), rejects it if it exceeds `MQTT_URL_SIZE`, and otherwise copies `len + 1` bytes into
+    the single-slot mailbox (`incomingPayload` + `messagePending`) and returns; a payload arriving while one is still
+    queued is dropped, and the library's own client task is never held up. The copy has to happen inside the callback
+    because for a multipart message the library frees its reassembly buffer as soon as the callbacks return.
+  - Callbacks live in `std::vector`s, so `applySettings()` binds them only once (`callbacksBound`) - it runs again on
+    every `mqttenable` change.
+  - Because the library only resubscribes topics registered through `onTopic()`, `_onConnect` subscribes `.../command`
+    (QoS 2) itself on every (re)connect, through a local topic buffer because `topic[]`/`status[]` belong to `loop()`.
+  - `applySettings()` disconnects when MQTT is disabled or the host is empty, and reconfigures plus reconnects
+    otherwise; the library's `disconnect()` waits for its own client task, which is another reason only `loop()` may
+    call it.
+  - `setBufferSize` is sized from the status/topic buffers so the status payload is not split, the library's client task
+    keeps its default 6144-byte stack at `NET_TASK_PRIORITY` (`setTaskStackAndPriority(6144, NET_TASK_PRIORITY)`), and
+    every `publish()` gets an explicit payload length. The stack is not enlarged because nothing but the library's
+    callbacks runs there - commands execute on the netserver loop - and the priority stays in the network tier instead
+    of above it, so a busy MQTT client cannot preempt the stream or display tasks during their TLS work.
+- `reported`/`candidate` live in the object and are compared field by field (`matchesCandidate()`,
+  `differsFromReported()`), never built as a local: `loop()` runs on the netserver loop task, whose stack is 4 KB on the
+  non-S3 builds and is also shared with the queue work and deferred command execution. The `StatusSnapshot` local it
+  replaced cost that task 812 bytes of high-water mark, which `[Core.monitor]` showed directly (5856 -> 5044 after MQTT
+  was enabled).
+- Private static callback methods (`_onConnect`, `_onDisconnect`, `_onMessage`) are required by the library callback
+  interface; they must return immediately.
 - Responsibilities:
   - connection lifecycle
   - subscribe to `.../command`
-  - publish status/playlist/volume
-  - status payload now includes `image_url` (HTTP/S image-only artwork URL used by Home Assistant)
-  - parse command payload forms (`key=value`, `key value`, `key(value)`, raw URL)
-  - apply minimal payload-shape normalization (`play` value-shape handling) then dispatch through `cmd.exec(...)` with source `Mqtt`
+  - publish the retained topics from `loop()`: status attributes, state, mode, ip, volume, playlist revision and
+    availability
+  - status attributes include `image_url` (HTTP/S image-only artwork URL used by Home Assistant) and `max_volume`, so a
+    consumer can scale the bare volume topic without being configured by hand
+  - parse command payload forms (`key=value`, `key value`, `key(value)`, bare URL) with `utility.stripWhitespace(...)` +
+    `utility.parseCommandLine(...)`, the same shared helper the telnet path uses, so `mqtt.cpp` defines no parser of its
+    own (`trimInPlace`, `stripWrappingQuotes`, `startsWithHttp`, `parsePayloadToCommand` and its anonymous namespace are
+    gone, and `<ctype.h>` is no longer included)
+  - dispatch through `cmd.exec(...)` with source `Mqtt`, in `processPendingMessage()` on the netserver loop task
   - apply explicit non-WebUI blocklist rejections for unsupported MQTT-origin commands
 - Coupling:
-  - command behavior is now primarily centralized in commandhandler.
-  - `ARTWORK` queue events in `netserver` trigger MQTT status republishes even without a WebSocket payload.
+  - command behavior is primarily centralized in commandhandler.
+  - `netserver` no longer triggers MQTT republishes from its request stream (the ARTWORK/TITLE/STATION/ITEM/MODE/VOLUME
+    hooks were removed); `Mqtt::loop()` owns that decision, so the state reported to MQTT cannot depend on queue entries
+    that may be dropped or coalesced.
   - artwork payload data is read from `audioHandlers`, not from `config.station`.
-- Status buffer sizing now derives from `STATION_FIELD_LENGTH` plus `MQTT_URL_SIZE`, replacing the older duplicated browse-URL size macro.
+  - `NetServer::triggerMqttPlaylistSync()` existed only to wrap the Ticker that deferred the playlist publish, so it was
+    removed along with the Ticker and the `mqttplaylistblock` wait the playlist download spun on inside the AsyncTCP
+    task; a playlist import now calls `mqtt.publishPlaylist()` directly from commandhandler. `netserver.cpp`'s only MQTT
+    interaction is the `mqtt.loop()` call in its loop, and `netserver.h` no longer mentions MQTT at all.
+  - `HA/custom_components/ehradio/media_player.py` is the consumer shipped with the firmware: it subscribes to `status`,
+    `state`, `volume`, `mode`, `ip`, `playlist` and `availability`, maps the `off` token to `MediaPlayerState.STANDBY`
+    because the radio has no true power switch, and builds the station-list URL from `ip` + `mode` so the source list
+    follows the SD card. Firmware and component versions move together from here on, since this release changed the
+    topic contract.
+- Status buffer sizing derives from `STATION_FIELD_LENGTH` plus `MQTT_URL_SIZE`, replacing the older duplicated
+  browse-URL size macro.
 
 ## `src/core/utility.h` / `utility.cpp`
 - Shared helper module following the standard core `class + global instance` pattern (`Utility utility;`).
 - Current responsibilities:
-  - `stripWhitespace(char*)`
-  - `stripWrappingQuotes(char*)`
+  - `stripWhitespace(char*)` - trim leading/trailing whitespace plus `\r`/`\n` in place
+  - `stripWrappingQuotes(char*)` - remove one layer of matching `"` or `'` quotes
   - `ipToStr(...)`
   - `escapeQuotes(...)`
+  - shared command-ingress helpers, so the MQTT and Telnet paths own no parser of their own:
+    - `normalizeToCRLF(const char* input, char* output, size_t outputSize)` - expand every lone `\n` to CRLF (was the
+      file-local `normalize_to_crlf` in `telnet.cpp`, the only snake_case helper left in the core)
+    - `isHttpUrl(const char* text)` - starts with `http://` or `https://`
+    - `parseCommandLine(const char* input, char* command, size_t commandSize, char* value, size_t valueSize)` - the
+      shared command-line parser: bare URL, `key=value`, `key(value)`, `key value` or a bare key, plus trimming, one
+      layer of wrapping quotes, and the `play` value-shape handling (`play` alone becomes `start`, `play <url>` becomes
+      `burl`)
   - playlist CSV parsing and station lookup/load helpers
+  - **`playlistLength()` derives the SD count from the index file - `(size - 8) / 4` - and opens and closes it on every
+    call**, so it is not free on the main loop: `player.next()`, `player.prev()`, `loadStation()` and `findStationByUrl()`
+    all call it, plus the web handlers. **It returns `uint16_t`, which is what caps the library at 65,535 tracks - and at
+    65,536 the count wraps to 0**, so the radio sees an *empty playlist* rather than a truncated one. **Capped on
+    2026.10.26** by `MAX_PLAYLIST_ENTRIES` (`config.h`): `playlistLength()` clamps to it and warns once, and the three
+    places that could create a row past it stop instead - `SDManager::listSD()` (stops adding to `sdplaylist.csv`/
+    `sdindex`), `SDManager::_countAudioFilesRecursive()` (so the footer count still matches what was indexed and the
+    card does not re-index every boot), `Utility::indexPlaylist()` (stops reading `playlist.csv`) - and the WebUI add
+    endpoint refuses the 65,536th station rather than computing `cs + 1 == 0`. The index footer already stores the count
+    as 4 bytes, so the file format is not the limit; widening to `uint32_t` means `playlistLength()`,
+    `config.countStation`, `config.lastStation`, the `PR_PLAY` payload and the web/display station ids. **Widening
+    deliberately deferred on 2026.10.25** - see `plans/shuffle-without-repeats.md`.
   - WiFi credential parse/save/import helpers
-  - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`)
-  - SPIFFS file-maintenance helpers shared with startup and WebUI update paths:
-    - `cleanupSpiffs()`
+  - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`); `doSleepW()` is also reached from `ticks()`'s
+    deep-sleep timer (`sleeptimer` / `sleepSsTimeout`, 5..1080 minutes)
+  - standby helpers `stopStandby()`, `startStandby()` and `toggleStandby()` (shared by the `stopstandby`, `startstandby`
+    and `togglestandby` commands and the IR power button); `startStandby()` also calls `network.cancelStreamRetry()`
+  - LittleFS file-maintenance helpers shared with startup and WebUI update paths:
+    - `pruneLittleFS()`
     - `deleteMainwwwFile()`
     - `updateFile(...)`
-    - `updateLocaleFile()`
-    - `updateLocaleFileAsync(...)`
-- Holds small reusable scratch/state buffers (`ipBuf`, `stationBuf`) plus the sleep duration state and sleep `Ticker`; it still does not own playback/artwork runtime state.
-- Current consumers include `audiohandlers.cpp`, `battery.cpp`, `commandhandler.cpp`, `config.cpp`, `display.cpp`, `netserver.cpp`, `network.cpp`, `player.cpp`, and startup/update flows.
+- `parseWsCommand(...)` deliberately stays separate from `parseCommandLine(...)` and stays strict: the WebSocket
+  settings path only ever receives `key=value` and must reject anything else rather than execute a bare command, so the
+  two are not merged.
+- `rssiLevel(int)` is the one reader of `RSSI_STEPS` (`options.h`): it returns 0-4, and `display.cpp` maps that level to
+  its glyph pair while `netserver.cpp` sends it to the WebUI as `rssibars`. Changing the scale in `options.h` therefore
+  moves the on-screen widget and the WebUI bars together.
+- Holds small reusable scratch/state buffers (`ipBuf`, `stationBuf`) plus the sleep duration state and sleep `Ticker`;
+  it still does not own playback/artwork runtime state.
+- Current consumers include `audiohandlers.cpp`, `battery.cpp`, `commandhandler.cpp`, `config.cpp`, `display.cpp`,
+  `mqtt.cpp`, `netserver.cpp`, `network.cpp`, `player.cpp`, `telnet.cpp`, and startup/update flows.
 
 ## `src/core/battery.h` / `battery.cpp`
-- `battery.h` declares `class Battery` (real class under hardware guard; no-op stub in `#else`); `extern Battery battery;` provides the global instance.
-- Public interface: `init()`, `bootStatus()`, `isInitialized()`, `getStatus()`, `formatStatusLine()`, `loop()`, `applyPowerPolicy()`, `recalcNow()`, `calibrate()`.
-- All ADC/inference state and helpers are private members/methods.
-- Battery monitoring/calibration/inference implementation.
+- `battery.h` declares `class Battery` (real class under hardware guard; no-op stub in `#else`); `extern Battery
+  battery;` provides the global instance.
+- Public interface: `init()`, `bootStatus()`, `isInitialized()`, `getStatus()`, `recalcNow()`, `loop()`, `calibrate()`.
+- All ADC state and helpers are private members/methods.
 - Responsibilities:
-  - ADC sampling and filtering
-  - battery presence detection
-  - charge/discharge inference with candidate windows
-  - threshold state (`low`, `critical`) tracking
-  - battery-driven brightness reduction / recovery and critical deep-sleep policy
-  - status formatting for telnet/WebUI
-  - triggers display and websocket updates
+  - ADC sampling (median of several reads), EMA voltage smoothing, percentage from the discharge curve
+  - battery presence detection inside `BATTERY_PRESENT_MIN_MV`..`BATTERY_PRESENT_MAX_MV`, clamped the same way in
+    `init()`
+  - pushes `DSPBATTERY` to the display and `GETBATTERY` to the WebUI when the percentage changes
+  - `calibrate()` turns a multimeter reading into a corrected `battery_adc_ref_mv`
+- **There is no charge/discharge inference and no charge-status reporting.** The device cannot tell charging from
+  discharging - there is no charge pin and no trend analysis - so `BatteryStatus` is percentage/voltage/present only,
+  and
+  the battery payload is `volt: NmV, percentage: N%` with nothing else. `Battery::formatStatusLine()` and the WebUI's
+  three status spans (`battery_charging` / `battery_discharging` / `battery_idle`) are gone; the older description of
+  "charge/discharge inference with candidate windows" and `applyPowerPolicy()` never existed in this code.
 - Logging note:
-  - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths), replacing direct serial/telnet prints.
+  - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths),
+    replacing direct serial/telnet prints.
 
 ## `src/core/backlightcontrols.h` / `backlightcontrols.cpp`
-- `backlightcontrols.h` declares `class BacklightControls` (real class under `BRIGHTNESS_PIN` + `DSP_DIMMING_ENABLED` guards; no-op stub in `#else`); `extern BacklightControls backlightControls;` provides the global instance.
+- `backlightcontrols.h` declares `class BacklightControls` (real class under `BRIGHTNESS_PIN` + `DSP_DIMMING_ENABLED`
+  guards; no-op stub in `#else`); `extern BacklightControls backlightControls;` provides the global instance.
 - Public interface: `init()`, `restart()`, `controlsLoop()`.
 - Responsibilities:
   - own persisted idle-dimming timer state and non-blocking brightness ramp
-  - use `config.store.dimmingEnabled`, `dimmingTimeout`, and `dimmingBrightness` instead of board-only compile-time dimming thresholds
-  - clamp the dim target to the current screen brightness, restore configured brightness, and restart the idle timer on explicit activity/settings events
+  - use `config.store.dimmingEnabled`, `dimmingTimeout`, and `dimmingBrightness` instead of board-only compile-time
+    dimming thresholds
+  - clamp the dim target to the current screen brightness, restore configured brightness, and restart the idle timer on
+    explicit activity/settings events
   - centralize the former `main.cpp` backlight code without moving it into the display task owner
 - Explicit call sites:
   - `main.cpp` after `config.init()`
@@ -563,7 +2570,8 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `battery.cpp` low-battery recovery / restore path when the dimmer feature is enabled
 
 ## `src/core/rgbled.h` / `rgbled.cpp`
-- `rgbled.h` declares `class RgbLed` (real class under `RGB_LED_PIN` guard; no-op stub in `#else`); `extern RgbLed rgbled;` provides the global instance.
+- `rgbled.h` declares `class RgbLed` (real class under `RGB_LED_PIN` guard; no-op stub in `#else`); `extern RgbLed
+  rgbled;` provides the global instance.
 - Public interface: `init()`, `isInitialized()`, `set()`, `playing()`, `stopped()`, `trackChange()`, `loop()`.
 - Optional RGB LED state machine:
   - playing/stopped colors
@@ -574,14 +2582,1085 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - `sdmanager.h` declares SD manager API and FS integration wrapper.
 - SD lifecycle and SD playlist indexing.
 - Responsibilities:
-  - mount/retry/unmount — `start()` attempts up to 4 `SD.begin(SD_CS, ...)` calls, early-returning on success (delays only between retries, not after success)
+  - mount/retry/unmount — `start()` attempts up to 4 mount calls, early-returning on success (delays only between
+    retries, not after success)
   - card-present checks
   - recursive scan and media file playlist/index creation
   - scan/index progress and errors now use centralized logging macros (`SERIALLOGDOT`, `ERRORLOG`)
-- SPI bus: `SDREALSPI` macro resolved at compile time — `SPIB` when `SD_SPI == 'B'` and `SPIB_SCK` defined, otherwise `SPIA`. Both buses are initialized in `Config::init()` before `SDManager::start()` runs. No `SPIClass` declared in `sdmanager.cpp`.
-- SD CS pin is `SD_CS`. Guard macro: `#if SD_CS!=255`.
+  - **An index is only ever written complete, or not at all - and its existence means "a walk finished".** The pair is
+    built as `/data/plsd.csv.tmp` and `/data/idxsd.dat.tmp` and renamed into place as the very last act of
+    `indexSDPlaylist()`, so an unfinished build leaves no index at all: there is nothing to detect, nothing to clean up,
+    and the next entry sees no index and rebuilds, exactly as it does on a card that has never been indexed. A pair
+    already on the card is untouched, and stays usable, until that swap; the only inconsistent moment is a reset between
+    the two renames, and the reader's checks catch that mismatch. `listSD()` returns `bool` and reports every way a walk
+    can stop early - a directory that will not open, a failed allocation, a short write to either file, a failing
+    recursion - because it cannot otherwise tell a card error from the end of a directory (`getNextFileName()` returns
+    empty for both); the swap happens only when the walk finished, both files are open and the index holds exactly one
+    4-byte offset per row (`index.size() == _sdFCount * 4`). Entering the SD File Manager mid-walk is what interrupts a
+    build (its listing walks the card from the AsyncTCP task while this walk is on the loop task), and before all this
+    it left a half-built index stamped with a footer that `playlistLength()` - index size minus the 8-byte footer,
+    divided by 4 - read as a real station count, so SD mode played a truncated list. On the reader side
+    `Config::initSDPlaylist()` demands `storedCount * 4 + 8 == size` in addition to the magic and the file-count
+    comparison. And a build that fails is owed another pass, not forgotten: `FileManager::loop()` re-arms the debt when
+    the index is still missing, after a 4 s delay and at most twice, resetting the count on a build that writes an index
+    - the same "no index means build one" predicate the mode entry uses.
+  - **`_endsWith()` compares the whole suffix.** It used to compare `strlen(str) - 1` characters, dropping the final
+    one, so `.mp4` passed as `.mp3` (`.mp` = `.mp`) and `.ogv` as `.ogg`, `.m4b` as `.m4a`, `.flaX` as `.flac` - video
+    files were indexed as tracks, which is what made a walk fail halfway with `SD write failed at .../...mp4` on a card
+    holding both.
+- **Two transports, one object.** `SDManager`'s base class is `fs::SDMMCFS` when `SD_USE_MMC` is defined and `fs::SDFS`
+  otherwise (`SDMAN_FS_BASE` in `sdmanager.h`). Both derive from `fs::FS`, so `sdman` is still consumed as `fs::FS&` by
+  `Config::SDPLFS()` and `Audio::connecttoFS()` — no caller changes and no `_SDplaylistFS` changes.
+  - SPI branch (unchanged behaviour): `SDREALSPI` macro resolved at compile time — `SPIB` when `SD_SPI == 'B'` and
+    `SPIB_SCK` defined, otherwise `SPIA`. Both buses are initialized in `Config::init()` before `SDManager::start()`
+    runs. No `SPIClass` declared in `sdmanager.cpp`.
+  - SDMMC branch: `setPins()` is called with 3 pins (1-bit) or 6 pins (4-bit, chosen from `SDMMC_D1==255`), then
+    `begin("/sdcard", mode1bit, false, freq)`. `mode1bit` must match the pin count or the framework rejects the config.
+    No SPI bus is touched; `ERRORLOG("SDMMC mount failed")` fires if all retries fail.
+  - **Never name an `fs` type unqualified here.** `FSImplPtr` is `fs::FSImplPtr`, declared inside `namespace fs` in
+    `FS.h`, which re-exports only `FS`, `File` and `SeekMode` to the global namespace. The unqualified form used to
+    compile purely because `SD.h` ends with a bare `using namespace fs;` — and that line is its own, not the framework's
+    convention: `SD_MMC.h` closes its namespace and declares `extern fs::SDMMCFS SD_MMC;` with no using-directive, so
+    `SDManager(FSImplPtr impl)` failed only on the MMC branch, as `expected ')' before 'impl'` on the parameter (the
+    base class above it resolved fine, which is what makes the message look misplaced). The constructor parameter and
+    the `sdman` definition are qualified, and `sdmanager.h` includes `<FS.h>` itself rather than inheriting it from
+    whichever transport the branch picks. Adding `vfs_api.h` to the header would also "fix" it, but only via that
+    header's own `using namespace fs;`, at the cost of leaking it plus `FSImpl.h` and the POSIX headers into every TU
+    that includes `sdmanager.h`.
+- `cardPresent()` is transport-specific: SPI probes `sectorSize()`/`readRAW()` (via `diskio_impl.h`, now wrapped in `#if
+  !defined(SD_USE_MMC)`), while SDMMC uses `cardSize() > 0` because `SDMMCFS` exposes no raw-sector API.
+- `cardPresentStable()` is the DEBOUNCED probe and the ONE owner of the strike count: one failed raw read is a busy
+  card, not a removal, so it reports the card gone only after `SDMAN_CARD_GONE_STRIKES` (3) consecutive failures and
+  resets the count on any success. The probe is rate-limited to `SDMAN_CARD_PROBE_MS` (1 s) inside SDManager, so the
+  player's `PR_CHECKSD` (every 2 s from `network.ticks()`) and the manager's `loop()` cannot double-count one busy
+  second. `grantPresenceGrace()` resets the count and holds the probe off for `SDMAN_CARD_CHECK_GRACE_MS` (3 s):
+  `filemanager`'s `leave()` calls it, because the card has just been written to and remounted and the first raw read is
+  the one that used to fail. `presenceProbeAllowed()` gates the player's check on that window.
+- **`player.cpp`'s `PR_CHECKSD` used to act on ONE un-debounced probe**, calling `sdman.stop(); config.changeMode(PM_WEB);`.
+  A card still busy after a delete batch (or the remount `leave()` does at `SDSPISPEED`) timed out that single read, so
+  pressing Done in the SD File Manager dropped the whole mode to web (`playmode: 0` then `sdman.stop` then
+  `initPlaylistMode`, one after the other in the log). It now asks the shared `cardPresentStable()`.
+- The three probe macros live in `sdmanager.h`, not `filemanager.h`, because SDManager owns the probe.
+- SD CS pin is `SD_CS`. Guard macro: `#if SD_CS!=255`. The value `254` is the SDMMC sentinel and must never be handed to
+  a GPIO call (`Startup::deassertCsPins()` skips it, and `Config::bootInfo()` logs SDMMC pins/mode instead of
+  `SD_SPI`/`SD_CS`).
 - Coupling:
   - consumed by config/player for SD mode.
+
+## `src/core/filemanager.h` / `filemanager.cpp` (SD card manager mode)
+- Runtime-only browse/edit mode for the SD card, compiled under `#ifdef USE_SD`. The header owns `SDMAN_AUTO_EXIT_MS`
+  (default 180000), guarded by `#ifndef` there rather than added to `options.h` (Rule #3), so a `myoptions.h` can still
+  override it; the card-probe macros belong to `sdmanager.h`, which owns the probe.
+- `FileManager filemanager;` is the global instance. `enter()` returns bool and stops the player, mounts the card if
+  needed, sets the active flag and asks the display for `SDMAN`; `leave(bool resumeAudio = true)` clears the flag, asks
+  for `PLAYER`, grants the presence grace and - under SmartStart - gives the audio back; `loop()` (called from
+  `main.cpp`) asks the shared debounced probe, redraws the countdown once a second and runs the idle timeout.
+- **A mount from scratch refuses the mode when there is no card.** `enter()` returns false, logs one line and does
+  nothing else - no stop, no display change, no `_active` - so the player keeps playing and the display stays put.
+  `hEnterApi()` answers 409 `no_card` for that. The mount is attempted BEFORE the stop only on this path: an already
+  mounted card must not be remounted until the player is stopped, because the step-down discards every handle.
+- **The mode hands playback back on exit, but only what it took.** `enter()` records `player.isRunning()` in
+  `_wasPlaying`, **on the transition into the mode only**, because SmartStart must not turn the user's own stop into
+  playback - the manager is not a play button. The transition-only part is not tidiness: loading the page more than
+  once (a reload, a second tab) calls `/sdman/enter` again, and doing the stop and the capture on every call broke the
+  resume twice over. That used to be guaranteed rather than merely possible - the page handed itself over to "/" on
+  load and called this again from there - and the page now keeps its own address instead, so the rule survives as the
+  guard for the reload case. The second capture read the player the first call had
+  already stopped, so `_wasPlaying` became false and `leave()` did nothing at all; and the second `PR_STOP` ran
+  `_stop()` again, which overwrote `config.sdResumePos` with the position of a stopped player. Everything else in
+  `enter()` (the on-demand mount and the clock refresh) stays idempotent on purpose.
+  `leave()` then reissues `player.resumeLastWebSource()` for `PM_WEB` or `{PR_PLAY, config.lastStation()}` otherwise,
+  the same two branches as `stopStandby()` and the smartstart block in `setup()`. The card needs no extra state to
+  continue where it left off: `_stop()` saves the byte offset in `config.sdResumePos` and the play path consumes it, and
+  an offset that no longer lands after an edit is left to the player's self-healing (failed connect, index rebuild).
+  Done and the idle timeout both resume; only the card-gone exit calls `leave(false)`, because the media it would play
+  from is what vanished.
+- **A changed card never resumes.** `_cardChanged`, set by every mutation through `markCardChanged()`, suppresses the
+  **card** resume in `leave()` only. A station NUMBER indexes `playlistsd.csv`, so after a delete it points at a
+  different file - and the re-index that follows picks a station at random (`initSDPlaylist()` calls
+  `_randomStation()`),
+  which makes an automatic card resume meaningless either way. A web stream is untouched by card edits, so SmartStart
+  still hands that back, and the log line names the new condition (`card changed 1`) alongside the old three.
+- **Mutations owe one re-index, and it is paid after the mode closes.** `dropSdDerivedFiles()` deletes **both** derived
+  files - `playlistsd.csv` (the rows) and `indexsd.dat` (one offset per row, plus a footer count) - and sets the bit;
+  nothing walks the card while the manager is open. They are one object in two files, and dropping only the index is how
+  a valid index came to sit beside a truncated playlist, which SD mode then read as an empty card; the index has to go
+  too for the rebuild to trigger, because its absence is the test `initSDPlaylist()` runs first. `FileManager::loop()` -
+  which `main.cpp` calls whether or not the mode is open - then does the walk: `SDINDEXSTART` + `SDCHANGE`, a retry and
+  a named `[Warning]` if that handshake does not arrive, a forced `config.initSDPlaylist(true)`, a `PLAYLIST`
+  notification, then `SDINDEXDONE` back to `PLAYER`. A session of a hundred deletes therefore costs one walk instead of
+  a hundred, the walk is visible on the counting screen (see the display section: the hold is what keeps it there), and
+  no request handler blocks the AsyncTCP task on it. If the card left the slot in the meantime the bit is simply
+  dropped.
+- **One walk, one visible path.** `SDManager::indexSDPlaylist()` is single flight: a second caller is refused and logged
+  (`_indexing`, cleared on every exit by a guard object), because two callers exist - this block and the WebUI playlist
+  save at `PLAYLISTSAVED` - and both write the same temp pair, so a mixed swap was possible. `Player::_play()` refuses
+  while `filemanager.rebuilding()`, the way it already refuses while the manager is open: a play reads the card the walk
+  is writing, which is what the presence probe reports as a removed card. And the player's own "File not found"
+  self-heal no longer walks the card on the player task - it could run beside this block, and its own `SDCHANGE` came
+  and went within one pump of `player.loop()` - it now calls `filemanager.markCardChanged()` and lets this block pay the
+  debt on its one visible path.
+- **The walk announces itself, and that announcement is a boolean - the player page never has to guess.**
+  `PLAYLISTREADY`
+  used to mean only "the list is settled"; it now carries `filemanager.rebuilding()`, so one message covers both ends of
+  a build. `FileManager::loop()` sets `_rebuilding = true` and sends the request *before* the first flash write and
+  clears it with a second request at the end of the block - so the page blanks the list, spins and locks on the first
+  and unlocks and fetches on the second. The client-connect notice hands out the same value from the same flag, which is
+  what makes a tab that connects mid-walk behave like the tab that started it. A build that runs while the page is
+  open can no longer be watched by playing from the list, because the list is not there to play from; and the request
+  at the end is sent even when the build *failed*, because a page must never wait for a build to succeed.
+- **The pair is validated together on the way in.** `initSDPlaylist()` already compares the index's footer count with
+  `sdman.countAudioFiles()`; it now also looks at the playlist beside it, because a valid index with a truncated or
+  empty
+  CSV is exactly what a mutation - or a re-index interrupted by a mode close - used to leave behind. A row is written as
+  `<name>\t<path>\t0\r\n` (see `SDManager::listSD`), so the shortest possible one, `a.mp3` at the card root, is 16
+  bytes,
+  and the CSV can never be smaller than 16 bytes per track it claims to hold; when it is smaller, the entry forces a
+  re-index. An empty card is deliberately not that case - its count is 0 and a 0-byte playlist is the correct file
+  there.
+- **Long operations in this module refresh the idle clock, not only the watchdog.** `removeRecursive()` stamps
+  `filemanager.touch()` in both of its loops (the name collection and the delete recursion) beside `sdFeedWatchdog()`,
+  and [`hDelete()`] stamps both at the top of its selection loop too: a selection is N FATFS deletes in one handler,
+  and a *file* never reaches those two loops inside `removeRecursive()` - it returns at the `isDirectory()` false
+  branch - so the batch loop is the only place a many-file delete can be fed. One delete request can run for minutes
+  and the idle branch would otherwise close the mode mid-delete - the same race the card-gone debounce guards against,
+  except this one hands the player back while FATFS is still writing. `touch()` also clears the screensaver counters,
+  so the display's countdown and the device's idle logic stay in step. **Rule for new code**: a long card operation
+  reachable from a web handler feeds the watchdog *and* stamps the clock. An abort here is not a neutral failure either:
+  a watchdog abort lands mid-write, leaves the mount dirty, and the next boot can fail to switch to the card until a
+  cold start - observed on a whole-card delete through the manager.
+- **A card with nothing playable is a state, not an error.** Three things agree on that now. `Utility::loadStation()`
+  returns the result of the entry read instead of an unconditional `true` (it used to report success for a read that
+  failed, so `_play()`'s `if (!utility.loadStation(...)) return;` guard never fired and the audio library was handed
+  the mount point as a track - `Reading file: "/"` followed by a garbage format name). `_play()` also refuses a
+  card-mode play whose url is empty, with `nothing to play: station N has no file`. And
+  `Config::initPlaylistMode()` installs the `ehRadio` placeholder when there is no station it can *load* - the test
+  is `_lastStation > 0 && utility.loadStation(_lastStation)`, deliberately not a count. `Utility::playlistLength()`
+  derives the SD count from the index file's size, and an index holding no entries is still large enough to report
+  one, so an empty card resolved to a station that does not exist and kept the previous station's name on the
+  display; a failed read leaves the station table untouched by design, so the placeholder has to be applied over it.
+  `initSDPlaylist()` applies the same state when a re-index leaves the list empty - the "delete everything, then
+  Done" path, which never goes through `initPlaylistMode()`. Both call one helper, `setNoStationState()`: url
+  cleared, `name = "ehRadio"`, and `config.setTitle("")`.
+  **The three text lines are derived, and none of them repaints on its own**: `_station()` renders the meta line from
+  `config.station.name`, while `_title()` renders *both* title lines from `config.station.title`, split on `" - "`.
+  That is why a placeholder which set the name and left the title alone let a web stream's title survive a card swap
+  and a switch back to an empty card. So anything that rewrites those two fields must ask for the repaint:
+  `initPlaylistMode()` sends both at its end (it is the only place the *boot* path passes through, and an unpainted
+  meta widget is simply blank), `changeMode()` sends `NEWTITLE` beside its `NEWSTATION`, and the FileManager's
+  post-exit re-index sends both *after* it switches back to `PLAYER` - a screen we own drops them, which is the
+  reason the requests sit after those page switches rather than beside the state changes.
+  The other half of the empty-card picture is that the state must not be overwritten by a stop: `Player::_stop()`
+  skips its `L10N_MSG_STOPPED` title when `config.station.url[0] == '\0'`, because an empty url *is* the "nothing to
+  play" state, and a switch into SD mode sends `PR_STOP` right before the placeholder runs - so the stop used to
+  announce "[stopped]" over the title the placeholder had just cleared.
+- Page and API are split on purpose: the page is `data/www/sdmanager.html` and **keeps that address for the whole
+  session**. While the mode is open `handleIndex` redirects "/" to it, so a bookmark, a second tab, a captive-portal
+  redirect or a Home Assistant link still lands on the manager rather than on a player UI whose buttons are all
+  refused - which is the reason the root was hijacked in the first place. A redirect and not the page body at "/":
+  the manager then has ONE address, so its own reloads never depend on the device's mode at that instant, and the
+  root response stays a constant. `handleNotFound` no longer redirects `/sdmanager.html` anywhere (it is served like
+  any other WebUI page) and the page no longer calls `location.replace('/')`.
+- **A running operation makes the whole button row inert.** `busy(on, text)` and `busyUpload()` toggle a `busy` class
+  on `<body>` alongside the overlay, and the stylesheet dims every `.fb` and `input` under it and sets
+  `pointer-events: none` - so New folder, both Upload labels, Delete and Done behave like the controls inside the
+  protected folder, which is where that look comes from. `busy()` also calls `armDelete(false)`, because the Delete
+  button's "Delete 3?" wording belongs to the press that armed it: without that it stayed armed for the whole request
+  and read "Delete 1?" behind the spinner.
+  The device has the matching guard, because the page can only speak for itself: `hDelete()` sets `markBusy(true)` for
+  the length of the batch (the selection is handled inside one request, so it is the one operation the mode must not
+  be closed in the middle of), `hDone()` refuses with 409 `busy` while it is set - same rule and same inertness as the
+  upload refusal, and the case it really covers is a *second* tab or device - and `leave()` clears the flag as a
+  backstop so a handler that died mid-operation cannot lock the mode closed.
+- **The page's status line lives in state, not in the element.** `notice()` writes one slot (`state.notice`) and
+  `paintNotice()` renders it; the listing's success path and `render()` repaint it rather than clearing it. What does
+  empty it: a new message, leaving the folder, or a press on any button under the list. That last one is a
+  capture-phase listener on the button row on purpose - it has to run *before* the button's own handler, or a handler
+  reporting synchronously would have its message wiped by the clear. Both the listing's success path and `render()`
+  used to clear the slot instead, so a report written just before the follow-up listing was erased within
+  milliseconds: the upload's skipped list, every mutation's answer and a delete's failures all "flashed by" that way.
+  Deliberately no timer, because a message that expires while it is being read is the bug this exists to fix. The
+  protected-folder banner is the one derived message, flagged `sticky`, so a render drops it once the folder is no
+  longer locked - and the buttons that clear the slot are dimmed while it applies, so there is nothing stale to clear.
+  It is also flagged as an error, because the red border `.pleditorwarning` gets recoloured to is the same thing to
+  the reader: this folder refuses every change.
+- **An upload batch reports once, at the end.** One slot cannot hold a line per file, and the per-file errors and
+  notices were overwriting each other - three failed files showed only the third - so nothing is reported per file and
+  `uploadSummary()` composes the lot: `msg_files_upload_failed` with a count, `msg_files_upload_skipped` with a count,
+  the last failure's reason appended, and the following listing no longer clears it. Counts, never filenames: the
+  names made a message that grew with the batch. The same key serves any count, so there is no singular form to keep
+  in step - "1 files failed to upload." is the accepted price. `xhr.onerror` is a transport failure rather than a
+  refusal, and it too counts itself into that summary instead of carrying a key of its own; it shows the summary
+  *without* the reload `done()` does, because a listing request would fail as well and its error would replace it.
+  The overlay for that batch has two shapes: `busy()` is the single body-size line a rename, delete or mkdir gets, and
+  `busyUpload()` stacks three under the spinner - "Uploading 4/5" and the percentage at twice the body size, the file
+  name between them as a detail - so the progress callback writes only the percentage while the transfer runs.
+  `msg_files_upload_failed` and `msg_files_upload_skipped` are new keys: the 50 locale files do not have them yet, so
+  other languages fall back to the inline English until they are translated.
+- **The player header's SD badge is the UI entry point.** `player.html` wraps that badge in its own
+  `div.gb.nb.local[data-command="sdfilemanager"]`, and `script.js` handles the command exactly like `search` - a plain
+  navigation to `/sdmanager.html`, nothing else, because the page opens the mode itself and stays on that address.
+  Two details are load-bearing. (1) The id (`sdmanbtn`) has to sit on the **wrapper**, not on the glyph: the playermode
+  handler shows and hides that id, and a wrapper left in the DOM would be an invisible 54px hot spot over the playlist
+  glyph, swallowing the toggle's own click in web mode. (2) `#toggleplaylist.sd-mode { pointer-events: none; }` turns
+  the toggle's hit-testing off in the one state where the badge is shown, so
+  `#toggleplaylist.sd-mode .gb { pointer-events: auto; }` restores it; the wrapper is a `.gb`, so its hover ring is the
+  ordinary one, the same the search glyph gets. No `sdinit` gate is needed - the badge only exists in SD mode, and a
+  non-SD build never sets `modesd`.
+- **There is no route at bare `/sdman`.** `AsyncURIMatcher::matches()` treats a plain URI as an exact path *or* as a
+  prefix followed by "/", so a handler registered at `/sdman` also answered `/sdman/list` and every sibling route;
+  the page then parsed that route's redirect as JSON. `/sdman/enter` is the only way in.
+- Routes: `/sdman/enter` (GET), `/sdman/done` (POST), `/sdman/info`, `/sdman/list`, `/sdman/mkdir`, `/sdman/rename`,
+  `/sdman/move`, `/sdman/delete` (POST, selection in the body), `/sdman/download`, `/sdman/upload` (POST with its own
+  chunk handler). Every handler except `enter`/`done` calls `requireActive()`, which answers 409 `not_active` when the
+  session ended, or 409 `no_card` when no card is mounted - the page re-enters on the first and leaves the manager on
+  the second.
+- **The manager's page follows the device over the WebSocket, so nothing polls it.** `SDMANACTIVE` (a new
+  `requestType_e`) carries `{"sdmanactive":0|1}` built from `filemanager.active()`: `enter()` broadcasts it once
+  `_active` is true and `leave()` once the exit is real, so EVERY close is covered by one line in one place - Done,
+  the idle timeout, the card leaving the slot, a close driven from another tab or from the box. A client that
+  connects is sent the current value in `onWsEvent` beside `GETBATTERY`, which is what arms a page that opened while
+  the manager was already up. `sdmanager.html` opens `ws://<host>/ws` and returns to "/" on the 1 -> 0 transition
+  ONLY: the connect-time push reports the state as it is, so a page told only 0 - its socket came up a moment before
+  its own `/sdman/enter` - never acts, and a user who opened the manager while the radio was on a web stream is not
+  bounced out. `playermode` was deliberately not reused for this: the play mode is not the manager's state, and
+  `leave()` even forces the play mode back to `PM_SDCARD`, so the page could not tell the two apart. Polling was
+  rejected outright: `/sdman/info` touches the idle clock (that is what `keepAlive()` is for), so a timer on it would
+  hold the manager open for ever and defeat `SDMAN_AUTO_EXIT_MS`. The `no_card` request paths stay as the fallback
+  for a socket that never comes up.
+- Mutations are POST-only and each one calls `invalidateSdIndex()` (removes `INDEX_SD_PATH`), so playlists and the SD
+  index are rebuilt rather than trusted after an edit.
+- `/` and `/data` (and anything under it) are protected: no create, rename, move, delete or upload there; browsing
+  stays allowed and the page dims the controls. Error codes are stable strings the page maps in `errText()`:
+  `protected`, `exists`, `no_space` (507), `not_found`, `no_card`, `bad_name`, `no_dir`, `not_dir`, `not_active`,
+  and `failed` as the fallback.
+- **Upload** is one file per request, multipart, streamed straight to the card with no RAM buffer. The `path` and
+  `name` args choose the target and `name` wins over the multipart filename. Replace (no `skip` - the default) opens
+  with `FILE_WRITE`, which truncates, so an existing name is overwritten; there is deliberately no `exists()` test on
+  that branch. Skip Existing (`skip=1`) leaves an existing name untouched and answers `{"ok":true,"skipped":true}`
+  without touching the SD index. Free space is measured *after* the truncating open, because the open is what
+  releases the room the replacement needs; a write that would exceed it fails with 507 and the partial file is
+  removed so a failed upload cannot leave a truncated track behind.
+- **The abandoned open handle is the counter-intuitive half of that.** There is no `UPLOAD_FILE_ABORTED`
+  notification to react to, so an upload cut off mid-stream leaves the handle open and the file half-written; the
+  next request closes it at `index == 0`, before opening anything new, which is what the missing callback would
+  otherwise have had to do. `FILE_WRITE` is also what truncates, so the room an overwrite needs is released by the
+  open itself rather than by the close - the reason the free-space figure is taken afterwards. And deleting while
+  walking a directory advances the position under the removal and skips entries, so child names are collected
+  before anything is removed.
+- **A short chunk is never mistaken for a whole file, and a cut-off upload is named.** `onUploadChunk()` now checks
+  the result of `_upFile.write(data, len)` and answers 500 `write_failed` when fewer bytes landed than the request
+  carried, so a full card is reported instead of a silently truncated track being called uploaded. It also stamps
+  `filemanager.touch()` **and** `sdFeedWatchdog()` on every chunk, because this handler runs in the AsyncTCP task and
+  that task is subscribed to the watchdog: a slow SPI-SD write was able to reset the device mid-file with no
+  application line to say why. The cut-off case keeps its own evidence - when a new file begins while `_upFile` is
+  still open, the log names the previous target and the byte count it stopped at before closing it. `hUploadDone()`
+  closes a still-open handle the same way and answers 409 `cut_off` rather than reporting success for a multipart
+  stream that ended early. On the page side (`sdmanager.html`) a network-level failure on one file is retried once and
+  the batch continues, because the old `xhr.onerror` abandoned every remaining file in the selection.
+- **A write's RETURN VALUE is how many bytes the stream ACCEPTED, not how many reached the card - so the upload is
+  measured after the fact.** On FATFS a write lands in a newlib stream buffer and reports its full length, and the
+  flush behind it can fail later, silently. That is the mechanism behind three separate looking symptoms in one
+  session: an upload that reported `uploaded (490496 bytes)` for a file that was never on the card, `short write at
+  ... (46 of 1436 bytes)` when a buffer boundary happened to flush mid-`fwrite`, and `indexing did not finish
+  (250 files, 0 index bytes)` - 250 rows whose four writes each returned their full length, and an index file of zero
+  bytes, because `listSD()` counts a file only when all four writes report, and none of them had reached the medium.
+  `hUploadDone()` therefore re-opens the target by name, compares `size()` against `_upBytes`, and answers 500
+  `write_failed` with the file removed when they differ. **Rule for new code**: never report a write as done on the
+  strength of its return value alone; measure the file.
+- **OBSERVED ON HARDWARE: mid-write `errno 5` (EIO) - and it follows the UPLOAD PATH, not the card.** The first
+  reading of this was wrong, so the evidence is recorded in full. `errno 5` is `EIO`, not `ENOSPC` (28) or `EBADF`
+  (9), and beneath it is FATFS's `FR_DISK_ERR`; it arrives in 5-8 ms, so it is a reject, not a slow card.
+  - Old card: `short write at ... (0 / 276 / 178 of 1436 bytes, errno 5, after 6-8 ms)`, and one file died after
+    **3537920 bytes**.
+  - **A brand new Sandisk High Endurance 8 GB failed the same way** - `96` and `361` of 1436 bytes - while one file
+    in the same batch uploaded **8673949 bytes with `0 chunk(s) retried`** and passed the landed-size check. A card
+    that can take 8.6 MB cleanly is not a failing card, and two very different cards cannot share a card fault.
+  - Mount, listing and `usedBytes` are perfect on both.
+  - **Every new-card failure is PARTIAL** (`0 < wrote < len`): the transport stops mid-sector. That is the shape of
+    interference during a write, not of a medium error.
+- **SUSPECT FOUND (and fixed): the presence probe was hammering the SD bus during uploads.** `FileManager::loop()`
+  called `sdman.cardPresent()` on every main-loop iteration - about 60 times a second - and the SPI implementation
+  of that probe issues a **raw `readRAW()` sector read** through `diskio_impl`, bypassing FATFS. So the main loop
+  was sending card commands continuously while AsyncTCP wrote a file to the same card, and through every delete.
+  Nothing was left of the three-strike debounce either: at 60 Hz the three strikes were spent inside 50 ms.
+  The probe is now skipped entirely while an upload is open or a delete batch is running (a transfer in progress is
+  itself the proof that the card is present) and is otherwise limited to **once a second** by `_lastCardCheckMs`.
+  **Rule for new code**: the SD bus is shared, so anything that touches the card from outside the operation that
+  owns it must be gated on that operation and rate-limited, however cheap the call looks.
+- **The card probe is still the fallback suspect if `errno 5` returns.** If mid-write EIO survives this change on a
+  known-good card, the next levers are the SPI clock (`SDSPISPEED`) and the transport itself - SDMMC on the S3 -
+  not more code in this module.
+- **A transfer is verified every `SDMAN_UPLOAD_VERIFY_BYTES` (64 KB), not only at the end.** `flush()` then `size()` is
+  the only pair that tells the truth about the medium; checking once at close let a card that accepts into the stream
+  buffer and discards it surface megabytes later (**4815872 bytes** into one file). Early verification turns that into a
+  failure within a cluster.
+- **Rescues are budgeted by SIZE, and a BURST of refusals is treated as a different failure entirely.** A flat count
+  conflated two things the field showed in the same week, and it cost a real upload: a 10 MB file reached
+  **10029827 bytes - 24225 short of its 10054052 - and the ninth isolated refusal met a flat cap of 8**, so a file
+  that was 99.76% written was thrown away by a constant rather than by the card. Meanwhile a card that was genuinely
+  failing refused 17 chunks in a row. So there are two rules now:
+  - `SDMAN_UPLOAD_RETRY_BURST` (4) consecutive refusals with no successful chunk between them fails the file at
+    once - a card that is not coming back, which no budget can help;
+  - otherwise the budget grows with the transfer: `SDMAN_UPLOAD_RETRY_FLOOR` (8) plus one per
+    `SDMAN_UPLOAD_RETRY_PER_BYTES` (**64 KB**) written - deliberately generous, so this is a sanity ceiling and never
+    the thing that ends a transfer. The divisor was 512 KB until the 14-file batch showed Stars wanting 11 rescues in
+    2.08 MB (one per 190 KB) where the 10 MB file wanted one per 1.25 MB: no divisor is right for both, and a
+    transfer that is landing, however grudgingly, should be allowed to land.
+  Both kinds of refusal are named in the log line (`burst - the card is not recovering` / `rescue budget reached`),
+  because they mean opposite things. Only the FIRST rescue is logged per file and the rest are counted: a card that
+  is merely flaky rescues many chunks, and a line each flooded the log badly enough that logging had to be switched
+  off to read anything.
+- **A retry waits `SDMAN_UPLOAD_RETRY_DELAY_MS` (2 ms) first.** The refusal being answered is
+  `0 of 1436 bytes, errno 5, after 0ms` - zero bytes accepted and no bus time at all, which is the card declining
+  the next write while it is still programming the previous block. That is a timing failure and time is the remedy;
+  retrying instantly only asks the same question again. It also makes `SDSPISPEED` a *mechanism* rather than a guess:
+  a slower clock is the same remedy by another route, so it is the next thing to try if the refusal rate is
+  unchanged, and SDMMC (which bypasses sdspi altogether) after that.
+- **The upload stall window depends on whether the transfer can still succeed.** `SDMAN_UPLOAD_STALL_MS` (120 s) applies
+  while it can; `SDMAN_UPLOAD_STALL_FAILED_MS` (1 s) applies once a chunk has failed, because the file is lost and
+  nothing is being waited for, so the manager - and the whole WebUI - must not stay locked for the healthy window.
+- **Both failure shapes are rescued, and the PARTIAL one is the interesting case.** `wrote == 0` means nothing was
+  accepted, so the stream has not moved and re-issuing the same bytes cannot duplicate or skip any - and with the
+  field evidence above, discarding a finished multi-megabyte file over one 8 ms reject is the wrong trade.
+  A short write of `0 < wrote < len` used to be fatal on the grounds that "how many bytes reached the medium is
+  unknowable". That was wrong: after `flush()`, `size()` IS the medium, and when it has not fallen behind `_upBytes`
+  the missing bytes are the TAIL of the current chunk, still in `data`. So the stream is `seek()`ed to the card's own
+  figure and that tail is re-sent. That is safer than failing the file, not merely kinder - the position comes from
+  the card rather than from our bookkeeping, so the two cannot drift apart, and nothing is re-sent that might
+  duplicate or skip a byte. Only when the shortfall reaches back past `_upBytes` are those bytes gone from our side
+  too, and only then is the file failed. Both counters (`_upRetries` for refused chunks, `_upPartialRescues` for
+  repaired ones) are named in the per-request line, so a file that landed because of rescues says so.
+- **The 14-file batch that settled the rest: 9 landed, and the 5 failures split 3 partial / 2 budget.** Worth
+  keeping because it is counter-intuitive - **every file that landed needed ZERO rescues**, not one of the nine,
+  while the failures were the files that hit refusals over and over (Stars spent 11 rescues in 2.08 MB, one per
+  190 KB, against the 10 MB file's one per 1.25 MB). The condition is per-transfer, not a steady rate: a file either
+  flows or it fights. That is why no per-size budget can be tuned right, why the divisor is now generous enough to
+  never be the limiter, and why the burst rule is the only correct give-up test.
+- **A "rescued" write is not a rescued write: the medium is the only truth.** The follow-up batch showed the rescue
+  counter lying. Infinity logged **26 rescues**, Stars **53**, and both failed - and `_upPartialRescues` stayed **0**,
+  which is what gave it away: the partial-write recovery needs `onCard >= _upBytes`, so a zero meant the card was
+  BEHIND our count, not level with it. The retry line reads `the retry wrote it (1436 bytes in 0ms)`, and 1436 bytes
+  of SPI in 0 ms is not a card write - it went into the stream buffer. So `_upBytes` counts bytes the stream
+  *accepted*, the buffer hides the loss, and the count drifts ahead of the medium until a flush fails and the
+  shortfall reaches back past bytes we no longer hold. **Rule**: never treat a write's return value as evidence that
+  data landed; `flush()` then `size()` is the only instrument here, and it is worth running often.
+- **When the card falls behind, the transfer is over - fail it at once and let the browser send the file again.**
+  The periodic `size()` check now runs every `SDMAN_UPLOAD_VERIFY_BYTES` (64 KB, was 256 KB) and a shortfall fails
+  the file immediately with its own reason, **`card_lagging`**, logging how far behind the card was. Grinding 53
+  rescues into a transfer that has already lost bytes helps nobody: it costs the card's time and it buries the
+  cause. The reason is distinct because of what the PAGE does with it: `card_lagging` (with `write_failed` and
+  `cut_off`) is retryable, and the page retries the file - resuming from the offset the device vouched for when it has
+  one, else from the start - under its attempt ceiling (`MAX_ATTEMPTS` floor, grown by `attemptCeiling()`, with
+  `MAX_STALLED_TRIES` as the size-independent no-progress guard), naming the attempt on screen. That is the only
+  recovery that can work here - **the device cannot
+  re-supply bytes it no longer holds, but the browser still has them**, and the failures are per-transfer (nine
+  files landed with zero rescues while three needed 26, 53 and 26), so a fresh attempt has a real chance where
+  patching bytes does not.
+- **Both ends of the SPI clock have now been tested and it is not the variable.** The last two batches ran at
+  10 MHz and behaved exactly like the earlier ones at 20 MHz: the same per-transfer refusals, the same one-per-47-KB
+  rate on a bad transfer. It is back at `SDSPISPEED 20000000` for speed. Do not spend another round on the
+  frequency; the remaining levers are the transport itself (SDMMC, which takes `sdspi` out of the path) and, if the
+  rate is ever worth attacking again, coalescing reads/writes - **and note the C library already buffers stream
+  writes into multi-chunk flushes** (the partial returns of 46-404 bytes are the proof), so a hand-rolled 16 KB
+  buffer would buy a few times fewer card writes, not the eleven times it looks like, and it would mean rewriting
+  the most delicate function in `filemanager.cpp`.
+  **SUPERSEDED for the manager session - see "THE CLOCK *IS* THE VARIABLE, AND THE DISPLAY BOARD IS THE REASON".**
+  The two batches above were both run on a unit whose display does not compete for the SPI bus. The conclusion still
+  holds for throughput ("the clock buys no speed") and still holds as "do not tune `SDSPISPEED` globally"; what it
+  missed is the ERROR RATE, which is a different variable and which does depend on the clock when the display shares
+  the bus. Session entry now lowers the clock to `SDSPISPEED_MANAGER` and exits restore `SDSPISPEED`.
+- **RESULT: 14 of 14 uploaded. Ten landed first time and four failed and landed on the second attempt** - the
+  whole-file retry is what closed this out, and the four failures are the ones that used to be lost files. Infinity,
+  the 10 MB file that was 24225 bytes short two rounds earlier, went up **complete at 10054052 bytes** on its second
+  attempt; Hot Like Fire was caught by `card_lagging` (the card fell 49511 bytes behind) instead of being ground
+  down, and landed on the retry. Every final upload reports `0 refused chunk(s) rescued, 0 partial(s) recovered` -
+  the first attempts are the only refusals, and they no longer cost a file.
+- **What a retry COSTS, measured: it restarts the file from byte 0, and that is about 18% overhead on a batch.**
+  `abortUpload()` removes the partial on purpose, so the browser re-sends everything. In that batch: 96 MB of files,
+  17.7 MB of discarded partials and four full re-sends, so roughly 114 MB moved for 96 MB of audio. Cheap in
+  aggregate; **expensive for the file it happens to** - Night Time reached **97.9%** (6817792 of 6965338 bytes,
+  discarded) and then cost about twice its size, and Infinity threw away 3.6 MB of a 10 MB file. Worth knowing
+  before reaching for a bigger batch or a slower link.
+- **Resumable retry is the fix for that cost, and it is deliberately NOT built yet.** Three levels, recorded so the
+  choice is explicit rather than accidental:
+  1. **Resume on retry (the one to build if it is ever needed).** The verification already knows a *trusted*
+     position - the last 64 KB checkpoint - so truncate the partial to it instead of deleting it, return `landed: N`
+     with the failure, and have the page re-send only `f.slice(N)` with an `offset=N`; the device appends and refuses
+     an offset that does not match its verified size. Night Time would have sent its last 147546 bytes rather than
+     6.97 MB. No continuous chunking, so the happy path stays one fast stream.
+  2. **General browser-driven chunking** - many small verified pieces, a failed piece retried alone. More robust,
+     more machinery, and it slows the path that currently works.
+  3. **Do nothing.** ~18% overhead and the batch completes.
+  The ordering matters: run the **40 MHz** test first. If a faster clock reduces the refusal count then resume is
+  complexity for nothing, and if refusals rise, this 18% figure is what says whether Level 1 earns its keep.
+- **A retry notice must be CLEARED when the file lands.** The message slot holds its text until another message
+  replaces it, and the batch summary only speaks up when something FAILED - so `sending it again: <file>` sat on
+  screen describing a file that was already on the card, which made a clean 14-of-14 batch look like it had gone
+  wrong. The notice is now informational rather than error-styled, and `finish()` clears it when a retried file
+  lands. **Rule**: any message that describes a state must be withdrawn when that state ends, or it becomes a lie.
+- **BUG FOUND AND FIXED: nothing created `/data` ON THE SD CARD, so a card without it could never build an index.**
+  `startup.cpp`'s `LittleFS.mkdir("/data")` is for the FLASH filesystem - a different filesystem with the same
+  folder name - and FATFS cannot create a file inside a directory that does not exist. `indexSDPlaylist()` opened
+  `/data/plsd.csv.tmp`, failed, and **returned without a word**, so the index was never built and SD mode reported
+  `no playable station (playlist length 0)` for ever. Uploads kept working throughout, because they only need the
+  folder they write into, which is exactly what hid it. `indexSDPlaylist()` now creates the folder, says so when it
+  does, and logs plainly if it cannot - the folder name is one `static const char SD_DATA_DIR[]` so the planned
+  rename to `/ehradio.data` has a single place to change.
+- **A diagnostic must never read through a handle it has already decided is invalid.** The same line printed
+  `playlist open 0 with 1495441367 bytes` - a 1.5 GB "size" for a handle the `?:` had just called invalid, on a
+  7.9 GB card - and it sent a whole round of diagnosis in the wrong direction. The line now names WHICH condition
+  failed (`the index file could not be created` / `the walk stopped at a refused write` / `the row count does not
+  match the file count`) and reads sizes only from handles known to be open.
+- **Per-file transfer timing is logged on success and on failure.** `uploaded <file> (N bytes on the card in Mms,
+  K KB/s)`, and the refusal line carries its own time and byte count. The point is comparison - 20000000 against
+  40000000, or SPI against SDMMC - decided on throughput rather than on a feeling, and **the failure cost is
+  included because that is where the minutes actually go**. A clock can be good for reading and bad for writing, so
+  this is read together with the listing's own `walked N entries in M ms`.
+- **THE SPI CLOCK DOES NOT AFFECT THROUGHPUT - measured, three ways.** A 14-file, ~96 MB batch at **20000000,
+  30000000 and 40000000** all landed at about **135 KB/s** (131-161, 113-139, 123-190), so 20 MHz is if anything the
+  best of the three and doubling the clock buys nothing. **Do not tune `SDSPISPEED` again**: it has no advantage to
+  trade against an error rate. 135 KB/s works out at roughly **4 ms per 512-byte sector**, far slower than 20 MHz SPI
+  could write a sector, which points at the card's own programming latency (or the network path) rather than the bus
+  - so the ~20 minutes a batch takes was never winnable through the clock either.  (Throughput only: the ERROR rate is
+  the clock's business after all - see "THE CLOCK *IS* THE VARIABLE, AND THE DISPLAY BOARD IS THE REASON".)
+- **THE CLOCK *IS* THE VARIABLE, AND THE DISPLAY BOARD IS THE REASON - and it is a per-SESSION clock, not a global
+  one.** The 2x2 that found this used two boards and two cards, same firmware:
+    - `sh1106_vs1053_3buttons` + the good card: excellent, every file first attempt.
+    - `sh1106_vs1053_3buttons` + the budget card: the usual refusals, rescue, ~4 KB behind, resume.
+    - `ili9488_pcm_1button_full` + the good card: about FIFTY failed transfers on a batch the sh1106 unit landed clean.
+    - `ili9488_pcm_1button_full` + the budget card: the worst of the four.
+  Both boards mount the SD card on `SD_SPI 'B'` (checked in `myoptions.h`), so the BUS is identical; the only
+  difference is the DISPLAY - a 128x64 I2C OLED against a 480x320 SPI panel. The old theory ("the 1 s release window
+  caused it") was wrong and was withdrawn: the same firmware is clean on one unit and dirty on the other, which points
+  at TIMING MARGIN - the panel's SPI traffic takes margin away from `sdspi`, and a budget card has the least margin to
+  lose. Lowering the clock gives it back.
+  - **T1, the good card on the ili9488 unit: `SDSPISPEED 10000000` fixed it COMPLETELY** - 10 of 10 files first
+    attempt, zero refusals, and **170-238 KB/s, i.e. exactly as fast as the best 20 MHz runs** (226 KB/s measured at
+    10 MHz). That is the second time the card has been shown to be the throughput limit at ANY clock, so nothing is
+    traded away for the reliability. Below 2.5 MHz the BUS would finally become the limit and uploads really would
+    slow down.
+  - **The budget card still fails at 10 MHz** (refusal, rescue, ~4 KB behind, resume, at 15-76 KB/s), so halving
+    helps but does not finish the job - which is why the step-down below exists rather than a single fixed number.
+  - **The mechanism is a REMOUNT, because the frequency is a MOUNT PARAMETER.** `SDManager::start(freq)` now takes the
+    clock, `ensureSpeed(freq)` remounts only when the card is not already at that clock (`SD.end()` + `begin(cs, spi,
+    freq)`), and `mountedFreq()` reports it. **A remount discards every open handle**, so it may ONLY happen at a mode
+    boundary or from the main loop - never inside a request handler. That is why `enter()` sets it and `loop()` steps
+    it, and nothing else touches it.
+  - **`SDSPISPEED_MANAGER` (10000000) is the session clock; `SDSPISPEED` is the player's.** `enter()` applies the
+    manager clock; `leave()` puts `SDSPISPEED` back before the card is handed to playback, so the player's reads keep
+    the high clock. **The manager runs at that ONE clock for the whole session** - browsing, listing, deletes and
+    uploads - because a speed change means a REMOUNT (the frequency is a mount parameter) and a remount discards every
+    open handle. Listing is therefore slower than it would be at `SDSPISPEED`; that is accepted: safety over speed.
+  - **THE AUTOMATIC STEP-DOWN WAS BUILT, TESTED AND REMOVED - do not rebuild it.** It halved the session clock on
+    every transfer that needed resuming, down to a 156250 Hz floor, on the theory that the refusals were a
+    time-between-writes problem a slower bus would cure. The field test killed it outright: a budget card froze at the
+    SAME byte offset with the SAME ~5 KB deficit at 10, 5, 2.5, 1.25, 0.625, 0.3125 AND 0.15625 MHz - a **64x range
+    with no change in behaviour** - while a 10 MB file went through untouched at 10 MHz in the same session. The
+    clock is not the variable, and every step it took cost a remount plus a permanently slower session. The macros
+    `SDMAN_SPEED_FLOOR` and `SDMAN_SPEED_STRIKES` went with it. Its three defects are still worth remembering, because
+    they were real faults and two of the lessons stayed:
+    1. Its strike was raised in only ONE of the two paths that can end an attempt. It lived in `hUploadDone()`, but
+       most failures are released by the STALL branch (`abortUpload()`), after which the page aborts and
+       `hUploadDone()` never runs - so a session whose files needed five and seven resumes never moved the clock.
+    2. Applying it from `loop()` RACED the request handler. `ensureSpeed()` is a `stop()`/`start()` pair and the
+       page's next request arrives on the AsyncTCP task, so seen mid-remount it read `ready == false` and answered
+       `no_card` at `0 bytes in 0.00s`, abandoning a 5.8 MB partial. **A mid-session remount is not safe here** -
+       which is exactly why the manager now has only one, at the mode boundary.
+    3. A failed remount left the card UNMOUNTED, and then every path answered `no_card`. `ensureSpeed()` now falls
+       back to the clock that DID work and keeps the card mounted, logging the fallback. That guard is KEPT.
+  - **A STALLING CARD COULD NOT CONVERGE, AND THAT IS WHAT ACTUALLY LOST FILES.** On `card_lagging` the retry resumed
+    from `_upVerified` - the last CHECKPOINT that passed - which can be far behind what the card holds: the field
+    resumed a 6.9 MB file at **766 bytes** when the card held **29696**, so every attempt re-sent the same ~29 KB into
+    the same wall, never advanced, spent the retry budget and was discarded (`Discarded the abandoned partial ...`).
+    The card's own `size()` after `flush()` is a LOWER bound on what is committed - the same instrument the verify
+    already trusts - so `_upVerified` is now set to that figure (floored to a sector by `resumeFloor()`), and the
+    retry continues from where the card truly stopped.
+  - **The manager ALWAYS hands back to SD mode.** `leave()` used to pick its resume target from `config.getMode()`,
+    i.e. whatever the device was last in, so a session opened while a web stream was playing resumed the WEB stream
+    on exit. It now forces `play_mode = PM_SDCARD` + `syncSDFS()` (when the card is mounted) BEFORE the resume
+    decision, and the web branch is gone: this mode exists to edit the CARD, so it returns to the card.
+  - **The answer was the card's ALLOCATION UNIT SIZE, which supersedes every theory in this section.** A cheap 16 GB
+    card that had failed here for months, at every clock, was **reformatted with 512-byte allocation units** and then
+    took everything: 14 files, 1 attempt each, 0 refusals, 0 partials, 186-198 KB/s - and then a deliberate fragmentation
+    stress run (upload, delete, re-upload, a 12 MB `.exe` and a 12 MB `.zip`) with the same result. The unit that broke
+    it - **8 KB, sixteen sectors** - is what every formatter, including the "SD card Formatter" utility, picks by default
+    for a card that size.
+    **It is a weak-card malady, not a law about large units.** The unit does not break a card by itself; it decides
+    whether a MARGINAL card can cope. On the same cheap card: **16 KB** landed every file but slowly (18, 11 and 13
+    attempts, 73-86 KB/s; without resume-on-retry those are three lost files), **8 KB** lost files outright, **512 B** was
+    clean at 90-95 KB/s. A branded Sandisk at **16 KB** was flawless - every file, 1 attempt, up to 199 KB/s even
+    fragmented. The ladder is a property of the CARD as much as of the format, so a large unit costs a marginal card
+    SPEED or files and a good card nothing.
+    The mechanism fits every symptom: with an 8 KB unit a stream of ~1436-byte chunks makes FATFS rewrite the same
+    cluster and the same FAT and directory sectors over and over, and this card refuses those read-modify-write patterns
+    (`errno 5`, the size a few KB short and never catching up, eventually a byte offset that cannot be passed). It also
+    explains the shape we kept noticing - **the first file after a format always lands and the ones after it do not**,
+    because only the first write goes into clean, contiguous, never-programmed space.
+    **So before blaming a card, a reader, a clock or this firmware, CHECK THE ALLOCATION UNIT.** The manager prints it in
+    its `Open (...)` line (`Allocation unit size: 512 bytes`); the SDMMC transport tolerated the large unit on this same
+    card (every file, 1 attempt, 0 refusals at 109-196 KB/s).
+  - **What the refusal actually is.** The card accepts 0-307 of 1436 bytes and refuses in 0-13 ms with no bus time at
+    all, i.e. it is declining the NEXT command while it is still programming the previous block.  That looked exactly
+    like a time-between-writes problem, which is why a slower bus was tried - and the **64x clock test REFUTED that
+    cure**.  The real cause turned out to be the allocation unit above, so the SHAPE was right and the remedy was
+    wrong: whatever the card is waiting for, it is not more time between commands, and it is not the display either
+    (its own bus, and the same board with a good card is flawless).
+  - **The refuted 512-byte write-alignment experiment aligned to the wrong unit.** `SDMAN_WRITE_SECTOR` (since removed)
+    rounded every write up to a whole SECTOR - while the test card's allocation unit was **8 KB, sixteen sectors**, so
+    it could not change how FATFS programs a cluster; the "no benefit" reading was inevitable and void. **The unit that
+    matters is the CLUSTER**, not the sector.
+  - **The allocation unit is REPORTED, never acted on.** `SDManager::allocationUnit()` reads `fs->csize` (in SECTORS,
+    so bytes = `csize * ssize`) from the volume `f_getfree()` hands back, once per mount; `0` is reported as `unknown`
+    rather than guessed. The manager prints it in its `Open (...)` line on BOTH transports - which is why `ff.h` is
+    included unconditionally rather than only on the SPI path (the MMC path does not pull in `diskio_impl.h`, which is
+    what carries it there) - and `/sdman/info` carries the same figure.
+  - A large allocation unit costs SPEED, not correctness: a mis-formatted card still uploads (measured 164-181 KB/s at
+    2 KB, ~90 KB/s at 512 B, 176-199 KB/s at 64 KB), so nothing warns about it or blocks over it.
+  - **WHY THE FIRST FILE ALWAYS LANDS AND THE ONES AFTER IT DO NOT.** After a format the first file goes into a clean,
+    contiguous, never-written region: almost no FAT work, and its directory entry is written once, at close.  Every
+    file after it makes the filesystem REWRITE sectors it has already programmed - the same FAT sector and the same
+    directory sector, read-modify-write, over and over.  **A card that fails on rewrites of already-programmed sectors
+    therefore passes the first file perfectly and fails everything after it**, which is exactly the observed shape,
+    and it is why a format "fixes" it for precisely one file.  (This was written as a hypothesis and is now the
+    mechanism confirmed by the allocation-unit finding above: the rewrite granularity IS the cluster size.)
+  - **A HOPELESS FILE NOW ENDS THE BATCH, deliberately.** The page allows a few no-progress retries
+    (`MAX_STALLED_TRIES` is 3) and then, when the reason blames the CARD (`CARD_FAULT`), abandons the whole batch with a
+    message that the
+    card looks faulty. A card that cannot finish one file will not finish the next thirteen, and the field runs showed
+    precisely that - file after file, each burning its budget and discarding a partial, with nothing gained. A refusal
+    the page caused itself (a bad name, a protected path) is NOT in `CARD_FAULT`: those are skipped and the batch
+    carries on.
+  - **THE SD CARD'S data FOLDER IS `/ehradio.data`, and it is NOT the LittleFS `/data`.** Two different filesystems
+    used the same folder name, which made them impossible to tell apart in a log, a listing or a bug report.
+    `SD_DATA_DIR` in `config.h` is now the ONE place the SD name is written, and `PLAYLIST_SD_PATH`, `INDEX_SD_PATH`
+    and their `.tmp` twins are derived from it by string concatenation. **The five LittleFS paths beside them
+    (`PLAYLIST_PATH`, `SSIDS_PATH`, `VERSION_PATH`, `TMP_PATH`, `INDEX_PATH`) did NOT move**: they are the web
+    endpoints the browser fetches, and changing them would break every one of those URLs. An existing card keeps its
+    old `/data` until the new folder is created and the index rebuilt - **nothing migrates it and nothing deletes it,
+    and `/data` is NOT protected**: it is ordinary clutter the user may clear from the UI, and the log line that
+    announced the new folder used to add a parenthetical about the old one, which only invited the question of what
+    happens to it. The PAGE has its own copy of the name (`sdmanager.html`'s lock test) and it does not move with the
+    macro.
+  - **The per-card SPI upload marker is gone**, removed with the premise it rested on: the cluster assembly disproved
+    that a large-unit card cannot be uploaded to. Taken out: `SDMAN_SPI_MARKER`, `spiUploadBlocked()`, the `spi_blocked`
+    refusal, the `hSpiMarker` route, `spi`/`spimarker` in `/sdman/info`, and on the page the marker notice and its
+    `state.spiBlocked` dimming. A batch abandoned for a card-side reason now reports the plain write failure only.
+  - **NEVER REMOUNT THE CARD WHILE ANYTHING CAN STILL HOLD A HANDLE FROM IT - and stopping the player is part of
+    that.** `FileManager::enter()` QUEUED a `PR_STOP` and remounted the card one line later, because the session clock
+    is `SDSPISPEED_MANAGER` and the player's is `SDSPISPEED`. A queued stop only ASKS the player task to stop, so the
+    audio's file handle outlived the filesystem it came from and closing it afterwards produced
+    `CORRUPT HEAP: Bad head at 0x... / assert failed: multi_heap_free ... (head != NULL)` and a reboot. It happened
+    EVERY time the manager was opened while PLAYING FROM THE CARD, and never from a web stream - a web stream holds no
+    SD handle, which is the tell. The fix is one call: `player.stopSync()`, which is `_stop()` -> `stopSong()` and
+    closes the audio file there and then. **This is the pattern the codebase already used**: `config.cpp`'s
+    `changeMode()` unmounts the card with `player.stopSync()` and THEN `sdman.stop()`, with a comment saying exactly
+    why. `_wasPlaying` must be read BEFORE the stop, because the stop clears it.
+    The same rule applies on the way OUT: `leave()` now closes `_listDir` before it remounts back to `SDSPISPEED`,
+    because a listing keeps its directory open across the whole walk and a listing the user abandoned can still be
+    open when the mode closes. **Rule: a remount is a mode boundary, and every handle the boundary's OWN side owns
+    must be closed before it - the ones it does not own (the player's) must be closed by the owner, synchronously.**
+  - **A REFUSED MODE SWITCH NOW ENDS THE WAIT.** Switching to SD mode with **no card** used to leave the page locked
+    on its spinner for the whole 3-minute backstop: `config.changeMode()` logs `SD card not found`, sends a
+    `GETPLAYERMODE` report and returns WITHOUT changing the mode, and the page only acted on a mode report it could
+    see had CHANGED. It now also acts on the report where it did NOT change, but only while a switch is outstanding
+    (`_switching`): that combination IS the refusal. The FIRST report after a page load is the one that must not be
+    mistaken for it, which is what `_modeKnown` is for. The wait ends, the lock is dropped and the list is refetched.
+    It used to raise an alert ("No SD card is mounted.") for the switch the page had ASKED for (`_switchWanted`), and
+    that pop-up is gone: the device has already shown why it refused, and the SD File Manager now refuses to open at
+    all without a card (`no_card` -> the page leaves), so the alert only repeated what the display and the manager page
+    both say. `_switchWanted` went with it; a no-op switch (asking for the mode we are already in) is handled the same
+    way as a refusal.
+  - **THREE SMALL UI FIXES, and the rule they follow.** (1) A plain `input[type=checkbox]` - the only control the
+    browser still drew for itself, used by the SD manager's Select All and the editor's per-row flags - is themed with
+    one `accent-color` rule, which colours the box AND the tick and follows the theme because it reads the same custom
+    property everything else does. (2) A list NOTICE is ONE ROW: `.sdnotice` carried 18px of padding and `.plloader`
+    40px around a 40px spinner, so an empty-folder message or the listing spinner measured about three rows and pushed
+    the row after it out of step. (3) The listing spinner is now the page's own spinner scaled to a list row rather
+    than a size of its own, so there is one spinner treatment in the UI, not two.  SCALING IT DOWN REQUIRES DECLARING
+    ITS PADDING, and that was a follow-up field bug: the manager's loader is spans INSIDE a `.pleitem`, so it inherits
+    `.pleitem span`'s `padding: 0 8px` and `--control-bg` box, and with the universal `box-sizing: border-box` an
+    18px box cannot hold 16px of padding plus a 6px ring - the browser widens the border-box to about 22px while the
+    height stays 18px, so the ring renders as an ELLIPSE (round at the player's 40px, oval here, from identical rules).
+    The manager's markup is the difference: player.html's loader is a DIV outside any `.pleitem` (`script.js`), the
+    manager's is spans in an `li.pleitem`.  The notice row is now `background: transparent` with no wrapper border, and
+    the ring declares its own padding and full border shorthand.  **The general rule: anything inside a `.pleitem`
+    inherits a 40px-wide, 8px-padded, 1px-bordered span box - override every one of those or the element will not be
+    the size that was asked for.**
+  - **THE WEB FILES ARE NOT IN THE FIRMWARE BINARY.** `board_build.filesystem = littlefs` and the gzip scripts run
+    ONLY for filesystem targets, so `pio run -e <env>` builds the FIRMWARE and nothing else - an edit to
+    `data/www/*.html`, `*.js` or `*.css` is invisible until `-t buildfs` (and `uploadfs` to flash it). The two are a
+    pair and are flashed separately. A build that reports no compilation and an unchanged flash size after a web edit
+    is telling you the web edit is not in it.
+  - **A retry cadence note, measured, so it is not re-derived:** the log's `No chunks for ~1005ms - releasing` is
+    `SDMAN_UPLOAD_STALL_FAILED_MS` (1000 ms), but it is NOT what sets the time between attempts. The page's upload
+    watcher runs every **2000 ms** and `waitForRelease()` polls `/sdman/info?up=1` every **1000 ms**, so the PAGE
+    gates the cycle; shortening the device's window to 250 ms would buy nothing (it was tried on paper and dropped).
+    If the retry cycle ever needs to be faster, the levers are the watcher's 2000 ms interval and `waitForRelease`'s
+    1000 ms - and both add cardless `/sdman/info?up=1` requests to the SAME AsyncTCP task that writes the chunks, so
+    that is a trade to measure, not to assume.
+- **EVERY RETRY HAS SUCCEEDED, in every run (4/4, 3/3, 1/1, 5/5, 3/3).** Combined with the refusals arriving in
+  0-1 ms with almost nothing accepted, the shape is a card declining a command while it is busy and being perfectly
+  happy a moment later. **Zero FAILED FILES is therefore achievable; zero FAILURES is not something we can promise
+  without the mechanism**, and the clock cannot deliver it. Absorbing the failures is the lever that removes them
+  from the outcome.
+- **RESUME ON RETRY - the protocol, and why it is small.** The device keeps a partial file when the CARD ended the
+  transfer (`write_failed`, `card_lagging`, `stalled`) and answers with **`landed: N`**, where N is the last position
+  the 64 KB verification PROVED is on the card - never the raw accepted byte count, because that is the number a
+  buffered write lies with. The page remembers `landed` per file and sends **`f.slice(landed)`** with
+  **`offset=landed`** on the next attempt. The device accepts the offset only when it equals the value it advertised
+  for the same path, opens with **`r+` (no truncate)**, seeks there and continues, letting the incoming remainder
+  overwrite the stale tail. A mismatch is refused and the file restarts - slower, never wrong.
+  - That is the whole protocol: **one request parameter and one response field**, because `Blob.slice()` happens in
+    the browser. The file still goes up as ONE request - no piece boundaries, no ordering, no reassembly. (The
+    general chunked-upload design that would need all three was considered and rejected as a far bigger protocol
+    for no extra benefit.)
+  - What it saves: a file that fails at 97.9% costs its last **147546 bytes** instead of re-sending 6.97 MB, and a
+    10 MB file no longer throws away 3.6 MB. Before this, one batch moved 114 MB for 96 MB of files and the worst
+    single file cost about twice its size.
+  - **A partial is kept only when a verified position exists.** Anything else - no space, a protected name, the mode
+    closing - removes it, because a truncated track under a name the page has listed is worse than no track. `leave()`
+    clears the record too: nothing may resume into a mode that has ended.
+- **RESUME WORKS, and the first run of it landed all 14.** Resumed attempts took 5830 ms, 9478 ms, 9715 ms and
+  13931 ms against 35-50 s for a full re-send - that is where the minutes come back.
+- **BUG IT EXPOSED: `_upBytes` starts at the resume offset, so it is the FILE POSITION, not the bytes moved.** The
+  timing line divided the whole file size by the time the tail took and reported **1086 KB/s** for a transfer that
+  actually ran at 172. Any figure used for comparison has to measure the same thing on both sides, so the line now
+  reports `_upBytes - _upResumedFrom` and says `bytes moved`. It also prints **seconds** (`33.25s`) - every figure
+  here is read by eye, and `33253ms` takes work to read.
+- **BUG IT EXPOSED: a kept partial was LEFT ON THE CARD when the page gave up.** The device keeps a partial so the
+  page can resume, but nothing removed it if the page never came back - and a field run left a **9.25 MB truncated
+  file** on the card after the page gave up on the file, which the listing then counted as a track. That is
+  precisely what the no-truncated-track rule exists to prevent. `discardResume()` now forgets the record **and
+  deletes the file**, and it is called when a different file starts and from `leave()`. **Rule**: a file kept for a
+  resume is a loan, not a gift - it must be reclaimed on every path where the page will not come back for it.
+- **KEEPING A FILE FOR A RESUME CHANGES WHAT `exists()` MEANS FOR THAT NAME, so every check that treats "already
+  there" as a reason to refuse has to know about it.** `Skip Existing` did not, and it cost **five of fourteen files
+  in one batch**: the partial kept for the resume IS the file that "already exists", so each retry was answered with
+  `upload skipped, name already present` and then `discardResume()` deleted the partial - the file lost twice over,
+  to a rule that was working exactly as written. A resume the page offers now **takes precedence** over Skip
+  Existing on both sides: `canResume` is computed before the refusal chain in `onUploadChunk` and gates the skip
+  branch, and the page's own pre-check is bypassed for a file it holds a `landed` offset for. **Rule for new code**:
+  when this module keeps a file on purpose, list every other test that asks whether the name is taken and decide what
+  each one should do about it.
+- **The countdown is drawn only below `SDMAN_COUNTDOWN_FROM_MS` (2 minutes), and `idleRemainingMs()` is ONE clock
+  again - the user's.** It had been answering with the upload's own deadline while a transfer was open, which put a
+  number on the display nobody asked for, and because every chunk restamps the clock that number sat still: first a
+  frozen 2:59, then a frozen 1:59. The deadline is still ENFORCED by the stall branch in `loop()`; whether it is
+  worth SHOWING is decided where the showing happens. During an upload or a delete the clock stays near the top of
+  its range and the line is **blank**, so what remains reads as what it is: a two-minute no-activity timer.
+- **CORRECTION - the SPI sweep measured WRITES only.** 20, 30 and 40 MHz all write at ~135 KB/s, but the clock does
+  affect READS, and high-bitrate FLAC streaming needs that headroom. So do not lock in 20000000: **resume is what
+  makes a higher write-error rate affordable**, which is the trade to make - keep 40 MHz if playback needs the read
+  speed and let the resume path absorb the write failures.
+- **The stall branch prints the quiet time it TESTED, and `abortUpload()` never overwrites a reason that is already
+  set.** Both were field bugs. Reading `uploadIdleMs()` again inside the `FUNCTIONLOG` let a chunk arriving from the
+  AsyncTCP task between the test and the print turn 30 s of silence into `upload quiet for 0ms`, a log line denying
+  the action it had just taken; and because `abortUpload()` assigned `_upReason` unconditionally, the resulting
+  `stalled` replaced the `write_failed` that was the actual cause, so every stalled transfer had really been a short
+  write first. `SDMAN_UPLOAD_STALL_MS` also went from 30 s to 120 s: it had been firing the instant a chunk
+  arrived, which proves the browser had merely paused mid-file and the device abandoned a live transfer.
+- **Delete** takes the whole selection as a newline-separated body and walks it once. Refusals (protected or in use)
+  and failures (missing, rmdir failed) share one `failed` counter in the response
+  (`{"ok":<bool>,"deleted":N,"failed":M}`) because the page has a single message for "this stayed"; the serial log
+  still tells the two apart. Child names are collected before anything is removed, because deleting during a
+  directory walk advances the position under the removal and skips entries.
+- The `isPlaying()` refusals in rename, delete and upload stay as a backstop even though entering the mode stops the
+  player and `Player::_play()` refuses new playback: nothing may touch a file the player is reading.
+- **An upload HOLDS the mode open, and a STALLED upload is the only thing that can release it early.** The idle
+  branch in `FileManager::loop()` is guarded by `!uploadOpen()`, so the 180 s user clock cannot close over a live
+  transfer, and a second branch - `uploadOpen() && uploadIdleMs() >= SDMAN_UPLOAD_STALL_MS` - abandons a transfer
+  which has gone quiet (`filemanager.h`: 120 s while it can still succeed, 3 s once a chunk has failed, overridable).
+  Before this the 180 s user clock was what closed a *live* upload: the mode went at the moment a chunk was slow to
+  return, `leave()` removed the half-written file by design, and every remaining file of the batch answered
+  `not_active` - a batch destroyed by our own timer, with the log naming an idle timeout that had not happened.
+  `hDone()` had always refused to close over an upload; the timer did not, and that asymmetry was the bug.
+- **The one close allowed over an open upload is guarded by `_upInWrite`.** Closing a `File` another task is inside
+  is the cross-task hazard that `lfs_file_seek` asserts on, so the stall branch does nothing while a write is executing -
+  it marks the reason (`stalled`) so the transfer ends deterministically at its next step, and a genuinely wedged
+  write is left to the task watchdog, which `sdFeedWatchdog()` feeds *outside* the write and which will therefore
+  reset the device by itself. A locked manager is the better failure there; a corrupted handle is not.
+- **`abortUpload()` is the single owner of an upload that will not finish** - the stall branch, `leave()`, and any
+  later path all call it, so the reason is always set before the close and the partial file is always removed. Its
+  line names the byte count, because `490496 bytes` and `0 bytes` are the same failure until you can see how far the
+  transfer got.
+- **Log lines must print the values they TESTED, not re-read them while formatting.** The old idle line read
+  `millis()` and `_lastActivity` in its argument list, so a `touch()` from the AsyncTCP task landing between the test
+  and the print produced `idle for 180000ms, closing (now 94441, base 94440, elapsed 1)` - a report of a timeout that
+  branch had not seen, and the reason a stalled upload's close was misread as an idle timeout for two rounds of
+  diagnosis. The values are now copied out first.
+- **A hidden widget's blank has to be RE-ASSERTED, not issued once.** `TextWidget::setText()` returns early when the
+  string it is handed equals the one already up, and that early return is what makes it cheap - but the SD manager's
+  countdown blanks to an empty string and then stays empty for minutes, so the one clear it performed on the way
+  there was the only one it ever got: from then on the comparison matched, nothing was painted again, and the digits
+  sat at their last value (a field report of a line "stuck" at 0:29 that reappeared as 2:00 the moment the string
+  changed). `TextWidget::repaint()` paints the current text unconditionally and `Display::sdmanCountdown()` calls it
+  every tick while the line is hidden; the two transitions are logged with the remaining time, which is what tells
+  "the value stopped changing" apart from "the paint was never re-issued".
+- **The page is TOLD the moment a transfer is lost, instead of finding out when it ends.** `/sdman/info?up=1`
+  answers `open`, `lost`, `up` and `landed`, and the uploader's own 2-second progress watchdog polls it while a file
+  is going up. It is a separate shape from the figures body because that one walks the FAT for `usedBytes()` - card
+  reads issued while a chunk is being written - and this one touches no card at all. `lost` is tied to an OPEN
+  handle rather than to the reason, because a reason outlives the transfer it describes and a stale `lost` would
+  abort the next file's request.
+- **The retry WAITS for the device to let go, and that wait is what makes the resume legal.** A failed transfer keeps
+  its handle until the stall branch closes it, and closing it is also when `abortUpload()` records `_upResumeAt`. A
+  retry sent before that is taken as a FRESH file: the target is truncated and the page's tail slice is written at
+  position zero. So the page asks `open` and sends nothing until it is false - which is also what let
+  `SDMAN_UPLOAD_STALL_FAILED_MS` drop from 10 s to 3 s, since the batch no longer waits out a window written for a
+  browser that was never coming back. `hUploadDone()` had to learn to LEAVE that record alone as well: the aborted
+  request can outlive the release, and its failure path used to zero `_upResumeAt`/`_upResumePath`, refusing the very
+  retry the partial had been kept for.
+- **An offset the device cannot vouch for is REFUSED (`resume_refused`), never written.** A request carrying
+  `offset=N` is a slice, not a file: the old fallback ("starting it again") truncated the target and put the tail at
+  position zero, producing a corrupt track reported as a successful upload. The page treats it as retryable, drops
+  its figure and sends the whole file.
+- **The upload bar counts the FILE, not the request, and the per-file notices are gone.** A resumed attempt is a
+  slice, so its own `loaded/total` starts at nothing while the file is already part way there: progress is
+  `from + loaded` over `f.size`, and a device-detected loss freezes it at `landed / f.size` - the figure the retry
+  then continues from - so the bar never lies about what the card holds. Nothing is written to the message slot
+  during a batch for a failure that is about to be resumed: the file name and the bar carry that, and the slot keeps
+  its one line for the batch summary.
+- **WHOLE-SECTOR WRITES: TRIED, MEASURED, REFUTED - and left in place as an off-by-default path.** The theory was
+  that a 1436-byte chunk (a TCP segment, not a multiple of the card's sector) made the file system read-modify-write
+  a PARTIAL SECTOR through the driver programming the previous block, which is a plausible mechanism for the `errno 5`
+  refusals that arrive 4 ms in after the stream buffer has accepted a few hundred bytes.  The same 14-file, 96 MB
+  batch on the same card says no: **aligned 12 then 17 failed transfers at about 7.3 minutes, as-it-arrives 7 then 7
+  at about 5.0-5.8 minutes.**  The trend points the OPPOSITE way - a longer unbroken burst of sector programs is
+  refused more readily - so a 4096-byte payload was never worth trying.  The machinery itself works exactly as
+  designed (every resumed offset in the aligned run is a multiple of 512, so `resumeFloor()` and the assembly both
+  did their jobs); it is the hypothesis underneath that failed. `SDMAN_WRITE_SECTOR` has since been removed with the
+  experiment; the cluster assembly replaced it, and the tail flush it needed survives in `sdFlushTail()` at the end of
+  the stream and before the final size check (`_upBytes` follows the WRITE, not the arrival).
+- **A short FINAL size check now keeps the file, exactly as `card_lagging` does.** It is the same loss reaching us by
+  another route - this check reads the file, that one reads it at a checkpoint - so it reports `landed` from the last
+  verified position and leaves the partial in place.  It used to remove the file and send no figure, so the retry sent
+  the whole thing: Teardrops landed 7332954 of 7381237 bytes and the next attempt sent all 7381237 again, when 48 KB
+  would have finished it.  **Rule**: every path where the card came up short is a resume opportunity, and only a path
+  with nothing verified may delete anything.
+- **A DIAGNOSTIC THAT ASKS A CLOSED HANDLE IS A DIAGNOSTIC THAT LIES.** `indexSDPlaylist()`'s failure line asked
+  `index ? "open" : "NOT open"` AFTER it had closed the handle, so it blamed "the index file could not be created" on
+  every failure whatever the truth was - and printed `rows 1936875874` and `playlist 1070244108 bytes`, memory
+  contents rather than sizes, from handles that had already been committed.  The open result is now captured at the
+  open, each failure carries its `errno`, the walk counts what it SAW (`_walkEntries`, `_walkDirs`) beside the files
+  it counted, and both temp files are re-opened by name for a size that came from the card (`sdFileSize()`) - the
+  only second opinion there is.  The one real signal in that log was `of 0`: `_sdFCount * 4`, so the walk counted no
+  files while `walked` said yes and neither "Failed to open directory" nor "SD write failed" appeared - a folder
+  skipped or a listing that came back empty, with nothing to say which.  **Rule**: a closed handle answers false, so
+  capture what is needed while it is open, and never print a number that did not come from a handle known to be
+  valid.  This is the second time this module has been misled that way; the 1.5 GB "sizes" figure was the first.
+- **PROVE THE STREAM RIGHT AFTER ANY RESCUE, not at the next checkpoint.** Both rescue paths - the partial-write repair
+  and the refused-chunk rescue - now set `_upNextCheck = _upBytes + wrote`, so the existing flush-plus-`size()` check
+  runs on the chunk that needed rescuing instead of waiting for the next 64 KB boundary.  The field pattern was
+  refusal, rescue accepted, and then the card silently SWALLOWING the whole next window: `fell 28765 bytes behind`,
+  `fell 49553`, `fell 53760` - one checkpoint's worth every time, so every byte written between the rescue and the
+  next check was written for nothing and the transfer was failed 30 to 66 KB later than it had to be.  Measured
+  effect: the reported shortfalls became **4303** and **4437** bytes, and the batch's recovery cost fell from 466 KB
+  to **114 KB, 0.12 percent of a 96 MB set**, with each failure ending sooner and `_upVerified` left as high as it can
+  be.  A rescue is the moment a transfer is most likely to be already lost, and that is where the proof belongs.
+  Note the distinction this settled: a REFUSAL (`errno 5`, nothing accepted) is repaired in 0 ms and costs one chunk
+  of tail, while the SWALLOWING (writes accepted, file not growing) is the expensive one - and it is caught by the
+  checkpoint, which is why the checkpoint cadence, not the write granularity, is the knob that matters.
+- **A BUDGET CARD BREAKS THE DESIGN'S ASSUMPTIONS, and the lag check now separates the two possible truths.** A cheap
+  16 GB card refuses one chunk in about 180 (one per ~256 KB) where a good card refuses essentially never, so a file
+  needs 20 to 40 attempts: the resume path held - recovery stayed at ~4 KB per failure - but the PAGE abandoned at a
+  flat 8 attempts with megabytes still to send (Infinity at 2.78 MB, Shelter at 3.04, Intro at 4.04, and 7/14 landed),
+  and every failure also cost the 3 s failed-stall window.  So: the attempt ceiling now SCALES with the file
+  (`max(8, size / 256 KB)`, bounded by a hard 200) while `MAX_STALLED_TRIES` stays the size-independent guard;
+  `SDMAN_UPLOAD_STALL_FAILED_MS` is 1 s; and the retry pause GROWS with consecutive refusals (2, 4, 8, 16, 32, 50 ms)
+  instead of a flat 2 ms, because a card that is still programming needs time rather than the same question again.
+  **The lag check asks whether the card is behind or the READING IS EARLY**: the size is read, the card is given
+  `SDMAN_UPLOAD_LAG_SETTLE_MS` (50 ms) to settle, and it is read AGAIN - if it catches up the transfer continues and
+  one line per file says so; only a shortfall that survives the pause fails the file, with both readings in the line.
+  That single measurement decides whether a budget card's failures are real (a lost write - so back off in the write
+  path) or an artefact of measuring mid-program (so read twice and never fail on the first number).
+- **PER-FILE ACCOUNTING, because an attempt is not a file.** The page sends one file over several requests, so every
+  figure in the per-attempt lines belonged to the LAST attempt: a file that took minutes and thirty attempts reported
+  "657001 bytes moved in 3.23s, 172 KB/s, 0 rescued".  The device now accumulates `_filePath`, `_fileStartedMs`,
+  `_fileMoved`, `_fileAttempts`, `_fileRetries`, `_filePartialRescues` across attempts - folding each attempt in when
+  it ends, resetting when the path changes - and the success line is
+  `Finished Upload <file> (N bytes moved in T, R KB/s, A attempt(s), X refused chunk(s) rescued, Y partial(s)
+  recovered)`: the file's wall clock and totals, which is what a comparison run is actually comparing.  Renamed from
+  `Uploaded` so it does not read like the `Upload ...` lines beside it.
+- **AN ATTEMPT CAN END THREE WAYS, SO IT IS FOLDED FROM BOTH ENDS.** A response (`hUploadDone`), a stall release
+  (`abortUpload`), or a cut-off - and two of them DO run for the same attempt. Folding only in `hUploadDone` missed
+  every attempt the stall branch released, and the field caught it: `Finished Upload ... 1465995 bytes moved in
+  85.33s, 16 KB/s` on a file that had run over 8.6 MB. `fileFoldAttempt()` is one guarded static (`_fileFolded`)
+  called at the TOP of both, while `_upPath` is still set (which is what tells a retry of the same file from the
+  start of a different one), and `_upBytes` is deliberately NOT zeroed by `abortUpload()` for the same reason.
+- **The upload bar and its percentage only move FORWARD, per file.** A retry resumes from the figure the device
+  vouched for, which is at or below the highest the bar already drew - so drawing it walked the bar backwards and
+  read as lost progress. The device-poll path used to do exactly that deliberately; the page now keeps a per-NAME
+  high-water mark and a lower figure is simply not drawn, so the figure freezes at the last good value and carries on
+  when the retry climbs past it. Reset by `busy()` and whenever the file name changes, so the next file starts at 0.
+- **TRANSPORT VERDICT: SPI and SDMMC write at the same speed; only SPI refuses.** Same card, same 14-file 96 MB batch:
+  SPI at 20/30/40 MHz landed 5 to 8 files per batch with 114-466 KB of recovery; **4-bit SDMMC and 1-bit SDMMC both
+  landed 14 of 14 with ZERO refusals, zero partial writes and nothing to recover** (167-255 KB/s per file, ~7.65
+  minutes for the batch; SPI's fastest clean session was ~6.5 min, its slowest ~7.9).  The spread between sessions is
+  wider than the difference between the transports, so the throughput figures do not choose between them - what
+  chooses is that `errno 5` never appears on SDMMC.  That settles what the SPI logs kept implying: the refusals are
+  the SPI TRANSPORT's (sdspi issues a command round trip per sector), not the card's and not the write granularity's.
+  **(QUALIFIED LATER - see the allocation-unit entry above: the WRITE GRANULARITY does matter, and it is what decides
+  whether those per-sector round trips can cope.  The transport verdict stands as measured on cards formatted the
+  same way; what it must not be read as is "the format is irrelevant".)**
+  Recommendation for a board with a choice: **SDMMC if the pins can be dedicated** (4-bit where the slot provides it,
+  1-bit otherwise - same write performance, no refusals, and it frees the SPI bus for display/audio), with SPI kept as
+  the universal fallback whose refusals now cost 0.12 percent of a batch.  Caveat measured on the es3c28p: SDMMC
+  sessions report main-loop stalls of 628-1896 ms that the SPI build does not, worst stage sometimes `controls`, so
+  investigate that before recommending it without qualification.  The one intermittent index-build failure we saw was
+  on the SPI transport right after a session full of refusals; both SDMMC sessions built the index normally.
+- **THE MAIN-LOOP STALLS ARE *NOT* THE ALLOCATION UNIT, and the field data says so three ways.**  The tempting theory
+  was that a large unit makes the card queue programmed data before finalising a cluster, so the bus goes quiet and
+  starves the loop.  It does not survive the measurements: the stalls appear on a card formatted at **512 B** as well;
+  they are ABSENT from the cheap card's **16 KB** run, where every file was slow; and they are PRESENT in the good
+  Sandisk's 16 KB run, which landed everything perfectly.  What that last run also had, and what the clean runs lacked,
+  was `ESPFileUpdater` writing `timezones.json`/`rb_srvrs.json` to LittleFS flash DURING an upload - a flash write and
+  a card write overlapping.  The stalls were also first recorded as a delete-burst symptom (1.2-2.4 s, with a
+  `playerQueue overflow`), i.e. with no upload running at all, so the shape that fits everything is **contention on the
+  shared flash/write paths, not the card's format** (the Part 1 "H2" line of investigation).  NOT FIXED - recorded so
+  nobody re-derives that the unit is innocent here.  The fix shape already exists in this codebase: defer a flash write
+  while an upload is open, the way the manager already defers its re-index.
+- **`playerQueue overflow` DURING A DELETE BURST IS THE SAME STARVATION, and `hDelete` now drains the queue.**
+  `Player::sendCommand()` drops a command and logs its type when the 10-slot `playerQueue` is still full after
+  `PLQ_SEND_DELAY` (100 ms); the number printed is `request.type` (1 PLAY, 2 STOP, 3 PREV, 4 NEXT, 5 VOL, 6 CHECKSD,
+  7 VUTONUS, 8 BURL, 9 TOGGLE).  The ONLY drain is `player.loop()` in `loop()`, gated on
+  `status == CONNECTED || SDOFFLINE`, plus the two opportunistic calls in `SDManager::listSD()`.  The producers are the
+  1 Hz `ctimer.attach(1, ticks)` (the "1ms" comment in `startup.cpp` is stale - `attach()` takes SECONDS) with `divrssi`
+  halving it, so `PR_CHECKSD` and `PR_VUTONUS` arrive about once per two seconds; a whole-card burst that blocks the
+  main loop on the shared bus for seconds per file therefore fills the queue and starts dropping ticks.  The delete
+  batch loop now calls `player.loop()` once per item, exactly as the index walk does, and the commands execute in that
+  task exactly as they already do there.  **Still open and NOT fixed: `SOFT_AP` and `FAILED` are outside the drain
+  gate, while `ticks()` is not gated on status at all - so in AP mode commands accumulate, get dropped, and a stale one
+  can sit in the queue until the status changes to `CONNECTED` and then fire.  `config.changeMode()`'s
+  `player.resetQueue()` is the existing answer to that hazard.**
+- **The upload writes ONE CLUSTER per file system call, via CMD25.** A multipart chunk is ~1436 bytes (a TCP segment,
+  never a multiple of the 512-byte sector), so writing each as it arrives misaligns the file position for ever and FatFs
+  falls back to its per-file sector window: one CMD24 per 512 bytes, each with its own select, command, status check and
+  deselect. Instead filemanager.cpp holds the bytes until a whole allocation unit is ready and hands it over in one
+  write. FatFs's direct multi-sector path runs because the write starts on a sector boundary and is several sectors
+  long, and FatFs clips it to the current cluster - so a cluster-aligned write reaches the driver as ONE
+  WRITE_MULTIPLE_BLOCK (CMD25) with CMD23 declaring the count, instead of 128 CMD24s on a 64 KB card. The driver's own
+  partial-burst recovery (SEND_NUM_WR_BLOCKS) covers a burst that breaks. A fragmented file is fine: the clip is per
+  cluster, so one call is still one cluster.
+  - **The unit is the card's own cluster size**, read at mount (`SDManager::allocationUnit()`), capped at
+    `SDMAN_ASM_UNIT_MAX` (64 KB, the largest FAT32 cluster with 512-byte sectors). A 512-byte card stands aside and says
+    so once per session; a large-unit card gets whole-cluster writes.
+  - **One buffer of `unit + SDMAN_ASM_SLACK`.** Two buffers (a tail array plus a payload array, the old experiment's
+    shape) would be about 130 KB at 64 KB, and this board's largest heap block is 127888 bytes. The unwritten remainder
+    is compacted to the front only when room runs out - in the steady state nothing moves. It is taken when an upload
+    opens (a refused or skipped file never pays), reused across a batch, and released when the manager closes; not
+    `.bss`, because a 64 KB static buffer would cost that RAM on every board whether uploads happen or not.
+  - **PSRAM first, internal heap second, logged either way.** The SD write path uses no DMA (`sdWriteBytes()` sends 512
+    bytes through `spiTransferBytes()`, which drives the FIFO in 64-byte pieces), so the buffer has no DMA-capability
+    requirement and PSRAM is legal. The choice is logged (`Cluster assembly: 65536-byte unit, 69632-byte buffer from
+    PSRAM`), which also shows whether a board's PSRAM is really enabled. If neither allocation succeeds the upload runs
+    as before with a line saying so - a held cluster must never be a condition of uploading at all.
+  - **The accounting follows the WRITE, not the arrival.** `_upBytes`, `_upVerified` and every check built on them count
+    what the card accepted, so a held cluster is not counted yet - which is why `resumeFloor()` rounds to the assembly
+    unit (a resume that began mid-cluster would misalign every write after it) and why the tail flush runs at the end of
+    the stream and again before the final size check.
+  - **The instrument is the log**: `Cluster writes for <file>: N write(s) of up to 65536 bytes, 3..8ms each (avg 5ms,
+    245 KB/s inside them)` - one line per attempt, only when the assembly wrote something. A failed burst prints the
+    driver's own `Card Failed! cmd: 0x19` (CMD25).
+  - **Measured in the field, and it works.** A 64 KB card that had managed 75-95 KB/s with refusals took a 10 MB file in
+    ONE attempt with ZERO refusals and ZERO partial writes: `154 write(s) of up to 65536 bytes, 29ms..73ms each (avg
+    64ms, 1000 KB/s inside them)` beside `Finished Upload ... 10054052 bytes moved in 55.48s, 176 KB/s, 1 attempt(s), 0
+    refused chunk(s) rescued, 0 partial(s) recovered`. 64 ms for 128 sectors is ~0.5 ms per sector, against the ~2.7 ms
+    per sector the single-sector path cost at 95 KB/s - a real, roughly five-fold CMD25 effect.
+  - **The gap between those figures is the next bottleneck, and it is not the card.** 154 writes is only ~10 s of the
+    55 s wall clock: one cluster is 46 chunks of 1436 bytes, which took ~296 ms to arrive (~220 KB/s over the wire). The
+    upload is now DELIVERY-bound, with roughly 5x headroom on the card. More speed means the network/HTTP path (and
+    possibly the display's SPI work, which competes for the CPU) - not the card and not this assembly.
+  - **Reformatting was the WORKAROUND; this is the CURE.** A 512-byte unit made the per-file sector window do one sector
+    per write, which by luck is one unit - so reformatting "fixed" the symptom by making the accidental burst size
+    correct. The assembly does that on purpose whatever the card's unit is.
+  - **It reduces refusals, it does not eliminate them, and the recovery path makes that harmless.** On the same 64 KB
+    card, a 500 MB MP4 into a deliberately fragmented file system refused once in 1257 cluster writes (82 MB in): the
+    rescue was refused too, the write was reported short, the transfer was released, and the resume finished it - one
+    round trip, not the file. Consequence: keep the whole recovery path (refusal rescue with backoff and budget,
+    short-write repair, verify checkpoints, stall release, resume protocol) - it is now the difference between one round
+    trip and 82 MB re-sent.
+  - **The 512-byte card is the regression baseline and is unchanged** - the assembly stands aside
+    (`Cluster assembly off: the allocation unit is 512 bytes, so one write is already one unit`), and 24 files (a 1 MB
+    text log, an 11.8 MB exe, a 9.4 MB exe, a 12.4 MB zip among them) all landed on the first attempt with zero rescues
+    at 82-95 KB/s.
+  - **The 8 KB-cluster card is the OTHER end, and it is why the correction chain exists.** A field run of a 2.1 MB zip
+    (9 attempts over 55 s, 37 KB/s overall) refused a chunk on nearly every transfer - `errno 5`, the rescue of it
+    refused too, `0 of 8192` written - and every attempt was salvaged by the chain around it: the verify caught the card
+    64 KB behind once, the stall release handed the transfer back, and each retry sent only the remainder (`Upload
+    stopped at N bytes with M verified ... Resuming at M`).  The unit decides SPEED, not correctness, and a card that
+    refuses writes needs this chain, not a formatter.
+  - **The throughput ladder:** 512 B ~90 KB/s; 2 KB 164-181 KB/s (409-550 KB/s inside the writes); 64 KB ~190 KB/s
+    overall (~1000 KB/s inside). Neither large unit refuses, so the difference is the COMMAND RATE (one CMD24 per 512
+    bytes against one CMD25 per cluster), and the unit decides SPEED, not correctness. At 2 KB and above the card is not
+    what limits an upload (the wire is, at ~220 KB/s); below it, it is. A formatter's default (4-16 KB) is comfortably
+    fine, so no advice to reformat is needed.
+- **The SPI upload marker and the reformat advice were removed** (the removed symbols are listed above); `au` stays in
+  the info payload and on the Open line, being the diagnostic that found all of this. The locale keys
+  `msg_spi_upload_marker`, `msg_format_au_512` and `msg_format_au_512_advice` are now unused (pruned by `* --clean
+  --sort`), and `cardFault()` reports the plain failure (`msg_write_failed`) instead of a verdict.
+- **THE DERIVED PAIR IS DROPPED ONLY WHEN THE PLAYABLE SET CAN HAVE CHANGED.**  `playlistsd.csv` and `indexsd.dat` are
+  one object in two files: the rows, and 4 bytes per AUDIO file (an offset into them) plus an 8-byte footer
+  `[magic 0x1867][count]`.  `initSDPlaylist()` validates the magic, `size == count*4 + 8`, and
+  `storedCount == sdman.countAudioFiles()` - it RE-COUNTS the card's audio files - so a change that cannot alter that
+  count cannot invalidate the pair, and dropping it was pure waste: an extra full walk plus the SDCHANGE screen every
+  time a document or a photo was uploaded.  `dropSdDerivedFiles(bool audioChanged)` now decides, and when it keeps the
+  pair it does NOT call `markCardChanged()`, which is what spares the close-time re-index, and it says NOTHING - keeping
+  them is the ordinary case and a line per upload told nobody anything, while the drop line prints ONCE per session
+  because it only fires when the pair really existed.  The four callers:
+  upload asks `sdman.isAudioName(target)`; delete asks it of each path and treats a DIRECTORY as unknown; rename asks it
+  of both names and likewise; a new folder is never audio-affecting.
+  - **The extension test is now ONE function, `SDManager::isAudioName()`**, because the conditional drop must agree
+    with the counter or a newly added track would hide until the next re-index.  The list (`.mp3 .m4a .aac .wav .flac
+    .ogg .opus`) was written out TWICE, in `listSD()` and `_countAudioFilesRecursive()`, each with a `strlwr()` that
+    lowercased the caller's buffer in place; both now call the one predicate, and the dead `_endsWith()` helper went
+    with them.
+- **The FAT-walk figure is now `Disk used: <used> of <total> bytes (<ms> ms walk)`, and it is SAID ONLY WHEN IT HAS
+  SOMETHING TO SAY** - when the figure changes, or when the walk takes longer than `SDMAN_INFO_SLOW_MS` (20 ms).  The
+  handler runs on every load, click and idle poll, so a line each time was noise; a changed figure is the only way a
+  wrong count shows up, and a slow walk is a card answering slowly.
+- **THE PAGE RECOVERS FROM A CLOSED MANAGER NOW, in both directions.**  The mode lives only while requests arrive (a
+  180 s idle clock), so a batch begun after a quiet spell meets a closed manager: `xhr.onload` used to end the whole
+  batch with "SD File Manager was closed." on the first such refusal, while the LISTING had always recovered by asking
+  for the mode again.  `startUpload()` now pokes `/sdman/enter` before the batch (the common case, gone), and a
+  `not_active` upload asks for the mode once and re-sends the same file - nothing of it was written, so nothing is
+  lost.  A second refusal is real and still ends the batch.  A refusal that is instead `no_card` is terminal: the same
+  answer reaches the page from `/sdman/enter`, `/sdman/list`, `/sdman/info` and the upload, and each one calls
+  `leaveManager()`, so a card pulled from the slot takes the tab back to "/" instead of reporting a failure it cannot
+  fix.
+- **Log conventions in `filemanager.cpp`, settled in the field.** (1) `ERRORLOG` is for a LOSS only - a failure with
+  nothing vouchable and no partial kept - because that is the only thing the user has to act on; every recoverable
+  failure is an ordinary `FUNCTIONLOG` line, which is what stopped a batch of fully-recovered transfers reading as a
+  list of failed files.  (2) ONE line per upload: the request-finished line prints only when it says something the
+  outcome cannot (the handle still open, or a transfer already failing), with its counters otherwise folded into
+  `Uploaded <file> (N bytes moved in T, R KB/s, A rescued, B recovered)` - the pair of them made a 14-file batch 28
+  lines.  (3) ONE line per close: `leave()` takes a `why` string and names the reason beside the four conditions,
+  where the idle timeout and the Done button each printed their own line above and below it.  (4) The first word is
+  capitalised on every line, so the left edge can be scanned.  (5) A line that reports a measurement reads the value
+  ONCE and prints what it tested - and if that value is the subtraction of two clocks, it must be CLAMPED:
+  `millis() - stamp` wraps to 4294967289 ms when the stamp is written by the AsyncTCP task between the two reads, and
+  the stall branch read that as forty-nine days of silence and released a live transfer with 6.4 MB in - which also
+  opens the door to a retry writing the same file as the request it superseded.
+- **A superseded request's chunks are DROPPED, by multipart index.** The index restarts at 0 for every request, so a
+  chunk whose index is below the highest this transfer has seen cannot belong to it: it is the tail of a request the
+  page already gave up on, still in flight.  Writing one would splice two transfers together, and reporting one gave
+  lines about an empty path and a card that was never asked anything (`the rescue of a refused chunk at  was refused
+  too`).  Dropped before the clock is stamped - a dead request is not activity.
+- **THE RETRY BUDGET COUNTS ATTEMPTS THAT WENT NOWHERE, NOT ATTEMPTS - resume changed what a failure means.** An
+  attempt that advanced the verified position did real work and the next one continues from there, so failing the
+  file at that point throws the progress away. A field run lost the last file of a batch exactly there: 2.85 MB, then
+  3.43 MB, then 6.47 MB of a 6,965,338-byte file - the third attempt ending 490 KB from the end - and that third
+  failure spent a budget of two retries which says nothing about how far the file got. Teardrops survived the same
+  shape of run only by having had one fewer retry. The page now counts per name: `PROGRESS_BYTES` (32 KB) of forward
+  movement makes a retry FREE, less than that spends one of `MAX_STALLED_TRIES` (2) - the file that cannot get off
+  the starting blocks - and `MAX_ATTEMPTS` (8) is the ceiling over both. A failure arriving with no `landed` at all
+  (a dropped socket) counts as having gone nowhere. **Rule for new code**: a budget on a path that RESUME makes
+  incremental must be spent by lack of progress, or it will fail the files that are nearly done.
+- **What the wasted tail costs, measured from the 40 MHz run.** A failure ends the transfer but not the request: the
+  browser pushes the rest of the file while the device drops every byte of it. Comparing the bytes the device
+  actually moved against the file sizes gives ~19.4 MB wasted across the 14-file set at 20 MHz against ~55.5 MB at
+  40 MHz - roughly 7.8 against 10.1 minutes of batch time - which is why the abort was worth building before
+  settling `SDSPISPEED` on throughput alone.
+- **One walker at a time, and the handlers that would start a second one refuse instead.** `/sdman/list` builds its
+  answer with a chunked response whose filler (`sdmanListFiller`) keeps the directory handle in module-static state
+  between callbacks, but a second request over the same handler starts the walk again and closes the handle the first
+  one is still using - the 7-14 s walks and the "listing failed" flakiness after the first one. `hList()` therefore
+  answers 409 `busy` while a listing is in flight (`_listDir` open, `_listDone` clear, and within
+  `SDMAN_LIST_ABANDON_MS` = 5000 ms of its start) and 409 `uploading` while an upload holds `_upFile`, and the page
+  retries those quietly instead of showing an error - that is what makes a refresh during an upload wait for the upload
+  rather than tear it down. The walk is also fed to the watchdog every eight entries, and the driver's own
+  `_listT0`/`_listDone` guard is the reason a torn-down response does not wedge the next one.
+- **Entry works in AP mode.** The `network.status != CONNECTED` guard was removed because it protected nothing:
+  `_switchMode()` refuses every mode change while the status is neither `CONNECTED` nor `SDOFFLINE`, so the AP screen
+  (SSID, password, address) is never taken over, and the card stays reachable as plain storage on a device with no
+  network. SD-offline needs no test of its own - `NetServer::begin()` returns before the web server starts.
+- Coupling: `controls.cpp` returns early in every physical input path while the mode is open - both encoder loops, the
+  IR loop and IR number entry, and the click, double-click, long-press-start/stop and during-long-press callbacks, plus
+  `controlsEvent()` underneath them; `display.cpp` `_switchMode()` refuses any mode
+  other than `PLAYER`/`SDMAN` while the mode is open, `commandhandler.cpp` drops commands, `Player::_play()`
+  refuses playback, and `startup.cpp`'s async services task parks while the mode is open - the same park SD playback
+  already used for its DRAM/decoding reasons, since the manager is rewriting the card and a download starting on the
+  network core is the last thing it wants. All five exist so the manager is the only thing touching the card while it
+  is open. The park is released by itself when the manager closes, Done button or idle timeout alike, within one
+  2-second poll. Holding it no longer has any bearing on the boot-stable proof: that counts from the WebUI coming
+  up (`_webUpMs`), which happens whether the services are parked or not - see the startup section.
+- The encoder guards drain rather than only returning: `encoderChanged()` is a delta-since-last-call, so skipping it for
+  a whole session delivers every detent turned meanwhile as one `int8_t` delta on the first loop after the mode closes,
+  i.e. a volume slam or a phantom station step. The long-press-stop guard also clears `lpId`, because `Controls::loop()`
+  keeps calling `onBtnDuringLongPress()` for as long as that latch is set.
+
+- **One idle clock, shared by every client, and the transients are silent.** `_lastActivity` is a single value on the
+  device, so any request from any tab or browser resets it and the on-screen countdown is that one number. `enter()`
+  refreshes it **before** its own `if (_active) return`, so a second tab loading the page silently restarts the three
+  minutes - the `open (...)` line prints only on the transition into the mode, which is why a phantom reset has nothing
+  in the log. The page's own copy of the deadline (`scheduleIdleReload()`) is armed only by responses carrying `idle`,
+  and an expired tab navigates to "/", which `handleIndex` redirects back to `/sdmanager.html` while the mode is open,
+  so that tab re-enters the mode and resets the device clock as well. The reset a user can drive on purpose is the
+  ping: `keepAlive()` on a document click (1000 ms floor) and on keydown (15000 ms), both calling `/sdman/info`, which
+  touches the clock. A click is the *only* signal a file picker leaves - the dialog is native, so neither a chosen file
+  nor a cancel reaches the page, and the countdown simply keeps running while it is open; the click that opened it
+  bought the 180 s, and clicking again is how a cancelled picker is recovered.
+- **The idle redirect is judged when it FIRES, and held for the whole batch.** `scheduleIdleReload()` tested
+  `state.uploading` only at the moment it armed the timer - and the delay it arms is the device's entire idle
+  window, so a timer set on the page's first `/sdman/info` could expire in the middle of a running batch and
+  navigate to "/", aborting the upload in flight. The device sees that as a perfectly healthy upload going silent
+  for its whole stall window, which is exactly what a field log showed, and it is why a batch ended after one file.
+  The test now happens inside the timer callback, against a batch-level flag (`state.batch`) rather than the
+  per-file `state.uploading` that `finish()` clears between files; `keepAlive()` respects it too, and only `done()`
+  clears it.
+- **The page watches upload PROGRESS, because nothing else can see a transfer that has stopped moving.** There is no
+  event for it: the device answers nothing until the last byte, so `xhr.timeout` cannot fire, and a browser that
+  stops sending produces no callback at all. A 20 s interval (`UPLOAD_STALL_MS`) aborts a file whose
+  `xhr.upload.onprogress` has not moved, and `onabort` gives it the same single retry as a dropped connection before
+  dropping it and carrying on with the batch. That is the difference between one bad file and a lost batch: the old
+  behaviour left the device waiting out its own deadline for a browser that had stopped sending.
+- **The on-screen countdown shows the upload's deadline only once a chunk has FAILED.** In that state the file is
+  already lost and the mode is about to be released, so the number is counting down to something real (the 10 s
+  `SDMAN_UPLOAD_STALL_FAILED_MS`). While the transfer is healthy the same number would be restamped by every chunk
+  and sit at a frozen 1:59, which reads as a stopped clock - so the ordinary idle clock is shown instead. The
+  deadline is still enforced by the stall branch in `loop()`; the display simply stops advertising it.
+- **Every close now names its cause, and the Done button is refused mid-upload.** Three things end the mode and
+  `leave()` alone cannot tell them apart, so each says so before calling it: `hDone()` logs `closing on request
+  (Done button)`, the idle branch logs `idle for <N>ms, closing (now, base, elapsed)`, and the card-gone branch
+  already logged `card gone for N checks`. The numbers in the idle line exist because `idleRemainingMs()` answers
+  zero for `!_active` as well as for an expired timeout: a `leave()` from the network task landing between the
+  `_active` guard at the top of `loop()` and the idle check below it used to be reported as a 180-second timeout,
+  which is a line naming a cause that branch had not caused - and it is how a close the user asked for was
+  mis-read as the browser going quiet. The branch therefore re-tests `_active`, and a base that is not what the
+  chunk touches wrote would now be visible in the line. `hDone()` also refuses with 409 `uploading` while
+  `uploadOpen()` is true, because `leave()` deletes the half-written file on purpose: a Done press from another
+  tab or another device would otherwise throw away an upload nobody finished watching. Between the files of a
+  batch `_upFile` is closed, so this only stops a close that would destroy something. The refusal is deliberately
+  inert - it does not `touch()`, so a Done press cannot be used to keep a stalled upload's mode alive - and it
+  logs `Done refused, upload in progress`, so a cross-tab refusal is visible instead of silent. The page reads that
+  answer
+  instead of navigating blindly - a 200 (the redirect the device sends, already followed by `fetch`) means
+  closed, anything else means refused, and the reason is shown with `msg_upload_in_progress`, a new key the
+  locale files do not carry yet.
+- **A slow card costs time; it does not abort the device.** Card work is slow by nature and it runs on whichever task
+  asked for it, which for the WebUI is AsyncTCP's task - and AsyncTCP subscribes that task to the task watchdog, so a
+  single multi-second operation aborts the firmware with `task_wdt: async_tcp` instead of merely delaying the page.
+  That is exactly what a 15 GB card did on entering the manager while a 7.5 GB one was fine. `sdFeedWatchdog()` in
+  `sdmanager.h` (`esp_task_wdt_reset()` plus one tick, since a tick also lets the other tasks run) is now called from
+  every long card walk: the listing filler every eight entries, the free-space figure either side of the FAT walk, and
+  the two index walks (`listSD()`, `_countAudioFilesRecursive()`), which already yielded per entry with a bare
+  `vTaskDelay(2)` but never fed the watchdog. Where the caller is not subscribed the reset reports
+  `ESP_ERR_NOT_FOUND` and is harmless.
+  - `removeRecursive()` was the last unfed walk and is now fed in both of its loops (the name collection and the delete
+    recursion), so deleting a folder holding a hundred entries on a slow card cannot abort the device - it is the same
+    multi-second walk in the same task.
+  - **Rule for new code**: any long card operation reachable from a web handler must feed the watchdog, because that
+    handler runs in the AsyncTCP task and that task is subscribed.
+  - **The subscription is deliberate** (`CONFIG_ASYNC_TCP_USE_WDT 1` in `options_overrides.h`): it turns a handler
+    wedged on a stalled SD call into an automatic reboot instead of a device that needs a power cycle. The cost is the
+    library's own 33-200 us per TCP event. Setting it to `0` in `myoptions.h` is the supported way to switch it off, and
+    it reaches the library through the force-include.
+- **The figures are recomputed on every request, never cached** - deliberately: a stale tree or a stale free-space
+  figure would be worse than a slow one, and the answer to a slow card is co-operation, not staleness. What
+  `/sdman/info` no longer does is pay for the *same* walk twice: `usedBytes()` is the walk, so the total comes from
+  `cardSize()` (the CSD the card reported at init, instant) and only the used bytes are walked, once. The cost is
+  reported rather than hidden - `figures: used X of Y, N ms` from `hInfo()` and `walked N entries in M ms` from the
+  listing - so a slow card shows up as a number in the log instead of a watchdog backtrace.
 
 ## `src/core/touchscreen.h` / `touchscreen.cpp`
 - Touch controllers:
@@ -599,6 +3678,369 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 ---
 
 ## WebUI Per-File Map (`data/www`)
+- **`player.html` carries the Playlist Editor and, in the same DOM, the Playlist Validator.** A `validator`
+  class on `#pleditorwrap` hides the play/Ovol columns and the Replace/Merge/Export/Share buttons and reveals a
+  Status column and Check All Streams, all through CSS so `submitPlaylist()`'s input indexing and `plRemove()`'s
+  `span[1]` lookup are untouched. The hide rule must outrank `.pleitem span { display:flex }` or the Status cell
+  shows in the editor - which it did; it is now `#pleditorwrap .plestatus` and the cell is centred both ways.
+  The mode is toggled from the settings gear while the editor is open, and each icon shows the mode you are
+  **in** (list icon in the editor, check icon in the Validator); closed, it is the settings gear again. Closing
+  - X or Save - resets the mode (`resetValidatorMode()`: classes, title, marks, running state) and updates the
+  gear only **after** the wrap is hidden, or the next open came up already in Validator with a toggle that was
+  "unaware". `script.js` marks each row from the `PLVALIDATE` events; a failure also ticks the row's checkbox and
+  appends a localized `(URL broken?)` to its Name once, so a saved list records the fault. While a sweep runs the
+  Check All Streams button becomes **Cancel** (`plvalidate=0`) and is the only control left active - every other
+  validator control is locked by the `validating` rule. In the Validator, Add is hidden (`pl-editor-only`); Save
+  and Undo return to **editor mode** instead of closing the overlay (editor mode still closes as before), while
+  the X still leaves to the playlist; and during a sweep the settings gear - the left-hand mode switch, outside
+  `#pleditorwrap` - is locked through `body.plvalidating`, as is `#toggleplaylist` in the toolbar, leaving Cancel
+  as the only active control. The editor list now carries `background-attachment: local`, so its striped
+  background scrolls with the rows like `#playlist`'s does. In the Validator the rows are not reorderable (the
+  `.grabbable` handle is `pointer-events:none` and `startDrag()` refuses) and the header's select-all checkbox is
+  hidden, leaving only the per-row boxes. The five new keys (`ttl_playlist_validator`,
+  `btn_pl_validate`, `btn_pl_cancel`, `lbl_status`, `msg_url_broken`) live in the **sources** with English
+  fallbacks; the locale files and the localization tools are the maintainer's (Rule #8), so the keys stay
+  untranslated until those tools are run. The editor's Name/URL columns are a **13:7 flex ratio** at the base rule
+  (URL ~35%) rather than a fixed 300px Name with URL taking the remainder, and the header Status cell uses the row
+  cell's `flex: 0 0 46px` treatment so it cannot shrink away. `clearValidationStatus()` is deliberately scoped to
+  `#pleditorcontent .plestatus`: the header cell carries `.plestatus` too, and a document-wide selector emptied its
+  "Status" label (the reserved space with no text).
+- **`editor.html` holds two sections, and each hides itself.** `conf.js` carries `editorThemes` (false on an OLED,
+  where there is no palette to edit) and `editorLayouts` (false in a build with no display, where there is no
+  registry behind the routes). The page added no locale keys, like the half it grew from.
+- **The layout half is the conf file's own structure: one card per `LayoutData` field.** The field table comes
+  from `GET /layout-elements.json` — each field's type, its own cells in the conf file's order, its group heading
+  and its flags — so the page draws a scroll as ten boxes, a slider as seven, a switch as one, and keeps no list
+  of its own that could drift. Cells hold NUMBERS and nothing symbolic is ever stored: the constants from
+  `conf.js` are used only to LABEL a value that happens to equal one (the cell's `title` reads `304 = MAX_WIDTH`)
+  and to mark a `left` or `top` that falls off the panel. **The numbers the user types are clamped to the panel**
+  (`cellMax()` / `clampEdited()`): `left` to `width-1`, `top` to `height-1`, a `width` to what is left after `left`,
+  a `height` to what is left after `top`, and the codec badge's `dimension` to the smaller of those two rooms. The
+  same limit is published as the input's own `max`, so the spinner and the browser's validation agree with it.
+  **The clamp runs only on the cell the user edits** - `fillLayout()` calls `paintLimits()` alone and `resetCard()` /
+  `clearCard()` call `onLayoutEdit()` with no event - so a value that came IN from a document is left exactly as it
+  is and the red outline still marks it, which is what keeps two shipped confs intact: `displayTFT220x176` scrolls its
+  meta/playlist/weather lines in a `DSP_WIDTH+10` window, and `displayTFT240x240round`'s volbar bleeds one pixel below
+  the bottom. A cell whose remaining room is not positive answers no limit at all rather than 0, so an already-
+  over-panel value cannot be forced to zero by clamping its width. The same source/target pair as the theme half:
+  "Load layout" lists every id and previews what it loads, with a **Reload** button beside it (and beside "Load
+  theme") that re-reads the source already selected. It is the very call the dropdown's own `change` handler makes,
+  so it behaves exactly like re-picking that profile - the way back from a mess of edits without having to choose
+  something else first - and it deliberately discards the unsaved edits, as re-selecting does,
+  "Custom Layout" only chooses where Save writes. `Save` blocks on one thing only — an empty `metaConf` or
+  `playlistConf`, which the device refuses too, because that is the one way this feature could break the device's
+  own screens — and the clock and number cards get a `fontsize` capped at 4 with its own hint, since 0 there
+  means the system font rather than "off". Export, Backup All and Import are the theme half's rules with the
+  layout's names, and a restore still packs into the FREE slots only.
+- **The layout half's switch, Reset and Clear, and the empty mark.** "Enable All Widgets for Editing" sits under
+  the Custom Layout row and is the ONLY control that is not the document: its state comes back from
+  `GET /layoutactive.json` and every press goes to `POST /editorwidgets`, so two pages open at once cannot
+  disagree about which widgets are being shown. **Round 5 made it a pair**: *Temporarily turn on …* and
+  *Temporarily turn off …* over the same ten settings (Weather, VU, VU Peaks, Battery, Invert Title, Clock Glow,
+  Paged Playlist, All Caps, Volume Page, Audio Buffer Bar), two to a row and mutually exclusive on the page. It is
+  the page's access to the device's `widgetsEditorForceOn` / `widgetsEditorForceOff`. Every theme element row and every layout
+  card carries the same pair of buttons — Reset (`\u238C`) and Clear (`\u1F5D1`, with a margin so it cannot be hit
+  by accident). **Reset copies the document the Load dropdown last produced** (`LOADED` / `LLOADED`, cached at
+  fill time), not what the device is using now, which is what makes it "undo my edits"; a key the document leaves
+  out resolves to zero/black, the device's own rule. **Clear writes zeros** — for a layout field that is not a
+  delete, it is an empty widget, which is also what the device draws for one. A card whose field is empty is shown
+  greyed and struck through, using the page's own copy of `present()` (`isEmptyField()`, type by type, with the
+  clock and digits testing all four cells and `MoveConfig` exempt).  **Round 3 replaced that inference with a
+  statement** - the checkbox bullet below - so the page no longer holds a copy of the rule at all.
+- **The layout half states presence instead of inferring it.** Every card except a bool and the two
+  `CONF_REQUIRED` lines carries a checkbox, and its off position writes that field as zeros into the document,
+  so Save, Export, the preview and `conf_tool.py` all agree with no per-type guessing. The numbers stay on the
+  page while it is off, and the card is struck through - which is also what a card shows when it is ticked but
+  has nothing set to draw with. Cells the table marks unused (`CONF_CELL_BIT`: a fill's `fontsize` and `align`,
+  the VU's `fontsize`) are labelled "unused", greyed and disabled, so a rectangle stops offering a font size.
+  Reset reads the loaded document and moves the checkbox with the cells; Clear zeroes them and unticks, which is
+  "off" rather than merely "empty".
+- **The two switches reach ten settings through one helper.** `editorOpt(stored)` in `widgetsconfig.h` is the whole
+  of it: force-on wins, else force-off, else what the user stored - that if/else IS the priority, so the pair cannot
+  collide even if a stale page had both ticked. Neither flag writes `config.store`, and a reboot clears both. Its
+  readers are the settings the editor has to be able to see either way: the VU (`vuLive()`/`vuDraws()`, its style
+  pinned to Bars for force-on), its peaks (`VuWidget::_vupeak()`), the weather (`weatherLive()`, `weatherWanted()`,
+  `weatherDetail()`, `_weatherHidden()`), the battery (present and faked at 50% for force-on, absent for force-off,
+  on the panel and in the WebUI battery row), Invert Title, Clock Glow, Volume Page, the Audio Buffer bar, Paged
+  Playlist and All Caps. `POST /editorwidgets` takes `mode=on|off|none` and `GET /layoutactive.json` answers
+  `widgetsOn` / `widgetsOff`.
+- **Two build macros became options, and a third was deleted.** `PLAYLIST_MODE_PAGED` -> `config.store.playlistPages`
+  ("Paged Playlist") and `PRETEXT_ALLCAPS` -> `config.store.pretextALLCAPS` ("All Caps"); each macro stays only as
+  the boot default, so an ILI9488 still starts paged and a build that defined `PRETEXT_ALLCAPS` still starts capped.
+  Both playlist paths are compiled now and `PlayListWidget::_paged` (taken in `init()`, so APPLYSTATE re-takes it)
+  chooses at draw time; `currentTop()` is one function with both shapes and the page carries both playlist widgets.
+  `preText()` tests the flag per codepoint, and the pretext cache key **folds the flag in** - it is keyed on the
+  caller's codepoint, taken BEFORE the transform, so without that a toggle would keep serving the capped entry.
+  The WebUI never case-transforms: the All Caps option (`config.store.pretextALLCAPS`) reaches only `preText()`,
+  and the stylesheet carries no `text-transform` driven by it.
+- **The numeric signal form is a percentage, not dBm.** `Display::_setRSSI()` passes `rssiPercent(rssi)` to
+  `_rssi->setText(value, rssiFmt)`: 2% per dB from -100 (0%) up to -50 (100%), saturating at 100% above that, which is
+  the same coarse scale the five-step bar form already uses. The wording stays the conf's `rssiFmt`, so a conf shows
+  the sign with `%%` (`"WiFi %d%%"`); a bare `%` before the closing quote is an incomplete conversion and is not
+  valid - exactly as `batterytxtFmt[] = "%d%%"` already demonstrates.
+- **`conf_tool.py`'s master parse checks itself, and a comment's braces are ignored.** `Master._parse_struct()` used
+  to count braces on the raw line, but `/* MOVES   { left, top, width */` never closes its own `{`, so the scan ran
+  past the real end of `struct LayoutData` and read every later `type name;` as a member. Round 5's
+  `return stored;` was the first such line, which put a phantom `.stored` field into the conf `--fromjson` wrote -
+  a designated initialiser for a member that does not exist, so that conf could not compile. Two fixes: the count now
+  goes through `count_braces()` (which strips comments), the header comment is balanced in the master, and the parse
+  `die()`s if its field count disagrees with the struct's own `LAYOUT_FIELD_COUNT`. Note `--clean` KEEPS an unknown
+  field rather than deleting it (it reports "no master slot, kept in place"), so a stray line is a hand edit.
+- **`BOOTLOGOTOP` is never revived inside a layout.** `conf_constants()` handed it to `symbolise_number()`, so a cell
+  that happened to equal it came back as the macro name - but it is the boot logo's own anchor and its value is
+  conditional (`#if BIG_BOOT_LOGO`), so a layout spelling it would move when the boot logo option changed.
+- **A zeroed `weatherMove` now hides the line.** `_weatherHidden()` gained `yieldsNoVU` beside `yieldsToVU`, so each
+  MOVE's zeros hide its widget in the state that move governs: `clockMove`/`weatherMoveVU` while the meter is live
+  and playing, `weatherMove` while playing with it off. `applyMove()`'s `moveZeroed` guard STAYS - it is what keeps
+  the hidden widget from also being dragged to (0, 0) and drawn there before the lock erases it. That change touches
+  exactly one shipped cell: `displayTFT480x320conf.h`'s "Big Text" entry, which is `{ 0, 0, 0 }`.
+- **A MOVE that changes nothing no longer repaints.** Because an all-zero move means HIDE (the bullet above), a
+  conf spells "this state leaves the line alone" as the widget's OWN position - `displayOLED256x64conf.h` writes
+  `weatherMove = { TFT_BORDER, 64-13, 0 }`, which is exactly what `weatherConf` already gives the line.  Moving a
+  widget to where it is costs an erase and a redraw of identical pixels, and the gap between those two panel
+  passes is a background-coloured tear across the widget's span - the whole span, not just the text, because a
+  scrolling line records its span (`_spanPainted()`) as the rectangle `_clear()` erases.  That was the reported
+  "line torn through the weather's row" on every start and stop of the stream, and the start never showed it
+  because the line is still hidden then, so `if(_active && !_locked) _clear()` skips the erase - the same code,
+  one state apart.  The guard is `Widget::moveIsNoop(MoveConfig)` for a move being applied (consulted by
+  `Display::applyMove()`, after its `moveZeroed()` test) and `Widget::atBackPosition()` for the way back, which
+  retires `_moved` and returns without erasing or drawing.  `moveTo()` itself is deliberately unguarded: the
+  dialog's own `_updValue->moveTo(...)` must still be able to paint a widget that has never been drawn.  See
+  `plans/move-noop-flicker.md`.
+- **The buffer bar's `outlined` frame is visible now.** `SliderWidget`'s fifth argument is the frame colour and
+  defaults to 0 (black); the volume bar passes `theme.volbarout` but the buffer bar passed nothing, so its frame was
+  black on black. It now passes `theme.buffer`, at both the constructor and the `init()` sites.
+- **Downloads carry the panel, and an import checks it.** `dspSuffix()` (in `netserver.cpp`) appends `_TFT480x320` /
+  `_OLED128x64` to every exported name and turns spaces into underscores, so the suggestion is
+  `ehRadioLayout-Big_Text_TFT480x320.json`; `/conf.js` gained `var dspFamily='TFT'` for it and for the editor's
+  `Display type: TFT 480x320` line under the Layout Editor heading. And `importLayout()` now refuses a foreign
+  document by name (`That file is for 320x240 - this display is 480x320!`) for both a single file and a Backup All;
+  a document with no `screen` is still accepted, since that field is not something a hand-made file must carry.
+- **`weatherLive()` is the weather's one VISIBILITY gate, and the editor's switch opens it** - the same shape as
+  the meter's `vuLive()`. `_weatherHidden()` was never enough on its own: the *content* is gated separately. Round 4
+  corrected the round-3 note here, which had the symptom wrong. There are **two** questions and the switch answers
+  both without ever touching `config.store`: `weatherWanted()` (`config.store.showweather || widgetsEditorEnabled`)
+  opens the two FETCH gates in `network.cpp`, and `weatherDetail(stored)` (`stored || widgetsEditorEnabled`) pretends
+  all four detail flags for `buildWeatherString()`, so the line shown is the longest one any layout could show.
+  `LAYOUT_SAMPLE_WEATHER` is deleted - it only ever appeared because turning the switch on kicked off a real fetch,
+  so with weather off the line was visible and empty. The `/editorwidgets` route now sets `network.forceWeather = true`
+  and calls `buildWeatherString()` on the way ON (so it fetches now rather than at the next interval) and calls
+  `buildWeatherString()` again on the way OFF. Accepted consequence: a device with no API key sits on
+  `l10n(L10N_LBL_W_LOADING)`, and a real line's length varies with conditions.
+- **The VU's orientation is `vuConf.align`, and the two booleans are gone.** `boomboxVU` and `rotateVU` were two
+  `LayoutData` fields for one idea, and `VuWidget` already treated them as mutually exclusive with `align`: every
+  `_config.align` test in `widget_vu.cpp` is reached only when `!_rotate`. They are removed, `LAYOUT_FIELD_COUNT` went
+  32 -> 30, and so did the two `extern const bool*` pointers and `display.cpp`'s table entries. `WA_LEFT` is the default,
+  `WA_CENTER` the boombox form, `WA_RIGHT` rotated 90. `VuWidget::init()` reads `_rotate` from `WA_RIGHT` and `bb` from
+  `WA_CENTER`, which leaves **every `!bb` branch unreachable** — deliberately LEFT in place rather than swept, because
+  deleting them is a large edit for no behaviour change. `displayTFT284x76conf.h`'s Default was the tree's only
+  "horizontal but not boombox" meter and became boombox (the user's call). The align rewrite (8 rotated layouts ->
+  `WA_RIGHT`) was a throwaway script; `--clean` then dropped the fields from all 14 confs and re-texted the header.
+- **A fill's dead cells are `0`, and the round trip says so.** The master's two `FillConfig` headers became
+  `{{ offset, top, 0, 0 }, width, height, outlined }` and every value `{{ 0, 0, 0, 0 }, ...}`: a fill reads neither
+  `fontsize` nor `align`, and every conf wrote `WA_LEFT` (= 0) there, so it is a spelling and not a change.
+  `conf_tool.py --fromjson` follows the header - a fill's `align` cell comes back as the number, not a `WA_*` name -
+  while the VU's header keeps `align` a name, because there it is the orientation.
+- **A preview must re-apply the MOVEs, and the debounce is 3 s.** `_applyState()`'s staged branch re-applied the locks
+  but not the moves, so editing the weather while playing with the meter on drew the line at its conf position (over
+  the meter) until the next play/stop; it now calls `_layoutChange(player.isRunning())` at the top, exactly as
+  `_switchMode()` already ends. `PREVIEW_DELAY` at `editor.html` is 3000 ms, shared by both halves, raised from 1000
+  because the rush of previews could overwhelm the device and crash it.
+- **The theme grid's action column moved to the END and lost its Clear button.** An element's "nothing" is
+  black, which is what Reset already puts back, so the trash can had no separate job on that half.
+- **`paintHint()` took three arguments and one call site passed two.** `onLayoutEdit()` called
+  `paintHint(f, c.inputs[cell.key])`, so the *cell* parameter received an input element and `inp` was undefined —
+  a `TypeError` on every keystroke, thrown inside the handler, which is what killed the debounce and the live
+  preview for the layout half. Both call sites now pass `(field, cell, input)`.
+- **`editor.html` — the theme editor and the layout editor, reached by typing the URL or from the options page's
+  Danger Zone button** (`data-command="editor"`, which opens `/editor.html` in a new tab rather than replacing the
+  settings page - the one navigation in that switch that does not move the current document). Its label is split by
+  capability, the way the switch itself is: "Theme Editor & Layout Editor" where the build reports `group_tft` (the
+  theme routes' own guard, `DSP_TFT`), "Layout Editor" alone where it does not. The button sits in a
+  `hidden dangerzone` row that only the three unlock switches reveal - `checkDangerZone()` walks that class, not an
+  id - and the button itself carries `hidden group_display`, so the `act` handler unhides it only on a build with a
+  display. The two gates therefore live on two elements and neither can undo the other, which is what the nesting
+  is for: a build with no display compiles none of the editor's routes and the page would hide both of its own
+  halves there. It deliberately does not follow the WebUI's `group_*` conventions; it loads `style.css` and
+  `variables.js` like any other page, but its colour fields show the theme's own values, never the palette's.
+  Its script is inline, per the
+  rule below. Two rows: "Load theme" (the source) and "Custom Theme" (the target, with Save, Delete, Export,
+  Export All and Import beside it — every one of them acts on the target or the slot list, so they belong on
+  its row). "Load theme" lists every id,
+  empty slots included, and both *replaces* the grid and shows it on the panel when changed, because a load
+  changes the grid as much as an edit does and should look the same. "Custom Theme" only chooses the slot and
+  never touches the grid, which is what makes copy-tweak-save-to-another-slot work. The two lists decorate
+  the slots their own way — the source reads "[ Custom Theme 1 ] Name" and just "[ Custom Theme 2 ]" when
+  empty, the target reads "[ 1 ] Name" and "[ 2 ] (empty)" — so the list itself says what Save would
+  overwrite and no separate hint line is needed. There is deliberately **one button that commits**: `Save`
+  writes the slot and makes it the theme in use. Everything else is feedback — every edit is sent on a
+  debounce as a preview, so the panel follows along while a colour is hunted for, and that preview has no
+  button or checkbox of its own. Which loads preview is gated by the `quiet` flag, which marks the two fills
+  that must NOT touch the panel: the one on page open, and the one after a delete (where the device has
+  applied the fallback itself). Without that gate, merely opening the page would repaint the device with
+  whatever theme the page happens to start on. The page **opens on the theme the device is using** — the id
+  comes from `GET /themeactive.json` and that theme is what fills the grid — rather than on the first
+  built-in, so a fresh page cannot quietly commit something nobody chose; the fill is quiet, because that
+  theme is already on the panel. The status line sits above the grid rather than under it, where a page this
+  tall would have hidden it. `Delete` needs a second click, in the spirit of the danger zone. `Export`
+  downloads the selected slot through `GET /xtheme.json?slot=N` — from the device, so the file is byte for
+  byte what a save would write and can be posted straight back through Save, which is the only reason it can
+  be trusted as a backup before a filesystem reflash. `Backup All` downloads every filled slot through
+  `GET /xthemeall.json`, and the device decides the shape: one theme comes down as that theme's own document
+  (so the two buttons agree when there is only one to export), several as the array. Both **suggest a file
+  name** through `Content-Disposition`, so the browser's save dialog arrives pre-filled: `ehRadioTheme-<theme
+  name>.json` for one, filtered to what a file system will take and with an RFC 5987 form alongside when the
+  name carries accents, and `ehRadioThemes-Backup.json` for the set. The RFC 5987 `filename*` value is written
+  **unquoted** and has to stay that way: a closing `"` after the `.json` is not a delimiter there but part of the
+  value, and the browser saves the file as `.json_`, replacing the illegal character with an underscore. `Import`
+  reads a chosen
+  file locally — it never leaves the browser until it is written — and splits by shape. A **single theme** is
+  written into the selected slot and becomes the theme in use, exactly like Save, overwriting that slot with
+  no warning: it is the one import that can destroy something, and it can only ever touch the slot the user
+  chose. An **array is a restore**, written into the **free** slots in ascending order and never over an
+  occupied one, each with `use=0` so putting themes back does not change what the device is playing. A backup
+  is a set of themes rather than a map of where they sat, so the slots are packed and the file carries no
+  placeholders — and the confirmation names the slots used, because they are not the slots the themes came
+  from. **Capacity is checked before the first write**: more themes than free slots aborts the whole restore,
+  writes nothing and says so in red (`That file has 4 themes but only 2 slots are free. Delete some themes and
+  try again.`), which is also why the arming step is gone — a bulk import can no longer overwrite, so a second
+  confirm click would protect nothing. The free-slot list is asked for fresh from `themeall.json` rather than
+  trusted from page state, since it decides the whole import.
+- **The element column reads as English, and the header switches it back to the .h names.** Each row's first
+  cell shows the label from `/theme-elements.json`, with the key in its `title`, and clicking the `Element`
+  header rewrites every cell in place between label and key. The header stays a header — plain text, pointer
+  cursor, a dotted underline on hover, deliberately **not** a button, because it is the column that changes and
+  not the page — and it obeys the same rewrite-don't-rebuild rule as the dropdown labels. The view is not
+  persisted, so every load starts friendly, and the column keeps only the label or key it needs: the document
+  and the wire stay keyed by key throughout.
+- **The theme name has its own row above the table, and the R/G/B fields step in 565 levels.** The name was
+  the first row of the `<tbody>`, which put it in the element column and made it read as that column's header;
+  it is not part of the grid, so it now sits in an `.erow` above it labelled `Name` (the id and everything
+  that reads it are unchanged). The colour fields offer the levels the panel actually holds: red and blue step
+  8 up to 248, green steps 4 up to 252, and the number shown is the level times its step — `r5 << 3` — so every
+  click is exactly one level and nothing can be typed that silently collapses onto the colour next door. 248
+  and 255 are the same red (`r8 >> 3` is 31 for both), so the field's maximum reads 248 rather than 255 and
+  249-255 are simply not offered; a value typed between two steps is snapped to
+  the nearest one when the field loses focus; and the `565` column plus the swatch stay the authoritative
+  reading. Presentation only — the wire format, the files and `RGB(r,g,b)` are untouched.
+- **Each field carries its own row index, and the preview debounce is a named constant.** `buildGrid()`
+  captures the row in the listener, so `onEdit(idx)` and `onSwatch(sw, idx)` paint the row that fired rather
+  than looking one up: the earlier version used `document.activeElement`, and a click on the spinner arrows
+  fires `input` **without focusing the field**, so it painted nothing while still sending the preview — a
+  panel flash with a swatch and a 565 cell stuck on the old value. The panel is repainted after
+  `PREVIEW_DELAY` (1000 ms) of quiet, because a preview is a full widget re-init and a colour hunt should not
+  be twenty repaints.
+- **Each row's acts column reads `⇤ 🗐 ⎌` - paste, copy, reset - and the clipboard is a 565 value.** `CLIP` holds the
+  copied colour in the device's own unit, so nothing is rounded twice and what the row shows is what gets pasted:
+  copy reads `row565(i)`, and paste is `setRow(i, CLIP)` + `onEdit(i)`, which is exactly the path a typed edit takes
+  (levels, swatch, 565 cell, debounced preview). The pair is always visible - the column is long and a hover-only
+  control would be a hunt - but **the glyphs never change colour**: only the paste box under the pointer does, in the
+  clipboard's own colour (`border-color` from `--clip`, published on `#grid` by the copy), and the copy box keeps the
+  ordinary `#bbb` hover - a copy icon drawn in the colour read as if it held one itself. The arrow points **left**
+  because the cells it writes are to the left; in `webui_tool.html` the circle is to their right, so there it points
+  right. The page's message line reports the hex that was copied or pasted, which the numbers alone do not make
+  obvious.
+- **An initialiser is not a refresher, and a page must not rebuild what the user is editing.** `editor.html`
+  builds its grid exactly once. After a save or a delete it refreshes only the dropdown *labels*, in place,
+  by rewriting the text of the options that already exist — because the id set never changes, only which
+  ids hold a theme. Calling the initialiser a second time emptied the table body, rebuilt every row as a
+  fresh empty input and re-created both selects, which blanked every field and snapped the source dropdown
+  back to its first option while the user was looking at it.
+- **Keep a script inside its page when only that page uses it.** Every file in `Config::wwwFiles[]` is fetched
+  separately by the OTA updater and each fetch pays its own HTTPS handshake, so fewer files means a faster update for
+  every device in the field - the byte count of the file barely matters beside that. `search.html`, `curated.html` and
+  `sdmanager.html` therefore carry their own `<script>` block inline, while `script.js`, `script2.js`, `variables.js`
+  and `curated_variables.js` stay separate because more than one page loads them. Removing a file from `wwwFiles[]` and
+  from `data/www` must happen together, and firmware plus filesystem must then ship together: older firmware still lists
+  the name and reports a missing file.
+- **The VU's pixel budget is told to the page, and the page spells it out.** `VU_MAX_WIDTH` / `VU_MAX_HEIGHT`
+  (280 / 140) moved from `widget_vu.h` to [`widgetsconfig.h`](../src/displays/widgets/widgetsconfig.h), so three
+  readers share one home: `vuResolveBox()`, `conf_index.h` (which lends them to the page as `CONF_VU_MAX_WIDTH` /
+  `CONF_VU_MAX_HEIGHT` through `/conf.js`'s `confDsp`, beside `dspFamily`), and a build with no display, which
+  still compiles the header. `editor.html` prints a line above the VU BANDS group - `Max Width: 280 / Max Height:
+  140 will be enforced if the VU exceeds the pixel budget. This VU uses: N / 39200 maximum pixels.` - from
+  `vuBoxResolved()`, which mirrors the device's own resolution. Informational only: nothing is clamped on the page,
+  the device has the last word. (Round 8 dropped a trailing `, so it is drawn about W x H.` from the over-budget
+  case: it described a box the widget no longer always draws, and could not be true at all for one that bails.)
+- **`Temporary On` pads the three text lines, so the widgets' widths are visible on the panel.** `Display::editorFiller()`
+  in `display.cpp` appends about one panel width of `" ~]"` (`DSP_WIDTH / 18 + 12` units, at the system font's 6 px
+  cell) to the station name and to each title half while `widgetsEditorForceOn` is set AND the stream is playing. It is
+  applied where the text is handed to the widgets (`_station()`, `_titleTexts()`), so the conf and the page stay
+  untouched, and it over-fills deliberately - a scroll widget truncates to `WIDGET_BUFF_SIZE` regardless. The centre
+  column of the two-switch row gains ", and some extra characters to titles."
+- **A zeroed MOVE comes back unticked, and `conf_tool.py` spells it `{ }`.** The card checkbox now asks "is any cell
+  set" (`anyCellSet()`, MOVEs included), while `allCellsZero()` stays the different question "would the device draw
+  nothing" - a MOVE stays exempt there, so a zeroed move is never struck through. `is_empty_field()` stopped exempting
+  `MoveConfig` for the spelling, `MOVE_EMPTY_TEXT = '{ }'` has no `// unused` comment, and `emit()` normalises a
+  `{ 0, 0, 0 }` to it - so the imported "Big Text" entry in `displayTFT480x320conf.h` came right on the next sweep.
+- **The VU's box is resolved ONCE, at load, and the widget draws what it is handed.** `vuResolveBox(LayoutData&)`
+  (declared in `layoutregistry.h`, defined in `layoutregistry.cpp`) is called from `Display::_setLayoutPointers()`,
+  the one place every copy into `activeLayout` passes through - `layoutCopy()` for a compiled conf or a LittleFS
+  slot, `layoutStagingCopyTo()` for the editor's push. Two rules, in this order: a box over the budget by AREA is
+  clamped to the 280x140 rectangle BY ITS SIDES and the clamped sides are written back into `bandsConf` (the same
+  rectangle `resolveScreensaverBox()` produces, so the player's meter and the screensaver's stopped disagreeing),
+  with `vuConf.left/top` untouched; then a box that runs past the panel (`left + boxW`, `top + boxH`) is **not
+  drawable**. `VuWidget` took a `drawable` flag (ctor/init parameter, default true) carried in
+  `Display::_vuNotDrawable`: when it is set no canvas is allocated, `ready()` is false and `_draw()`/`_clear()`
+  return immediately - but the widget stays PRESENT, so the clock and the weather still hide as though the meter
+  were there (the neighbours' gates were deliberately left alone). `VuWidget::init()`'s scale-and-recentre budget
+  block and `vuScaleToBudget()` are gone. The stored slot keeps the typed numbers, so the editor's warning still
+  has something to point at.
+- **A text size of 0 is not a size, and `layoutSanitize()` is where that is enforced.**  The cell means two
+  different things, and `conf_index.h` already records which: on `numConf` and `clockConf` it is a size INDEX
+  whose 0 IS the system font (`CONF_FONT_INDEX`), and three shipped confs ask for it - the 128x32 OLED, the
+  284x76 and the 160x80 set both to 0; on every other field it multiplies the system font's own cell.  A 0 there
+  collapses the row, and worse: the scroll widgets read `textsize == 0` as their own "init has not run" sentinel
+  (`_setTextParams()`, `_calcX()`, the scroll step), so a station-name or title line set to 0 in the editor's
+  font-size box stayed half-built and crashed the device.  `layoutSanitize(LayoutData*)`
+  (`layoutregistry.h`/`.cpp`) walks `_confFields` and, per field: skips the `CONF_FONT_INDEX` ones, so the clock
+  and the number keep 0 and those three panels are untouched; finds the fontsize cell BY NAME in
+  `_confCells[type]` (the cell lists own that order, so a second copy of its index would be the thing that
+  drifts) and skips it where the field marks it `unused` - a fill's is a literal 0 and the VU's is a presence
+  marker, and writing a 1 into an empty conf would flip `presentOf()`, which counts `textsize` as one of its
+  presence bits; clamps `0 -> 1` only where the field is already PRESENT, since that same `presentOf()` read
+  before the clamp is exactly "present, ignoring textsize", so an all-zero conf stays the spelling for an omitted
+  widget; and touches only `CT_WIDGET`/`CT_SCROLL`/`CT_BITRATE`.  It is called from `Display::_setLayoutPointers()`
+  beside `vuResolveBox()` - the one place every copy into `activeLayout` passes through - so a compiled conf, a
+  LittleFS slot AND the editor's staged push are corrected, including a slot that already holds a 0, which a
+  parser-side clamp would leave crashing on every boot.  `editor.html` sets the font-size box's own `min` to 1
+  wherever the field is not `CONF_FONT_INDEX` (and keeps `0`, `max` 4 and the "0 is the system font" title where
+  it is), and `clampEdited()` now enforces that floor as well as the panel-derived ceiling - typed or pasted, not
+  only spun.  See `plans/layout-fontsize-clamp.md`.
+- **A widget's box must be checked against the PANEL, not only against the budget.** The budget bounds an area, so
+  a box inside it can still be placed past the edge: band width 220, gap 35, `offset` 10 gives a right edge of 485 on
+  a 480 px panel. `VuWidget::_blit()` hands `setAddrWindow(offset, top, _cw, _ch)` to the driver with no edge test,
+  and the canvas is allocated at the box size, so an off-panel box can both fail to allocate (nothing ever draws)
+  and write outside the panel. That is why the bail above exists, and why `editor.html`'s `paintWarnings()` now
+  marks the `vuConf` and `bandsConf` cells that put the box past the edge - advisory only, the save is never refused.
+- **`TFT_FRAMEWDT` is `TFT_BORDER` now.** The old name said "frame width" for a value that is the edge inset - a
+  margin - so round 8 renamed it across the 16 conf headers, `conf_index.h` (`CONF_FRAMEWDT`, unchanged as the page's
+  name), `display.cpp` and `widgets.cpp`. `conf_tool.py`'s `emit_import_entry()` rewrites a community conf's
+  `TFT_FRAMEWDT` to `TFT_BORDER`, which is the only macro NAME that tool handles at all since the number→name
+  revival was removed.
+- **A widget's first cell is `offset`, and it was called `left` because that is true for one of three settings.**
+  It is the widget's distance from the edge `align` names: `WA_LEFT` gives `x = offset`; `WA_RIGHT` gives
+  `x = width - textwidth - offset` (a right margin); `WA_CENTER` makes it the left edge of the span the text
+  centres in (`TextWidget::_realLeft()`, and a scroll always brings a span), while the clock instead centres on the
+  screen and ADDS it (`ClockWidget::_getTimeBounds()`). So it is neither ignored under Centre nor symmetric. Round
+  9 renamed the member, the cell key and the label (the editor shows "Offset"); `presentOf()` followed; and the
+  twelve accessors (`.widget.offset`, `c->offset`, `_config.offset`, `wc.offset`, `apPassConf.offset`,
+  `clockConf_ptr->offset`, `vuConf.offset`) went with it - while `VuBox::left`, `_clockleft`, `_oldleft` and
+  `_realLeft` were deliberately left alone. A MOVE keeps `left`/`top`: those are absolute destination coordinates
+  and a `MoveConfig` has no `align` at all. No conf file can break from this, because an entry is positional and
+  the name survives only in COMMENTS - and `conf_tool.py` reads cells positionally too, so what it sees change is
+  only the JSON key a document carries (the slot files are the device's own). The editor needed two hard-coded keys
+  moved with it: `paintWarnings()`/`vuBoxResolved()`'s `'offset'`, and - the one that would have failed silently -
+  `LIMITED_CELLS`, which is keyed by cell name and drops a limit whose key matches nothing.
+- **A cell a type offers but its widget never reads is greyed, not hidden.** `BitrateWidget::_draw()` reads
+  `offset`, `top` and `dimension` and never `align`; the centring inside the badge is its own square, which is what
+  made it look as though it might respect one. `fullbitrateConf` therefore gained `CONF_CELL_BIT(3)`, the same
+  treatment a fill's dead `fontsize`/`align` cells get.
+- **A Temporary switch re-sends the document.** `/editorwidgets` only flips `widgetsEditorForceOn`/`Off` and
+  rebuilds the weather string, so on its own the following re-apply settles on the STORED layout and every unsaved
+  edit on the page snaps back - which is what "ticking Temporary On reverted my layout" was. `pushWidgetMode()` now
+  clears `layLastSent` and calls `layoutPreview()` once the switch has been accepted, so the same document follows
+  it the way a field edit already did.
 
 ## `data/www/script.js`
 - Main runtime script.
@@ -608,34 +4050,98 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - dynamic page loading (`player`, `settings`, `update`, `ir`)
   - shared page bootstrap helpers for logo/version/i18n application
   - safe lazy fallback for script2-exposed functions (`ensureFunctionLoaded`)
-  - control dispatch from DOM (`data-command`)
+  - control dispatch from DOM (`data-command`): the press resolves against the NEAREST holder, walking up from the
+    innermost `div`/`span`/`li`, so a command wrapper may carry a label div of its own and still fire
   - playlist editor/import/export logic and curated integration
   - online update UI progress handling
   - shared ready-aware redirect helper (`redirectWhenReady`) used by update and reboot flows
+  - mode switching (`changeMode`) and its guard state (`setModeSwitching`)
+- **A press that changes something stays lit for a moment.** The `data-command` handler adds `.pressed` to any button
+  carrying `hold` and removes it after `HOLD_MS` (2 s), restarting the timer on a repeated press; `style.css` gives
+  `.pressed` exactly the hover colours, so a touch screen - which never fires `:hover` - sees the press too.
+- **A mode switch blanks the page and locks it, and the page never has to guess when it is over.** `changeMode(el)`
+  flips the two mode icons, calls `setModeSwitching(true)` and only then sends `newmode=`, so the icon, the blanked
+  list, the loader and the lock all happen in the same tick as the press; `setModeSwitching(true)` puts the `plloader`
+  spinner into `#playlist` (the same markup `generatePlaylist` uses), empties `#pleditorcontent` so the editor cannot
+  offer the mode being left, and sets `body.switching`, which `style.css` turns into a dim plus `pointer-events: none`
+  over every `.gb` control and over the playlist. Two signals then come back, with distinct meanings: `playermode`
+  **with a changed mode** is the START of a switch (sent at the start of `Config::changeMode()`, before `sdman.start()`
+  and before the card is verified or indexed) and the page only locks - it does not fetch, because an answer now is
+  either the list being left behind or one still being rewritten; `playlistready` (request type 35) is the END, sent at
+  the end of `changeMode()` and at the end of the deferred rebuild in `FileManager::loop()`, and that is what unlocks
+  and fetches. It is sent even when a build produced nothing, deliberately: the page waits for the device to STOP
+  TRYING, never for a build to succeed, or a card that refuses a write would leave it locked behind the loader. It is
+  also sent when a client connects, so a page opened mid-switch still ends up with a list, and the first `playermode`
+  after a load only establishes which mode we are on (`_modeKnown`) rather than counting as a switch. A backstop timeout
+  releases the lock if the device never answers. The two branches of the icon flip were the wrong way round for a long
+  time - each hid the icon just pressed and then showed that same icon again - so the flip never happened locally and
+  only the device's message ever did it, which is after the work.
 - Reboot/update redirect nuance:
-  - `redirectWhenReady(...)` only redirects after it has observed at least one not-ready state, preventing a false-positive redirect against the still-running pre-reboot instance.
-  - `/ready` probes now use a short client-side fetch timeout so reboot/reset flows do not stall waiting on a dead device connection during restart.
+  - `redirectWhenReady(...)` only redirects after it has observed at least one not-ready state, preventing a
+    false-positive redirect against the still-running pre-reboot instance.
+  - `/ready` probes now use a short client-side fetch timeout so reboot/reset flows do not stall waiting on a dead
+    device connection during restart.
   - reboot and update redirect calls now explicitly apply a 1-second post-ready grace in JavaScript before navigation.
-  - manual upload completion now uses a 60 second fallback, while OTA still uses 180 seconds; both can redirect early as soon as `/ready` reports true.
-  - mDNS rename (`restartmdns`) calls `MDNS.end()` + `MDNS.begin()` at runtime via `NetServer::restartMdns()` — no reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without redirect.
+  - manual upload completion now uses a 60 second fallback, while OTA still uses 180 seconds; both can redirect early as
+    soon as `/ready` reports true.
+  - WiFi "Save & Reboot" (`submitWiFi`) uploads `wifi.csv`, which the device imports before calling `ESP.restart()`, so
+    it hands the wait to `rebootSystem(...)`. The old fixed 10-second `setTimeout` guessed when the board would be back
+    and could fire while it was still down; the poll redirects the moment `/ready` answers.
+  - the reboot ceiling is 60 s and lives in `rebootSystem`'s default, so call sites pass no number. It is a ceiling only:
+    the redirect fires the moment `/ready` has been seen down and then up, and 60 s is what stops a 45 s boot from
+    navigating to a page the device is not serving yet. Uploads keep their own budgets - 60 s manual, 180 s OTA - and
+    the mDNS rename keeps 8 s because it is not a reboot.
+  - mDNS rename (`restartmdns`) calls `MDNS.end()` + `MDNS.begin()` at runtime via `NetServer::restartMdns()` — no
+    reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host
+    with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without
+    redirect.
 - consolidated with `data/www/dragpl.js`
   - Playlist drag-and-drop reorder behavior.
 
 ## `data/www/options.js`
 - Settings page behavior.
+- **The Danger Zone's unlock rows are found by class, not by id.** `checkDangerZone()` and `initDangerZone()` call
+  `setDangerZoneVisible()`, which walks `.dangerzone` with `classEach()`, so a row that belongs behind the three
+  switches joins the group by carrying the class and no second element has to be taught about it. `dangerzone_txt`
+  and `dangerzone_sw1..3` keep their ids (a label and the switches themselves), as do the `dz_reboot`, `dz_format`
+  and `dz_reset` confirm rows, which are single targets.
 - Responsibilities:
   - timezone JSON loading and dropdown population
   - locale list loading and locale switch logic
   - weather provider field visibility logic
-  - **theme/layout dropdown loading** — fetches `/themes.json` and `/layouts.json`, populates `#themeId`/`#layoutId` dropdowns, sends `websocket.send("theme=N")` / `websocket.send("layout=N")` on change
+  - MQTT credentials visibility: `setupMqttToggle()` collapses `#mqttsettings` while `#mqttenable` is off, synced on
+    click and from the `getmqtt` payload; unlike the layout-driven groups this is not a device-reported `act` token
+  - **theme/layout dropdown loading** — fetches `/themes.json` and `/layouts.json`, populates `#themeId`/`#layoutId`
+    dropdowns, sends `websocket.send("theme=N")` / `websocket.send("layout=N")` on change
   - `afterSetupElement` hook restores current `themeId`/`layoutId` from WebSocket data
   - apply handlers for locale/weather/mqtt/wifi
   - reboot/reset/format status screen with per-action behavior:
-    - reboot/reset use ready-aware return-to-root with shorter fallback (15s)
-    - format SPIFFS shows reboot status but skips automatic reload
+    - `reboot` uses ready-aware return-to-root (`rebootSystem`, 60 s ceiling, redirect as soon as `/ready` answers)
+    - `format` LittleFS shows reboot status but skips automatic reload
+    - `reset` (settings reset) does not restart the device, so it only shows the status line and reloads after 2 s
+    - `rebootSystem` keeps its `setTimeout` fallback for a page where `redirectWhenReady` is somehow absent
 
 ## `data/www/player.html`
 - Player page structure (playlist, controls, sliders, status elements).
+- The `#info` row is one line by construction: `nowrap`, no per-item minimum widths, and only `#bitinfo` flexes (it
+  ellipsises) while volume, battery, shuffle and the RSSI bars keep their natural width. `#batteryinfo` is part of that
+  row - it is not a row of its own - and carries the label from `ttl_battery` plus the percentage.
+- RSSI is a graphic, not a number: `#rssibars` holds a four-path SVG (weakest first) sized in `em` so it tracks the info
+  text at every breakpoint, with a `<title id="rssititle">` giving `RSSI: -29dBm` as the tooltip. Bars past the
+  reported level take the `.off` class and are painted `--main-bg-color` rather than hidden, so the shape never resizes;
+  a level of 0 leaves every bar unlit, mirroring the empty glyph pair the display widget draws below the last step.
+- `#shuffle` is a `.gb` button inside `#playernav`, wedged between next and the mode switch, so it is the same circle as
+  its neighbours at every breakpoint and inherits the `.active` states from that family instead of carrying rules of its
+  own. The `playermode` branch in `script.js` is still what shows it in the SD player only, so the info row is left with
+  volume, codec, battery and the bars.
+- `#mutebutton` is a 38x25 pill to the LEFT of the volume slider in `#volrow`: the slider's height, its 13px radius,
+  and the round controls' palette (`--icons-outline` at rest; `--highlight-fill` background with
+  `--icon-active-glyph` while muted, hover under the mouse-only query only), so a lit pill reads like a lit `.gb`.
+  The glyph carries a cropped `viewBox` (`1.6 3.6 20.5 17.0` — the artwork's own bounds plus about 0.4 units of
+  air, not a stretched drawing) sized 24x20, which is why its lines sit roughly a pixel off the border instead of
+  floating inside a 24x24 box. It is a `cmdbutton` with `data-command="mute"`, so the click path needs no JS and no
+  local toggle — `setupElement` mirrors the device's state onto `.active`. It is deliberately not a `.gb`, so the
+  breakpoint circle sizes do not apply, and the EQ overlay covers it exactly as it covers the slider.
 
 ## `data/www/settings.html`
 - Settings page structure with grouped sections and `data-command` bindings.
@@ -646,34 +4152,162 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 
 ## `data/www/ir.html`
 - IR recording and assignment UI.
+- Every `.irbutton` carries a `data-irid` name (`power`, `mute`, `up`, `down`, `prev`, `next`, `play`, `mode`, `number`,
+  `n0`…`n9`) that maps 1:1 to the `irstore` field / NVS key, so DOM order is irrelevant.
+- The shell loads the page body from `irrecord.html`; the `/ir.html` route itself is handled by the PSRAM cache
+  fallthrough.
+- **The remote is not themed; the rows under it are.** `#irremote` uses fixed hex in `style.css`, because hardware
+  looks the same in every theme. `#irrecord` instead borrows the flat button: `checkSelect()` puts `active` on the
+  clicked `.irradio` plus its sibling `.irrecordvalue` and on nothing else - there is no row-level class - so an
+  unselected row is a `.fb` at rest (`--button-fill` / `--button-text` / `--button-outline`) and the selected row is
+  that same button pressed (`--button-active-fill` / `--button-active-text`, ring unchanged - the pair `:hover` and
+  `.pressed` use). Deliberately no hover rule: the row reports a state. `.irclear` never receives `active`, so it is
+  always a button at rest; its cross is two CSS bars in `--button-text`, replacing a base64 PNG that was fixed dark
+  grey on whatever fill the theme had.
 
 ## `data/www/search.html`
 - Search UI for radio-browser integration.
+- **Carries its own script inline** (formerly `data/www/search.js`, now the `<script>` block at the foot of the page):
+  websocket search progress, results fetch with a 404 retry, pagination, quick searches and the import hooks.
 
 ## `data/www/curated.html`
 - Curated list browsing/import page.
+- **Carries its own script inline** (formerly `data/www/curated.js`): index fetch, playlist list fetch, and the
+  replace/merge import into the playlist.
 
 ## `data/www/script2.js`
 - Consolidated helper script loaded by main shell and standalone search/curated pages.
 - Contains logic previously in `ir.js`, `updform.js`, `playstation.js`
   - station preview/play helper (`sendStationAction`)
   - online update check/start UI helpers
-  - IR setup/learn interactions (`initControls`, `checkSelect`, `irClear`, `backRecord`)
+  - IR setup/learn interactions (`initControls`, `checkSelect`, `irClear`, `backRecord`); `irbuttonClick()` sends the
+    button's `data-irid` name as `irbtn=<name>` and `irbtn=-1` on deselect
 - also consolidated with `data/www/locale.js`
   - i18n runtime helper (`t(...)`) and translation application (`applyI18n`).
   - Applies key-based translations to DOM and fallback behavior.
 
-## `data/www/search.js`
-- Search page API calls, pagination, result actions, and import hooks.
-
-## `data/www/curated.js`
-- Curated list fetch/load/import page logic.
-
 ## `data/www/style.css`
-- Primary stylesheet.
-
-## `data/www/theme.css`
-- Theme override variables/colors.
+- Primary stylesheet, and the WebUI's only palette: the `:root` block at the top declares every colour
+  variable (this was `data/www/theme.css`, folded in), followed by one `:root[data-theme="N"]` block per
+  Display Theme that changes the palette.
+- There is no lock any more: every block is processed by every mode, and a theme is finished by not editing it.
+  The old `PERFECT` title suffix went with the `--update` stage it existed to protect, and `--theme-name` is a
+  declaration rather than part of a comment.
+- On a non-TFT build there is no display palette, so the same setting is labelled "WebUI Theme"
+  (`group_webui_theme`) and the `theme` command saves `themeId` without calling
+  `display.applyTheme()` - on OLED that would only repaint the panel. On a TFT that call is compiled in, so
+  `commandhandler.cpp` has to include `dspcore.h` for `DSP_TFT` to exist there at all.
+- Variables are named by **role**, never by the colour they happen to hold, and the **62 declarations in
+  `:root` are grouped by family**: 9 family heads, 9 standalone colours and 44 members (53 roles: the generator
+  derives 50, and the other three - `--page-bg`, the window around the app column; `--list-bars`, zebra rows;
+  `--playlist-hover`, row hover - are hand-owned, though a block may set them like any other role).
+  A head - `--surfaces`, `--edges`, `--fills`, `--outlines`,
+  `--highlights`, `--actives`, `--labels`, `--infotexts`, `--maintexts` - holds the one colour and its members
+  point straight at it, so one edit moves the family and a theme splits a member by declaring that member.
+  **A head is painted by no rule and never written into a block**: a name that appears only in `:root` is a
+  head, and `theme_tool.find_families()` treats it as such (not in `ROLE_ORDER`, never inflated). The nine standalone
+  colours are `--input-border`, `--list-bars`, `--list-names`, `--logo`, `--logo-shadow`, `--logo-text`,
+  `--page-bg`, `--panel-gradient` and `--playlist-hover`.
+  **The default palette is deliberately neutral** (black/white/grey), so a theme is what adds colour. `:root` is
+  also the fallback whenever no `data-theme` is set, which is what the on-device editor shows while previewing an
+  unsaved theme; block 0 carries its own declarations like every other block. `--accent-text` no longer exists: it
+  was folded into `--heading-text` once it turned out to have no role of its own.
+  `--background` is now `--panel-background`, which says what it paints and matches the rest.
+  Families: `--surfaces` = `--panel-background` / `--scrollbar-track` / `--switch-track`; `--edges` =
+  `--panel-border` / `--scrollbar-thumb`; `--fills` = `--button-fill` / `--control-bg` / `--editor-grid` /
+  `--input-fill` / `--meter-track` / `--select-fill`; `--outlines` = `--button-outline` /
+  `--icons-outline` / `--list-outline` / `--meter-outline` / `--spinner-ring` / `--switch-thumb` /
+  `--warning-outline`; `--highlights` = `--button-active-fill` / `--highlight-fill` / `--list-active-bg` /
+  `--meter-fill` / `--switch-track-on`; `--actives` = `--button-active-text` / `--icon-active-glyph` /
+  `--list-active-text` / `--switch-text`; `--labels` = `--button-text` / `--heading-text` / `--input-text` /
+  `--link-text` / `--select-text` / `--station-name`; `--infotexts` (bright) = `--small-text` (the `#copy`
+  footer) / `--meta-text` / `--info-text` / `--eq-label-text` / `--list-urls`; `--maintexts` (dim) =
+  `--main-text` (the `body` default) / `--caption-text` /
+  `--editor-cell-text` / `--link-quiet` / `--section-title-text` / `--switch-off-text`.
+  `--info-text` is one role on purpose: bitrate, RSSI, volume and battery share the player's info row.
+  **`--control-bg` is the lit part of a checkbox or radio**: the tick of a native `input[type=checkbox]` and the dot
+  of a native `input[type=radio]` (`accent-color`, which a native control shows only while it is on), and the disc of
+  the update page's custom radio (`.checkmark`, whose ring and dot are `--switch-thumb`). The toggle switches are a
+  different widget and never use it: their groove is `--switch-track` / `--switch-track-on` and the knob is
+  `--switch-thumb`. The SD manager's round icon buttons used to be its last client; they are now an `--editor-grid`
+  ring with an `--editor-cell-text` glyph (see the preview bullet below).
+  Outside the families: `--input-border` (text-field outline), `--list-names` (editor name column),
+  `--list-bars` and `--playlist-hover` (fixed list colours),
+  `--panel-gradient` (the wash in a settings card) and the logo trio `--logo`, `--logo-text`,
+  `--logo-shadow`. `--warning-outline` is the editor
+  warning ring. The bitrate box inside a search result carried a fixed `#707070` dotted ring and now takes
+  `--list-outline`; `#equalizerbg`'s `rgba(0, 0, 0, 0.1)` veil and the validator's `rgb(0, 200, 0)` /
+  `rgb(255, 60, 60)` pass and fail stay literal on purpose, being transparency and a signal rather than theme
+  surfaces. **The IR remote is not themed at all**: `#irremote`, `.irbutton` and its blue/red keys use
+  fixed hex values in `style.css` (a real remote looks the same in every theme), so it has no palette roles.
+  The rows under it are the opposite case: `#irrecord` is painted entirely from the button roles - at rest
+  `--button-fill` / `--button-text` / `--button-outline`, and the `active` row `--button-active-fill` /
+  `--button-active-text` with the ring unchanged - so a row reads as an unpressed or a pressed flat button, with
+  no hover. The title badge and the caption keep their own roles.
+- `data-theme` is the theme's id in `themes.h` (`0` = ehRadio Blue & Red, `1` = ёRadio Gold, `2` = Graphite,
+  ...), written onto `<html>` by `/variables.js` before the first paint. A theme with no block - any custom
+  slot, or a built-in never mapped - inherits `:root` whole, so the default palette is the fallback by
+  construction. Adding colours for another theme is one block here and nothing else.
+- The theme paints the app column only: `#content`, `#searchcontent`/`#curatedcontent`, `#editorwrap`
+  and the SD manager's `#pleditor`. `html`, `body` and `#progress` use `--page-bg`, which no generated theme
+  writes, so a light or saturated theme never floods the browser window.
+- **`#playerwrap` paints nothing, on purpose.** It is the 440 px column inside the card, not a second surface;
+  giving it `--panel-background` changed nothing on a dark theme and double-framed the player on a light one.
+- **Every page is one 960 px card with a 580 px column inside it.** `#content` - the shell every fragment is
+  injected into, see `index_html` in `netserver.h` - is 960 wide with `align-items: center`, and
+  `#content > *:not(#pleditorwrap):not(#playerwrap):not(.fb)` caps its direct children at 580 - the first two
+  exclusions keep the 880 px editor and the 440 px player column out, and the third keeps a root-level flat button
+  (the settings Done) on its own `max-width`, which the id in this selector would otherwise override;
+  `#searchcontent`/`#curatedcontent` carry the same pair because they are standalone documents rather than
+  fragments. The player page has always looked like
+  this: `script.js` adds `idx` for it and `#content.idx` was the 960 px rule, now deleted at desktop width while
+  `max-width: 98%` under 1100 px remains, so the player keeps its tablet inset. `#pleditorwrap` is excluded from
+  the cap or the 880 px editor would be clamped to the column. **editor.html is deliberately not in this scheme:**
+  it is a two-column tool, not an app page, and it has no `#content`.
+- **The zebra under a list is a gradient, not a base64 PNG.** `#playlist` and `#pleditorcontent` used to carry
+  fixed images - decoded, two 39 px bands and two 32 px bands of `#272727` / `#2d2d2d` - which could not follow
+  the theme and showed as the wrong colour under a short list and behind the SD manager's
+  `background: transparent` notice rows. Each is now a `repeating-linear-gradient` in `--list-bars` /
+  `--panel-background` with the same periods (the row height of that list at the default font size) and
+  `background-attachment: local`, so the bands still scroll with the rows. The rows' own zebra remains the
+  `nth-child` rule.
+- **The editor's preview is a grid cell; only the SD manager's arrows are round.** `.pleitem span.pleplay` takes the
+  cell's shape from `.pleitem span` - square, full row height, the 1 px `--editor-grid` border - and differs only in
+  being 32 px wide with the glyph centred; that is what keeps the row's horizontal rule unbroken across the column.
+  It was a 28 px circle inset by a 2 px margin behind a transparent border, so the rule visibly stopped there, and a
+  round ring can never draw a cell's straight edge on any theme. The fill on hover and on the playing row carries
+  `!important` because the odd-row zebra paints every span in the row underneath it.
+  `body.sdman #pleditorcontent .sdiconbtn` is the round one - 22 px, ring `--editor-grid`, glyph
+  `--editor-cell-text`, no fill, `--icons-outline` and `--list-active-bg` on hover - and its cells are borderless, so
+  a circle breaks no rule; its strokes are `currentColor`, one colour driving an SVG.
+- **`.fb.done` centres with auto margins**, not the old `margin-left: calc(50%)` plus `translateX(-50%)`: that pair
+  was tuned to a 540 px parent and slid off centre as soon as the card widened to 960. `margin: 20px auto 10px auto`
+  with `max-width: 140px` is centred at any width.
+- **`body.sdman #pleditorwrap` carries no vertical padding.** The wrapper is pinned `top: 0; bottom: 0`, so the base
+  rule's 5 px and 10 px painted two bands of `--page-bg` above and below the panel; `padding: 0 5px` keeps the side
+  gaps and lets the panel meet both window edges.
+- A live theme change is applied by the dropdown handler in `options.js` and by the `themeId` key of the
+  GETSCREEN reply in `script.js`; both only set `data-theme`, the colours stay CSS's.
+- `.fb` is the flat button: `--button-fill` / `--button-text` at rest, `--button-active-fill` /
+  `--button-active-text` on hover (mouse only) and while it carries `.pressed`, which `script.js` adds for two
+  seconds after a press so a touch screen gets the same feedback. There is no permanently highlighted variant -
+  the old `.fb.hl` is gone, and the buttons that used it (Apply Changes, Save, Calibrate, the update page's
+  Cancel) are ordinary `.fb` buttons now.
+- To judge a change against every screen at once, or to build a theme block, open `src/displays/webui_tool.html` -
+  see its own section above.
+- The blocks in `data/www/themes.css` are generated by `theme_tool.py -i` when a display theme is imported, and
+  then by hand in `webui_tool.html`; `theme_tool.py --inflate`/`--deflate` (or `--deflate-lossy`) keep one lean.
+  There is no `mode=` marker and no `--update`: themes.h is written once per theme and the WebUI palette is
+  tuned after that.
+- `#info` is a one-line flex row by construction: `nowrap`, no per-item minimum widths, and `#bitinfo` the only item
+  that
+  flexes (centred, ellipsising). The old `min-width: 110px` per item plus `flex-wrap: wrap` is what used to push an item
+  onto a second row; `#batteryinfo` no longer has `width: 100%` or an `order`, so the battery shares the row.
+- Sizes that must track the text use `em`: the RSSI bars are a `1em` square, which rides the 12/14/18/21px info font at
+  the four breakpoints without a rule per breakpoint.
+- The playlist editor input carries the **same ladder as `#playlist li span.text`** (20px base, 16px at ≤375, 25px at
+  600-899, 30px at 900-1200), so a name reads the same in the list and in the editor. It is not tied to the SD manager's
+  `.sdname` any more; the editor's own spans and the playlist's count column already agreed at 14/12/18/21.
 
 ## `data/www/locales.json`
 - Locale-code to display-name mapping for selector.
@@ -693,7 +4327,230 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - common display core wrapper and API layer used by `core/display.cpp`.
 - `src/displays/widgets/widgets.h`, `widgets.cpp`, `widgetsconfig.h`
   - widget classes (scroll, text, bars, VU, clock, playlist, etc.).
-  - `SliderWidget` buffer/volume bar rendering now repaints the full inner area each update to avoid stale pixels after page/mode transitions.
+  - **The scroll mark is the widget's own.** `ScrollWidget`'s constructor and `init()` take no separator: they build
+    `_sep` from `scrollMark()`, a helper in `widgets.cpp` that owns the mark, its character and its one date, so no
+    other file names a character and changing it is one edit. The mark is `«` (`SCROLL_MARK_TEXT`, spelled as UTF-8 -
+    a bare 0xAB byte is a stray continuation to `preTextString()` and would be dropped, not drawn) and
+    `SCROLL_MARK_ICON` - a two-cell icon from `icons.h`'s `ICON_TABLE`, drawn by the display layer, so it needs no
+    font support - on Canada Day: `scrollMark()` asks `network.timeinfo` for `tm_mon == 6 && tm_mday == 1` and
+    nothing else, because a wrong clock is simply not 1 July, with `EVERYDAY_IS_CANADA_DAY` as an `#ifdef` for
+    looking at the icon on any day. `_setMark()` allocates `strlen(mark) + 1` (the old code hard-coded four bytes,
+    which is what made a two-byte mark impossible), measures it with `utf8_strlen` rather than `strlen` - the mark
+    may be multi-byte and `_sepwidth` is what the scroll cycle is measured against - and leaves the previous mark in
+    place if the allocation fails. `_refreshMark()`, first thing in `loop()`, re-asks and rebuilds only when the mark
+    actually differs, so a date that rolls over while the device runs lands on the next pass and nothing is
+    reallocated in between. `scrollMark()` is declared in `widgets.h` because the screensaver's info line joins its
+    own parts with it too - the literal `" * "` that used to sit in `_screensaverLine()` is gone. See
+    `plans/holiday-icons.md`.
+  - **A scrolling line owns its whole span, and now says so.** `ScrollWidget::_spanPainted()` records
+    `_oldleft`/`_oldtextwidth` as the span and sets `_textPainted`, and is called at the end of the scrolling paints
+    in `setText()` and in `_draw()`. Both erase sites - `TextWidget::_paint()` and `ScrollWidget::setText()`'s
+    non-scrolling branch - erase the UNION of the old and the new rectangle, so without that record a later, shorter
+    text erased only its own box and left a previously scrolling line's pixels standing around it. Invisible wherever
+    a background bar covers the row (the TFT's `_metabackground`) and obvious where none does: the OLED's meta line
+    showing `VOLUME` over a scrolling station name. `_clear()` reads the same two flags, so a hidden scrolling line
+    left its pixels behind the same way. See `plans/layout-widget-overlap.md`.
+  - **Boot-line messages** (what the `_bootstring` line says while the boot is blocked): one request type per message in
+    `displayRequestType_e` (`common.h`) plus a case in `Display::draw()` that does
+    `_bootstring->setText(l10n(L10N_MSG_...))`. The three are `WAITFORSD`, `FORMATTING` and `SCANNINGWIFI` — the last
+    for the boot scan, which blocks the radio for ~5.7 s with nothing else to show, and it is sent from `wifiBegin()`
+    just before the scan. **Senders must include a short `delay()` after `display.putRequest(...)`**: it only queues,
+    and the blocking work that follows can otherwise start before the display task has drawn the line (the `FORMATTING`
+    sender does the same). The strings live in the generated `src/locale/dsplocale.h`, so a new message needs its key
+    added to all 36 `src/locale/display/*.json` files and that header regenerated; measured cost of one new key across
+    the 36 locales is **~5 KB of flash**, which is the number to weigh before adding one.
+    **`BOOTVSPATCH` / `BOOTVERSION` are the pair that is deliberately NOT in the locale tables**: the cue sets the
+    line to the literal `"VS1053"` (a chip name needs no translation, and the cue is only ever sent from a VS1053
+    build, so a locale key would still have cost its ~5 KB in every other build), and `BOOTVERSION` puts
+    `RADIOVERSION` up. `_bootScreen()` now starts the line EMPTY, so the version appears exactly once — `setup()`
+    queues `BOOTVERSION` immediately after `player.init()` returns, which is past the reset, the chip query, the
+    patch, the audio-task start and the first balance/tone/volume writes. `Player::init()` queues the cue under
+    `if (VS_PATCH_ENABLE)` inside its VS1053 branch, just before `ResetChip()`/`begin()`. **The restore has to stay
+    on the far side of `player.init()`, never beside `loadUserCode()`**: "patch applied" is logged inside `begin()`,
+    before the writes that can strand a wedged chip, and the `done` line at the end of `player.init()` is what a
+    panel showing `VS1053` is the counterpart of. The cue's paint window is `ResetChip()`'s own `delay(30)` +
+    `delay(100)` and `begin()`'s `delay(170)` — no delay was added for it. **Why it earns a request at all**:
+    `loadUserCode()` issues one `write_register` per plugin word and each waits on DREQ with a 50 ms ceiling, so a
+    chip that refuses the patch (corrupt patch RAM after a fast power cycle, or a patch applied twice) costs
+    `PLUGIN_SIZE` × 50 ms — 8414 words, about seven minutes — which is exactly what a "hung" boot looks like.
+  - `TextWidget::setText()` is **virtual** (all three overloads), with `ScrollWidget` and `NumWidget` marking their
+    matching overloads `override` so the compiler enforces the match. This matters because a subclass can legitimately
+    be held in a `TextWidget*`: the boot line is exactly that case (`Display::_bootstring` is a `TextWidget*` over a
+    `ScrollWidget`). Bound non-virtually, a call through that pointer runs the **base** version, which never sets
+    `_doscroll`/`_x` and measures with the base `_charWidth` — the boot line then could not scroll and, for a string
+    wider than the window, was painted at an underflowed centre offset, which reads as "nothing drawn". `_draw()` was
+    already virtual, so this removes a static/dynamic mismatch rather than adding a mechanism.
+  - `TextWidget::_realLeft()` **clamps** rather than underflowing: when `_textwidth` is not smaller than the available
+    width it returns the SPAN's left edge — `offset` where the widget has a span, the panel edge where it has not —
+    instead of wrapping the subtraction to ~65500 and painting off-panel. Only reachable for text wider than its
+    space — a `ScrollWidget` scrolls instead and a plain `TextWidget` is conf-sized — so the clamp is insurance
+    against the invisible-rather-than-misplaced failure mode, and it keeps a too-wide line spilling to the RIGHT, into
+    the direction its own window clips and erases, rather than out of its span to the left.
+  - The boot text line (`Display::_bootstring`, built in `Display::_bootScreen()`) is a `ScrollWidget` fed from the
+    conf's plain `bootstrConf` `WidgetConfig`, so a string that fits is drawn statically at the conf's align (WA_CENTER
+    still rules) and a longer one parks at the span's edge and scrolls. Its window and buffer are derived in code
+    (`offset = TFT_BORDER`, `width = MAX_WIDTH`, `buffsize = BOOTSTR_LEN` 128), and its **pace comes from the panel
+    like every other line's**: `setScrollRole(SCROLL_ROLE_BOOT)` selects `SCROLLDELAY_BOOT` and the derived speed and
+    step (below). The block that used to borrow `apSettConf`'s `startscrolldelay`/`scrolldelta`/`scrolltime` field by
+    field is gone with those fields - a boot screen no longer inherits a message line's cadence, because there is no
+    per-line cadence to inherit. **`offset` is the one field the conf cannot supply**:
+    it is the span's LEFT EDGE, not a margin (`WidgetConfig::offset`), and it is dead in the plain centred widget the
+    conf declares — which is why every conf leaves it `0`. It goes live as soon as the line becomes a scroll, so with
+    `width = MAX_WIDTH` it must be the border inset; left at `0` the line centred inside `[0, MAX_WIDTH)` and sat one
+    `TFT_BORDER` left of the glass (10 px on a 480x320, 8 px on the 320x240/240x240 — a character or two at the boot
+    sizes). The OTA/validator label in `Display::_buildPages()` had the same shape (`offset = 0` while keeping
+    `apSettConf`'s inset width) and now centres that span on the glass instead.
+  - **One line scrolls at a time, and a DESTROYED line used to leave that slot dangling.** `dsp.setScrollId()` is a
+    single pointer for the whole panel: `ScrollWidget::_calcX()` takes it while a line is mid-scroll and releases it
+    on wrap, `setText()` releases it when the line owns it, and `_draw()` returns early while it names someone else.
+    `_showDialog()` and `_switchMode()` clear it too, because they swap the page. What was missing is destruction:
+    nothing cleared the slot when a `ScrollWidget` was deleted, and `Page::~Page()` deletes the widgets it holds — so
+    a page torn down while its line held the slot left the pointer aimed at freed memory, and then EVERY scroll line
+    on the panel sat still for the rest of the boot. The boot screens do exactly that: `_start()` removes the logo
+    page and `_apScreen()`/`_sdmanScreen()` each remove the page they replace. That is the reported "the AP screen's
+    two lines do not scroll until a reboot": the boot logo's own line is a `ScrollWidget` as well, its window is
+    `MAX_WIDTH`, and on a narrow panel the version string (or a scan-progress string) is wider than that, so it took
+    the slot — while on a wide TFT the same string fits, `_doscroll` stays false, and the slot is never taken. The
+    deciding test is string-versus-window, NOT the panel family: any panel whose boot line or `apTitleConf` overflows
+    its window can do it. Fixed in `~ScrollWidget()`, which releases the slot when it owns it, plus an explicit
+    `dsp.setScrollId(NULL)` at each of the three page swaps so the idiom stays visible where `_showDialog()` and
+    `_switchMode()` already spell it. See `plans/boot-scroll-id-dangle.md`.
+  - **The slot is handed out by the page in round-robin, not claimed by whichever line is due first.** `Page::loop()`
+    polls every widget with `scrollWanted()` - side-effect free, so it does not refresh the stamp it tests - while the
+    slot is free, takes the first one **after the widget served last**, and calls its `scrollTurn()`, which makes one
+    step and takes the slot. The owner then keeps stepping in its own `loop()`, which claims nothing: `loop()` is now
+    "step if I own it", and only the page hands the slot out. Consequences: no line can take two turns in a row while
+    another wants one; the page's widget ORDER no longer decides who scrolls (a title 2 appended late in the layout
+    path used to sit after the weather row and was therefore never reached first); and a hold of 0 - `SCROLLDELAY_WEATHER`
+    and `SCROLLDELAY_BOOT` in `dspconf.h`, against `SCROLLDELAY` for every other role - no longer means
+    "always". `_scrollReady()` folds the gates (`_present`, `_active`, `!_locked`, `_doscroll`, textsize) so the poll
+    and the step cannot disagree; `_active` is in it because `_calcX()` claims the slot whether or not anything is
+    drawn, so an inactive-but-unlocked line used to be able to own the slot invisibly. This is the "the weather line
+    scrolls constantly and title 2 never gets a turn" report. See `plans/scroll-turn-fairness.md`.
+  - **The PACE is the panel's, not a layout's.** `ScrollConfig` is `{ WidgetConfig widget; uint16_t width; }` - the
+    retired `scrolldelay`/`scrolldelta`/`scrolltime` were the same numbers in nearly every layout, could only be
+    written as literals by the editor, and were the sole control over display bandwidth that an author could not see.
+    `dspconf.h` now owns `SCROLLPX` (**pixels per second at fontsize 1** - one column of the smallest glyph is
+    `CHARWIDTH` = 6 px - scaled by `sqrt(textsize)`, i.e. 100 / 141 / 173 / 200 / 224 % for sizes 1..5, and nudged up
+    with the panel's width: `(42 + (DSP_WIDTH - 128) / 44)`, so 42 at 128 px wide and 50 at 480. The width term is
+    calibrated on both panels by eye, because the same px/s replaces a 110-px row in a couple of seconds and a 460-px
+    row in seven or eight - the small screen reads as racing and the big one as sluggish. Affine, not proportional: a
+    readable character rate barely depends on the panel, only the sluggishness term grows with the row.
+    `SCROLL_PUSH_US_PER_PX` cannot stand in for it - that macro is a bootstrap estimate of step cost, replaced by the
+    measured mean after four steps, and it moves the step/pitch pair, never the speed), `SCROLL_DUTY` (100 - the whole
+    display task may go to one scrolling line. On a slow panel this is a
+    SMOOTHNESS knob rather than an FPS guard, because a cycle slower than any admissible pitch cannot be bought back by
+    the budget; what the budget buys is step resolution, and at 50 a 460-px line moved 2-4 px per paint and read as a
+    stutter while at 90 it moves 1 px. Measured cost of raising it on the 480x320: about 1-2% of the VU's frame),
+    `SCROLL_PUSH_US_PER_PX` (0.02f / 0.95f, an estimate used only until a step is measured), and the five holds
+    `SCROLLDELAY_META`/`_TITLES`/`_PLAYLIST`/`_WEATHER`/`_BOOT`. All of them are `#ifndef`, so `myoptions.h` still
+    overrides everything; `SCROLLTIME` and `SCROLLSTEP_MS` are gone - `options.h` warns once if an override still
+    defines either - because **there is no pitch knob**. A line says only WHICH KIND it is - `setScrollRole()`, called
+    at each construction in `display.cpp` (the screensaver line is `SCROLL_ROLE_WEATHER` at 75%, which is exact now
+    instead of a delta truncation) - and `init()` derives the rest.
+    **The size term is the square root of the cell.** "ms per character" is linear in the size, so every size runs one
+    character rate and it crawls at font 1 while racing at font 4; a constant pixel rate goes the other way and makes
+    small text unreadable. Pixel speed proportional to `sqrt(cell)` sits between them, and `_applyPace()` computes
+    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`. A QUADRATIC normalised at font 1 was tried and
+    reverted: it allows font 1 only 81 % of font 2's px/s, i.e. 1.6x its character rate.
+    **A perfect scroll is impossible on this hardware, and chasing it costs a day - do not.** A line can only paint on
+    a display-task pass (`DSP_TASK_DELAY`, 10 ms) and the panel needs the push it gets, so the derived pitch never
+    lands on that grid. Paying the distance from the clock makes the speed exact but the STEP uneven, and the lean a
+    push leaves at the panel is as wide as the step - the text then flickers; carrying the paint deadline instead keeps
+    the step constant but spends the remainder as a regular pulse; counting passes makes both exact and can only reach
+    `(1000 / pass) x (step / passes)`, which at font 1 on a 12 ms grid needs a 3-px step. So the delivered speed is
+    NOMINAL - 70-100 % of `SCROLLPX` - and the value is dialled by eye against real panels rather than derived.
+    **The step is WHOLE pixels and the pitch is derived from it.** A fractional step alternates its distance and can
+    owe a tick that moves nothing at all - which reads as a slow line AND as a stutter, and that is exactly what the
+    fractional version shipped first did on a monochrome panel. So `_applyPace()` chooses
+    `step = max(1, ceil(speed * dutyMin / 1000))` pixels from the duty budget and then `pitch = ceil(1000 * step / speed)`,
+    which keeps the speed exact, the cadence even, `pitch >= dutyMin` (so the budget holds) and the slow panel's settled
+    gap - the tear fix - intact. `_calcX()` therefore has no accumulator at all, and `_measureStep()` replaces the cost
+    estimate with the measured mean after four steps, re-deriving the step and the pitch together. **The duty test
+    mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest admissible pitch is
+    `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a 2.2 s pitch, the 1 s
+    cap clipped it, and the step became `speed x 1 s`, a station name crossing in three jumps. The second slip was a
+    stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every size to
+    0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling". Three
+    units meet in this one function (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
+    Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
+    chunks". It was never a rendering fault, and four candidates were withdrawn by measurement before the arithmetic
+    gave it away: *quantisation* (the step is fine - the row was run at `SCROLLPX 28`, one display pixel per step, and
+    the symptom survived), *the block clip* (a `textsize`-wide block shaved at the window edge leaves exactly the
+    columns a per-pixel test would, and `Adafruit_GFX::writeFillRect()` calls the VIRTUAL `fillRect()`, which
+    `psFrameBuffer` overrides with its buffer writer - so the scaled path never bypassed the framebuffer, whatever the
+    stale warning in that class says), *the missing partial itself* (`psFrameBuffer::columnInk(x)`, which counts
+    non-background pixels in a column, reported a non-zero range on every character, `ink=7..22` for the
+    maple-icon one), and *the framebuffer* (a `SCROLL_NO_FB` bisect forced the same row down `dsp` + `setClipping` and
+    fontsize 3 was still wrong there - that path also flashes on every step, so it is not a mode worth keeping).
+    The cause is in `_draw()`'s window string. A glyph sits at `cur + i*cell` with `cur` running 0 down to
+    `-(cell-1)`, so it can be partly visible while `i < (width - cur)/cell`, which reaches `width/cell + 1`; the code
+    kept only `width/cell + 1` characters (indices 0 .. n), one short. The LAST kept glyph therefore always showed
+    exactly `width % charWidth` pixels of itself - a constant that does not depend on `cur` - so it appeared that many
+    columns wide on the frame it first showed, and the rest slid in normally. On a 460-px room that overhang is 4 px at
+    cells of 6, 12 and 24 px but **10 px at the fontsize-3 cell of 18 px**, and minus the font's blank left bearing it
+    leaves four columns of ink popping at once - which is exactly the 4 columns reported, and why only fontsize 3 looked
+    broken. The fix is one character more: `_maxVis()` is `width/charWidth + 2` and `_winBytes()` sizes the string as
+    `_maxVis()*4 + 1`, used by `_draw()` and `setText()` on both the framebuffer and `dsp` paths, so the glyph halfway
+    into the window is emitted and clipped by the window edge one pixel at a time. Confirmed on the panel
+    ("buttery smooth"); every other size carried the same fault at 4 px rather than 10, so the rule fixes them all, and
+    the probe set that found it (`[SCROLL]`, `[PAINT]`, `columnInk()`, `left()`/`top()`) has been removed. The five scroll
+    cells are also gone from `conf_index.h`, so the editor page draws no such boxes (it is generic over `f.cells`) and
+    the device parser - which walks the CELL LIST, not the document's keys - ignores them in an old slot file;
+    `trim_scroll_conf()` in `conf_tool.py` drops them from a `.h` or a layout document on import. See
+    `plans/scroll-global-speed-and-delay.md`.
+  - **A line erases only its OWN box; nothing clears it because another line moved onto it.** Three things remove a
+    scroll line's pixels - its own `setText()` (the union of the old and new text rectangle, or the whole recorded span
+    after it has scrolled - `_spanPainted()`), `lock()`/`_reset()` (`_clear()`, and `freeBuffer()` which erases the
+    window on the panel only if it was ever `display()`ed), and a page repaint. That is deliberate: it is what lets two
+    widgets share one row (`_windowRect()` narrows a fitting line to its glyphs). The consequence to know about is
+    geometric - two TEXT rows closer than `CHARHEIGHT * textsize` interleave, because the lower one cannot reach above
+    its own top edge. `displayTFT480x320conf.h`'s Big Text layout is the one shipped case: `title2Conf` top 95 against
+    `weatherConf` top 100 at textsize 3 (a 24 px row), so 19 px of the two rows overlap and five rows of title 2 sit
+    above the weather's box. 128x128 and 160x128 overlap by 2 px, 320x240 by 1 px, every other conf is clear. The layout
+    editor's collision check cannot flag it: it reports intersecting boxes and cannot tell a background band
+    (`metaBGConf`) from two text rows. Left as the layout's own business - see
+    `plans/big-text-title2-weather-overlap.md`.
+  - `ProgressWidget` is the boot screen's animated dots line, with exactly one instantiation (`Display::_bootScreen()`),
+    so its behaviour is the boot screen's. The line is `speaker + runway + boot glyph`, hard against both glyphs, and
+    `ProgressConfig` is `{ frame interval ms, line character width, blob elements }` — every conf carries that header
+    above the field, and `conf_tool.py` emits it for generated confs. `width` is the **whole line budget in
+    characters**: `init()` derives the runway as `width - 2`, counting each glyph as **one character regardless of its
+    byte length** (the SD pair renders one column wider than the rest, which is invisible on a single row of pixels).
+    **There are two paint paths, and that split is what keeps a TFT flicker-free**: `_draw()` is the full paint —
+    speaker, the runway with the blob where it belongs, boot glyph — reached only from activation, layout changes and
+    screensaver restarts, so the two static glyphs are drawn once and then never touched; `_progress()` is the
+    animation, and it paints **only the cells that differ from the previous frame**, at most two of them (the cell the
+    blob left, the cell it entered), against a whole-line erase plus fourteen glyph writes in the single-path version.
+    `_fieldX` records the field's x origin at the last full paint, and `_painted` guards the first tick so a delta can
+    never be painted against a picture the widget did not put on the panel; both paths place column `c` at `_realLeft()
+    + (frameChars + c) * _charWidth`, which is why a full paint cannot shift the dots. **The blob can be a second
+    colour**: `_dotColor` starts as the widget's own `fgcolor`, and `setDotColor()` may replace it - the boot screen
+    passes `BOOT_DOT_COLOR` (`dspcolors.h`, guarded and defaulting to `BOOT_PRG_COLOR`, so the line stays one colour
+    unless a build asks otherwise). `_dotCell()` inks the blob with it, and `_draw()`, which printed the whole line in
+    `_fgcolor` through `TextWidget::_draw()`, re-inks just the blob's cells afterwards - only when the two colours
+    differ, at most `barwidth` cells, landing on the same pixels for the reason the sentence above gives. The two frame
+    glyphs never take part, and erasing a cell is a `fillRect()` in `_bgcolor`, so it is colour-free. On a 1-bit panel
+    both values collapse to the same lit pixel; on SSD1322/SSD1327 the second one has to be a driver-palette value.
+    The reason is the panel rather
+    than the animation: an SH1106 is a framebuffer whose refresh hides an erase, while an ILI9488 shows every write, so
+    the same code flickers on one and not the other. The blob grows in at the speaker, slides right one column per frame
+    and has its head eaten at the far end, which is what makes the dots read as vanishing into the boot glyph; the cycle
+    is `runway + blob` frames (the 128x64 OLED conf's `{ 90, 14, 4 }` is a twelve-column runway and sixteen frames, 1.44
+    s), and the character count is identical on every frame so the centred position never moves. A blob at or above the
+    runway never reaches the sliding phase — it just grows and snaps back. **The blob element is an icon codepoint,
+    `\026` (VOL_75) from `icons.h`, not a font glyph**: that is what makes it line up, because icon codepoints all share
+    the same seven-row grid as the speaker and the boot glyph, whereas a font bullet carries its own vertical metrics
+    and sits off centre between them. **The text buffer is sized in BYTES rather than characters, for a reason worth
+    keeping**: with the earlier two-byte U+00B7 dot, a character-count buffer truncated the line mid-dot, a dangling
+    `0xC2` made the renderer take the terminator as its second byte and draw past the NUL (a glyph no font knows), and
+    the changed character count moved the centred x every frame. `_buffsize` is `frame bytes + runway + one extra byte
+    per blob element + 1`, which reduces to `frame bytes + runway + 1` while the element stays one byte. Nothing here
+    uses `Widget::_width`, which `Widget::init()` zeroes and `moveTo()` rewrites — sizing from that drew a completely
+    blank line. `_scrolldelay` is set in `init()`; it was previously never initialised.
+  - `SliderWidget` buffer/volume bar rendering now repaints the full inner area each update to avoid stale pixels after
+    page/mode transitions.
 - `src/displays/widgets/pages.h`, `pages.cpp`
   - page and pager composition framework.
 
@@ -702,11 +4559,14 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - init hardware
   - draw primitives/text/pages
   - sleep/wake/flip/invert where supported
+- `flip()` maps `config.store.flipscreen` to `setRotation(...)`. Rotation values follow the Adafruit GFX convention
+  (0=0°, 1=90°, 2=180°, 3=270°) relative to each controller's native orientation. `ROTATE_90` (optional, for square
+  panels) is applied only when `DSP_WIDTH==DSP_HEIGHT` and adds 90° to that controller's normal base rotation.
 - Files include:
   - `displayST7735*`, `displayST7789*`, `displayST7796*`
   - `displayILI9341*`, `displayILI9488*`, `displayILI9225*`
   - `displaySSD1306*`, `displaySSD1305*`, `displaySH1106*`, `displaySSD1327*`, `displaySSD1322*`
-  - `displayN5110*`, `displayGC9A01A*`, `displayGC9106*`, `displayST7920*`, `displayLC1602*`
+  - `displayGC9A01A*`, `displayGC9106*`, `displayNV3007*`
 
 ## Display config files (`src/displays/conf/*.h`)
 - Mostly widget coordinates/sizing/visibility for each panel class.
@@ -715,58 +4575,787 @@ All modules in `src/core/` follow the **class + global instance** pattern:
   - `displayOLED128x64conf.h` for SH1106/SH1107/SSD1305/SSD1306 128x64 OLED class.
   - `displayTFT480x320conf.h` for ILI9488/ST7796 class.
   - `displayTFT320x240conf.h` for ILI9341/ST7789 class.
-- The canonical files are intentionally deduplicated masters without per-model `#if DSP_MODEL...` branches; model-specific legacy deltas were removed in favor of one shared layout baseline per family.
-- Display driver headers now include conf files directly; custom fallback include blocks using `__has_include("conf/*_custom.h")` were removed.
-- `metaBGConf` / `metaBGConfInv` — runtime-switchable station-name background (full bar vs thin line on TFT; bar vs no-bar on OLED). Controlled by `config.store.inverttitle`.
-- OLED configs: `metaBGConf` may be `{ }` (normal mode no bar), `metaBGConfInv` has the bar (inverted mode). `importlayout.py` auto-swaps when importing into OLED targets.
-- All conf files must define every `WidgetConfig` / `FillConfig` / `ScrollConfig` / `ProgressConfig` / `VUBandsConfig` / `MoveConfig` field that `display.cpp` references — nothing is optional at link time. Disabling a feature is done by zeroing the relevant struct (e.g. `height=0`, `buffsize=0`, `dimension=0`); `display.cpp` checks those sentinel values at runtime and skips the widget. This eliminates the old `HIDE_*` compile-time macro system entirely.
+- The canonical files are intentionally deduplicated masters without per-model `#if DSP_MODEL...` branches;
+  model-specific legacy deltas were removed in favor of one shared layout baseline per family.
+- Display driver headers now include conf files directly; custom fallback include blocks using
+  `__has_include("conf/*_custom.h")` were removed.
+- `metaBGConf` / `metaBGConfInv` — runtime-switchable station-name background (full bar vs thin line on TFT; bar vs
+  no-bar on OLED). Controlled by `config.store.inverttitle`.
+- OLED configs: `metaBGConf` may be `{ }` (normal mode no bar), `metaBGConfInv` has the bar (inverted mode).
+  `conf_tool.py` auto-swaps when importing into OLED targets.
+- All conf files must define every `WidgetConfig` / `FillConfig` / `ScrollConfig` / `ProgressConfig` / `VUBandsConfig` /
+  `MoveConfig` field that `display.cpp` references — nothing is optional at link time. Disabling a feature is done by
+  zeroing the relevant struct (e.g. `height=0`, `buffsize=0`, `dimension=0`); `display.cpp` checks those sentinel values
+  at runtime and skips the widget. This eliminates the old `HIDE_*` compile-time macro system entirely.
+- `conf_index.h` beside them describes those same fields for other code — each field's type, its cells, its `offsetof`
+  in `LayoutData`, the group it belongs to, and the conf file's own constants. It is included at the tail of
+  `dspcore.h`, after the conf file, and it is the contract a layout JSON file will be read against. See its entry
+  above and `plans/layout-editor.md`.
 
 ## Display tools
-- `src/displays/tools/utf8To.*`
-- `src/displays/tools/utf8_common.*`
-- `src/displays/tools/utf8Latin.*`
-- `src/displays/tools/utf8Cyrillic.*`
+- `src/displays/tools/pretext.h` / `pretext.cpp` — `preText()` font-aware text resolver (keep / fold / replace),
+  `allCaps()`, `foldToBase()`, `glyphAvailable()`, `utf8_strlen()`, `utf8_offset()`.
+- `src/displays/tools/dspstats.h` — Core Monitor counters (`cmGlyphCount`, `cmPreTextCalls`, `cmPreTextHits`,
+  `cmFillCount`, `cmPushCount`, `cmDspCore`) with increment helpers that vanish unless `CORE_MONITOR` is defined.
+  Definitions live in `core/display.cpp`; the fields are printed and documented under CORE_MONITOR below.
+- `src/displays/tools/gen_fold_table.py` → `pretext_fold.h` — generator for the stepping tables, plus the generated
+  header (3,624 entries, 14,496 bytes, emitted in two halves so supplementary keys still fit 4-byte entries). `--stats`
+  reports coverage per Unicode block.
 - `src/displays/tools/commongfx.h`
 - `src/displays/tools/psframebuffer.h`
-- `src/displays/tools/oledcolorfix.h` — OLED monochrome color initialization. `DSP_INVERT_TITLE` ifdef removed; `metafill` corrected to `TFT_FG` (was `TFT_BG` — invisible on black screen).
+- The old `utf8To.*`, `utf8_common.*`, `utf8Latin.*` and `utf8Cyrillic.*` files are **gone** (they were replaced by the
+  Unicode GFXfont pipeline); `localization-guide.md` still described them as "retained for reference".
+- `src/displays/tools/oledcolorfix.h` — OLED monochrome color initialization. `DSP_INVERT_TITLE` ifdef removed;
+  the palette no longer carries `metafill`/`plcurrentfill` (the meta band takes `metabg`, the rule under an inverted
+  meta takes `line`, and the playlist highlight takes `plcurrentbg`).
 
 Purpose:
 - text normalization/transliteration and glyph handling
 - display utility support
 
 ## Display fonts/assets
-- `src/displays/clockfonts/*` for digit/font assets.
-- `font15.h` is wired for 128x64 mono-OLED clock paths (SH1106/SH1107, SSD1306 128x64, SSD1305). Clock font dispatch headers now live under `src/displays/clockfonts/` (`font15.h`, `font19.h`, `font35.h`, `font52.h`, `font70.h`), and DS_DIGI/Chunky6 families also live there (`src/displays/clockfonts/DS_DIGI/`, `src/displays/clockfonts/Chunky6/`). `font15.h` maps CHUNKY6 modes directly to Chunky6_15 variants; `font19.h` is retained for possible future use. For clock rendering fallback, widgets now force `CLOCKFONT5x7` when `TIME_SIZE<15`, or when `TIME_SIZE==15` with `CLOCKFONT` set to `YO_MONO`.
+
+**Both fonts are runtime choices now.  There is no `TIME_SIZE`, no `CLOCKFONT5x7`, no `Clock_GFXfont`
+and no `fontNN.h`: the whole compile-time font selection is gone.**  `plans/font-overhaul.md` is the
+design record; this is the shape of it.
+
+- **System fonts** — one folder each, `src/displays/fonts/<Name>/`, holding the `.bdf` and the header
+  `bdf2adafruit3.py` generates from it.  All of them are compiled in.  `dspfont.h` declares them
+  `extern` and holds `_systemFontNames[]` / `_systemFonts[]`; **`fonts/fonts.cpp` is the only
+  translation unit that includes the headers** — a namespace-scope `const` has internal linkage, so
+  including them from `dspfont.h` put the whole set in flash once per TU that reached it (measured:
+  39 KB on sh1106/es3c28p, 78 KB on ili9488).  `displayFont()` returns
+  `_systemFonts[activeSystemFontId]`.
+  **Every system font must stay on the 6x8 metric class** (`xAdvance == 6`, `yAdvance == 8`) — layout
+  comes from `CHARWIDTH`/`CHARHEIGHT`, not from the font — and that is validated at boot.
+- **Clock fonts** — one folder per STYLE, `src/displays/clockfonts/<Style>/`, holding
+  `{10,15,21,28,35,52,70}.png` plus optional `<size>glow.png` / `<size>glow_char.png`.  `py makefont.py
+  <Style>` converts the whole folder into one `clockfonts/<Style>.h` and **aborts, naming every missing
+  size, if the set is not complete**.  Every glyph is packed at its FULL CELL (digit/colon cell width x
+  image height), so all eleven share one ink grid — there is no trim-to-ink mode.  The glow glyph is the
+  union of the lit pixels across the digits, injected at `/` (hard-coded, no switch).  Per size an
+  ordinary run resolves it from the files alone, in this order: `<size>glow_char.png`, one digit cell
+  used as drawn; `<size>glow.png`, an alternative drawing of the same ten digits whose union is used;
+  finally the union computed from `<size>.png`.  The glyph therefore masks the strip — an existing
+  `<size>glow_char.png` makes its size's glow strip inert until regenerated or deleted.  `--glow-out
+  [SIZE]` writes that union — from `<size>glow.png` when present, otherwise from `<size>.png`, never
+  reading the file it is writing — as `<Style>/<size>glow_char.png` (white on black, exactly the digit
+  cell), all seven sizes or just SIZE, **prompting before overwriting** and **without writing the .h**.  The
+  generated header defines the seven `GFXfont`s, that glow character and a `ClockFontStyle`; the
+  three styles are declared in `dspfont.h` as `_clockFontStyles[]` and defined in
+  `clockfonts/clockfonts.cpp`, which is the only TU that includes them.  `clockFontStyle()` is the
+  accessor, driven by `config.store.clockFontId`.
+- **The clock size is a LAYOUT value** — `clockConf.textsize`, a size index: `0` = the system font
+  (all the 128x32 panel does), `1..4` = 15, 35, 52, 70 px.  It used to be `TIME_SIZE`, one number for
+  the whole build derived from `DSP_HEIGHT`; every shipped conf now carries the index that rule
+  produced for its panel.  `numConf.textsize` is the same index for the number page, and the two are
+  independent — the widgets resolve their own `ClockFontSel`, which is why there is no global clock
+  font pointer any more.
+- **The one exception is the screensaver's Smaller Clock option** (`config.store.screensaverClockSmaller`,
+  `SS_SMALLER_CLOCK`): while `config.isScreensaver` is true, `ClockWidget::init()` resolves the conf's
+  index **one rung lower** through `_clockConfSize()` in `widgets.cpp`, and `0` is the floor — a layout that
+  already asks for the built-in font keeps it.  It is applied at the ONE place a size is resolved because
+  `_cf` is what every measurement of the clock derives from (`_superfont`, `_timeheight`, `_timewidth`,
+  `_space`, `_rowgap`, `_clockheight`, `_clockwidth`, the PSRAM framebuffer window); a draw-time `if` would
+  print a smaller font into a box measured for the larger one.  `ClockWidget::refreshSize(conf)` rebuilds
+  only when the resolved index differs, and takes the conf as an **argument**, never `_config`: `moveTo()`
+  writes `_config.offset/top`, so re-initing from `_config` would take the moved position as the widget's
+  own.  `Display` calls it in exactly two places — `_enterScreensaver()` before `_screensaverWidgets()`
+  (`config.isScreensaver` is already true on every route in, including `SSREBUILD` from the WebUI), and
+  `_switchMode()`'s PLAYER branch **after** `config.isScreensaver = false` (`_begin()` picks the
+  framebuffer window's background from that flag) and **before** `setPage(PG_PLAYER)`, which is what paints
+  the clock at its own size again.  Leaving the screensaver for VOL or SDMAN deliberately does NOT refresh:
+  the page on the panel is still the screensaver's, and `_begin()` would build a theme-background window
+  over a black one.  Two visible consequences of the rungs being indices rather than heights: `1 -> 0`
+  drops a 15 px clock font to the built-in 6x8 cell, and `2 -> 1` crosses `_compactClock()`, so the divider
+  column and the screensaver's date column go with it.  The WebUI row (`scrsmall`) is gated by
+  `group_smaller` / `hide_group_smaller` on `activeLayout.clockConf.textsize != 0` — at index 0 the option
+  does nothing.
+- **The seconds** are drawn with that style's `8/15/21/28` sibling at the same ink top the built-in
+  cell used, falling back to the built-in font when the style has no sibling at that index.  Their
+  glow uses `theme.secondsbg` / `theme.secondsbgss`.
+- **`fullClock` and `seconds` are per-layout booleans** (`LayoutData`, first two of the TRANSFORMS
+  group), replacing "the size is 52 or 70, or the model is an ILI9225" and "this size has a seconds
+  font".  The ILI9225 model hack is gone.
+- **At the two smallest sizes `fullClock` degrades to the date alone** (`_compactClock()`, i.e.
+  `_superfont <= 1`).  Size 0 (no clock font) and 1 (15 px) have no divider column to put a divider in - its
+  gap is a pixel or two - nor an 8 px day-of-week row that reads beside the time, so `_printClock()` drops
+  both and keeps the date, on a row of its own below.  **The seconds are not implied either:** they live beside
+  the divider in the sizes that have one, so at 0 and 1 they are drawn only when the layout sets `seconds` -
+  the draw gate is `drawSeconds = _showSeconds || (_fullclock && !_compactClock())`, whose 2..4 half is the old
+  `_fullclock || _showSeconds`.  That is what makes the ink agree with the box: `_rowwidth` counts the seconds
+  only under `_showSeconds`, so drawing them regardless left a centred time off-centre with the seconds hanging
+  outside the box it was centred in.  It also removes a latent collision: with `fullClock` AND `seconds` on at
+  size 1 the DOW and the seconds share the column and their bands overlap.  Sizes 2..4 are untouched, and the
+  screensaver's clock follows the same rule (same widget, same print).  Note this is the SCREENSAVER's full date,
+  not `fullClock` itself - the widget keeps the date on the main screen at 0 and 1, on its own row.
+  **The WebUI's two clock rows are gated on the SIZE INDEX the widget actually has**, in `GETACTIVE`
+  (`netserver.cpp`): the glow row needs a theme whose `clockbg` (or `digitbg`, for the number) differs from the
+  background *and* a widget with a clock font at all (`clockConf.textsize` / `numConf.textsize`), while the
+  SCREENSAVER'S FULL DATE row (`group_full_time`) is offered
+  when `(fullClock || seconds)` and the clock has a font.  The `seconds` half matters: at size 1 the switch still
+  governs the seconds on the screensaver (only the date is not drawn at 0 or 1), so withholding the row there
+  would hide a switch that does something.  Size 0 is the one with nothing to offer - no clock font, so no glow
+  character and no screensaver full date either.  The boundary itself is a plain literal in
+  `ClockWidget::_compactClock()` (`_superfont <= 1`), deliberately not a shared macro.
+  **And the screensaver's two parts are gated apart:** the
+  seconds follow `showSecondsOnScreensaver` alone - the user's own setting - while the divider, the day and the
+  date need BOTH the framebuffer and a size above the compact ones.  They used to share one flag, so the seconds'
+  gate ANDed in the full clock's permission whenever `fullClock` was set, and that permission asks for the
+  framebuffer: on an OLED a layout with `fullClock` showed no seconds on the screensaver at all while the same
+  layout without it showed them, and on a TFT the two clauses happened to collapse to the setting, which hid the
+  coupling.  The compact sizes also never draw the date on the screensaver now (the flag carries
+  `!_compactClock()`), which cannot reach the main screen because `!config.isScreensaver` short-circuits first.
+- **`_rowgap` is one row's gap for the size** - `_space`, or a whole built-in character row at index 0, where
+  `_space` is 0.  It serves both the seconds' gap and the date's row, and it replaced `_space` in the three
+  places those rows are measured: identical for 1..4, and it is what fixed index 0, where the date landed ON
+  the time's row and the seconds were raised a row above it.  The compact box is `max(time row, date)` so a
+  right-aligned date cannot be pushed out of the framebuffer window, and at those sizes the two rows are aligned
+  INDEPENDENTLY: `_rowLeft(rowW)` places each of them inside the box, so a centred clock centres its time line
+  and its date line separately instead of centring the block as a whole.  `_rowLeft()` returns the box's own
+  left edge above these sizes, so nothing there changes, and `_rowwidth` is the time's own row - the time plus
+  the seconds when they follow it - measured in `_getTimeBounds()` beside the date's width.  The blinking colon
+  and the glow follow `_rowLeft()` as well, and they are the two that missed the inset longest: neither is part
+  of the time string, and the glow was drawn at the BOX's edge, which only stops being the digits' start once the
+  compact sizes make the box the wider of the two rows - so its cells sat away from the digits they fill, which
+  is what the TFT showed and a one-bit OLED never could (its `clockbg` equals `background`, so it has no glow).
+  `_dateString()` is the
+  one place the date string is built, called from `_getTimeBounds()` as well as the print, because the box is
+  sized for the wider row.
+  **The y convention is the thing to remember:** a clock font's `setCursor` y is its BASELINE with the ink
+  above it, the built-in cell's is the glyph TOP with the ink below - which is why the seconds' ink top is
+  `_top()` when there is no clock font, and why the built-in seconds must be sized `_cf.textPx` and not
+  `_superfont` (which is 0 there).  At every clock-font size the seconds' ink top is `_top()-_timeheight` in BOTH
+  fullClock states: a legacy `+ _space` on the no-fullClock path used to drop them below the digits' first row
+  (2 px at size 1, 5/7/10 at 2..4), so the same clock looked a row different depending on whether the layout also
+  asked for the date.  The framebuffer WINDOW follows the same split, and both halves have to be
+  read together: a clock font's ink is above its baseline, so the whole `_timeheight` must be inside the window
+  and `_begin()` places it at `_config.top - _timeheight`; the system font's ink is below its cursor, so at size
+  index 0 the window starts at `_config.top` itself, `_top()` is 0 inside it, and `_clockheight` is
+  `CHARHEIGHT * textPx` plus the date's row when `fullClock` is on - 8, or 16, where the clock-font formula gave
+  8 and 24.  Sized for a clock font instead, only the digits' FIRST row fell inside the window with `fullClock`
+  off - "a few pixels, all in the same row" - and the eight rows above the clock were dead space that `clear()`
+  and `freeBuffer()` were wiping.  Two side effects worth knowing: `clockHeight()` at index 0 is that 8 or 16
+  (its one reader is the screensaver's clock-move maths, which wants exactly the box's height), and the drawn
+  pixels did not move at all.
+  **And a framebuffer glyph never paints its background:** `psFrameBuffer::write()` overrides the library's and
+  renders through `_writeGlyph()`, which draws only the LIT pixels, so on a TFT nothing erases itself and every
+  text redraw relies on a `clear()` first.  The seconds are the one thing redrawn in place every second, which is
+  why their built-in branch needed the same `fillRect(sx, sy, _secwidth, CHARHEIGHT * fs, bgColor)` the
+  `secondsFont` branch already had - without it "35" left behind every pixel "36" did not cover and 0..9 smeared
+  into one another while the minutes, repainted after a clear, stayed crisp.  See
+  `plans/clock-small-size-date-only.md`.
+  **The NUMBER widget reads the same index** (`numConf.textsize`) and had refused 0 outright: `NumWidget::_draw()`
+  returned early on `_cf.index == 0`, so a layout asking for the system font drew NOTHING there while `setText()`
+  went on erasing the cells it would have used - and the three panels whose confs ask for 0 (the 128x32 OLED, the
+  284x76 and the 160x80) never showed the number at all.  That refusal is gone, and nothing else was needed: the
+  erase, the bounds (`_charWidth()` out of `textPx`, so 6 px per character) and the size (`_cf.textPx`) already
+  resolved the system font, with the ink BELOW `_config.top` - the mirror of the clock's index 0, where the ink is
+  above its cursor.  `NumWidget` draws to the panel directly rather than through a framebuffer, so it needs none
+  of the clock's window care.  See `plans/font-index-0-number.md`.
+- **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.  It is
+  gated at draw time by the glow colour differing from the backdrop (`clockBgColor != bgColor`, and the
+  seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
+  is exactly the no-op the old `!DSP_OLED` guard gave, while a colour theme that sets them equal is skipped
+  too.  On greyscale SSD1322 (`clockbg = GRAY_1` against a black background) the glow is now both offered and
+  drawn, where the `DSP_OLED` guard hid it, and that panel's colon takes the TFT branch's rule as well: its OFF
+  phase is drawn in `clockbg`, so the blink cannot punch a background-coloured colon out of the glow block (on a
+  one-bit palette the same expression answers the background, because `_glowOn()` holds the theme test).  All
+  three things the CLOCK's glow touches - the time's glow, the
+  seconds' glow, and the colon's OFF colour, which is deliberately drawn in the glow colour so the block stays
+  unbroken while the colon blinks - ask one predicate, `ClockWidget::_glowOn()`, which needs a clock FONT as well as the
+  stored setting: `init()` can only put the digit `'0'` in `_glow`/`_glowSec` at size index 0 (they are the width
+  templates `_timewidth`/`_secwidth` are read off, so they must not be blanked instead), and printing them would
+  paint a literal `00:00` behind the time.  Size 0 therefore has NO glow anywhere, and the WebUI's Clock Glow row
+  is offered on the same rule plus that font test, via the `group_clockglow` / `hide_group_clockglow` token in
+  `GETACTIVE` (`netserver.cpp`).  Since 2026.10.28 there are **two rows and two tokens**: `group_clockglow` is
+  `clockbg != background && clockConf.textsize != 0`, and `group_digitsglow` is `digitbg != background &&
+  numConf.textsize != 0`.  Each is an AND, because each is a "hide when", never a second reason to show, and
+  neither row is affected by the other setting.  The `theme` command re-sends the
+  tokens so the rows follow a theme switch with the settings page open, and a `layout` switch re-sends them for the
+  same reason (each widget's size index lives in the layout, not in the theme).
+  **The NUMBER widget glows too** (`NumWidget`, `numConf`), on its **own stored setting** `config.store.digitsglow`
+  since 2026.10.28 - `NumWidget::_glowOn()` is the number's copy, needing a clock font, that setting and
+  `digitbg != background`.  The digits keep `theme.digit` and the glow behind them is `.digitbg`, its own field
+  since 2026.10.27 (15% of `.digit`; `plans/digitbg-glow.md`), so the clock and the number can glow in different
+  colours - which is what the eight themes that draw the number in blue needed, having glowed it in the clock's
+  grey.  A number cannot reserve cells out of nothing, so the
+  widget is told the WIDEST value its screen can show (`setFieldMax()`): `VOLUME_SCALE` for the volume,
+  `config.store.countStation` for a station/track number and for the SDCHANGE scan counter.  Only the digit COUNT
+  of that figure is kept (`digits(max)`, at least one, never a hardcoded two, because any total can itself be a
+  single digit), and with the glow on the value is **zero-filled to it** - `5` at `VOLUME_SCALE` 42 prints `05` -
+  so the string itself is the field.  One width therefore serves placement, erase and the glow cells
+  (`_textwidth`), and a centred layout stays centred at every value instead of printing a lone digit in the
+  right-hand half of a two-cell box.  There is no reserved box and no second width: the glow glyph carries the
+  digit's own advance, so N glow cells are exactly N digit cells, and both strings print at the same x.  Both are
+  printed with the ONE-argument `setTextColor()`, which is
+  transparent: `dsp` on a TFT is the driver, not the framebuffer, so an opaque print would paint each glyph's
+  background over the glow.  The scan screen's total is `countStation`, which `initSDPlaylist()` now keeps from the
+  `countAudioFiles()` walk that decides whether to re-index (exact whenever that walk ran) and which is otherwise
+  the previous index's count; a fresh card has no total, so its zero-fill follows the count.
+  `countStation` is the one cache of "how many entries can the device browse", so every mode change refreshes
+  it: **`initPlaylistMode()` ends with `setCountStation(cs)`**, where `cs` is already the active mode's length
+  (read at the top, re-read after the SD re-index and after `initPlaylist()`), and
+  **`Utility::initPlaylist()`** refreshes it whenever the web index is rebuilt - boot, a station added, a
+  playlist saved, an import.  Both are needed: the first covers a mode change in either direction, the second
+  covers an index rebuild that never enters `initPlaylistMode()`.  Without them the station entry padded to
+  one digit (no figure at all), and an SD card's total survived into web mode (three digits on a short web
+  playlist).  The display task never opens the index, so the store has to carry it.
+  **The footer is one table per screen** (`Display::_footerMask()`).  `_footer` is a sub-page attached to
+  `PG_PLAYER` and `PG_DIALOG` only, so it is painted on every dialog; `PLAYER` and `VOL` are the modes that keep it
+  (`FW_ALL`), and every other mode - the two number screens, `UPDATING` / `VALIDATING`, `LOST`, `SLEEPING`,
+  `INFO`, `SETTINGS`, `TIMEZONE`, `WIFI` - keeps none of `_volbar`, `_voltxt`, `_volip`, `_battery`, `_rssi`,
+  `_bufferbar`.  `_applyFooter()` runs in `_switchMode()` BEFORE the page switch, hides with the lock-plus-deactivate
+  pair (a `TextWidget` still paints from `setText()` on a lock alone) and shows with `unlock()` alone, because the
+  page pass that follows activates and draws the widget.  Every request that writes a footer widget asks
+  `_footerShown(bit)` first, and `_showDialog()` empties `_nums`, which otherwise kept the last number behind a
+  title.
+  **The IP line's icon follows the mode, and one helper owns the swap.**  `_volip` is written from the conf's
+  `iptxtFmt` by `Display::_footerIp()` and by the SDOFFLINE writes in `_applyState()`, `_showNumbers()`, the
+  `_switchMode(PLAYER)` return path, `NEWIP` and the layout switch - and the confs disagree on that string.  The
+  ones with a mark carry the two-cell **web-mode pair** `"\021\022"` at its head (`WEBMODE_A` / `WEBMODE_B`, slots 17
+  and 18, drawn to match the WebUI's own mode mark); the single-cell `\037` IP glyph that used to sit there is gone,
+  its `ICON_TABLE` slot is `NULL` and its bitmap is left commented out in `icons.h`.  `displayTFT160x128conf.h` and
+  `displayOLED128x32conf.h` carry `"%s"` with no mark at all, and `displayTFT160x80conf.h` carries `""` because that
+  layout has no IP line.  `ipLineFmt(sd)` in `display.cpp` returns the conf's string untouched, or `"\030\031%s"`
+  when that string begins with `"\021\022"` and `sd` is true - the card pair is a SUBSTITUTE for the conf's mark,
+  never an addition, so a conf without one keeps its own spelling and the empty one keeps the line blank, the
+  offline path included.  The swap is pair for pair: both are two glyph cells and neither carries a space, so it
+  cannot change the line's width, its centring or the rectangle the next paint erases.  `sd` is true for every
+  SDOFFLINE write and for `config.getMode() == PM_SDCARD` in `_footerIp()`, so a card in the footer means "playing
+  from the card".  Because the line is now mode-dependent, `Config::changeMode()` queues `NEWIP` beside its
+  NEWMODE/NEWSTATION/NEWTITLE requests: WEB -> SD passes through the SDCHANGE screen, but SD -> WEB leaves the
+  player screen already up, so `_switchMode()` returns at its same-mode guard and nothing else would rewrite the
+  icon.
+  **The mark has to be there before the address exists.**  `_footerIp()` used to blank the line until
+  `netserver.isListening()`, which left the boot mode invisible for as long as the WebUI took to come up.  It now
+  prints the SAME format with an EMPTY argument while the server is not listening: `"\021\022%s"` renders the web
+  mode pair alone (and `"\030\031%s"` the card), two cells, no placeholder and no invented address, and the `"%s"`
+  and `""` confs render nothing - so the mark-less layouts need no third case and behave exactly as they did when
+  the branch cleared the widget.  The gate itself is kept, and the two halves of the line now mean different
+  things: the mark says which mode the device booted into and is there from the first painted frame, while the
+  ADDRESS appearing beside it is what says the WebUI answered - which is why `NEWIP` is still the request that
+  completes the line rather than starts it.
+- **`YO_MONO` and `DS_DIGI/` are deleted.**  `LED` took YO_MONO's id slot (`0`); the ids are the index
+  into `_clockFontStyles[]`, so they must never be renumbered.
+- `/fonts.json` and `/clockfonts.json` are built from those two tables by `Display::_buildJsonCache()`,
+  which is why the WebUI dropdowns cannot drift from what is compiled in.
+
+**Flash cost, measured, one copy each** (the point of the single defining TU):
+
+| item | bytes |
+|---|---|
+| `MatrixLight8x6` / `MatrixChunky8x6` | 12,752 each |
+| `UnixX11_6x9` (`Fixed`) | 13,696 |
+| one clock STYLE (all seven sizes, bitmaps + glyph tables) | 13,404 |
+
+So the two extra system fonts are +13,696 and the three clock styles +40,212: measured deltas of
++41,220 (sh1106, 128x64), +39,032 (es3c28p) and +36,308 (ili9488, which had already been paying for
+one 70 px font).  **Adding a font now costs its own size and nothing more** — before the linkage fix
+every one of them was in the image twice (three times on the ILI9488 family).
 
 ## GFXfont Rendering Pipeline (`src/displays/tools/commongfx.h`, `psframebuffer.h`)
 
-`DspCore::_writeGlyph(uint16_t cp)` is the central glyph renderer replacing the legacy 256-slot glcdfont system. Key behaviors:
+`DspCore::_writeGlyph(uint16_t cp)` is the central glyph renderer replacing the legacy 256-slot glcdfont system. Key
+behaviors:
 
-- **Dispatch:** When `gfxFont != NULL && gfxFont != &DisplayFont` (a special clock font is active), delegates to `Adafruit_GFX::write()` which uses the font's native `drawChar`. Otherwise renders via `&DisplayFont` (the configured Unicode GFXfont).
-- **Icon rendering:** Codepoints `0x01-0x1F` map to `ICON_TABLE[]`; rendered with `startWrite()`/`endWrite()` wrapping (needed for Adafruit SPI TFT drivers).
-- **Font glyph rendering:** Similarly wrapped in `startWrite()`/`endWrite()`. The inner loop iterates all `width` bitmap columns but only renders columns where `(xOffset + xx) < xAdvance` — prevents glyph bleed beyond the cell boundary (fixes colon/digit overlap on SH1106 YO_MONO). Bleed columns have their bits consumed from the bitmap stream but are not rendered.
-- **Space handler:** Advances cursor by the font's first-glyph `xAdvance` without drawing pixels.
-- **Unrenderable fallback:** Falls through `foldAccent()`; if still unmapped, advances cursor by the font's `xAdvance` (blank space).
-- **`psframebuffer.h`** mirrors the same `_writeGlyph` logic for PSRAM-framebuffer TFT displays.
+- **Dispatch:** When `gfxFont != NULL && gfxFont != &DisplayFont` (a special clock font is active), delegates to
+  `Adafruit_GFX::write()` which uses the font's native `drawChar`. This check now runs **before** `preText()`, so the
+  resolver is never asked about a font other than the one that will draw the glyph.
+- **Icon rendering:** codepoints `0x01-0x1F` map through `iconAt(cp, textsize)` to a bitmap, rendered with
+  `startWrite()`/`endWrite()` wrapping (needed for Adafruit SPI TFT drivers). A mark is always one cell,
+  `6*textsize` by `8*textsize` px - exactly the rectangle `TextWidget::_paint()` erases - so the ladder below
+  leaves centring, erasing and the scroll cycle untouched.
+  - **Two data shapes in `icons.h`.** Scale 1 is `static const uint8_t NAME[]`: 8 rows, 6 significant bits,
+    leftmost pixel = bit `0x20`. A hand-drawn variant is `static const uint32_t NAME_<N>[]`: `8*N` rows of
+    `6*N` bits, leftmost = bit `6*N-1`. `6*N` has to fit the row, so N <= 5.
+  - **One ladder, both renderers.** The scale drawn is the largest existing `k <= min(textsize, 5)` that
+    DIVIDES the textsize - the request itself first, so a mark drawn for that size is drawn 1:1 - else 1 with
+    `ps = textsize`. Excluding the exact match is not a detail: at textsize 2 the only candidate left is 1, and
+    every seeded scale-2 variant becomes unreachable at the size it was drawn for. `ps` must be an integer, so
+    a scale-3 mark is ignored at textsize 4 rather than padded into a 24 px cell - one stroke weight beside
+    another reads worse than the blow-up. Anything above 5 lands on scale 1 with `ps = textsize`; the device
+    never clamps `textsize` (`layoutSanitize()` only lifts a present widget's 0 to 1), and the editor's
+    `max 4` is not enforced.
+  - **The icon scale is `textsize`** - the `fontsize` field of a widget entry - and never `_superfont`, which
+    is the clock size index (`ClockFontSel::_cf.index`, 0..4 selecting the 15/35/52/70 px clock fonts).
+  - **`iconBits()` is a switch, not an array of table pointers**, because `uint8_t* const*` does not convert to
+    `void* const*`. Scale-1 rows are read with `pgm_read_byte` and variants with `pgm_read_dword`, identically
+    in both `_writeGlyph()` copies; `commongfx` paints clear bits in `textbgcolor` when it differs from
+    `textcolor`, `psframebuffer` never paints background because its buffer holds it.
+  - **`ICON_TABLE` and `ICON_TABLE_2`..`ICON_TABLE_5` are all emitted**, NULL where a mark has no variant, so
+    the lookup needs no `#if` and a new scale cannot leave the header unbuildable. A NULL slot falls through to
+    the normal glyph handling exactly as before (`\011`, `\012`, `\036`).
+  - **`src/displays/icons_tool.py`, beside the header, owns the arrays' shape and never their pixels.**
+    Generation is selective and seed-only: `-s NAME N` (with `--force`) seeds one variant from the largest
+    existing divisor, so no mark gets a size it was not asked for and hand-tuning survives every run.
+    Two reconciliation DIRECTIONS exist because a row value and its comment can disagree and only the
+    author knows which half is the drawing: `-b` rebuilds the value from the comment, `-c` regenerates the
+    comment from the value, and the bare run asks per mark (keep binary / keep comment / skip).
+    `--check` reports each fault as a WHOLE-glyph block - all `8*N` rows, value and comment side by side,
+    under the declaration line - and one line each for a row count that is not `8*N`, a row wider than
+    `6*N`, a `uint8_t` declaration above scale 1, a name declared twice, a table slot that names a mark
+    that no longer exists or misses one that does, and a pixel comment that disagrees with its row value.
+    Table faults are settled in the bare run by regenerating the tables, which is exact because the writer
+    derives every slot from the declarations. `-o LEFT RIGHT` writes two marks side by side to
+    `icon_stitch.txt` at every scale both have; `-i` reads it back after validating each row's width,
+    characters, count, names and column codepoints, reporting against the SHEET's line numbers and writing
+    nothing on any problem. `--stats` reports the data cost in B and KB, the per-build copy projection, and
+    what it does not count. The header is committed, like `pretext_fold.h`, and the pixel comments cost no
+    flash - the preprocessor strips them. See `plans/icon-size-variants.md`.
+  - **These arrays are `static` in a header, so each TU that emits `_writeGlyph()` keeps its own copy** -
+    measured in the linker map as two copies in a PSFBUFFER TFT env and three in an OLED env. That is
+    pre-existing behaviour of the scale-1 bitmaps, accepted at ~64-370 B per array copy.
+- **Font glyph rendering:** Similarly wrapped in `startWrite()`/`endWrite()`. The inner loop iterates all `width` bitmap
+  columns but only renders columns where `(xOffset + xx) < xAdvance` — prevents glyph bleed beyond the cell boundary
+  (fixes colon/digit overlap on SH1106 YO_MONO). Bleed columns have their bits consumed from the bitmap stream but are
+  not rendered.
+- **Space handler:** Advances cursor by the font's first-glyph `xAdvance` without drawing pixels. Space is handled
+  *before* `preText()`, because resolving it would turn the gap into the substitute character.
+- **Resolution (`preText`) is a chain, not a single mapping:** keep the glyph when the font has it, else walk
+  `preTextFoldStep()` -- which folds within the script first (U+1F00 → U+03B1) and then to an ASCII lookalike (→ `a`) --
+  re-testing the font after every step, and substitute `_` only when the chain runs out. One table therefore serves
+  fonts of different coverage. The generator's rule is overrides → canonical base → first ASCII of the NFKD form → name
+  lookalike, and a non-ASCII base counts as a step only when it can itself progress (otherwise Hangul would claim 11,172
+  dead-end Jamo steps).
+- **The one-in-one-out contract still holds** (`utf8_strlen(text) * charWidth` is computed on the string as stored), and
+  never 0. Codepoints are 32-bit through `preText()`/`glyphAvailable()`/`_writeGlyph()` because four-byte sequences
+  would otherwise be truncated into a different glyph; the **result** is always BMP.
+- **`preTextString()` resolves a whole string once, at ingress** — `TextWidget::setText`, `ScrollWidget::setText`,
+  `NumWidget::setText` and the scroll separator. A scrolling label re-prints its window every scroll step, so this
+  removes the repetition and makes measurement and drawing use the same bytes. Invisible codepoints (combining marks,
+  zero-width, variation selectors) are dropped there and only there; the per-glyph path substitutes for them instead.
+- **Unrenderable codepoints are memoised** in a 128-slot direct-mapped cache keyed on the codepoint *and the font
+  pointer*, so a font change invalidates it for free. `preTextInvalidateCache()` is for a font whose data changes in
+  place.
+- **Cursor advance** in the two glyph branches is now defensive only (font swapped mid-frame); the old post-`preText`
+  fallback and its `_writeGlyph()` recursion are gone, so `preText()` is the single place that decides what is drawn.
+- **`psframebuffer.h`** mirrors the same `_writeGlyph` logic for PSRAM-framebuffer TFT displays — any change to one must
+  be applied to both.
 
 Important rendering invariants:
-- Never call `startWrite()`/`endWrite()` in `write()` or `writePixel`/`writeFillRect` overrides — SPI nesting causes hangs on Adafruit TFT drivers.
-- The `gfxFont == NULL` case (YO_MONO / display font) runs through `_writeGlyph` using DisplayFont, NOT the built-in glcdfont. This means glyph metrics (yAdvance, yOffset, xAdvance) come from DisplayFont.
+- **The clip rectangle is half-open**: `setClipping({left, top, w, h})` admits `left .. left+w-1` and
+  `top .. top+h-1`. `writePixel()` tests both trailing edges with `>=` (it used `>`, which let exactly one pixel
+  column and one pixel row escape), and `writeFillRect()` clamps its rectangle to those bounds rather than testing
+  only its origin. One pixel of escape is invisible on a framebuffer build — the PSRAM buffer clips by its own
+  bounds — and visible on a monochrome panel, where it is the glyph column that a scrolling line's deliberately
+  oversized window (one glyph more than the span holds) prints past its span and no later erase covers. See
+  `plans/clip-rect-off-by-one.md`.
+- Never call `startWrite()`/`endWrite()` in `write()` or `writePixel`/`writeFillRect` overrides — SPI nesting causes
+  hangs on Adafruit TFT drivers.
+- The `gfxFont == NULL` case (YO_MONO / display font) runs through `_writeGlyph` using DisplayFont, NOT the built-in
+  glcdfont. This means glyph metrics (yAdvance, yOffset, xAdvance) come from DisplayFont.
+
+## Display Widget Memory Ownership
+
+The widget classes mix two allocation conventions; release must match allocation:
+
+| Member | Owner | Allocated with | Released with |
+|---|---|---|---|
+| `_text`, `_oldtext` | `TextWidget` (and `NumWidget`, which duplicates it) | `malloc` | `free` |
+| `_sep`, `_window` | `ScrollWidget` | `malloc` | `free` |
+| `_fb` | `ScrollWidget`, `ClockWidget` | `new psFrameBuffer` | `delete` |
+| `_canvas` | `VuWidget` | `new Canvas` | `delete` |
+| `_caps` *(removed)* | `VuWidget` | was an in-object array for the spectrum's per-band caps | — the caps were cut on review, so the widget carries no per-band state |
+
+Rules:
+- Never `free()` a `new`-allocated object: `free()` skips the destructor and leaks the internal buffer.
+- `init()` is re-called on every layout/theme change, so it must release its previous buffers first.
+- Resize an existing `psFrameBuffer` with `freeBuffer()` then `begin()`, never by allocating a second one.
+
+### Optional widget guard fields
+
+Each config type has its own field that makes a widget meaningful, and that is what the creation guard in `display.cpp`
+must test — never a coordinate, since `{0,0}` is a legitimate position:
+
+| Config type | Fields | Guard field |
+|---|---|---|
+| `WidgetConfig` | `left`, `top`, `textsize`, `align` | any cell non-zero |
+| `ScrollConfig` | `widget`, `width`, `startscrolldelay`, `scrolldelta`, `scrolltime` | any cell non-zero |
+| `FillConfig` | `widget`, `width`, `height`, `outlined` | any cell non-zero |
+| `BitrateConfig` | `widget`, `dimension` | any cell non-zero |
+| `VUBandsConfig` | `width`, `height`, `space`, `vspace`, `perheight` | any cell non-zero |
+
+`ScrollConfig` used to carry `buffsize` and `uppercase`, and its guard used to be `buffsize > 0`; both members are
+gone. The buffer is `WIDGET_BUFF_SIZE` in `widgets.h` (every conf passed the same 140; the widget's own `init()`
+default is that macro, now **172** = `STATION_FIELD_LENGTH` + 2, which is what a 169-byte station name or title needs
+because a `ScrollWidget` keeps `_buffsize - 2` bytes), with the boot line passing `BOOTSTR_LEN` instead and the
+weather row and the screensaver's info line passing `COMPOSED_LINE_BUFF` (`WEATHER_STRING_L` + 2) for the 511-byte
+forecast. A widget's size is repeated at every `init()`, not just at construction: `init()` re-mallocs.
+`uppercase` never did anything at all - `PRETEXT_ALLCAPS` is the switch that works. `conf_tool.py` strips the old
+pair out of a conf file (`trim_scroll_conf()`). See `plans/widget-text-buffer-sizes.md`.
+
+**The guard is one rule, in one place.** `presentOf()` in `widgetsconfig.h` - every cell zero means absent -
+replaced five per-type `present()` overloads and the `zeroed()` patch the clock and the digits needed while the
+rule was `textsize > 0`. It lives in the structs' own header because the same question was answered by five
+copies (display.cpp's tests, `layoutRequiredOk()`, the page's `isEmptyField()` and the tool's
+`is_empty_field()`), and only one of them can be right. `MoveConfig` is exempt everywhere: zero there is a
+displacement, which is what makes a widget yield to the VU. `VuWidget::init()` clamps `perheight` to 1 so the
+rule feeds `_drawBars()`'s division nothing degenerate - a safety fix at the point the value enters, not a
+presence test.
+
+**The badge and the bitrate text keep what they were last handed**, so `Display::_applyBitrate()` is the one place
+that pushes `config.station.bitrate` and `config.configFmt` into them. It is called from the `DBITRATE` request -
+which is the only thing that queues it - and from `_reinitWidgets()` right after the pair is created or re-inited,
+because an init wipes what the widget held and a layout change or a live preview would otherwise leave an empty
+badge until the next track started.
+
+`_fullbitrate` and `_bitrate` are **independent**, not alternatives: the badge is drawn when
+`fullbitrateConf.dimension > 0`, the text when `bitrateConf.textsize > 0`, both when a layout fills both, neither
+when it fills neither. Neither is ever deleted - `_reinitWidgets()` hides the one a layout does not ask for with
+`hideByLayout()`, like every other optional widget - and `Page::removeWidget()` deletes the widget it is handed, so a
+caller that removes one and then deletes it too is a **double free**. That pair was the last widget still deleted on
+a switch, and it is why switching between a `.bitrateConf` layout and a `.fullbitrateConf` one rebooted the board
+(`CORRUPT HEAP` / `multi_heap_free` assert). `BitrateWidget::_draw()` also returns early on `!_active` now: a hidden
+badge still receives `setBitrate()`/`setFormat()` on every `DBITRATE`, and its `_draw()` opens with an ungated
+`_clear()` that would otherwise paint a background square where the badge would have been.
+
+## VU Widget Rendering (TFT vs OLED, and the runtime style)
+
+`VuWidget` lives in **`src/displays/widgets/widget_vu.h` / `widget_vu.cpp`** — it moved out of `widgets.h`/`widgets.cpp`
+because it is now seven draw paths over one box. `widget_vu.h` includes `widgets.h`; **`widgets.h` must not include
+`widget_vu.h`** (that is the include cycle) — `display.cpp` includes it explicitly instead. It is compiled for every
+display.
+
+`_draw()` is a **dispatcher**: it resolves the area once into `_len`/`_thk`/`_cw`/`_ch`, calls `_levels()`, fills the
+whole area with the background, then switches on `config.store.vustyle` and blits once at the end. The styles are
+`vuStyle_e` from `widgetsconfig.h` — **seven of them**: Bars (0), Digital LED (1), History (2), Spectrum Reflect (3),
+Waveform (4), Lissajous (5), Spectrum Mirror (6). The ids are persisted in `config.store.vustyle` and are the keys in
+`/visuals.json`, so they must never be renumbered again (Spectrum A was cut, and the ids shifted, before the first
+release) — Spectrum Mirror is id 6 rather than id 4 for exactly that reason, and `/visuals.json` lists it beside
+Spectrum Reflect so the two still sit together in the dropdown. `_fillLocal()` is the only helper that knows the pixel
+surface:
+
+| | TFT (`DSP_TFT`) | OLED (`DSP_OLED`) |
+|---|---|---|
+| Buffer | `Canvas *_canvas`, 16-bit (`GFXcanvas16`) | none — the driver owns the framebuffer |
+| `init()` | allocates the canvas | no allocation |
+| Fills | `_canvas->fillRect` at widget-local coords | `dsp.fillRect` at `_config.left/top` + local coords |
+| Transfer | one `startWrite`/`setAddrWindow`/`writePixels`/`endWrite` | none — `DspCore::loop()` calls `display()` |
+
+The shared box fill in `_draw()` is the clear for **every** style, including the tail-clear bar family: every fill and
+`_clear()` stops at `len`, so the final (clamped) segment is only clean because the box was cleared first. Do not
+reintroduce `drawRGBBitmap` here — the manual blit is deliberate (see the memory-ownership notes above).
+
+**The bar family is a full wipe plus a full repaint, and that is deliberate.** A brief incremental path — a band
+between the old and the new tip, with a dirty-rectangle blit — was removed (2026-10-10) because its correctness rested
+on `_prev*` state that had to describe the canvas exactly, and it kept leaving leftovers in the vspace gaps and the
+inter-channel strip. `_draw()` now wipes the whole box for every style unconditionally, `_blit()` always sends the
+whole box, and the dirty rectangle, `_prevMeas*` / `_prevPk*` / `_prevStyle` / `_prevVupeak`, `_selfErasing()` and
+`Widget::_invalidate()` are gone. Do not reintroduce a partial blit without the wipe it depends on. See
+[`plans/vu-bars-full-repaint.md`](../plans/vu-bars-full-repaint.md).
+
+**The bar family's shape is two macros** — `VU_BAR_PERCENT` (20) and `VU_BAR_GAP_PERCENT` (10), at the top of
+`resolveScreensaverBox()` in `widget_vu.cpp`, read as percentages of the content height. Each channel is one
+`VU_BAR_PERCENT`, the gap between them is `VU_BAR_GAP_PERCENT`, and the remainder is placement, split evenly above
+and below by the centring — the shipped shape is `25 + 20 + 10 + 20 + 25`. Both Bars and Digital LED go through this
+path (`case VU_STYLE_DIGITAL_LED: _drawBars(true);`). Above the pixel budget the bar and the gap scale by one
+factor, so that shape draws literally only where the budget does not bite. **The gap row is inside the budget**: the
+box is `2 * barH + gapH` tall (`hmax = budget / w` caps that sum), and the canvas is allocated at that full height
+(`_ch = _bands.width * 2 + _bands.space`, `vuCanvasBuffer(cw, ch)` at 2 bytes per pixel), so the empty row between the
+channels costs exactly as much PSRAM as a bar row of the same height would. The margins *outside* the box (`box.top`)
+are not counted, because nothing is allocated for them.
+
+**The screensaver's meter honours `TFT_BORDER`, and the border is taken ONCE.** `resolveScreensaverBox()` computes
+`in = TFT_BORDER` (0 where the panel is no wider than two borders) and `w = areaW - 2*in` at the top, and every style
+below works against `w`: the bar family returns `box.w = w, box.left = in`, and everything else is placed at
+`in + (w - box.w)/2`. The budget is divided by `w` rather than the panel's width, because the inset is width the canvas
+no longer occupies — that is also why the 480x320's bars gained 2 px per channel when the inset arrived. Wherever the
+budget engages, the placement is arithmetically the old one (`in + (w - box.w)/2 == (areaW - box.w)/2` for the same
+`box.w`), so only what used to be flush to the glass moved: the bar family on every panel, and any style that is under
+budget. The HEIGHT is never inset — the content area already excludes the info line's strip, so insetting it again
+would only push the meter off the panel's centre. `vuResolveBox()` is untouched: the player page's box is the layout's
+own. See [`plans/screensaver-vu-inset.md`](../plans/screensaver-vu-inset.md).
+
+**The bar family has its own pixel ALLOWANCE.** `BARS_ALLOWANCE` (0.75 on the TFT build, 1 on the OLED one, declared
+beside `VU_BAR_PERCENT`/`VU_BAR_GAP_PERCENT`) scales the budget for these two styles alone before the height cap is
+taken (`hmax = barBudget / w`); `budget` itself is untouched, so Lissajous and the trace styles keep the whole
+rectangle. That is a FRAME-RATE control, not just a memory one: two full-width rows cost a full-canvas erase plus a
+full blit every frame, so the box *area* is the frame cost - on the 480x360 the 0.75 allowance takes the box from
+460x85 (39,100 px, ~41 ms, ~8 FPS) to 460x61 (28,060 px, ~30 ms, ~11 FPS). See
+[`plans/screensaver-vu-bars-allowance.md`](../plans/screensaver-vu-bars-allowance.md).
+
+**The screensaver's segment GAP and COUNT are its own, and they are PER STYLE** - decided in `initScreensaver()` on the
+copy of `bandsConf` it already makes; the shared `_drawBars()` loop then draws them unchanged, which is what keeps the
+player page historical and verbatim (the exact-tiling painter and its `_ssTiling` flag were removed). The two bar
+painters read differently, so
+`VU_STYLE_BARS` gets `max(layoutBands.vspace, 1 x vuPeakThickness(box.w))` - gap equal to the marker, which then FILLS
+a gap - and a **square-or-taller** block (`thk >= w`), while `VU_STYLE_DIGITAL_LED` gets `2 x` (air either side of the
+snapped marker) and **1:1.5-or-taller** (`2*thk >= 3*w`). `vuPeakThickness()` is `ceil(len *
+VU_PEAK_THICKNESS_MILLI/1000)`, one helper shared with the marker itself. The count comes from `ssSegmentCount(...)`:
+start at the layout's `perheight`, add 2 segments at a time, and stop at the first count meeting the style's ratio - or
+at the **hard cap of 16**, which a layout asking for more is clamped down to. Only "shape met" or "cap" ends the walk,
+so a poor candidate can never be chosen (12 into 460 is 40 long against 25 tall for Bars and is stepped over to 16);
+and because the walk only ever makes blocks SHORTER, a panel whose layout already yields tall enough blocks keeps its
+count - the 320x240 stays at 10 for both styles. On the 480x360 with the 0.75 allowance: Bars = 16 blocks of ~22x25
+with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps. See `plans/screensaver-vu-two-bar-styles.md`.
+**Because the count rarely divides the span, the AXIS is snapped down to an exact multiple of it:** `axis = per *
+(box.w / per)` becomes `bands.height` and the box's left edge moves by `(box.w - axis) / 2`, so `step` is exactly the
+pitch `ssSegmentCount()` judged, every block is `len/per - gap` long, and `_drawBars()`'s trailing clamp cannot fire
+there. The pixels given up are fewer than `per` and come back as equal background at both ends of a box that is still
+centred - the 128x64 OLED shows 12 identical blocks of ~8x10 (Bars, 3 px each end) or ~6x10 (Digital LED). This
+replaced an exact tiling that shortened the two tip segments and drew the last one without its trailing gap; on a 5-9 px
+block those differences *are* the picture, which is why the OLED looked wrong. Snapping the axis also keeps
+`vuSnapLit()`'s LED grid and the peak markers on the gaps - a `lead` offset inside the painter would have cut the tip
+block instead - and it leaves the shared painter untouched. See
+[`plans/screensaver-vu-equal-segments.md`](../plans/screensaver-vu-equal-segments.md).
+**The PLAYER page's bars now use the same rule**, from the other end: `VuWidget::_draw()` snaps `_len` itself to
+`per * (_len / per)` for the bar family only, immediately after `_cw`/`_ch` are resolved and BEFORE `_levels()`, so one
+snapped axis serves the measurement, the erase strips, the LED snap and the markers. `_cw`/`_ch` are deliberately left at
+the band's full size - in rotate mode `_cw = _len` was already taken - so the box, the canvas and the blit do not move and
+the leftover columns are simply never painted; the shortfall is at the loud end rather than split, because a layout's box
+cannot be re-centred. Before this, `_drawBars()` drew `ceil(len/step)` blocks with the last one clamped: the 128x64 Default
+layout (53 px, 10 segments, gap 1) had **11 blocks with an 11 px stub at the end**, and the second 128x64 layout 11 with a
+6 px stub. The trace styles are excluded - their axis is a time or frequency span. Keep the two rules in step: the
+screensaver snaps a copy of `bandsConf`, the player page snaps `_len`, and both must agree. See
+`plans/vu-bars-full-segments-player.md`.
+
+**What the meter draws is `dimension * vuLeft / vuThreshold`** - the live reading as a fraction of the meter's
+REFERENCE - and `get_VUlevel()` returns the length CLEARED from each bar, 8 bits a channel, so **0 means "nothing
+cleared", i.e. a FULL bar**, and `dimension` means empty. Three consequences, all load-bearing:
+- **"Nothing to show" answers EMPTY, not 0.** `config.vuThreshold` is zeroed by `Config::setTitle()` on every title
+  change and by `_play()` on every start; returning 0 there lit both bars to maximum at every track boundary, and that
+  is the "the VU never goes to zero between tracks" report. Both libraries now return `(dimension << 8) | dimension`
+  when the source is not wanted, and clamp the reference to 1 (it is also `map()`'s divisor) so silence maps to
+  `dimension`.
+- **The reference releases in real time.** `Config::vuRefTrack(left, right)` in `config.h` raises `vuThreshold` to the
+  reading at once, then falls by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6% per 250 ms, ~22%/s, a 2.8 s
+  half-life), never below the live reading - so compressed material can empty, while the per-call decay that once
+  pinned the bar cannot recur. One implementation, called by both `computeVUlevel()`s, so the rule does not fork with
+  the libraries.
+- **The interface is 8 bits a channel, so `dimension` cannot exceed 255.** `_levels()` asks for 255 units and scales to
+  the bar's own length (1.8 px a step on the 460 px screensaver bar). Passing `len` directly broke every bar longer
+  than 255 px: the screensaver's rested about 55% lit at silence and went non-monotonic above it.
+- Both sample styles' display gain is `256 / vuThreshold`, so the waveform and the spectrum follow the same release and
+  brighten through a quiet passage; accepted. See `plans/vu-level-reference-and-255-ceiling.md`.
+
+**Two kinds of layout, one drawing rule.** The **bar family** (styles 0-1) draws two strips where `bandsConf` says they
+are, so the orientation (`vuConf.align`) and the boombox bit (`bb`, which is exactly `align == WA_CENTER`) both matter to
+it, exactly as `rotateVU`/`boomboxVU` did before they were folded into `align`. **Every other style** (2-6) draws into
+one area, `_cw` x `_ch`: time or frequency runs along its **width**, and the two channels split its **height** — except
+Spectrum Mirror, which splits its **width** — with `bb` never consulted there. Nothing transposes - the OLED, the
+rotated TFT box, the portrait TFT box and the BoomBox ribbon get the same picture. The orientation is read in
+`_draw()` for both cases, but only to size the area: `_rotate` picks `_cw = bandsConf.height` with `_ch =
+bandsConf.width * 2 + bandsConf.space`, otherwise it is the other way round. `_fillLocal()` is the only pixel helper;
+the non-bar painters never touch the per-channel geometry. A first cut transposed the non-bar styles onto the area's
+*long* axis, which put the portrait box's spectrum on its side and needed per-family special cases - all of that is
+gone.
+
+**The sample styles need audio the VS1053 does not have.** `player.getWaveform(int16_t* out, uint16_t n)` returns `n`
+interleaved L/R pairs (oldest first) and `player.getSpectrum(uint8_t* bands, uint8_t n)` returns `2 * n` band values in
+0..255 (L's bands then R's), or `false` when there is nothing to give. On the I2S path the audio task keeps a
+`VU_CAPTURE_SAMPLES` (512) rolling window, rotated into a published copy on the `f_vu` tick with a sequence counter
+around the copy; a reader that sees the sequence move drops the frame rather than drawing a torn trace. On the VS1053
+both methods are stubs returning `false`, which is why the spectrum there is synthesised from the level in the widget -
+a fact the dropdown no longer states, since the label is the same on every backend. **The transform only exists where it
+is used**: `getSpectrum()` is dead code on a VS1053 build, so the linker drops its twiddle table, Hann table and FFT
+scratch entirely.
+
+**The spectrum's scale is two factors that are easy to lose.** `getSpectrum()` returns 0..255 where 255 is a full-height
+bar, and it gets there as `sqrt(mean power) * (2/N) * (2/32768) * gain`. The first two are the transform's own
+normalisation; the third takes the int16 sample range down to 0..1 *and* gives back the Hann window's 0.5 coherent gain;
+and `gain` is **the meter's reference**, `clamp(256 / config.vuThreshold, 1, 32)`, so the loudest content the level
+meter has seen sits at full scale. That is what makes the I2S spectrum behave like the level bar beside it and like the
+simulated source on the VS1053, which is fed that same calibrated level. Dropping the `2/32768` pins every band at 255
+and hot — that is exactly what the first hardware build did. The dB window is `VU_SPECTRUM_DB_FLOOR` (60) in
+`options.h`. The result is also **held**: a band rises at once and falls over `VU_SPECTRUM_FALL_MS` (400), because one
+512-sample window is a noisy estimate - a band swings about 10 dB window to window, and a quiet window dims the whole
+display. That is the same hold that fixed a hardware flicker: the seqlock drops a frame whenever the publisher moves
+during the staging copy - **7% of frames**, ~1.8 a second, measured - and `getSpectrum()` used to report it as `false`,
+which a painter reads as "this backend has no transform" and answers by switching to its SIMULATED source for one
+refresh. On a sparse real spectrum that reads as the whole display suddenly filling in. A dropped frame now repeats the
+held frame; the strict check is what the waveform needs, where a spliced window is visible.
+
+**Spectrum and trace layout details.** The inter-bar gap is `VU_SPECTRUM_SPACE_PX`, never `bandsConf.space` (that
+separates the two *meter strips* — 4 px on one TFT layout, 17 px on another, which left only 7 bars on the second).
+Because `barW` is floored, the bar block is **centred** — under the baseline in the stacked Spectrum, and inside each
+half in Spectrum Mirror, which is why its two low ends stop short of the divider, Spectrum Mirror reserving `th + 2` px
+more there so the line gets daylight on both sides instead of sitting flush against the first bar. And the Lissajous
+joins each sample pair to the previous one with a stepped line — one fill per pixel of the longer axis — because
+isolated dots read as a scatter rather than as a vectorscope trace.
+
+**The sample styles use the same reference as everything else.** `_waveGain()` is `65536 / config.vuThreshold` in 8.8
+fixed point (256 = unity, clamped to 0.25x..32x), applied to the waveform's amplitude and the Lissajous's X and Y, with
+the hot colouring measured *after* it. Without it both styles were absolute readings of raw int16: a trace that hugged
+the middle of the area and could never reach the hot zone. An uncalibrated meter (threshold 0) maps to unity. The
+Lissajous hot test is proportional on whichever axis the beam is furthest out on — a single `min(halfW, halfH)` scale
+can never go hot at the left or right edge of a wide box.
+
+**The `[PSRAM]` core-monitor line is the memory diagnostic, and its fields are a contract.** `Used / total: Framebuffer:
+X, VU FFT: X, WebUI Cache: X, Audio buffered: X, Contiguous Free: X`. `VU FFT` is `vuPsramBytes` (declared in
+`config.h`, defined in `config.cpp`), written by the audio library's scratch allocator, and it reads 0 until a spectrum
+frame has been drawn because that allocation is lazy. `Contiguous Free` is
+`heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)` — the largest single free block, which is the figure that reveals
+fragmentation, since total free can look healthy while the biggest block shrinks. Add new fields at the end rather than
+reordering.
+
+**Pacing is adaptive now, not a fixed divisor.** `VuWidget::loop()` times `_draw()` with `micros()`, smooths the cost
+(`_drawUs`, a quarter of each sample) and sets `interval = max(VU_REFRESH_MS, cost * VU_DUTY_FACTOR)`, both macros in
+`options.h` — at the default factor of 3, a frame spends at most a third of its own interval drawing. `VU_REFRESH_MS` is
+the floor and stays the number the level bars care about, so the limiter can only ever slow a style **below** the rate
+the audio core publishes levels at. `_redrawMs` (the limiter's timestamp) is deliberately **not** `_lastMs` (the fade
+maths' time base): while they were shared, a skipped frame showed up as a doubled `dt` in the fade.
+`VU_SAMPLE_REFRESH_DIV` is gone — it was a fixed guess at which styles were heavy and by how much, and it covered only
+two of them. On TFT the blit is inside `_draw()` and counted; on OLED the panel flush is paid afterwards by the display
+task, so the figure measured there is the widget's own cost. **While the startup services are downloading** the floor is
+multiplied by `VU_STARTUP_SERVICES_DIV` (4), so every style redraws a quarter as often for that window — the updater
+holds up to three TLS sessions on the network core and the audio stream is usually already up. The gate is
+[`startup.servicesBusy()`](src/core/startup.h:19), set by the services task around its own downloads: **not**
+`SVC_WILL_RUN`, which also covers the SD-mode park and the 10 s countdown, where the display must stay fast.
+
+**History is the one style a variable redraw rate breaks**, because its x axis *is* time, so `_drawHistory()` advances
+by wall clock: it pushes however many columns the elapsed time owes (one per `VU_REFRESH_MS`), keeping the sub-tick
+remainder in `_histMs` so the strip does not drift, and a gap longer than the strip fills it in one go rather than
+replaying it. It also draws **two rects per column, not four** — the tick at each level is already inside either the
+fill (switch off) or the joined run (switch on), so only the first column, which has nothing to join to, needs bare
+ticks. The waveform and the Lissajous need neither fix: they plot the whole capture window every frame, so only their
+refresh rate moves.
+
+**The draw-cost report is the measuring instrument.** With `WIDGET_DEBUG` defined, `loop()` accumulates frames, fills
+and draw time and prints them every 5 s like the Core Monitor: `[VU.Widget] Box 404x7, style 3: 28.1 FPS, draw 1.05ms
+avg / 2.31ms peak, interval 33ms, 12.0 fills/frame, free heap 93000`. `fills/frame` counts `_fillLocal()` and
+`_drawBand()` calls (not the blit) and is what shows whether a style is drawing rects it does not need; the draw time
+shows whether the box is simply too big for the panel. The members and the log are both behind `#ifdef WIDGET_DEBUG`, so
+a normal build pays nothing for either. The `WIDGET_DEBUG` line in `options.h`'s `ALL_DEBUG_LOGS` block used to read
+`#ifdef WIDGET_DEBUG`, a define that could never take effect; it is now `#ifndef`, matching its siblings.
+
+### Colours on OLED
+
+`config.theme.vumax` / `vumin` are set per driver, not via `dspcolors.h`:
+
+- 1-bit panels (`tools/oledcolorfix.h`): both `TFT_FG`. A single bit cannot express two colours, so level reads from
+  geometry alone.
+- `OLED_GREYSCALE` with `core/options.h`, default `false` selects the driver's grayscale palette (instead of 1-bit
+  mono), and is only valid for `SSD1322` (support removed from`SSD1327`)
+
+`dspcolors.h` is deliberately minimal: only `BOOT_PRG_COLOR`, `BOOT_TXT_COLOR`, `BOOT_DOT_COLOR`, `TFT_BG`, `TFT_FG`.
+Panel-specific palettes live with their own drivers. `BOOT_DOT_COLOR` is the one macro in there with an `#ifndef`
+guard: it defaults to `BOOT_PRG_COLOR`, and exists so a build can lift the animated blob off the speaker and boot glyph
+beside it (`ProgressWidget::setDotColor()`), which is the only two-colour boot line the panel supports.
 
 ## Screen Rendering Fixes (Session: SH1106 YO_MONO)
 
+### The clock only prints a time the device can stand behind (utility.cpp, widgets.cpp)
+- `ClockWidget::_printClock()` is the single function that puts the time on the glass, and it has two doors into it:
+  `draw()` (the tick-driven path, which also formats through `_getTime()`) and `_draw()`/`forceDraw()`, which the widget
+  base class calls itself from `setActive()` and from the layout show/hide helpers - so `Pager::setPage()` and every
+  layout change repaint the clock. Gating `Display::_time()` does NOT cover those: that only handles the tick updates,
+  which is why a gate there changed nothing at all.
+- **The gate is asked by the two callers BEFORE they decide how much to repaint, and it stays inside `_printClock()`
+  as the last line of defence.** The order matters because the decision is one-shot: `draw()` calls `_getTime()`, which
+  spends `_forceflag` on a year change and rewrites `_timebuffer`, so a paint refused *after* that leaves the next one a
+  DELTA paint - and a delta paint draws the seconds and the colon but not the time, the date, the day or the divider.
+  That is what an RTC unit showed at boot before 2026.11.03: `refreshClock()` filled the cache from the chip and queued
+  `CLOCK` while the system clock was still unset, so the force decision was spent on a paint the gate then refused, and
+  the panel showed a live seconds column sitting over the hours until the next minute boundary forced a full paint. A
+  no-RTC unit never showed it, because there the cache stays zeroed until `doSync()` fills it and only then queues
+  `CLOCK`, so the first paint is already trustworthy. `_linesleft` is derived in `_getTimeBounds()` for the same reason:
+  it is pure geometry, and leaving it to the force branch left the seconds' x indeterminate for any delta paint that came
+  first.
+- `clockTrustworthy()` (`utility.cpp`, declared in `utility.h`) is asked by both callers of `_printClock()`. With
+  `network.timeinfo` a pure cache (see below) it asks one thing: has anything set the cache? `network.timeinfo.tm_year
+  + 1900 <= 1901` is the zeroed struct, which is what the no-RTC radio showed as `00:00` until the first `doSync()` (1901
+  rather than a modern floor, so a device that never syncs can never cross it). **The RTC chip is trusted on ANY status,
+  `SDOFFLINE` or not** (2026.11.03): a unit with a battery-backed chip is expected to know the time at boot rather than
+  wait for SNTP, and the chip holds LOCAL time as plain fields - `RTC::setTime()` writes `tm_hour`/`min`/`sec` straight
+  into the `DateTime` and `doSync()` hands it the local struct - so no timezone is needed to print it. The cost, accepted:
+  a STALE chip (a timezone or DST change while powered off) shows its old local time until the first successful sync,
+  which rewrites the chip. **There is no RTC-agreement test any more**: the cache is copied from the system clock
+  whenever that is set, so the chip can no longer overrule it.
+- **A chip that has STOPPED feeds nothing.** `RTC::getTime()` returns without touching the caller's struct when
+  `isRunning()` is false; it used to do `tinfo->tm_sec++` + `mktime()` there, which invented a time from one it had not
+  read and free-ran `network.timeinfo` on every tick. A dead-battery boot therefore leaves the cache zeroed and the year
+  test keeps the clock blank - the same picture as before, without the garbage.
+- **"Is the system clock set" and "what is its local time" are one read**, `systemLocalTime()` (`utility.cpp`, declared in
+  `utility.h`): the one-year-epoch floor (`now > 31536000`, far above any uptime, far below any real date), the
+  `time(NULL)` and the `localtime_r()`. `refreshClock()` asks it; `clockTrustworthy()` no longer does, because trusting
+  the chip made that branch unable to change the answer. `localtime()` only becomes local once `configTzTime()` has run,
+  which happens at the WiFi-connect event - that governs reading the SYSTEM clock, not printing the chip.
+- The first genuine paint needs no help from the gate: `ticks()` (RTC) and `doSync()` (network) both request `CLOCK` the
+  moment they have something to show, and the first paint the gate allows is a FORCE paint - `_forceflag` is only spent
+  by a paint that actually happens, because neither caller reaches `_getTime()` while the gate is shut.
+
+### One producer for network.timeinfo: refreshClock() (network.cpp, utility.cpp)
+- **`refreshClock()` (`network.cpp`) is the single place `network.timeinfo` is made current and the only place `ticks()`
+  queues `CLOCK`.** `network.timeinfo` is a **pure cache** of the most reliable clock available, refreshed every tick and
+  never advanced by hand. The authority order is:
+    1. **the system clock**, once SNTP has set it (`systemLocalTime()`). It is disciplined and keeps running across a
+       WiFi outage, so it is read **regardless of `network.status`**;
+    2. **otherwise the RTC chip**, when one is present - the only source across an offline boot;
+    3. **otherwise nothing**, leaving the cache as it is.
+- **The old hand-incremented clock is gone.** `ticks()` used to advance a second, private clock (`tm_sec++` + `mktime()`)
+  in parallel with the SNTP-disciplined system clock, which is why the display drifted and "bounced" when NTP snapped it
+  back. Two more defects went with it: the increment was used while merely *offline* (worse than the system clock, which
+  is still valid then), and in RTC builds the chip overwrote the cache every tick even when the system clock was
+  authoritative, letting an inaccurate cell lead the display. With no source the increment only ever advanced a struct
+  there was nothing to show, because `clockTrustworthy()` gates the print.
+- **The `:01s` RTC-drift check is deleted.** With the cache copied from the system clock whenever that is set, the cached
+  value and `localtime()` can never disagree, so the check could never fire. The chip is kept in step by `doSync()`'s
+  periodic `rtc.setTime()` instead. This is the ESP8266/yoRadio single-clock shape finally restored: one authoritative
+  source, cached for the display.
+- A seconds-level skip or repeat during an NTP slew is expected and correct - the display is honestly tracking the real
+  clock.
+
 ### ClockWidget colon blink (widgets.cpp)
-- The seconds-area `fillRect` at line 813 is guarded by `if (Clock_GFXfontPtr != NULL)` — its Y-position formula (`_top() - _timeheight + _space`) is only correct for special clock fonts; YO_MONO renders at `_top()` directly and the fillRect would clear into title rows.
+- The seconds-area `fillRect` at line 813 is guarded by `if (Clock_GFXfontPtr != NULL)` — its Y-position formula
+  (`_top() - _timeheight + _space`) is only correct for special clock fonts; YO_MONO renders at `_top()` directly and
+  the fillRect would clear into title rows.
 
 ### Screensaver clock boundaries (display.cpp, widgets.h)
-- `minTop = max(TFT_FRAMEWDT, _clock->timeHeight())` — for framebuffer displays, `_config.top - _timeheight` must stay >= 0 to avoid framebuffer clipping above the display.
-- `maxTop = dsp.height() - clockH - TFT_FRAMEWDT` — was missing the `-clockH` term, allowing the clock to render partially off-screen.
+- `minTop = max(TFT_BORDER, _clock->timeHeight())` — for framebuffer displays, `_config.top - _timeheight` must stay
+  >= 0 to avoid framebuffer clipping above the display.
+- `maxTop = dsp.height() - clockH - TFT_BORDER` — was missing the `-clockH` term, allowing the clock to render
+  partially off-screen.
 - Movement interval now uses `% SCREENSAVERMOVE` (default 5 seconds) instead of hardcoded `% 60`.
 - `ClockWidget::timeHeight()` accessor added to expose `_timeheight`.
+- **Hiding a framebuffer clock has to push the window.** `psFrameBuffer::clear()` fills the PSRAM buffer only and
+  never touches the panel, so `ClockWidget::_clearClock()`'s `PSFBUFFER` branch must `_fb->display()` after it —
+  `_clearClock(bool push = true)` is that flag, and only `_printClock()`'s force path passes `false` (that path
+  repaints and displays the same window itself, so a blit there would only flash). Without the push, locking a TFT
+  clock wiped its buffer and left the last `display()` frame on the panel: the "clock ghost" behind the VU, plus the
+  clock's background over the title rows sharing its band. The erase is deliberately **not** gated on `painted()` —
+  `Widget::lock()` calls `_reset()` first, which recreates the buffer and clears that flag, so a guard there would
+  skip exactly the erase that matters; the OLED branch fills its rect unconditionally, and gating would make the two
+  families diverge. The erase logs under `WIDGET_DEBUG` (tag `Widgets.debug`): the window in PANEL coordinates, the
+  framebuffer's own size and `painted()` — the pair to read when an erase does not take, since `_left()`/`_top()` are
+  buffer coordinates.
+- **Hide the clock BEFORE its neighbours are drawn, or the hide's erase eats them.** `_reinitWidgets()` applies the
+  clock's feature lock right after `init()` — `if (_clockHidden()) { _clock->lock(true); _clock->setActive(false); }
+  else showByLayout(_clock);` — for two reasons. `Widget::init()` clears `_locked`, so `showByLayout()` would draw a
+  clock the state hides; and the erase a later hide performs is a background push over the clock's whole window,
+  which is the band the VU and the moved weather line share. Erasing last (the `_clock->clear()` that used to end
+  `_applyState()`) punched a background rectangle through the weather, and nothing repaired it:
+  `hideWeatherIfChanged()` returns early for a line that is already visible, and `ScrollWidget::setText()` does
+  nothing while the string is unchanged. `_layoutChange()` still erases on a page that is already drawn (the
+  play/stop transition), so it calls `_weather->repaint()` for exactly that case.
+  **`repaint()` is virtual, and a `ScrollWidget` overrides it to call its own `_draw()`.**  `TextWidget::repaint()`
+  reaches `_paint()`, whose erase is unclipped and as wide as `_textwidth` — which on a scroll is the WHOLE string,
+  not the span — so a repaint of the weather uncovered the row from the end of its 50 px span out to the full
+  string's width, straight through a divider painted beside it.  `_draw()` erases only the span while scrolling and
+  only its own text rectangle otherwise, and clips every print, so the uncovered pixels are always the ones it
+  repaints.  The other `repaint()` caller, the SD manager's countdown, is a plain `TextWidget` where the wide erase
+  is exactly right.
+- **The clock's window is offset by `_config.top - _timeheight`, and any trace of it must say so.** `_left()`/`_top()`
+  return `0`/`_timeheight` once the canvas is ready, so they are **buffer** coordinates: a clock with `top = 218` and
+  a 70 px cell has its window at y = 148, not at the panel top. Two wrong diagnoses came out of a log that printed
+  only the buffer pair — `clockMove = { }` in "Big Text" hides a clock at y 148, over the weather (135) and behind
+  the VU (175).
+- **Every mode change used to unlock the clock.** `_switchMode()`'s else-branch runs for EVERY new mode that is not
+  the screensaver, and it ended with an unconditional `_clock->lock(false)` under a comment claiming `_clockHidden()`
+  would re-lock it — but `_reinitWidgets()` and `_layoutChange()` are the only sites that apply `_clockHidden()`, and
+  a mode change goes through neither. So a clock whose layout yields to the VU was unlocked by any mode change (a
+  WebUI press, the volume page, the playlist) and its own per-second `draw()` then painted it behind the meter and
+  over the weather line, with nothing in the log to say why — a refusal was the only record `draw()` produced, so a
+  clock that was really painting left no trace at all. It is `lockIfChanged(_clock, _clockHidden())` now, the same
+  one definition the other two sites apply. The lesson generalises: a widget's feature lock belongs to
+  `_clockHidden()`/`vuLive()` and their kin, so every site that changes a lock must apply that definition rather
+  than a bare `lock(true)`/`lock(false)`.
 
 ### NumWidget volume-digit clearing (widgets.cpp)
-- YO_MONO clear height: `realth = _textheight * CHARHEIGHT` (was OLED-only; now applies to all displays with `Clock_GFXfontPtr == NULL`).
-- Special-font clear height: `realth = _textHeight() + 1` — uses the font's actual glyph height + 1px margin, matching `_clearClock()`'s pattern.
+- YO_MONO clear height: `realth = _textheight * CHARHEIGHT` (was OLED-only; now applies to all displays with
+  `Clock_GFXfontPtr == NULL`).
+- Special-font clear height: `realth = _textHeight() + 1` — uses the font's actual glyph height + 1px margin, matching
+  `_clearClock()`'s pattern.
 
 ### Font directory renamed
 - `src/displays/ehfonts/` → `src/displays/clockfonts/`
@@ -774,9 +5363,27 @@ Important rendering invariants:
 
 ---
 
+## Screen Rendering Fixes (Session: VU Rotated Layout)
+
+> **Superseded in round 4:** `LayoutData::rotateVU` and `LayoutData::boomboxVU` no longer exist — the VU's orientation
+> is `vuConf.align` (`WA_LEFT` default / `WA_CENTER` boombox / `WA_RIGHT` rotated). The notes below describe the code
+> as it was when that session landed.
+
+- **New layout flag** `LayoutData::rotateVU` (exposed via `rotateVU_ptr`), treated exactly like `boomboxStyle` — absent
+  means false. `VuWidget::_rotate` is read from `rotateVU_ptr` in `init()`.
+- **Layout ordering** in `displayTFT480x320conf.h`: `_layoutNames` is now `Default`, `Default (VU Rotated)`, `BoomBox
+  (VaraiTamas)`. The rotated layout is layout #2 (`bandsConf = { 32, 130, 4, 2, 10, 3 }`, `.rotateVU = true`); BoomBox
+  moved to #3.
+- **Blit choice**: `VuWidget::_draw()` uses the manual `startWrite()` / `setAddrWindow()` / `writePixels()` /
+  `endWrite()` sequence for all three modes. `drawRGBBitmap()` was deliberately removed from the widget layer — the
+  manual path depends only on `setAddrWindow` and `writePixels`, which every TFT driver is guaranteed to implement, and
+  it issues a single bulk transfer rather than one `writePixels` call per scanline. Do not switch this back.
+- **Direction**: the rotated VU fills left-to-right with `_vumaxcolor` at the right end.
+
 ## CPU Core Assignments & Stack Sizes
 
-The ESP32 has two hardware cores: **Core 0** (PRO_CPU) and **Core 1** (APP_CPU). The ESP32 Arduino framework runs `setup()` and `loop()` on Core 1. Audio decoding is isolated on Core 0; all other application tasks run on Core 1.
+The ESP32 has two hardware cores: **Core 0** (PRO_CPU) and **Core 1** (APP_CPU). The ESP32 Arduino framework runs
+`setup()` and `loop()` on Core 1. Audio decoding is isolated on Core 0; all other application tasks run on Core 1.
 
 ### Compile-time Core Macros (`src/core/options.h`)
 
@@ -788,35 +5395,75 @@ Two macros control core assignment across the codebase:
 | `NETWORK_CORE` | `1` | `0` | Core for netserver and all network/utility tasks |
 | `DSP_TASK_CORE_ID` | `1` | `0` | Core for the display loop task (independent of `NETWORK_CORE`) |
 
-On single-core ESP32-C3 (`CONFIG_FREERTOS_UNICORE`), all three macros are forced to `0` automatically; defining any of them manually on a unicore build is a compile-time `#error`. `CONFIG_ASYNC_TCP_RUNNING_CORE` is tied to `NETWORK_CORE` so the AsyncTCP internal event task follows automatically.
+Both supported targets are dual-core, so the three macros keep their defaults and are never forced.
 
-### Board Stack Multiplier (`STACK_MULTIPLIER`)
+`NETWORK_CORE` is derived in **`options_overrides.h`** as well as here - a deliberate duplicate (the one place in this
+codebase where the same rule lives twice, because the value must reach AsyncTCP, a translation unit that never sees
+`options.h`). That header is force-included and compiled first, so it owns the value and the copy here is a no-op in
+those builds; in builds without the force-include (the other `builds/*` templates) the copy here is what defines it.
+Both copies are `#ifndef NETWORK_CORE`, so evaluating them twice is harmless. `CONFIG_ASYNC_TCP_RUNNING_CORE` defaults
+to `NETWORK_CORE` so the AsyncTCP internal event task follows automatically, and both are deliberately overridable in
+`myoptions.h`.
 
-A board-aware multiplier scales all five user-configurable FreeRTOS task stacks automatically:
+The health of the force-include channel is observable: the Done-button panic in the SD manager (`LoadProhibited` on core
+1) has not recurred since the override landed, although that is a single observation - correlation, not a proven
+mechanism. The unpinned `async_tcp` task floating onto core 1 during a mode switch is the plausible link.
 
-| Board | `STACK_MULTIPLIER` | Effect |
-|---|---|---|
-| ESP32-S3 | 2 | All base stack sizes doubled |
-| ESP32 | 1 | Base sizes unchanged |
-| ESP32-C3 | 1 | Base sizes unchanged (C3 has *less* RAM than base ESP32) |
+### Stack sizes: real KB, and they are BYTES to xTaskCreate (2026-10-20)
 
-- Defined automatically after the board guard in `src/core/options.h`. Override in `myoptions.h` with `#define STACK_MULTIPLIER 1` or `2` if needed.
-- Only values `1` and `2` are accepted — a compile-time `#error` fires otherwise.
-- Per-task manual overrides (e.g. `#define DSP_TASK_STACK_SIZE 6`) bypass the multiplier; a `#elif` range guard validates the manually-set value.
-- The multiplier applies **only** to the five configurable task stacks. Fixed-stack tasks (HTTPS workers, OTA) are unaffected.
-- `SEARCHRESULTS_BUFFER` and `CONFIG_ASYNC_TCP_QUEUE_SIZE` use separate per-board explicit values (not `STACK_MULTIPLIER`) since they scale differently.
+**In ESP-IDF `StackType_t` is `uint8_t`, so `xTaskCreate`'s stack depth counts BYTES and
+`uxTaskGetStackHighWaterMark()` answers in BYTES.** `KB * 1024` at each call site was therefore correct all along.
+
+That is worth recording because a 2026-10-20 refactor got it exactly backwards: it assumed words, so it multiplied
+every KB value by 4 *and* divided by `sizeof(StackType_t)` (which is 1, so the division was a no-op). Every stack
+grew 4x, ~90 KB of internal heap disappeared at boot (134820 -> 45064), and the WebUI could no longer serve its
+assets - `nsQueue overflow, dropped req=...` with `[Heap] 44KB free, 10KB largest block`. The tell was in the build
+log's own arithmetic: `webBringUp task could not be created (32768 words, ...)` printed `32 * 1024 / sizeof(StackType_t)`
+as 32768, which is only possible if that sizeof is 1.
+
+The contract now:
+
+- `*_TASK_STACK_SIZE` macros are **kilobytes**, each call site passes `KB * 1024` **bytes**, and nothing divides
+  by `sizeof(StackType_t)`.
+- **`STACK_MULTIPLIER` is gone**, with its 2x folded into the defaults, so the numbers below are the sizes that
+  have actually been running in the field (yoRadio's originals were half these).
+- The monitor and every `[Core.HWM]` line print `uxTaskGetStackHighWaterMark()` raw, which is bytes - no `* 4`
+  anywhere (the old `startup.cpp` and async prints had one, understating their headroom by 4x).
+
+  | Task | macro | bytes |
+  |---|---|---|
+  | `loopTask` | `LOOP_TASK_STACK_SIZE` = 16 | 16 KB |
+  | `DspTask` | `DSP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `netserverLoopTask` | `NETSERVER_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `doSync` / `retryStreamConnection` / `wifiReconnectionTask` | `NETWORK_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `startupServicesAsync` | `STARTUP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `webBringUpTask` | `WEB_BRINGUP_TASK_STACK_SIZE` = 8 | 8 KB |
+  | `async_tcp` | `CONFIG_ASYNC_TCP_STACK_SIZE` = 8192 (bytes) | 8 KB, halved from the library's 16384 |
+
+  Measured headroom, from boots that were healthy: `[async_tcp]` 4.6 KB free of 8 KB; `[startupServices]` ~5 KB
+  free of 8 KB (its raw HWM 4952 before the `*4` was removed). Those are tight-looking but they are what has been
+  running; a future pass can now read them correctly and shrink deliberately, one task at a time.
+
+- **`the High Water Mark is in words too.** `uxTaskGetStackHighWaterMark()` returns words; `main.cpp`'s monitor line
+  used to print them labelled "free bytes", understating every task's headroom by 4x - which is how the oversized
+  stacks looked safe. It now multiplies by `sizeof(StackType_t)`, so `Main/Display/Netserver` in the monitor are
+  bytes and are directly comparable with the `[Core.HWM]` lines.
+- `MIN_MALLOC` is pinned at 24112 (it used to be `12056 * STACK_MULTIPLIER`) so the guard's behaviour did not move.
+- `config.cpp`'s boot log prints these KB values, which are now truthful.
 
 ### Core 0 — Audio
 
 #### `src/libraries/I2S_Audio/Audio.cpp` + `src/libraries/VS1053_Audio/audioVS1053Ex.cpp`
 - Both audio libraries pin their `PeriodicTask` (audio decode loop) to `m_audioTaskCoreId`.
-- `src/core/player.cpp` `Player::init()` calls `setAudioTaskCore(AUDIO_CORE)` to set this explicitly (defaults to Core 0).
+- `src/core/player.cpp` `Player::init()` calls `setAudioTaskCore(AUDIO_CORE)` to set this explicitly (defaults to Core
+  0).
 
 ### Core 1 — Everything Else
 
 #### `src/core/display.cpp`
 - `loopDspTask` ("DspTask") is pinned to `DSP_TASK_CORE_ID` (default `1`) via `xTaskCreatePinnedToCore`.
-- This task calls `display.loop()` only. `netserver.loop()` was moved to its own dedicated task (see `netserverLoopTask` below).
+- This task calls `display.loop()` only. `netserver.loop()` was moved to its own dedicated task (see `netserverLoopTask`
+  below).
 
 #### `src/core/network.cpp`
 - `doSync` (time/weather sync task) is pinned to `NETWORK_CORE`.
@@ -825,54 +5472,115 @@ A board-aware multiplier scales all five user-configurable FreeRTOS task stacks 
 
 
 #### `src/core/netserver.cpp` — `netserverLoopTask` + all utility tasks pinned to `NETWORK_CORE`
-- `netserverLoopTask` (started by `NetServer::startLoopTask()`, called from `main.cpp` after each `netserver.begin()`) is pinned to `NETWORK_CORE`. It is the sole caller of `netserver.loop()`.
-- All formerly scheduler-assigned (`xTaskCreate`) utility tasks are explicitly pinned to `NETWORK_CORE` via `xTaskCreatePinnedToCore`:
-  `vTaskSearchRadioBrowser`, playback task (lambda), radio-browser click task (lambda), `checkForOnlineUpdateTask` (lambda), `startOnlineUpdateTask` (lambda)
+- `netserverLoopTask` (started by `NetServer::startLoopTask()`, called from `main.cpp` after each `netserver.begin()`)
+  is pinned to `NETWORK_CORE`. It is the sole caller of `netserver.loop()`.
+- All formerly scheduler-assigned (`xTaskCreate`) utility tasks are explicitly pinned to `NETWORK_CORE` via
+  `xTaskCreatePinnedToCore`:
+  `vTaskSearchRadioBrowser`, playback task (lambda), radio-browser click task (lambda), `checkForOnlineUpdateTask`
+  (lambda), `startOnlineUpdateTask` (lambda)
 
-#### `src/core/startup.cpp`, `src/core/utility.cpp`, `src/core/commandhandler.cpp` — pinned to `NETWORK_CORE`
+#### `src/core/startup.cpp`, `src/core/commandhandler.cpp` — pinned to `NETWORK_CORE`
 - `src/core/startup.cpp`: `startupServicesAsync`
-- `src/core/utility.cpp`: `updateLocaleFileAsyncWrapper`
 - `src/core/commandhandler.cpp`: `vTaskFetchCuratedIndex`, `vTaskFetchCuratedPlaylist`
 
 #### Arduino `loop()` — implicit Core 1
-- All calls from `src/main.cpp` `loop()` run on Core 1: `telnet.loop()`, `battery.loop()`, `player.loop()`, `controls.loop()`.
-- `netserver.loop()` is **not** called from `loop()` or from DspTask; it runs exclusively in `netserverLoopTask` pinned to `NETWORK_CORE`.
+- All calls from `src/main.cpp` `loop()` run on Core 1: `telnet.loop()`, `battery.loop()`, `player.loop()`,
+  `controls.loop()`.
+- `netserver.loop()` is **not** called from `loop()` or from DspTask; it runs exclusively in `netserverLoopTask` pinned
+  to `NETWORK_CORE`.
 
 ### FreeRTOS Task Reference
 
-Stack sizes and priorities are controlled by macros in `src/core/options.h` (`/* Tweaks for Core Processes */`). Higher priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used. Per-task local conversion macros (`_BYTES`) are defined at the top of each `.cpp` file (except `SET_LOOP_TASK_STACK_SIZE` which is an `Arduino.h` macro). Stack defaults scale with `STACK_MULTIPLIER` — values shown as ESP32/C3 (1x) / S3 (2x).
+Stack sizes and priorities are controlled by macros in `src/core/options.h` (`/* Tweaks for Core Processes */`). Higher
+priority = more CPU; Arduino `loop()` runs at priority 1. Priority 0 is idle-level (starved) and is never used.
+**Every stack figure below is KB of real bytes**, converted at its call site with `STACK_KB_TO_WORDS()`; the fixed
+ones that are still raw literals are marked as **words** (x4), which is where the old 4x overshoot lived.
+`STACK_MULTIPLIER` no longer exists - see the section above for why.
 
-| Task | File | Stack macro (default ESP32 / S3) | Priority macro (default) | Notes |
+| Task | File | Stack | Priority macro (default) | Notes |
 |---|---|---|---|---|
-| `loopTask` | main.cpp | `LOOP_TASK_STACK_SIZE` KB (8 / 16) | 1 (framework) | Arduino loop(); `SET_LOOP_TASK_STACK_SIZE()` applies at boot |
-| `DspTask` | display.cpp | `DSP_TASK_STACK_SIZE` KB (4 / 8) | `DSP_TASK_PRIORITY` (2) | — |
-| `netserverLoopTask` | netserver.cpp | `NETSERVER_TASK_STACK_SIZE` KB (4 / 8) | `NETSERVER_TASK_PRIORITY` (2) | — |
-| `doSync` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `LOW_TASK_PRIORITY` (1) | Time/weather sync |
-| `searchWiFi` ×2 | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | — |
-| `retryStreamConnection` | network.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Post-disconnect reconnect |
-| `retryStreamConnection` | player.cpp | `NETWORK_TASK_STACK_SIZE` KB (4 / 8) | `NET_TASK_PRIORITY` (3) | Stream drop reconnect; was hardcoded to Core 0 (bug) |
-| `vTaskFetchCuratedIndex/Playlist` | commandhandler.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `vTaskSearchRadioBrowser` | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `playbackTask` (lambda) | netserver.cpp | 4096 http / 8192 https | `PLAYBACK_TASK_PRIORITY` (3) | Dynamic stack based on URL scheme |
-| `rbClickTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `checkForOnlineUpdateTask` (lambda) | netserver.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `startOnlineUpdateTask` (lambda) | netserver.cpp | 16384 fixed | `NET_TASK_PRIORITY` (3) | OTA — stack hardcoded |
-| `updateLocaleFileAsyncWrapper` | utility.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
-| `startupServicesAsync` | startup.cpp | 8192 fixed | `LOW_TASK_PRIORITY` (1) | HTTPS — stack hardcoded |
+| `loopTask` | main.cpp | `LOOP_TASK_STACK_SIZE` (64 KB) | 1 (framework) | Arduino loop(); `SET_LOOP_TASK_STACK_SIZE()` applies at boot |
+| `DspTask` | display.cpp | `DSP_TASK_STACK_SIZE` (32 KB) | `DSP_TASK_PRIORITY` (2) | unshrinkable until the HWM readings are trusted again |
+| `netserverLoopTask` | netserver.cpp | `NETSERVER_TASK_STACK_SIZE` (32 KB) | `NETSERVER_TASK_PRIORITY` (2) | ditto |
+| `webBringUpTask` | startup.cpp | `WEB_BRINGUP_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | `netserver.begin()` + `startLoopTask()` + `NEWIP` |
+| `doSync` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | Time/weather sync - **TLS**, so unmeasured and unchanged |
+| `searchWiFi` ×2 | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | — |
+| `retryStreamConnection` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | Post-disconnect reconnect |
+| `wifiReconnectionTask` | network.cpp | `NETWORK_TASK_STACK_SIZE` (32 KB) | `NET_TASK_PRIORITY` (3) | Spawned by the disconnect event and the `ticks()` self-heal |
+| `vTaskFetchCuratedIndex/Playlist` | commandhandler.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `vTaskSearchRadioBrowser` | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `playbackTask` (lambda) | netserver.cpp | 4096 http / 8192 https **words** (16/32 KB) | `PLAYBACK_TASK_PRIORITY` (3) | Dynamic stack based on URL scheme |
+| `rbClickTask` (lambda) | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `checkForOnlineUpdateTask` (lambda) | netserver.cpp | 8192 **words** (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS — still a raw literal |
+| `startOnlineUpdateTask` (lambda) | netserver.cpp | 16384 **words** (64 KB) | `NET_TASK_PRIORITY` (3) | OTA — still a raw literal |
+| `startupServicesAsync` | startup.cpp | `STARTUP_TASK_STACK_SIZE` (32 KB) | `LOW_TASK_PRIORITY` (1) | HTTPS downloads |
+| MQTT client task (library-owned) | PsychicMqttClient | 6144 (library default) | `NET_TASK_PRIORITY` (3) | Plain TCP; `Mqtt::loop()` runs on `netserverLoopTask`, not here. Apply is held while the startup downloads are running |
 
 ### CORE_MONITOR debug feature (opt-in)
 
-Enable by adding `#define CORE_MONITOR` to `myoptions.h`. Zero impact on binary when not defined.
+Enabled by `ALL_DEBUG_LOGS`, or directly with `#define CORE_MONITOR` in `myoptions.h` — `options.h` only defines it
+inside the `ALL_DEBUG_LOGS` block. The counters and helpers in `src/displays/tools/dspstats.h` compile to nothing when
+it is not defined, so a build without the monitor pays nothing for them.
 
-When active, emits a `FUNCTIONLOG("Core Monitor", ...)` line to serial+telnet every 5 seconds:
-- **Dual-core output**: `Core0(+Audio) loops/s: 82 (12.15ms/loop) | Core1(Main+Net+TCP+Disp) loops/s: 15327 (0.07ms/loop) | MaxMainLoopUs: 5197 | Heap: 163732`
-  - The labels in parentheses are built at compile time via `CORE_0` / `CORE_1` string macros defined in `options.h`. Each macro concatenates component tokens (`+Audio`, `+Net`, `+TCP`, `+Disp`) conditioned on where `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE`, and `DSP_TASK_CORE_ID` are assigned. These macros are only defined when both `CORE_MONITOR` and `!CONFIG_FREERTOS_UNICORE` are true.
-- **Unicore C3 output**: `Core0 loops/5s: N (worst: N) | Core0(Main) loops/5s: N (worst: N) | MaxMainLoopUs: N | Heap: N` — `CORE_0`/`CORE_1` are not available on unicore; labels are static strings
-- **Also shows SPIFFS information**: `Used: N / N bytes, Free: N bytes`
+Emits to serial + telnet every 5 seconds:
+
+- **Task rates**: `DspTask(core1) loops/s: 77 (12.99ms/loop), Main(core1) loops/s: 824 (1.21ms/loop), Max Main Loop
+  Time: 12.580ms, Free Heap: 139880`
+  - The two figures are per **task**, not per core. Field 1 is the display task (`cmDspLoopCount`, incremented in
+    `loopDspTask`), field 2 is the Arduino `loop()` (`cmMainCount`). Each is labelled with the core it actually runs on:
+    the display task reports its own core via `cmDspCore`, the main loop via `xPortGetCoreID()`. **Do not read field 1
+    as "core 0"** — in the common configuration both tasks are pinned to core 1, so the old literal `Core0`/`Core1`
+    prefixes attached core 0's subsystem names to the display task's counter and a display-task change looked like a
+    core-0 regression.
+  - The display task sleeps `DSP_TASK_DELAY` (10 ms) after every iteration, so its period is work + 10 ms and its
+    ceiling is ~100 loops/s: a figure at the ceiling means the display was idle, below it means it was drawing.
+  - Rates are per **measured** second (the `millis()` delta between prints, which includes the time the printing itself
+    takes). Dividing by a hardcoded 5 inflated every figure by 5-7% - that is what made a display task on its 10 ms
+    floor report 107 loops/s.
+- **Display work**: `DspTask work/s: glyphs 1830, fills 240, preText 1830 (hit 99%), fb flushes 77 (1.0/loop)`
+  - `glyphs` is counted at the top of `_writeGlyph()` in both `commongfx.h` and `psframebuffer.h`. `fills` is counted in
+    `DspCore::writeFillRect()` after its clip test, so it is the class-agnostic "how much rectangle drawing reached the
+    panel" figure - every `dsp.fillRect()` on either class passes through it.
+  - `preText` calls and hits live in `pretext.cpp`; a hit is an answer that did not need the fold chain. On real station
+    names the hit rate sits at **100%**, because the display font carries every codepoint they use: the fold table is a
+    safety net, not a hot path.
+  - `fb flushes` counts OLED `display()` calls and TFT **PSRAM region blits only**. On a TFT build only `ScrollWidget`
+    and `ClockWidget` draw through a `psFrameBuffer`; every other widget writes straight to the driver over SPI, so this
+    is not "the panel was written" and it can legitimately read 0 while the screen is visibly updating - scrolling the
+    playlist is exactly that case.
+  - `glyphs` exceeds `preText` calls by the number of spaces and control codepoints, which `preText()` answers before it
+    starts counting.
+- **Core layout**: `Core layout: core0 (Audio+Net+TCP), core1 (Main+Disp)` — built at compile time from the `CORE_0` /
+  `CORE_1` string macros in `options.h`, which concatenate `+Audio`, `+Net`, `+TCP` and `+Disp` according to where
+  `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE` and `DSP_TASK_CORE_ID` are assigned. Only defined on a
+  dual-core build.
+- **Stack high water marks**: `Main`, `Display`, `Netserver` minima, never reset between windows.
+- **The `[Heap]` line and its integrity walk run EVERY cycle** (5 s), not every fifth: the TLSF assertion inside
+  `block_locate_free` fires within seconds of a corruption appearing, so a 25-second window usually misses it. The walk
+  is what makes a free-list corruption visible at all - `tlsf_check()` validates the `fl_bitmap`/`sl_bitmap` against the
+  free lists, so `heap ok` means it, but only for the instant it ran. Because the other core is allocating throughout,
+  a single `CORRUPT` is a strong suspicion rather than a proof; the reading that matters is a `CORRUPT` followed by a
+  panic.
+- **A `CORRUPT` reading is stashed in RTC memory** (`coredump::noteHeapCorruption()`), which a panic's
+  `RTC_SW_CPU_RST` does not clear - the same mechanism `recoveryReboots` uses. The next boot's `coredump::archive()`
+  prints it **above** the crashdump text, so the file says the heap was already broken before the allocation that
+  tripped over it, which is the half of the story the dump alone cannot tell.
+- **LittleFS and PSRAM lines** stay rate-limited by `CORE_MONITOR_ETC_LOOPS` (default 5 cycles = 25 s).
+
+- **The monitor does not measure audio.** It counts the display task and the Arduino `loop()`; on the common builds both
+  are pinned to core 1, so a `Core layout: core0 (Audio)` line means core 0 carries no counter at all and its load has
+  to be read from the `[PSRAM] Audio buffered` figure instead.
+- **Each group ends with a blank line** via `SERIALLOGLF()` - a prefix-free `serialLog("%s", "")` in `core/logging.cpp`,
+  so serial and telnet both get a bare CRLF. That keeps consecutive reports separable, including when the LittleFS, Heap
+  and PSRAM lines print alongside them.
 
 Implementation:
-- `src/core/display.cpp`: `volatile uint32_t cmDspLoopCount` incremented each `loopDspTask` iteration
-- `src/main.cpp`: `extern` reference to `cmDspLoopCount` + per-loop timing via `micros()`; worst-case counters are all-time minimums (never reset between windows)
+- `src/displays/tools/dspstats.h` — counter declarations plus the increment helpers, which are no-ops when
+  `CORE_MONITOR` is undefined
+- `src/core/display.cpp` — defines the counters beside `cmDspLoopCount`; the display task reports its own core on every
+  iteration
+- `src/main.cpp` — reads and resets them, times the main loop with `micros()`, and prints the lines above plus the
+  trailing blank line
 
 ---
 
@@ -881,12 +5589,22 @@ Implementation:
 This section calls out hardware implementations that diverge from the common code path and are more likely to regress.
 
 ## Audio backend variants (`src/core/player.cpp` + `src/libraries/*`)
+- **The I2S audio task's stack lives in the library header, not in `options.h`**: `AUDIO_STACK_SIZE` in
+  `I2S_Audio/Audio.h` is a plain `static const size_t` (3500 words since it was raised from 3300 for a station that
+  overflowed it - `MPEG-2.5, Layer I` on `echoesofbluemars.org`, panic shape `Stack canary watchpoint triggered
+  (PeriodicTask)` on core 0). It is not read from `options.h` and cannot be tuned from `myoptions.h`; the
+  header has to be edited. The full write-up is in `src/libraries/i2s-frankenstein-surgery-notes.md`, Addendum 2 -
+  including why it was *not* the task watchdog and *not* the AsyncTCP priority or core. The VS1053 library keeps its
+  own `AUDIO_STACK_SIZE` (`audioVS1053Ex.h`); it was raised to the same 3500 for parity, which is alignment rather
+  than a fix, since that backend hands the bitstream to a hardware decoder and never reaches the software decoder's
+  depth (`vs1053-frankenstein-surgery-notes.md`, "Stack Size").
 - Two major audio stacks are used depending on macros/hardware:
   - I2S audio library path
   - VS1053 external decoder path
 - `options.h` enforces that both are not enabled together.
 - Risk notes:
-  - behavior differences between backends (metadata timing, codec handling, volume behavior) can create env-specific bugs.
+  - behavior differences between backends (metadata timing, codec handling, volume behavior) can create env-specific
+    bugs.
   - some callback/metadata handling is shared while low-level decoder behavior is not.
 
 ## Display driver families (`src/displays/display*.cpp/.h`)
@@ -908,21 +5626,80 @@ This section calls out hardware implementations that diverge from the common cod
 
 ## Custom Libraries (`src/libraries`)
 
-These are **not** third-party packages installable via PlatformIO's registry. They are custom or heavily-modified libraries embedded directly in the repository, mostly inherited from yoRadio and extended for ehRadio. Consult `src/libraries/libraries-note.md` for the origin, upstream source, and modification status of each library.
+These are **not** third-party packages installable via PlatformIO's registry. They are custom or heavily-modified
+libraries embedded directly in the repository, mostly inherited from yoRadio and extended for ehRadio. Consult
+`src/libraries/libraries-note.md` for the origin, upstream source, and modification status of each library.
 
 ### Display driver libraries
 - `Adafruit_GC9106Ex/` — GC9106 TFT driver (not a real Adafruit library; adapted from prenticedavid)
 - `Adafruit_ST7796S/` — ST7796S TFT driver (same origin)
 - `ILI9225Fix/` — ILI9225 TFT driver (heavily modified)
 - `ILI9488/` — ILI9486/ILI9488 SPI driver (modified from ZinggJM)
-- `LiquidCrystalI2C/` — I2C LCD driver (slightly modified from johnrickman)
 - `SSD1322/` — SSD1322 OLED driver (slightly modified from JamesHagerman)
-- `ST7920/` — ST7920 GLCD driver
 
 ### Audio decoder libraries
-- `I2S_Audio/` — software I2S audio decoder (adapted from schreibfaul1/ESP32-audioI2S via Maleksm's yoRadio mod). PSRAM buffer size now configurable via `PSRAM_BUFSIZE` macro.
-- `VS1053_Audio/` — VS1053 hardware decoder driver (adapted from schreibfaul1/ESP32-vs1053_ext via Maleksm's yoRadio mod). PSRAM buffer size now configurable via `PSRAM_BUFSIZE` macro. `stopSong()` SM_CANCEL sequence now guarded by `if(m_f_running)` — prevents permanently stuck CANCEL bit when stop is called during init with no song playing. `VS_PATCH_ENABLE` forced `false` on this hardware — FLAC patches produce audio silence on this VS1053 variant.
+- `I2S_Audio/` — software I2S audio decoder (adapted from schreibfaul1/ESP32-audioI2S via Maleksm's yoRadio mod). The
+  audio input and FLAC reserved buffer sizes are set inside the library; PSRAM is required (enforced in `options.h`).
+- `VS1053_Audio/` — VS1053 hardware decoder driver (adapted from schreibfaul1/ESP32-vs1053_ext via Maleksm's yoRadio
+  mod). PSRAM is required. `stopSong()` SM_CANCEL sequence now guarded by `if(m_f_running)` — prevents permanently stuck
+  CANCEL bit when stop is called during init with no song playing.
+  `VS_PATCH_ENABLE` forced `false` on this hardware — FLAC patches produce audio silence on this VS1053 variant.
+  **The chip performs no Parametric Stereo, so HE-AAC v2 (`mp4a.40.29`) plays as mono** — see the codec-order
+  subsection below before touching its variant table.
 - `ES8311_Audio/` — ES8311 codec driver (written for ehRadio by kasperaitis)
+
+### I2S AAC decode: the facts that decide whether a stream keeps up (2026-11-03)
+
+- **Decode cost is per profile, and that is the whole story.** AAC-LC uses roughly two thirds of the audio task's
+  wall time and keeps up easily; HE-AAC v2 (SBR + PS) used ~98% and could not, which is heard as slow playback and
+  stutter. Any "I2S audio is slow" report starts by checking which profile the stream chose.
+- **`FIXED_POINT` is OFF in `aac_decoder/libfaad/neaacdec.h`.** FAAD's float paths run the FFT and QMF on the S3's
+  hardware FPU, and that is what makes HE-AAC v2 keep up. Turning it back on restores the deficit.
+- **`neaacdec.cpp` must keep `#pragma GCC optimize("Os")` while `FIXED_POINT` is off.** This toolchain's Xtensa GCC
+  8.4 hits an internal compiler error (float constant load, postreload) in FAAD's float path at both `-O2` and `-O1`.
+  `-Os` is the only level that compiles. The pragma is per-file, so the rest of the project's flags are unaffected.
+  Revert the pragma only together with `FIXED_POINT`.
+- **`FIXED_POINT` off also re-enables `MAIN_DEC`**, because the fixed-point block is what undefines it.
+- **The decoder owns its own core.** `playAudioData()`/`playChunk()` run on `AUDIO_CORE` 0; the Main task only refills
+  the input ring. A Main stall therefore costs nothing unless the ring drains - so Main-loop stalls are not evidence
+  about audio health.
+- **`AUDIO_TASK_PRIORITY` is 6** (library default was 2), which puts the decoder above AsyncTCP (4) but below lwIP
+  (18) on core 0. At 2, every playlist GET and socket log line preempted it.
+- **The three IIR filter chains are skipped when their coefficients are identity.** With a flat equaliser they
+  otherwise run 5 float multiplies, 4 adds, 8 loads and 8 stores per channel per sample pair to compute `y = 1 * x`.
+- **Playlist polling has a floor of one poll per segment**, because one segment per poll is what sustains playback.
+  The wait is `M3U8_NO_SEGMENT_WAIT_MS` (500 ms) scaled 1-4x by consecutive empty answers. A fill-based gate on the
+  poll cannot work.
+- **The `no_host_timer` pause at the top of the m3u8 branch of `Audio::loop()` is load-bearing.** Scoping it to the
+  poll made `frames/s` collapse and starved the DMA - that was measured, not assumed. Its comparison is not
+  wrap-safe; leave it.
+- **Segment identity is `EXT-X-MEDIA-SEQUENCE` plus the entry index** (`m_m3u8BaseSeq`, `m_m3u8EntryIdx`,
+  `m_lastM3u8Seq`, `m_m3u8SeqValid`), never a URL substring. `m_lastM3U8host` is the variant's media playlist;
+  `m_lastHost` is the master. A retry must use the former and must never call `connecttohost()`, which is a full
+  session reset (frees buffers, clears the ring, rebuilds the decoder).
+- **Instruments to keep while in doubt**: the `i2s:` line every 10 s (`frames/s`, `decode`/`write` ms, `short`,
+  worst audio-task `gap`, `sil` runs, ring), `lost N seq` on the occupancy line, and a `join:` line per segment
+  boundary. `frames/s` is only meaningful against the clock printed on the same line. `sil` counts runs of 480
+  consecutive all-zero frames, i.e. 20 ms at 24 kHz.
+- **Global `-O2` buys nothing here**: decode time was unchanged and flash grew ~180 KB.
+
+### VS1053: HE-AAC v2 is mono, because the chip has no Parametric Stereo (2026-11-04)
+
+- **The failure is a lost channel, not a preference.** HE-AAC v2's AAC core is mono by construction; the stereo image
+  is synthesised by Parametric Stereo. The I2S path runs PS (`PS_DEC`) and plays those streams in stereo. The VS1053
+  decodes in hardware, does not do PS, and therefore outputs the mono core. Confirmed on hardware by forcing the
+  HE-AAC v1 variant: stereo returned immediately.
+- **`mp4a.40.29` is ranked last in `VS1053_Audio/`'s codec table** and LC and v1 sit above it. Never re-order that
+  table for bandwidth or quality reasons without testing the chip; on this backend the order decides whether a stream
+  has two channels at all.
+- **Both forks' tables were unable to decide the profile until 2026-11-04.** The match was `indexOf()`, and
+  `mp4a.40.2` is a literal prefix of `mp4a.40.29`, so every v2 line scored as AAC LC and ties went to whichever
+  variant the manifest listed first. Both now reject a match followed by a digit. The I2S ordering stated on
+  2026-11-03 was inert for v2 lines until this was fixed.
+- **The two tables differ in one position on purpose**: xHE is last on I2S (least likely supported), v2 is last on
+  VS1053 (loses a channel).
+- A `variant:` line naming the chosen `EXT-X-STREAM-INF` is printed once per master-playlist redirect; it is the only
+  record of which profile reached the decoder.
 
 ### Touchscreen library
 - `FT6336_Touchscreen/` — FT6336 capacitive touch driver (written for ehRadio by kasperaitis)
@@ -935,7 +5712,10 @@ These are **not** third-party packages installable via PlatformIO's registry. Th
   - `ILI9225Fix/TFT_22_ILI9225Fix.cpp` (`DEBUG` macro print path)
 
 ### Include conventions in library files
-- Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line** (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if DSP_MODEL==DSP_ST7920`, `#if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)`, `#if defined(USE_AUDIO_VS1053)`). This pattern is acceptable and intentional.
+- Library `.cpp` files that reference project defines begin with `#include "../../core/options.h"` as the **first line**
+  (before any `#if` guard), then gate all remaining includes and code behind the relevant `#if` condition (e.g., `#if
+  DSP_MODEL==DSP_ILI9488`, `#if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)`, `#if
+  defined(USE_AUDIO_VS1053)`). This pattern is acceptable and intentional.
 - Library `.h` files do not include `options.h`; they are self-contained and guarded with `#ifndef`/`#pragma once`.
 
 ---
@@ -944,7 +5724,8 @@ These are **not** third-party packages installable via PlatformIO's registry. Th
 
 ## `src/core/locale.h` (selector)
 - Thin include wrapper: includes `dsplocale.h` and defines `WEBUI_LOCALE` from `DSP_LOCALE` if not overridden.
-- `_activeLocale` runtime index (set from `config.store.locale_display`), `l10n()` / `l10n_dow()` / `l10n_month()` / `l10n_wind()` helpers.
+- `_activeLocale` runtime index (set from `config.store.locale_display`), `l10n()` / `l10n_dow()` / `l10n_month()` /
+  `l10n_wind()` helpers.
 - `l10n_findLocale()` resolves locale code to array index at runtime.
 
 ## Display locale files (`src/locale/display/*.json`)
@@ -956,17 +5737,115 @@ These are **not** third-party packages installable via PlatformIO's registry. Th
 ## WebUI locale files (`src/locale/www/*.json`)
 - 50 JSON source files, compiled via `make_wwwlocale.py` into `wwwlocale.h` PROGMEM (gzip-compressed byte arrays).
 - Served from PROGMEM at `/locale.json` (with `Content-Encoding: gzip`) and `/wwwlocale.json` (index).
-- No SPIFFS files needed — all locale data is compile-time embedded.
+- **English is served like every other locale.** `handleDynamicLocale()` used to answer 404 when the requested code
+  matched `HARDCODED_WEBUI_LOCALE` ("en_US"), on the reasoning that the HTML already holds that text - which cost a
+  failed load and a console warning in devtools and nothing else. Both the check and the define are gone:
+  `src/locale/www/en_US.json` is the master `www_tool.py` diffs the other locales against, and the pages are its
+  source, so the HTML is English and there is no build-time or runtime switch that makes it anything else.
+- No LittleFS files needed — all locale data is compile-time embedded. **Nothing is deployed into `data/www` for a
+  locale, and nothing is cleaned up afterwards.** `builds/platformio_pre_gzip_www.py` used to scan `myoptions.h` and
+  `CPPDEFINES` for `WEBUI_LANGUAGE_xx_XX` / `DSP_LANGUAGE_xx_XX` and copy `src/locale/webui/{code}.json` - a directory
+  that does not exist - into `data/www`, and `builds/platformio_post_gzip_www.py` then deleted `xx_XX.json` again
+  after packaging. Both halves are gone, and the `_LANGUAGE_` macros were never read by the firmware anyway: it
+  selects on `DSP_LOCALE` and `WEBUI_LOCALE`, so that removed build step was their only reader in the repo.
 
 ## Locale build tools
 - `src/locale/make_dsplocale.py`: validates display JSONs, generates `dsplocale.h` with PROGMEM string tables + enum.
 - `src/locale/make_wwwlocale.py`: validates webui JSONs, gzip-compresses into `wwwlocale.h` PROGMEM byte arrays.
-- `src/locale/hardcode_locale_to_webui.py`: bake locale text into WebUI assets (for `HARDCODED_WEBUI_LOCALE`).
+- `src/locale/hardcode_locale_to_webui.py` (removed): it rewrote the `data/www` files in another language for the
+  `HARDCODED_WEBUI_LOCALE` build, so it went with that define.
 
 ## Locale maintenance tools
-- `src/locale/www_tool.py` (was `scan_www_check_json.py`): scan HTML/JS for i18n keys, check/add/translate/sort www locale JSONs. Supports `--create`.
-- `src/locale/display_tool.py` (NEW): manage display JSONs against master. Sort uses master key order (never alphabetizes). Clean never touches master. Supports `--create`.
-- `src/locale/trans_deepl.py` (was `scan_trans_deepl.py`): DeepL translation module. Uses `trans_*.key` discovery pattern (was `scan_trans_*.key`).
+- `src/locale/www_tool.py` (was `scan_www_check_json.py`): scan HTML/JS for i18n keys, check/add/translate/sort www
+  locale JSONs.
+  - **`--merge <file.json>` (added): upsert a partial locale JSON into one locale.** `www_tool.py de_DE --merge
+    changes.json [--clean] [--sort]`. One locale only - `*`, the prompt modes (`--fast/--every/--diff/--ndiff`) and
+    `--translate` are each refused with their own message. A merge never prompts, which includes the translation-service
+    question: it is skipped rather than asked before the merge starts. The partial may carry any subset of keys;
+    `locale_code` in it is ignored (the filename is the authority) while `locale`/`locale_en` merge normally. The run
+    reports added/updated/unchanged counts, then how many master keys are missing from the file and how many are present
+    but empty - the list a translator still owes.
+  - **A key the master does not know is skipped and named, and never written** (exit 0, the rest of the partial merges
+    as usual). The master key set is the `data/www` scan for www, the master JSON for display. The report is `Ignored: N
+    key(s) in <file> are not in the master key set`, and the message names the three readings: the name is wrong, the
+    key is old, or it is new and belongs in the master first. The first version refused the whole file and wrote
+    nothing, which was wrong about the common case: a translator working from an older copy hands back keys that have
+    since been retired, and the rest of their work should not be lost over that. What stays a hard rule is that such a
+    key is never written, because `make_dsplocale.py` treats an extra key exactly as it treats a missing one, as a build
+    error.
+  - **`--newkeys`/`-k [FILE]` (added): write the keys the locale(s) lack into a template** - key -> master text, for a
+    translator to fill in and hand back for `--merge`. **It is a pre-pass, not an alternative to the normal run**: with
+    a mode given it collects first, while the keys are still missing, and the pass then fills the locales - so `*
+    --translate --fast --clean --sort --newkeys` yields both the filled files and the list to send out. With no mode it
+    collects and stops, because the pass would start prompting. It composes with `*` and with `--clean`/`--sort` (which
+    apply to the template), and refuses only `--merge`, being the opposite direction. `*` unions the missing keys across
+    every locale and writes **once**, because a key absent from one locale is almost always absent from the rest. An
+    existing template is never rebuilt: keys it already has keep their values, which may be someone's work in progress,
+    and only new keys are appended; `--clean` then means "drop template keys the master no longer has".
+    - **The template lives beside the tools, not in the locale folders** (`src/locale/www_newkeys.json`,
+      `src/locale/display_newkeys.json`, overridable with `-k FILE`). Both generators glob their own folder as locale
+      files - `make_dsplocale.py` validates `locale_code` and the key set, `make_wwwlocale.py` requires
+      `locale`/`locale_en` - so a template dropped into `www/` or `display/` would fail validation and be embedded in
+      `wwwlocale.h` as a bogus locale. Verified after the fact: `make_wwwlocale.py --verify` still counts 50 files with
+      both templates present.
+  - **How it collects keys, and the rule that follows from it.** It matches `data-i18n` attributes (patterns 1a-1i:
+    element text, `placeholder`, `value`, `title`, `alt`) and literal `t('key', 'default')` calls (patterns 2 and 3),
+    across `data/www/*.html`, `data/www/*.js` and `netserver.h` (for `emptyfs_html`). **Never wrap `t()` in a helper
+    function, and never keep keys in a table of bare strings.** `tr('key', 'text')` does not match `\bt\(` - the
+    character after the `t` is `r` - and `{ 'code': 'err_key' }` is not a call at all, so both forms are invisible to
+    the scanner, and a `--clean` run then deletes those keys from every locale as unused. There is nothing to guard
+    against either: `locale.js` is compiled in from `locale_js.h` and cannot fail to load, which is the only reason a
+    wrapper was ever wanted. Where a message is selected at runtime each arm must still be a real `t(...)` call -
+    `errText()` in `data/www/sdmanager.html` is a `switch` of literal calls for exactly this reason.
+  - **The unchanged-translation prompt differs between the automatic pass and the interactive one.**
+    `confirm_source_text_use()` asks before writing the source text when the service failed or returned it unchanged. In
+    `--fast` it offers `y` / `a` (always for this key, held in the module-level `_source_text_always` set for the rest
+    of the run - the same key is asked once per locale under `*`) / `n`, and **`n` ends the run** with a message naming
+    both causes and saying that finished locales are saved and the one in progress is not. `prompt_for_key()` calls it
+    with `auto_pass` left false and keeps plain `y/n`: there `n` means "not this key" (keep the JSON, or skip it in the
+    missing mode), and `y` hands the key to the normal edit prompt anyway.
+    - **`a` suppresses the question, never the attempt.** `translate_text()` runs first for every key, and the set is
+      consulted only when the result was empty or identical to the source text, so a key settled with `a` still receives
+      a real translation in any later locale that produces one. The set is per key, not per run: a service failing
+      everywhere still asks once per key, and `n` - not `a` - is the answer to that.
+  - Run it as `py src/locale/www_tool.py * --fast` to add every newly found key to all 50 locales using the master text;
+    `--clean` and `--sort` are the same pass with the tidy-ups. On Windows it fails with a `cp949` encoding error when
+    it reaches the non-Latin locales unless `PYTHONIOENCODING=utf-8` is set - `display_tool.py` does this for itself and
+    this one does not.
+  - **The two ways this collector invents keys from prose or from concatenation.** (1) Never write the call form out in
+    a comment, even when the comment is explaining the scanner itself: pattern 2 cannot tell prose from code, and the
+    header comment of `data/www/sdmanager.html` plus the comment above its `errText()` switch each produced a bogus
+    `key` entry that then spread to all 50 locales. (2) Do not put `data-i18n` on a tag whose markup is assembled by
+    string concatenation: pattern 1a reads from the attribute to the next `>`, then the element text to the next `<`,
+    and in `'... data-i18n="k" title="' + esc(t('k','text')) + '">' + SVG + '</span>'` the next `>` is the one closing
+    the attribute - so the tool recorded the following concatenation fragment (`' + SVG_UP + '`) as that key's source
+    text in every locale. Build such tooltips with `t()` as the row is rendered and leave `data-i18n` off. Check any
+    page after editing it with
+    `python -c "import sys;sys.path.insert(0,'src/locale');import www_tool as
+    w;print(w.extract_keys_from_html_js('data/www/<page>.html'))"`.
+- `src/locale/display_tool.py` (NEW): manage display JSONs against master. Sort uses master key order (never
+  alphabetizes). Clean never touches master. Supports `--merge <file.json>` and `--newkeys`/`-k [FILE]` with the same
+  upsert, unknown-key-skip and template rules as `www_tool.py`, except that the master key set comes from the master
+  JSON and the sort uses master key order.
+- **`--create` was removed from both tools.** It laid down a locale file holding every key with an empty value, which
+  turned out to be useless: a translator starts from a real file - the master, or a language they can read - and copies
+  it. The option, the `auto_create` plumbing and `create_locale_from_master()`/`create_locale_file_from_master()` are
+  gone, so both tools now only ever edit a locale that already exists, and a merge into a missing file says so and names
+  the fix.
+- **`--key NAME` was added to both tools: redo exactly one key across every locale.** The name is looked up in that
+  tool's own master - the `data/www` scan for `www_tool.py`, the master JSON for `display_tool.py` - once, before any
+  locale file is opened, so a typo exits 1 with a single message instead of one per locale in a `*` run. Both `missing`
+  and `fast` normally skip a key the locale already has, which is exactly the case the option exists for, so it writes
+  the key where it exists as well as where it does not; it is orthogonal to the modes and to
+  `--translate`/`--clean`/`--sort`, so `* --translate --fast --clean --sort --key X` re-translates one key everywhere.
+  In the interactive modes the key is still prompted when a value exists, but through the `all` prompt layout, so the
+  current text appears as `[JSON]` and ESC keeps it rather than letting the source text replace it unseen. Refused, with
+  its own message: `--merge` (it writes a whole partial file, so there is nothing to select) and `--newkeys` (the
+  opposite direction - it collects the keys the locales lack). One key per run; a sweep for many is still `--ndiff`.
+  Verified on a scratch copy of `fr_FR.json` (deleted afterwards): the pass wrote 1 key and `fc` against the original
+  showed exactly one differing line.
+- `src/locale/trans_deepl.py` (was `scan_trans_deepl.py`): DeepL translation module. Uses `trans_*.key` discovery
+  pattern (was `scan_trans_*.key`).
 - `src/locale/trans_deepl.md` (was `scan_trans_deepl.md`): DeepL setup + usage docs.
 
 ---
@@ -988,17 +5867,21 @@ This section is specifically for adding/removing settings and avoiding missed li
    - persist with `saveValue(...)`
    - trigger display/network side effects and request updates as needed.
 7. Add WebUI wiring:
-   - element in `data/www/settings.html` with id and `data-command`.
+   - element in `data/www/options.html` with id and `data-command`.
    - fallback label text + `data-i18n` key.
    - add i18n key in `src/locale/www/en_US.json` (and optionally others).
 8. Ensure websocket UI apply path exists in `data/www/script.js`:
    - `setupElement(...)` supports element type/id.
    - incoming `GET*` payload key matches DOM element id or custom handler.
-9. If setting is locale/time/weather related, update `data/www/settings.js` apply handlers too.
-10. Telnet command handling is thin-dispatch by default: update `src/core/commandhandler.cpp` first, and only extend `src/core/telnet.cpp` if protocol normalization needs a new alias/form.
+9. If setting is locale/time/weather related, update `data/www/options.js` apply handlers too.
+10. Telnet command handling is thin-dispatch by default: update `src/core/commandhandler.cpp` first, and only extend
+    `src/core/telnet.cpp` if protocol normalization needs a new alias/form.
 11. If setting affects startup behavior, check `main.cpp`, `config.init()`, and `startup.startupServices()`.
 12. Update this `code-summary.md`.
-13. Update `Commands.md`.
+13. Update `Commands.md`: the entry goes in the same block and at the same position as its `cmdIs(...)`
+    branch, because the file's whole value is that walking it and this router together is mechanical. If
+    the command is refused for HTTP/MQTT/Telnet, that comes from `isBlockedForSource()` and the doc's
+    *Blocked* column has to match it - nothing else is authoritative for that column.
 
 ## When removing a setting field
 
@@ -1044,15 +5927,17 @@ Frequent miss points:
 - WebUI: `commandhandler.cpp`
 - HTTP URL params: `netserver.cpp` `handleIndex()` multi-param loop -> `commandhandler.cpp` (with source blocklist)
 - Telnet/serial: normalized parser -> `commandhandler.cpp` (minimal local handling)
-- MQTT: normalized payload parser -> `commandhandler.cpp` (with source blocklist)
+- MQTT: payload parsing stays in `mqtt.cpp` (`processPendingMessage()` on the netserver loop task) ->
+  `commandhandler.cpp` dispatch with the source blocklist
 - Physical controls: `controls.cpp`
 
 Implication:
-- For universal control behavior, update `commandhandler.cpp` first; then adjust only channel-specific parser aliases/blocklists.
+- For universal control behavior, update `commandhandler.cpp` first; then adjust only channel-specific parser
+  aliases/blocklists.
 
 ## Matrix C: Playlist actions
 
-- Edit/import in browser -> upload to `/webboard` -> SPIFFS write
+- Edit/import in browser -> upload to `/webboard` -> LittleFS write
 - `netserver` triggers `PLAYLISTSAVED`
 - `config.indexPlaylist()/initPlaylist()` refresh index
 - `player` and display refresh via request queue events
@@ -1061,11 +5946,17 @@ Implication:
 
 ## Telnet Section Interactions (Explicit)
 
-`telnet.cpp` primarily acts as a command ingress path now. Most command behavior is owned by `commandhandler.cpp` and shared with MQTT/HTTP paths.
+`telnet.cpp` primarily acts as a command ingress path now. Most command behavior is owned by `commandhandler.cpp` and
+shared with MQTT/HTTP paths.
 
-Input-line handling is delimiter-based (`\r` or `\n`) with explicit 2000 ms timeouts, which avoids delayed command execution on clients that submit CR without LF.
+Input-line handling is delimiter-based (`\r` or `\n`) with explicit 2000 ms timeouts, which avoids delayed command
+execution on clients that submit CR without LF.
 
-If you add a setting command in `commandhandler.cpp`, telnet and MQTT generally inherit it automatically unless blocked by the shared HTTP/MQTT/Telnet non-WebUI policy.
+The command line itself is parsed by `Utility::parseCommandLine(...)`, shared with the MQTT ingress path; telnet's only
+private rule is the `mode 2` -> `-1` alias applied immediately after that call.
+
+If you add a setting command in `commandhandler.cpp`, telnet and MQTT generally inherit it automatically unless blocked
+by the shared HTTP/MQTT/Telnet non-WebUI policy.
 
 ---
 

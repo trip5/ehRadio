@@ -23,7 +23,7 @@
 #include <WiFiClientSecure.h>
 #include <SD.h>
 #include <SD_MMC.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <FS.h>
 #include <FFat.h>
 #include <codecvt>
@@ -153,10 +153,19 @@ protected:
 };
 //----------------------------------------------------------------------------------------------------------------------
 
-static const size_t AUDIO_STACK_SIZE = 3300;
+static const size_t AUDIO_STACK_SIZE = 3500;
 static StaticTask_t __attribute__((unused)) xAudioTaskBuffer;
 static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 extern char audioI2SVers[];
+
+// A permanent verdict on a stream, set only by Audio::setRefuse().  Keep the order and the values identical in both
+// forks - core matches on these names, never on numbers.  See plans/handle-unsupported-unrecognized.md.
+enum streamRefuse_e : uint8_t {
+    STREAM_REFUSE_NONE = 0,     // nothing to refuse
+    STREAM_REFUSE_UNSUPPORTED,  // recognised container or codec we cannot decode (fMP4, encrypted HLS, ...)
+    STREAM_REFUSE_NOT_AUDIO,    // a page, an API, an image, an unknown content type: not a stream at all
+    STREAM_REFUSE_NO_HEAD       // the probe never got its eight bytes: stop, but the ladder may retry (capped)
+};
 
 class Audio : private AudioBuffer{
 
@@ -183,6 +192,8 @@ public:
     bool setPinout(uint8_t BCLK, uint8_t LRC, uint8_t DOUT, int8_t DIN = I2S_GPIO_UNUSED, int8_t MCLK = I2S_GPIO_UNUSED);
     bool pauseResume();
     bool isRunning() {return m_f_running;}
+    uint8_t refuseReason() {return m_refuseReason;}   // non-zero: a verdict for Player::loop() to act on
+    void clearRefuse() {m_refuseReason = STREAM_REFUSE_NONE;}   // consumed between validator probes
     void loop();
     uint32_t stopSong();
     void forceMono(bool m);
@@ -209,6 +220,14 @@ public:
     void     setVUmeter() {};
 //    uint16_t getVUlevel();
     uint16_t get_VUlevel(uint16_t dimension);
+    /* Visualiser capture, shared by the waveform, Lissajous and spectrum styles.  Both return false
+       when there is nothing to give - the meter is off, the window has never been published, or the
+       publisher moved under the read - so the widget has one "is there a spectrum?" path instead of an
+       #if per style, and a torn window is dropped rather than drawn.
+         getWaveform: fills 2 * n int16, interleaved L and R, oldest first and newest last.
+         getSpectrum: fills 2 * n uint8, the low bands for L then the low bands for R. */
+    bool     getWaveform(int16_t *out, uint16_t n);
+    bool     getSpectrum(uint8_t *bands, uint8_t n);
 //    uint8_t  vuLeft, vuRight;                  // average value of samples, left channel, right channel
     esp_err_t i2s_mclk_pin_select(const uint8_t pin);
     bool     eofHeader;
@@ -220,6 +239,7 @@ public:
     void setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass);
     void setI2SCommFMT_LSB(bool commFMT);
     int getCodec() {return m_codec;}
+    bool codecDecided() {return m_codec != CODEC_NONE;}   // the library understood the payload
     const char *getCodecname() {return codecname[m_codec];}
     const char *getVersion() {return audioI2SVers;}
 
@@ -278,6 +298,8 @@ private:
   void            Gain(int16_t* sample);
   void            showstreamtitle(const char* ml);
   bool            parseContentType(char* ct);
+  void            setRefuse(uint8_t reason, const char* shape);
+  uint8_t         sniffHead(const uint8_t* p, size_t n, const char** shape);
   bool            parseHttpResponseHeader();
   bool            initializeDecoder(uint8_t codec);
   esp_err_t       I2Sstart(uint8_t i2s_num);
@@ -666,6 +688,57 @@ private:
     std::vector<char*>    m_playlistContent;  // m3u8 playlist buffer
     std::vector<char*>    m_playlistURL;      // m3u8 streamURLs buffer
     std::vector<uint32_t> m_hashQueue;
+    // m3u8 segment identity.  The window base comes from EXT-X-MEDIA-SEQUENCE, the running index counts #EXTINF
+    // entries within the current parse, and m_lastM3u8Seq is the highest sequence already queued.  Identity is the
+    // SEQUENCE NUMBER, never the URL text: the same segment arrives from rotating hosts (cloud-proxy-hls, n13b-e2)
+    // with a changing query string, so comparing URLs sees new content where there is none - which is precisely how
+    // the field ended up playing 887 twice and 888 twice and then jumping to 892.
+    uint64_t              m_m3u8BaseSeq    = 0;
+    uint16_t              m_m3u8EntryIdx   = 0;
+    uint64_t              m_lastM3u8Seq    = 0;
+    bool                  m_m3u8SeqValid   = false;
+    // Floor on how often the playlist may be re-fetched when the window offers nothing new, so an empty queue can
+    // never turn into a reconnect loop against the station.
+    uint32_t              m_lastM3u8FetchMs = 0;
+    // Consecutive playlist polls that found nothing new.  Drives the wait in loop(): a flat 500 ms poll is what
+    // stopped segments being missed, but it issues 5-6 GETs per 1.8 s segment and every GET wakes AsyncTCP on the
+    // audio core.  The wait grows 500/1000/1500/2000 ms with this count and is cleared by the next window that
+    // actually yields a segment, so normal play polls about once per segment again.
+    uint8_t               m_m3u8IdlePolls  = 0;
+    // Sequence numbers that were never handed to us at all, i.e. the manifest window's head moved past them between
+    // two polls.  Reset per stream and reported with the buffer occupancy, because a lost segment is heard ~20
+    // segments later (the ring is that deep) and therefore cannot be correlated with anything by ear.
+    uint32_t              m_hlsLostSeq      = 0;
+    // I2S clock rate lock-in.  m_i2sAppliedRate is the rate the peripheral is actually programmed to; a rate the
+    // decoder reports is only applied when it DIFFERS from this, and it is applied on the audio task rather than in
+    // setSampleRate(), which runs on paths where the I2S handle may not exist yet.
+    uint32_t              m_i2sAppliedRate = 0;
+    bool                  m_f_ratePending  = false;
+    // Frames the I2S peripheral accepted in the current 10 s window, counted in playChunk() on the audio task.  The
+    // ratio to the applied clock is the difference between "the decoder produces fewer frames than the DAC consumes"
+    // and "the frames are produced but lost", and it is the number that settles a slow-playback report without
+    // guessing.  Reset whenever the window is reported.
+    uint32_t              m_i2sFramesOut   = 0;
+    // The other two numbers in the same report.  m_i2sWriteUs is the time the audio task spent blocked inside
+    // i2s_channel_write (blocking means the DMA is full, i.e. we are ahead of the DAC); m_decodeUs is the time spent
+    // inside sendBytes().  A short window where decode dominates is a slow decoder; one where the write dominates is
+    // a DMA limit; one where both are small while frames/s is short means the loss is outside both of them.
+    uint32_t              m_i2sWriteUs     = 0;
+    uint32_t              m_i2sWriteShort  = 0;
+    uint32_t              m_decodeUs       = 0;
+    // Worst gap between passes of the audio task itself.  It separates the two possible faults behind an audible stop:
+    // longer than the DMA depth (dma_desc_num * dma_frame_num frames, 682 ms at 24000 Hz) means the task was
+    // descheduled and the DAC ran dry; much smaller means the task was running and the silence came from the data.
+    uint32_t              m_audioGapMaxUs  = 0;
+    // Silence-run detector, filled in playChunk() per sample pair.  A run of 480 all-zero frames is 20 ms of digital
+    // silence at 24000 Hz and cannot be music, so counting runs separates "the DAC ran dry" from "zeros were written".
+    // m_silMaxRun is the longest single run in the window, in frames.
+    uint32_t              m_silRuns        = 0;
+    uint32_t              m_silMaxRun      = 0;
+    // Set by playChunk() whenever the pending output frames run out, and cleared at every segment join.  If a join
+    // reports drained 0, the frames pending at the previous seam were never written - discarded when the next segment
+    // arrived, which is a 21-43 ms skip of real audio once per segment.
+    bool                  m_f_samplesDrained = false;
 
     const size_t    m_frameSizeWav    = 4096;
     const size_t    m_frameSizeMP3    = 1600;
@@ -677,6 +750,18 @@ private:
 
     static const uint8_t m_tsPacketSize  = 188;
     static const uint8_t m_tsHeaderSize  = 4;
+
+    /* Visualiser capture.  VU_CAPTURE_SAMPLES comes from core/options.h, which every includer already
+       pulls in first (Audio.cpp line 11, player.h).  The audio task writes _capWin on every decoded
+       sample pair and, on each published level, rotates the window into _capPub and bumps _capSeq; the
+       display task reads _capPub under that sequence.  The payload is 2 KB, so unlike the one-byte
+       vuLeft/vuRight handover a read can tear, which is what the sequence check exists for.
+       _capSeq == 0 means "never published".  Static, so no heap and no PSRAM requirement. */
+    int16_t  _capWin[2][VU_CAPTURE_SAMPLES];    // rolling window, [0] = left, [1] = right
+    int16_t  _capPub[2][VU_CAPTURE_SAMPLES];    // published copy, linearised oldest-first
+    uint16_t _capPos = 0;                       // next write index in _capWin
+    volatile uint32_t _capSeq = 0;              // bumped on every publish
+    void     _capturePublish();                 // rotate _capWin into _capPub
 
     uint8_t  vuLeft, vuRight;			// average value of samples, left channel, right channel
     char*           m_ibuff = nullptr;              // used in audio_info()
@@ -727,6 +812,8 @@ private:
     uint16_t        m_streamTitleHash = 0;          // remember streamtitle, ignore multiple occurence in metadata
     uint16_t        m_timeout_ms = 250;
     uint16_t        m_timeout_ms_ssl = 2700;
+    uint16_t        m_connectTimeout_ms = 1200;
+    uint16_t        m_connectTimeout_ms_ssl = 1200;
     uint8_t         m_flacBitsPerSample = 0;        // bps should be 16
     uint8_t         m_flacNumChannels = 0;          // can be read out in the FLAC file header
     uint32_t        m_flacSampleRate = 0;           // can be read out in the FLAC file header
@@ -746,6 +833,12 @@ private:
     uint32_t        m_stsz_position = 0;            // pos of stsz atom within file
     uint32_t        m_haveNewFilePos = 0;           // user changed the file position
     uint32_t        m_sumBytesDecoded = 0;          // used for streaming
+    uint32_t        m_stallSum = 0;                 // m_sumBytesDecoded at the last sign of decoder progress
+    uint32_t        m_stallMs = 0;                  // millis() of that sign; 0 = no window open
+    uint32_t        m_ringWritten = 0;              // cumulative bytes handed to the ring this track; see mp3 err line
+    uint32_t        m_gapTraceMs = 0;               // last "track 10s" ring-arithmetic trace, 0 = not yet
+    bool            m_f_firstSync = true;           // still looking for the first frame: a skip here is pre-audio, not audio
+    int32_t         m_lastFrameBytes = 0;           // bytes the decoder consumed on the last good frame
     uint32_t        m_webFilePos = 0;               // same as audiofile.position() for SD files
     bool            m_f_metadata = false;           // assume stream without metadata
     bool            m_f_unsync = false;             // set within ID3 tag but not used
@@ -774,6 +867,7 @@ private:
     bool            m_f_timeout = false;            //
     bool            m_f_commFMT = false;            // false: default (PHILIPS), true: Least Significant Bit Justified (japanese format)
     bool            m_f_stream = false;             // stream ready for output?
+    uint8_t         m_refuseReason = STREAM_REFUSE_NONE;  // see setRefuse()
     bool            m_f_decode_ready = false;       // if true data for decode are ready
     bool            m_f_eof = false;                // end of file
     bool            m_f_lockInBuffer = false;       // lock inBuffer for manipulation

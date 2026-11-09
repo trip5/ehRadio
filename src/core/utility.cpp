@@ -6,23 +6,35 @@
 #include <ctype.h>
 #include <cstdlib>
 #include <cstring>
-
-#ifndef ARDUINO_ESP32C3_DEV
-  #include <driver/rtc_io.h>
-#endif
-
+#include <stdarg.h>
+#include <driver/rtc_io.h>
+#include "backlightcontrols.h"
 #include "config.h"
 #include "display.h"
 #include "netserver.h"
+#include "network.h"
+#include "player.h"
 #include "../displays/tools/pretext.h"
 
-namespace {
+// Fills 'out' with the current local time and returns true only when the system clock is real. "Real" needs a floor:
+// before SNTP the clock is seconds since boot - a valid-looking positive time_t - so one year of epoch is the smallest
+// honest floor, and below it localtime() has no timezone to apply either. This is the one place that read happens:
+// clockTrustworthy() and refreshClock() both ask here instead of each calling time(NULL) and localtime_r().
+bool systemLocalTime(struct tm& out) {
+  const time_t now = time(nullptr);
+  if (now <= 31536000) return false;  // seconds since boot, not a date
+  return localtime_r(&now, &out) != nullptr;
+}
 
-struct LocaleUpdateParams {
-  ESPFileUpdater* updater;
-  uint8_t clientId;
-  char localeCode[16];
-};
+bool clockTrustworthy() {
+  // The clock may only print a time the device can stand behind - waits until SNTP lands to trust the clock, otherwise the time bounces around...
+  if (network.timeinfo.tm_year + 1900 <= 1901) return false; // nothing has set it: year 1900, the zeroed struct
+  struct tm sysTm;
+  if (systemLocalTime(sysTm)) return true; // the system clock is authoritative once set
+  return network.status == SDOFFLINE; // no system clock: trust the chip only offline
+}
+
+namespace {
 
 bool readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& ovol) {
   index.seek((idx - 1) * 4, SeekSet);
@@ -51,8 +63,8 @@ void Utility::sleepCore() {
           rtc_gpio_pulldown_dis((gpio_num_t)i);
         }
       }
-      #if defined(ARDUINO_ESP32C3_DEV) || defined(ARDUINO_ESP32S3_DEV)
-        // S3/C3: native GPIO wake on LOW level (button PRESS, not release)
+      #if defined(ARDUINO_ESP32S3_DEV)
+        // S3: native GPIO wake on LOW level (button PRESS, not release)
         for (uint8_t i = 0; i < 40; i++) {
           if (mask & (1ULL << i)) {
             gpio_wakeup_enable((gpio_num_t)i, GPIO_INTR_LOW_LEVEL);
@@ -78,89 +90,61 @@ void Utility::sleepCore() {
   #endif
 }
 
+volatile uint8_t Utility::sleepWanted = 0;
+
+// Both of these are called from an esp_timer task, never from the main loop: `ticks()` is a Ticker callback
+// (`network.ctimer.attach(1, ticks)`) and so is the sleep timer that sleepForAfter() arms.  So they do the one thing that
+// is safe from any task - raise a flag - and the sleep itself happens in serviceSleep() below, on the main loop.
+void Utility::requestSleep()     { sleepWanted = 1; }  // sleep now, no wake timer
+void Utility::requestSleepWake() { sleepWanted = 2; }  // sleep, then wake after `sleepfor` minutes
+
+// Main loop: carry out a sleep that a timer, a button or the `sleep` command asked for.  Two phases, because the request
+// and the teardown used to happen in the same instant: display.putRequest(NEWMODE, SLEEPING) is queued to the display
+// task, while sleepCore() calls display.deepsleep() microseconds later - so the message was never painted, and the timer
+// paths never asked for one at all.  Phase A wakes a blanked panel, requests the message and arms SLEEP_MSG_HOLD; phase B
+// does the teardown once the hold has expired.  Deliberately non-blocking: the display task needs those seconds to draw,
+// and the audio task keeps feeding through them.
+void Utility::serviceSleep() {
+  static uint32_t sleepAtMs = 0;
+  static bool     holding   = false;
+  const uint8_t what = sleepWanted;
+  #ifndef DEEP_SLEEP_DISABLE
+    if (what && !holding && SLEEP_MSG_HOLD > 0) {
+      holding = true;
+      sleepAtMs = millis() + (uint32_t)SLEEP_MSG_HOLD * 1000UL;
+      // Silence first, so the message is noticed.
+      network.cancelStreamRetry();
+      player.sendCommand({PR_STOP, 0});
+      config.setDspOn(true);            // a blanked panel would swallow the message we are about to ask for
+      display.putRequest(NEWMODE, SLEEPING);
+      FUNCTIONLOG("SLEEP", "Sleeping in %u s", (unsigned)SLEEP_MSG_HOLD);
+      return;
+    }
+    if (holding && (int32_t)(millis() - sleepAtMs) < 0) return;   // signed: correct across the millis() wrap
+  #endif
+  if (!what && !holding) return;                       // nothing asked and nothing pending: the common case
+  sleepWanted = 0;
+  holding = false;
+  #ifndef DEEP_SLEEP_DISABLE
+    if (what == 2) doSleep(); else doSleepW();
+  #endif
+}
+
 void Utility::doSleep() {
   #ifndef DEEP_SLEEP_DISABLE
+    // 'sleepfor' is minutes: the wake timer takes microseconds, and the message says minutes.  It used to say
+    // "Will wake after %i minutes" with sleepfor * 60, i.e. five minutes printed as three hundred.
+    if (sleepfor > 0) FUNCTIONLOG("SLEEP", "Sleeping now.  Will wake after %i minutes.", (int)sleepfor);
+    else              FUNCTIONLOG("SLEEP", "Sleeping now.");
+    Serial.flush();  // esp_deep_sleep_start() does not wait for the UART to drain, and this line is the record
+    delay(50);
     sleepCore();
-    esp_sleep_enable_timer_wakeup(sleepfor * 60 * 1000000ULL);
+    if (sleepfor > 0) {
+      esp_sleep_enable_timer_wakeup(sleepfor * 60 * 1000000ULL);
+    }
     esp_deep_sleep_start();
   #endif
 }
-
-namespace {
-
-bool updateLocaleFileCore(ESPFileUpdater* updater, const char* localeCode) {
-  #ifdef UPDATEURL
-    if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
-      FUNCTIONLOG("Locale", "Updating locale: %s - no need to download, hardcoded locale uses default.", HARDCODED_WEBUI_LOCALE);
-      return true;
-    }
-
-    char tryFile[64] = "/www/locale.new";
-    char finalFile[64] = {0};
-    char tryUrl[128] = {0};
-    bool success = false;
-    FUNCTIONLOG("Locale Update", "Downloading file for %s...", localeCode);
-    for (size_t j = 0; j < 2; j++) {
-      SPIFFS.remove(tryFile);
-      if (j == 0) {
-        snprintf(finalFile, sizeof(finalFile), "/www/%s.json.gz", localeCode);
-        snprintf(tryUrl, sizeof(tryUrl), "%s%s.json.gz", FILESURL, localeCode);
-      } else {
-        snprintf(finalFile, sizeof(finalFile), "/www/%s.json", localeCode);
-        snprintf(tryUrl, sizeof(tryUrl), "%s%s.json", FILESURL, localeCode);
-      }
-      ESPFileUpdater::UpdateStatus result = updater->checkAndUpdate(
-          tryFile,
-          tryUrl,
-          "",
-          ESPFILEUPDATER_VERBOSE
-      );
-      if (result == ESPFileUpdater::UPDATED) {
-        FUNCTIONLOG("Locale Update", "Download for %s successful, saving as %s", localeCode, finalFile);
-        SPIFFS.remove(finalFile);
-        if (SPIFFS.rename(tryFile, finalFile)) {
-          success = true;
-          break;
-        }
-      }
-    }
-    if (!success) {
-      FUNCTIONLOG("Locale Update", "Failed to fetch file from either .gz or uncompressed URL");
-    }
-    return success;
-  #else
-    return false;
-  #endif
-}
-
-void updateLocaleFileAsyncWrapper(void* param) {
-  LocaleUpdateParams* params = (LocaleUpdateParams*)param;
-  bool success = updateLocaleFileCore(params->updater, params->localeCode);
-  if (success) {
-    char oldLocaleGz[64] = {0};
-    char oldLocale[64] = {0};
-    snprintf(oldLocaleGz, sizeof(oldLocaleGz), "/www/%s.json.gz", config.store.locale_webui);
-    snprintf(oldLocale, sizeof(oldLocale), "/www/%s.json", config.store.locale_webui);
-    SPIFFS.remove(oldLocaleGz);
-    SPIFFS.remove(oldLocale);
-    config.saveValue(config.store.locale_webui, params->localeCode);
-    FUNCTIONLOG("Locale Update", "Successfully updated to %s", params->localeCode);
-    char msg[64] = {0};
-    snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", params->localeCode);
-    websocket.text(params->clientId, msg);
-  } else {
-    FUNCTIONLOG("Locale Update", "Failed to update to %s", params->localeCode);
-    websocket.text(params->clientId, "{\"locale_update_failed\":true}");
-  }
-  delete params->updater;
-  delete params;
-  #ifdef CORE_MONITOR
-    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
-  #endif
-  vTaskDelete(NULL);
-}
-
-} // namespace
 
 void Utility::stripWhitespace(char* text) {
   if (!text) return;
@@ -241,6 +225,108 @@ bool Utility::parseCSV(const char* line, char* name, char* url, int& ovol) {
   return true;
 }
 
+void Utility::normalizeToCRLF(const char* input, char* output, size_t outputSize) {
+  if (!input || !output || outputSize == 0) return;
+
+  size_t inputLen = strlen(input);
+  size_t out = 0;
+
+  bool needsConversion = false;
+  for (size_t i = 0; i < inputLen; ++i) {
+    if (input[i] == '\n' && (i == 0 || input[i - 1] != '\r')) {
+      needsConversion = true;
+      break;
+    }
+  }
+
+  if (!needsConversion) {
+    size_t copyLen = (inputLen < outputSize - 1) ? inputLen : outputSize - 1;
+    memcpy(output, input, copyLen);
+    output[copyLen] = '\0';
+    return;
+  }
+
+  for (size_t i = 0; i < inputLen && out + 1 < outputSize; ++i) {
+    char c = input[i];
+    if (c != '\n') {
+      output[out++] = c;
+    } else if (i > 0 && input[i - 1] == '\r') {
+      output[out++] = '\n'; // already CRLF
+    } else if (out + 2 < outputSize) {
+      output[out++] = '\r';
+      output[out++] = '\n';
+    } else {
+      break; // no room for the pair
+    }
+  }
+  output[(out < outputSize) ? out : outputSize - 1] = '\0';
+}
+
+bool Utility::isHttpUrl(const char* text) {
+  return text && (strncmp(text, "http://", 7) == 0 || strncmp(text, "https://", 8) == 0);
+}
+
+bool Utility::parseCommandLine(const char* input, char* command, size_t commandSize, char* value, size_t valueSize) {
+  if (!input || input[0] == '\0' || !command || !value || commandSize == 0 || valueSize == 0) return false;
+
+  command[0] = '\0';
+  value[0] = '\0';
+
+  if (isHttpUrl(input)) {
+    strlcpy(command, "burl", commandSize);
+    strlcpy(value, input, valueSize);
+    return true;
+  }
+
+  const char* eq = strchr(input, '=');
+  if (eq) {
+    size_t commandLen = static_cast<size_t>(eq - input);
+    if (commandLen >= commandSize) commandLen = commandSize - 1;
+    memcpy(command, input, commandLen);
+    command[commandLen] = '\0';
+    strlcpy(value, eq + 1, valueSize);
+  } else {
+    const char* open = strchr(input, '(');
+    const char* close = strrchr(input, ')');
+    if (open && close && close > open) {
+      size_t commandLen = static_cast<size_t>(open - input);
+      if (commandLen >= commandSize) commandLen = commandSize - 1;
+      memcpy(command, input, commandLen);
+      command[commandLen] = '\0';
+
+      size_t valueLen = static_cast<size_t>(close - open - 1);
+      if (valueLen >= valueSize) valueLen = valueSize - 1;
+      memcpy(value, open + 1, valueLen);
+      value[valueLen] = '\0';
+    } else {
+      const char* space = strchr(input, ' ');
+      if (space) {
+        size_t commandLen = static_cast<size_t>(space - input);
+        if (commandLen >= commandSize) commandLen = commandSize - 1;
+        memcpy(command, input, commandLen);
+        command[commandLen] = '\0';
+        strlcpy(value, space + 1, valueSize);
+      } else {
+        strlcpy(command, input, commandSize);
+      }
+    }
+  }
+
+  stripWhitespace(command);
+  stripWhitespace(value);
+  stripWrappingQuotes(value);
+
+  if (strcmp(command, "play") == 0) {
+    if (value[0] == '\0') {
+      strlcpy(command, "start", commandSize);
+    } else if (isHttpUrl(value)) {
+      strlcpy(command, "burl", commandSize);
+    }
+  }
+
+  return command[0] != '\0';
+}
+
 bool Utility::parseWsCommand(const char* line, char* cmd, char* val, uint8_t cSize) {
   char* equals = nullptr;
 
@@ -310,7 +396,7 @@ bool Utility::addSsid(const char* ssid, const char* password) {
   strlcpy(config.ssids[slot].password, password, sizeof(config.ssids[0].password));
   config.setLastSSID(slot + 1);
 
-  File file = SPIFFS.open(TMP_PATH, "w");
+  File file = LittleFS.open(TMP_PATH, "w");
   if (!file) return false;
   for (int i = 0; i < config.ssidsCount; i++) {
     if (strlen(config.ssids[i].ssid) > 0) {
@@ -323,17 +409,17 @@ bool Utility::addSsid(const char* ssid, const char* password) {
   }
   file.close();
 
-  if (SPIFFS.exists(TMP_PATH)) {
-    SPIFFS.remove(SSIDS_PATH);
-    return SPIFFS.rename(TMP_PATH, SSIDS_PATH);
+  if (LittleFS.exists(TMP_PATH)) {
+    LittleFS.remove(SSIDS_PATH);
+    return LittleFS.rename(TMP_PATH, SSIDS_PATH);
   }
   return false;
 }
 
 bool Utility::importWifi() {
-  if (!SPIFFS.exists(TMP_PATH)) return false;
-  SPIFFS.remove(SSIDS_PATH);
-  SPIFFS.rename(TMP_PATH, SSIDS_PATH);
+  if (!LittleFS.exists(TMP_PATH)) return false;
+  LittleFS.remove(SSIDS_PATH);
+  LittleFS.rename(TMP_PATH, SSIDS_PATH);
   FUNCTIONLOG("REBOOT", "Reboot trigger by Import Wifi.");
   config.saveValue(&config.store.bootStableMarker, true);
   delay(250);
@@ -342,7 +428,7 @@ bool Utility::importWifi() {
 }
 
 void Utility::indexPlaylist() {
-  File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
+  File playlist = LittleFS.open(PLAYLIST_PATH, "r");
   if (!playlist) {
     FUNCTIONLOG("Playlist", "indexPlaylist: playlist.csv not found, cannot build index");
     return;
@@ -351,18 +437,27 @@ void Utility::indexPlaylist() {
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
   int stationOvol = 0;
-  File index = SPIFFS.open(INDEX_PATH, "w");
+  File index = LittleFS.open(INDEX_PATH, "w");
+  uint32_t entries = 0;
   while (playlist.available()) {
     uint32_t pos = playlist.position();
     if (parseCSV(playlist.readStringUntil('\n').c_str(), stationName, stationUrl, stationOvol)) {
+      // Stop READING at the ceiling: a row past MAX_PLAYLIST_ENTRIES can never be given an id. Breaking here
+      // rather than skipping keeps the index contiguous and stops the parse of a hopeless file.
+      if (entries >= MAX_PLAYLIST_ENTRIES) {
+        WARNINGLOG("playlist.csv has more than %u stations: the rest are not indexed and cannot be played",
+                   (unsigned)MAX_PLAYLIST_ENTRIES);
+        break;
+      }
       index.write((uint8_t*)&pos, 4);
+      entries++;
     }
   }
   index.close();
   playlist.close();
   size_t idxSize = 0;
-  if (SPIFFS.exists(INDEX_PATH)) {
-    File idxRead = SPIFFS.open(INDEX_PATH, "r");
+  if (LittleFS.exists(INDEX_PATH)) {
+    File idxRead = LittleFS.open(INDEX_PATH, "r");
     if (idxRead) {
       idxSize = idxRead.size();
       idxRead.close();
@@ -372,18 +467,33 @@ void Utility::indexPlaylist() {
 }
 
 void Utility::initPlaylist() {
-  if (!SPIFFS.exists(INDEX_PATH)) {
+  if (!LittleFS.exists(INDEX_PATH)) {
     FUNCTIONLOG("Playlist", "initPlaylist: index missing, running clean and index");
     bool cleaned = cleanPlaylist();
     if (!cleaned) indexPlaylist();
   } else {
     FUNCTIONLOG("Playlist", "initPlaylist: index exists, no action needed");
   }
+  // Both files, every boot: the pair is what says whether the device and the playlist agree, and an index
+  // that does not belong to the CSV is a device reporting no stations while the file lists them.
+  size_t csvSize = 0, idxSize = 0;
+  File csv = LittleFS.open(PLAYLIST_PATH, "r");
+  if (csv) { csvSize = csv.size(); csv.close(); }
+  File idx = LittleFS.open(INDEX_PATH, "r");
+  if (idx) { idxSize = idx.size(); idx.close(); }
+  FUNCTIONLOG("Playlist", "initPlaylist: %u bytes of playlist.csv, %u index entries (%u bytes)",
+              (unsigned)csvSize, (unsigned)(idxSize / 4), (unsigned)idxSize);
+  // The index that was just built is the authoritative count for PM_WEB, and it is the width the big number is
+  // zero-filled to: the display task may not open the index, so the store carries the figure.  Clamped the same
+  // way playlistLength() clamps, or a full file would wrap to zero here.
+  uint32_t entries = (uint32_t)(idxSize / 4);
+  if (entries > MAX_PLAYLIST_ENTRIES) entries = MAX_PLAYLIST_ENTRIES;
+  config.setCountStation((uint16_t)entries);
 }
 
 bool Utility::cleanPlaylist() {
   // Phase 1: Scan for blank lines, bare LF, or invalid CSV format
-  File playlist = SPIFFS.open(PLAYLIST_PATH, "r");
+  File playlist = LittleFS.open(PLAYLIST_PATH, "r");
   if (!playlist) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: playlist.csv not found, nothing to clean");
     return false;
@@ -424,8 +534,8 @@ bool Utility::cleanPlaylist() {
 
   // Phase 2: Rewrite clean version with CRLF line endings
   FUNCTIONLOG("Playlist", "cleanPlaylist: issues found, rewriting...");
-  playlist = SPIFFS.open(PLAYLIST_PATH, "r");
-  File tmpFile = SPIFFS.open(TMP_PATH, "w");
+  playlist = LittleFS.open(PLAYLIST_PATH, "r");
+  File tmpFile = LittleFS.open(TMP_PATH, "w");
   if (!playlist || !tmpFile) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: failed to open file for rewrite (playlist=%d tmp=%d)", playlist ? 1 : 0, tmpFile ? 1 : 0);
     if (playlist) playlist.close();
@@ -458,15 +568,15 @@ bool Utility::cleanPlaylist() {
   tmpFile.close();
 
   // Replace original with cleaned version
-  SPIFFS.remove(PLAYLIST_PATH);
-  if (!SPIFFS.rename(TMP_PATH, PLAYLIST_PATH)) {
+  LittleFS.remove(PLAYLIST_PATH);
+  if (!LittleFS.rename(TMP_PATH, PLAYLIST_PATH)) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: failed to rename cleaned playlist");
-    SPIFFS.remove(TMP_PATH);
+    LittleFS.remove(TMP_PATH);
     return false;
   }
 
   // Rebuild index from clean file
-  SPIFFS.remove(INDEX_PATH);
+  LittleFS.remove(INDEX_PATH);
   indexPlaylist();
 
   FUNCTIONLOG("Playlist", "cleanPlaylist: rewrite complete, index rebuilt");
@@ -479,12 +589,20 @@ uint16_t Utility::playlistLength() {
     File index = config.SDPLFS()->open(REAL_INDEX, "r");
     size_t sz = index.size();
     // SD index has an 8-byte footer: [magic:4][count:4]
-    if (config.getMode() == PM_SDCARD) {
-      out = (sz >= 8) ? ((sz - 8) / 4) : 0;
-    } else {
-      out = sz / 4;
-    }
+    size_t rows = (config.getMode() == PM_SDCARD) ? ((sz >= 8) ? ((sz - 8) / 4) : 0) : (sz / 4);
     index.close();
+    // This narrowing is where a full card used to become an empty one: 65536 rows truncate to 0, and every consumer then sees an
+    // empty playlist.  Clamping here is the one chokepoint no future writer can defeat. See MAX_PLAYLIST_ENTRIES in config.h.
+    if (rows > MAX_PLAYLIST_ENTRIES) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        WARNINGLOG("playlist index holds %u entries; only the first %u have ids and can be played",
+                   (unsigned)rows, (unsigned)MAX_PLAYLIST_ENTRIES);
+      }
+      rows = MAX_PLAYLIST_ENTRIES;
+    }
+    out = (uint16_t)rows;
   }
   return out;
 }
@@ -506,7 +624,8 @@ bool Utility::loadStation(uint16_t stationId) {
   int stationOvol = 0;
   File playlist = config.SDPLFS()->open(REAL_PLAYL, "r");
   File index = config.SDPLFS()->open(REAL_INDEX, "r");
-  if (readStationEntry(playlist, index, stationId, stationName, stationUrl, stationOvol)) {
+  const bool ok = readStationEntry(playlist, index, stationId, stationName, stationUrl, stationOvol);
+  if (ok) {
     memset(config.station.url, 0, STATION_FIELD_LENGTH);
     memset(config.station.name, 0, STATION_FIELD_LENGTH);
     strncpy(config.station.name, stationName, STATION_FIELD_LENGTH);
@@ -516,7 +635,7 @@ bool Utility::loadStation(uint16_t stationId) {
   }
   playlist.close();
   index.close();
-  return true;
+  return ok;
 }
 
 uint16_t Utility::findStationByUrl(const char* url) {
@@ -603,6 +722,9 @@ char* Utility::stationByNum(uint16_t num) {
 
 void Utility::doSleepW() {
   #ifndef DEEP_SLEEP_DISABLE
+    FUNCTIONLOG("SLEEP", "Sleeping now.");
+    Serial.flush();  // esp_deep_sleep_start() does not wait for the UART to drain
+    delay(50);
     sleepCore();
     esp_deep_sleep_start();
   #endif
@@ -611,71 +733,175 @@ void Utility::doSleepW() {
 void Utility::sleepForAfter(uint16_t sleepfor, uint16_t sa) {
   Utility::sleepfor = sleepfor;
   if (sa > 0) {
-    sleepTimer.attach(sa * 60, Utility::doSleep);
+    sleepTimer.attach(sa * 60, Utility::requestSleepWake);  // the callback only raises the flag; serviceSleep() sleeps
   } else {
-    Utility::doSleep();
+    Utility::doSleep();  // already on the main loop, so sleep here and now
   }
 }
 
-void Utility::cleanupSpiffs() {
-  FUNCTIONLOG("Cleanup", "Scanning SPIFFS for unwanted files...");
-  File root = SPIFFS.open("/");
-  if (!root || !root.isDirectory()) return;
+void Utility::stopStandby() {
+  config.setDspOn(true);
+  backlightControls.restart();
+  if (config.store.smartstart) {
+    if (config.getMode() == PM_WEB) player.resumeLastWebSource();
+    else player.sendCommand({PR_PLAY, config.lastStation()});
+  }
+}
 
-  File file = root.openNextFile();
-  while (file) {
-    if (file.isDirectory()) {
-      file = root.openNextFile();
-      continue;
+void Utility::startStandby() {
+  network.cancelStreamRetry();
+  config.setDspOn(false);
+  backlightControls.restart();
+  player.sendCommand({PR_STOP, 0});
+}
+
+void Utility::toggleStandby() {
+  if (config.store.dspon) startStandby();
+  else stopStandby();
+}
+
+bool Utility::verifyLittleFS() {
+  const size_t n = Config::wwwFilesCount;
+  if (n == 0 || n > 64) return false;  // nothing to verify, or wider than the bitmask below
+
+  #ifdef BOOTLOG_TIME
+    const uint32_t t0 = millis();  // measured for the summary line below, and only printed with BOOTLOG_TIME
+  #endif
+  uint64_t plainSeen = 0, gzSeen = 0;
+  // Listing "/" is not enough: LittleFS is a real filesystem, so the root listing yields only
+  // the www and data directory entries. This check only cares about the www files, so /www is
+  // opened directly. The basename is compared rather than the whole path, so this stays correct
+  // whether or not the core returns a full path from File::path().
+  File root = LittleFS.open("/www");
+  if (root && root.isDirectory()) {
+    File f = root.openNextFile();
+    while (f) {
+      if (!f.isDirectory()) {
+        const String path = f.path();
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        const bool gz = name.endsWith(".gz");
+        if (gz) name.remove(name.length() - 3);
+        for (size_t i = 0; i < n; i++) {
+          if (name == Config::wwwFiles[i]) {
+            if (gz) gzSeen |= (1ULL << i); else plainSeen |= (1ULL << i);
+            break;
+          }
+        }
+      }
+      f = root.openNextFile();
     }
+    root.close();
+  }
 
-    String path = file.path();
-    bool keep = false;
-    if (path.startsWith("/www/")) {
-      String name = path.substring(5);
-      char currentLocaleGz[64] = {0};
-      char currentLocale[64] = {0};
-      #ifdef UPDATEURL
-        snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", config.store.locale_webui);
-        snprintf(currentLocale, sizeof(currentLocale), "%s.json", config.store.locale_webui);
-      #else
-        snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", WEBUI_LOCALE);
-        snprintf(currentLocale, sizeof(currentLocale), "%s.json", WEBUI_LOCALE);
-      #endif
-      if (name == currentLocaleGz || name == currentLocale) {
-        keep = true;
+  // Both forms of one file is a leftover from an update that switched to the compressed copy
+  const uint64_t bothSeen = plainSeen & gzSeen;
+  for (size_t i = 0; i < n; i++) {
+    if (bothSeen & (1ULL << i)) {
+      char fullPath[64];
+      snprintf(fullPath, sizeof(fullPath), "/www/%s", Config::wwwFiles[i]);
+      LittleFS.remove(fullPath);
+      FUNCTIONLOG("Cleanup", "Removed duplicate (compressed version exists): %s", fullPath);
+    }
+  }
+
+  const uint64_t have = plainSeen | gzSeen;
+  const uint64_t need = (n >= 64) ? ~0ULL : ((1ULL << n) - 1);
+  uint16_t present = 0, asPlain = 0, asGz = 0;
+  for (size_t i = 0; i < n; i++) {
+    const uint64_t bit = 1ULL << i;
+    if (have & bit) present++;
+    if (plainSeen & bit) asPlain++;
+    if (gzSeen & bit) asGz++;
+  }
+  const bool ok = (have == need);
+  // The listing pass is the interesting part of this line, but its cost is a diagnostic like the boot-stage markers:
+  // printed with BOOTLOG_TIME, omitted without it.
+  char tookStr[16] = "";
+  #ifdef BOOTLOG_TIME
+    snprintf(tookStr, sizeof(tookStr), ", %lums", (unsigned long)(millis() - t0));
+  #endif
+  FUNCTIONLOG("Cleanup", "verifyLittleFS: %u/%u present (%u plain, %u gz)%s%s",
+              (unsigned)present, (unsigned)n, (unsigned)asPlain, (unsigned)asGz,
+              tookStr, ok ? "" : ", MISSING FILES");
+  if (!ok) {
+    for (size_t i = 0; i < n; i++) {
+      if (!(have & (1ULL << i))) { FUNCTIONLOG("Cleanup", "  missing: %s", Config::wwwFiles[i]); break; }
+    }
+  }
+  return ok;
+}
+
+void Utility::pruneLittleFS() {
+  FUNCTIONLOG("Cleanup", "Scanning LittleFS for unwanted files...");
+
+  // As with verifyLittleFS, the root listing only yields directory entries under LittleFS, so
+  // the two directories are walked explicitly. Directory entries themselves are never removed.
+  // Keep this list closed to these two: the config and playlist files live at the root, and a sweep widened to it
+  // would delete them.
+  static const char* const dirs[] = {"/www", "/data"};
+  for (const char* dir : dirs) {
+    File root = LittleFS.open(dir);
+    if (!root || !root.isDirectory()) continue;
+
+    const bool isWww = (strcmp(dir, "/www") == 0);
+    File file = root.openNextFile();
+    while (file) {
+      if (file.isDirectory()) {
+        file = root.openNextFile();
+        continue;
+      }
+
+      const String path = file.path();
+      const String name = path.substring(path.lastIndexOf('/') + 1);
+      bool keep = false;
+
+      if (isWww) {
+        char currentLocaleGz[64] = {0};
+        char currentLocale[64] = {0};
+        #ifdef UPDATEURL
+          snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", config.store.locale_webui);
+          snprintf(currentLocale, sizeof(currentLocale), "%s.json", config.store.locale_webui);
+        #else
+          snprintf(currentLocaleGz, sizeof(currentLocaleGz), "%s.json.gz", WEBUI_LOCALE);
+          snprintf(currentLocale, sizeof(currentLocale), "%s.json", WEBUI_LOCALE);
+        #endif
+        if (name == currentLocaleGz || name == currentLocale) {
+          keep = true;
+        } else {
+          for (size_t i = 0; i < Config::wwwFilesCount; i++) {
+            if (name == String(Config::wwwFiles[i]) || name == String(Config::wwwFiles[i]) + ".gz") {
+              keep = true;
+              break;
+            }
+          }
+        }
+        if (keep && !name.endsWith(".gz")) {
+          const String gzPath = String(dir) + "/" + name + ".gz";
+          if (LittleFS.exists(gzPath)) {
+            LittleFS.remove(path);
+            FUNCTIONLOG("Cleanup", "Removed duplicate (compressed version exists): %s", path.c_str());
+            file = root.openNextFile();
+            continue;
+          }
+        }
       } else {
-        for (size_t i = 0; i < Config::wwwFilesCount; i++) {
-          if (name == String(Config::wwwFiles[i]) || name == String(Config::wwwFiles[i]) + ".gz") {
+        for (size_t i = 0; i < Config::dataFilesCount; i++) {
+          if (name == String(Config::dataFiles[i])) {
             keep = true;
             break;
           }
         }
       }
-      if (keep && !name.endsWith(".gz")) {
-        String gzPath = "/www/" + name + ".gz";
-        if (SPIFFS.exists(gzPath)) {
-          SPIFFS.remove(path);
-          FUNCTIONLOG("Cleanup", "Removed duplicate (compressed version exists): %s", path.c_str());
-          file = root.openNextFile();
-          continue;
-        }
+
+      if (!keep) {
+        LittleFS.remove(path);
+        FUNCTIONLOG("Cleanup", "Removed: %s", path.c_str());
       }
-    } else if (path.startsWith("/data/")) {
-      String name = path.substring(6);
-      for (size_t i = 0; i < Config::dataFilesCount; i++) {
-        if (name == String(Config::dataFiles[i])) {
-          keep = true;
-          break;
-        }
-      }
+      file = root.openNextFile();
     }
-    if (!keep) {
-      SPIFFS.remove(path);
-      FUNCTIONLOG("Cleanup", "Removed: %s", path.c_str());
-    }
-    file = root.openNextFile();
+    root.close();
   }
+
   FUNCTIONLOG("Cleanup", "All unnecessary files purged");
 }
 
@@ -686,8 +912,8 @@ void Utility::deleteMainwwwFile() {
   char mainFile[64] = {0};
   for (const char* suffix : {"", ".gz"}) {
     snprintf(mainFile, sizeof(mainFile), "/www/%s%s", lastFile, suffix);
-    if (SPIFFS.exists(mainFile)) {
-      SPIFFS.remove(mainFile);
+    if (LittleFS.exists(mainFile)) {
+      LittleFS.remove(mainFile);
       FUNCTIONLOG("Utility", "Deleted main www file: %s", mainFile);
     }
   }
@@ -722,46 +948,6 @@ void Utility::updateFile(void* param, const char* localFile, const char* onlineF
   } else {
     FUNCTIONLOG("ESPFileUpdater", "%s - update failed", simpleName);
   }
-}
-
-void Utility::updateLocaleFile() {
-  #ifdef UPDATEURL
-    ESPFileUpdater* updater = new ESPFileUpdater(SPIFFS);
-    updater->setMaxSize(1024);
-    updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    bool success = updateLocaleFileCore(updater, config.store.locale_webui);
-    if (success) {
-      FUNCTIONLOG("Locale Update", "Successfully updated to %s", config.store.locale_webui);
-    } else {
-      FUNCTIONLOG("Locale Update", "Failed to update to %s", config.store.locale_webui);
-    }
-    delete updater;
-  #endif
-}
-
-bool Utility::updateLocaleFileAsync(const char* localeCode, uint8_t clientId) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  #ifdef UPDATEURL
-    LocaleUpdateParams* params = new LocaleUpdateParams();
-    params->updater = new ESPFileUpdater(SPIFFS);
-    params->updater->setMaxSize(1024);
-    params->updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    params->clientId = clientId;
-    strlcpy(params->localeCode, localeCode, sizeof(params->localeCode));
-    if (xTaskCreatePinnedToCore(updateLocaleFileAsyncWrapper, "updateLocaleFileAsyncWrapper", 8192, params, LOW_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
-      delete params->updater;
-      delete params;
-      return false;
-    }
-    return true;
-  #else
-    config.saveValue(config.store.locale_webui, localeCode);
-    FUNCTIONLOG("Locale Switch", "Changed to %s", localeCode);
-    char msg[64] = {0};
-    snprintf(msg, sizeof(msg), "{\"locale_updated\":true,\"locale\":\"%s\"}", localeCode);
-    websocket.text(clientId, msg);
-    return true;
-  #endif
 }
 
 // Software CRC32 (portable fallback; ESP32 has hardware crc32_le in ROM)
@@ -802,6 +988,15 @@ const char* utf8_trim15(const char* src) {
   memcpy(buf, src, bytes);
   buf[bytes] = '\0';
   return buf;
+}
+
+uint8_t rssiLevel(int rssi) {
+  const int steps[] = { RSSI_STEPS };
+  if (rssi >= steps[0]) return 4;
+  if (rssi >= steps[1]) return 3;
+  if (rssi >= steps[2]) return 2;
+  if (rssi >= steps[3]) return 1;
+  return 0;
 }
 
 Utility utility;

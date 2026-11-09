@@ -1,0 +1,200 @@
+/* WEBUI THEMES - the per-display-theme overrides.
+   One block per entry in _themes[] of src/displays/themes.h, keyed by that entry's index.  Every colour a
+   block does not name comes from :root in style.css, which is the design, so a block stays a short list of
+   differences rather than a second palette.  --theme-name is a copy of _themeNames[] so a page can show the
+   name it belongs to: themes.h is the authority and theme_tool.py refreshes these on every run.
+   style.css imports this file.  It is written by src/displays/theme_tool.py and by the browser tool
+   in src/displays/webui_tool.html, which can only see values and therefore rewrites the file whole. */
+:root[data-theme="0"] {
+  --theme-name:         "Blue & Red (Trip5)";
+  --actives:            #ffffff;
+  --control-bg:         #f81c00;
+  --highlights:         #f81c00;
+  --infotexts:          #cccccc;
+  --link-quiet:         #115fff;
+  --link-text:          #f81c00;
+  --list-active-bg:     #115fff;
+  --meter-track:        #003299;
+  --playlist-hover:     #f81c00;
+  --spinner-ring:       #115fff;
+  --switch-track-on:    #115fff;
+  --warning-outline:    #f81c00;
+}
+:root[data-theme="1"] {
+  --theme-name:         "Blue & Red & More (Trip5)";
+  --actives:            #ffffff;
+  --control-bg:         #f81c00;
+  --highlights:         #f81c00;
+  --infotexts:          #cccccc;
+  --link-quiet:         #115fff;
+  --link-text:          #98d8e8;
+  --list-active-bg:     #115fff;
+  --meter-fill:         #16a316;
+  --playlist-hover:     #df28ff;
+  --spinner-ring:       #ffff00;
+  --switch-text:        #000000;
+  --switch-track-on:    #ffff00;
+  --warning-outline:    #df28ff;
+}
+:root[data-theme="2"] {
+  --theme-name:         "Elle (Trip5)";
+  --actives:            #ffffff;
+  --fills:              #f000f0;
+  --highlights:         #ff00ff;
+  --infotexts:          #cccccc;
+  --link-quiet:         #e300e3;
+  --logo:               #ff80ff;
+  --logo-shadow:        #ff00ff;
+  --logo-text:          #ffffff;
+  --meter-track:        #200020;
+  --outlines:           #ff00ff;
+  --panel-gradient:     #200020;
+  --playlist-hover:     #ff00ff;
+}
+:root[data-theme="3"] {
+  --theme-name:         "ёRadio Gold (e2002)";
+  --actives:            #000000;
+  --highlights:         #ad9838;
+  --infotexts:          #cccccc;
+  --labels:             #e3d360;
+  --list-names:         #ad9838;
+  --logo:               #e3d25f;
+  --logo-shadow:        #a89c46;
+  --logo-text:          #ff0000;
+  --outlines:           #e3d25f;
+}
+:root[data-theme="4"] {
+  --theme-name:         "Graphite (Kle7rx)";
+  --actives:            #ebebeb;
+  --control-bg:         #d00000;
+  --edges:              #7d7d7d;
+  --fills:              #5e5e5e;
+  --highlights:         #6070f5;
+  --infotexts:          #c0c0c0;
+  --labels:             #ffffff;
+  --link-text:          #6070f5;
+  --list-names:         #c8c8c8;
+  --logo:               #ffffff;
+  --logo-shadow:        #505050;
+  --logo-text:          #ffffff;
+  --maintexts:          #c0c0c0;
+  --meter-fill:         #d00000;
+  --outlines:           #bbbbbb;
+  --warning-outline:    #d00000;
+}
+:root[data-theme="5"] {
+  --theme-name:         "Gray (Krzsiek)";
+  --actives:            #000000;
+  --highlights:         #b4b4b4;
+  --logo:               #ffffff;
+  --logo-shadow:        #303030;
+  --logo-text:          #a0a0a0;
+  --maintexts:          #c2c2c2;
+}
+:root[data-theme="6"] {
+  --theme-name:         "Colorful I (Levente Daradici)";
+  --actives:            #000000;
+  --button-active-fill: #00ff00;
+  --edges:              #7a7e7a;
+  --fills:              #000fd5;
+  --highlight-fill:     #ff0000;
+  --highlights:         #b4b4b4;
+  --icons-outline:      #00ff00;
+  --infotexts:          #f8fc00;
+  --labels:             #fcff27;
+  --logo:               #ff39ff;
+  --logo-shadow:        #860086;
+  --logo-text:          #000fd5;
+  --maintexts:          #fc00fc;
+  --outlines:           #eff300;
+  --warning-outline:    #fc00fc;
+}
+:root[data-theme="7"] {
+  --theme-name:         "Ocean (Levente Daradici)";
+  --actives:            #000000;
+  --edges:              #e20000;
+  --fills:              #000000;
+  --highlights:         #b4b4b4;
+  --icon-active-glyph:  #00005a;
+  --input-border:       #76002b;
+  --labels:             #00ffff;
+  --list-names:         #ffffff;
+  --logo-text:          #ffffff;
+  --maintexts:          #fbff01;
+  --outlines:           #6064ff;
+  --panel-gradient:     #00004c;
+  --surfaces:           #00005a;
+}
+:root[data-theme="8"] {
+  --theme-name:         "White and Black (Levente Daradici)";
+  --actives:            #f9fdf9;
+  --button-fill:        #ffffff;
+  --control-bg:         #e20000;
+  --edges:              #e20000;
+  --fills:              #000000;
+  --heading-text:       #6464ff;
+  --highlights:         #000000;
+  --infotexts:          #000000;
+  --input-border:       #ff0000;
+  --input-text:         #ffffff;
+  --labels:             #000000;
+  --link-text:          #e20000;
+  --list-bars:          #c0c0c0;
+  --list-names:         #020202;
+  --logo:               #000000;
+  --logo-shadow:        #000000;
+  --logo-text:          #ff0000;
+  --maintexts:          #020202;
+  --meter-fill:         #6464ff;
+  --outlines:           #e20000;
+  --panel-gradient:     #d4d7d4;
+  --playlist-hover:     #e20000;
+  --select-text:        #ffffff;
+  --surfaces:           #f9fdf9;
+  --switch-text:        #ffffff;
+}
+:root[data-theme="9"] {
+  --theme-name:         "UltraPerfect (András Daradici)";
+  --actives:            #000000;
+  --edges:              #9b7d7a;
+  --fills:              #955d00;
+  --highlights:         #b4b4b4;
+  --icon-active-glyph:  #420000;
+  --input-border:       #70413f;
+  --list-names:         #a2a6a2;
+  --logo:               #c47a00;
+  --logo-shadow:        #714600;
+  --logo-text:          #ff0000;
+  --meter-fill:         #f70000;
+  --meter-outline:      #955d00;
+  --outlines:           #f2f9f2;
+  --panel-gradient:     #380000;
+  --surfaces:           #420000;
+  --switch-track-on:    #f70000;
+}
+:root[data-theme="10"] {
+  --theme-name:         "Golden Wind (András Daradici)";
+  --actives:            #000000;
+  --button-outline:     #ffffff;
+  --fills:              #9d5400;
+  --highlights:         #c7c7c7;
+  --icons-outline:      #ffffff;
+  --input-border:       #f7d77f;
+  --link-quiet:         #9d5400;
+  --list-bars:          #9d5400;
+  --list-names:         #ffffff;
+  --logo:               #000000;
+  --logo-shadow:        #bfbfbf;
+  --logo-text:          #9d5400;
+  --main-text:          #9d5400;
+  --maintexts:          #ffffff;
+  --outlines:           #9d5400;
+  --panel-border:       #f4faf4;
+  --panel-gradient:     #d49600;
+  --playlist-hover:     #808080;
+  --scrollbar-thumb:    #f7d77f;
+  --surfaces:           #fab100;
+  --switch-off-text:    #9d5400;
+  --switch-text:        #ffffff;
+  --switch-track-on:    #9d5400;
+}

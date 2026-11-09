@@ -80,6 +80,11 @@
   "locale_en": "Icelandic"
 },
 {
+  "locale_code": "it_IT",
+  "locale": "Italiano",
+  "locale_en": "Italian"
+},
+{
   "locale_code": "kk_KZ",
   "locale": "қазақ тілі",
   "locale_en": "Kazakh"
@@ -131,7 +136,7 @@
 },
 {
   "locale_code": "ro_RO",
-  "locale": "română",
+  "locale": "Română",
   "locale_en": "Romanian"
 },
 {

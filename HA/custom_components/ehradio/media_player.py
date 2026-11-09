@@ -21,7 +21,7 @@ from homeassistant.components.media_player import (
     RepeatMode,
 )
 
-VERSION = '2026.06.03'
+VERSION = '2026.09.22'
 
 _LOGGER      = logging.getLogger(__name__)
 
@@ -56,6 +56,21 @@ MEDIA_PLAYER_PLATFORM_SCHEMA = MEDIA_PLAYER_PLATFORM_SCHEMA.extend({
   vol.Optional(CONF_DEVICE_URL, default=''): cv.string
 })
 
+# <root>/state carries one bare token in Home Assistant's own vocabulary; the device never localizes it.
+STATE_TOKEN_MAP = {
+  'off':       MediaPlayerState.STANDBY,
+  'playing':   MediaPlayerState.PLAYING,
+  'idle':      MediaPlayerState.IDLE,
+  'buffering': MediaPlayerState.BUFFERING,
+}
+
+# <root>/availability is retained, and the device's last will publishes the offline half of it.
+AVAILABILITY_OFFLINE = 'offline'
+
+# Both station lists are served over HTTP; <root>/mode says which one is live, and <root>/ip where it is.
+PLAYLIST_PATH_WEB = '/data/playlist.csv'
+PLAYLIST_PATH_SD  = '/data/playlistsd.csv'
+
 def setup_platform(hass, config, add_devices, discovery_info=None):
   root_topic = config.get(CONF_ROOT_TOPIC)
   name = config.get(CONF_NAME)
@@ -73,7 +88,19 @@ class ehradioApi():
     self.root_topic = root_topic.strip('/')
     self.playlist = playlist
     self.playlisturl = ""
-    self.device_url = device_url  # user-configured; auto-detected from playlist if empty
+    self.device_url = device_url  # user-configured; otherwise built from the ip topic
+    self.ip = ""
+    self.mode = 0                 # 0 web radio, 1 SD card, as published on the mode topic
+
+  def base_url(self):
+    if self.device_url:
+      return self.device_url
+    if self.ip:
+      return f"http://{self.ip}/"
+    return ""
+
+  def playlist_path(self):
+    return PLAYLIST_PATH_SD if self.mode else PLAYLIST_PATH_WEB
 
   async def set_command(self, command):
     try:
@@ -110,27 +137,23 @@ class ehradioApi():
     except:
       await self.mqtt.async_publish(self.hass, self.root_topic + '/command', media_content_id)
       
-  async def load_playlist(self, msg):
-    try:
-      self.playlisturl = msg.payload
-      # Auto-detect device URL from playlist URL if not configured
-      if not self.device_url and self.playlisturl.startswith('http'):
-        from urllib.parse import urlparse
-        parsed = urlparse(self.playlisturl)
-        self.device_url = f"{parsed.scheme}://{parsed.netloc}/"
-      file = await self.hass.async_add_executor_job(self.fetch_data)
-    except uException as e:
-      _LOGGER.error(f"Error load_playlist from {self.playlisturl}")
-    else:
-      file = file.split('\n')
-      counter = 1
-      self.playlist.clear()
-      for line in file:
-        res = line.split('\t')
-        if res[0] != "":
-          station = str(counter) + '. ' + res[0]
-          self.playlist.append(station)
-          counter=counter+1
+  async def load_playlist(self):
+    base = self.base_url()
+    if not base:
+      _LOGGER.warning("Playlist not fetched yet: no ip topic received and no device_url configured")
+      return
+    self.playlisturl = base.rstrip('/') + self.playlist_path()
+    file = await self.hass.async_add_executor_job(self.fetch_data)
+    if not file:
+      return  # keep the station list we already have rather than clearing it on a transient failure
+    counter = 1
+    self.playlist.clear()
+    for line in file.split('\n'):
+      res = line.split('\t')
+      if res[0] != "":
+        station = str(counter) + '. ' + res[0]
+        self.playlist.append(station)
+        counter=counter+1
 
 class ehradioDevice(MediaPlayerEntity):
   def __init__(self, name, max_volume, fallback_image, device_url, api):
@@ -146,10 +169,12 @@ class ehradioDevice(MediaPlayerEntity):
     self._max_volume = max_volume
     self._fallback_image = fallback_image
     self._device_url = device_url
+    self._available = True      # optimistic until the availability topic says otherwise
+    self._revision = ''
 
   @property
   def device_info(self) -> DeviceInfo:
-    device_url = self.api.device_url or self._device_url
+    device_url = self.api.base_url() or self._device_url
     return DeviceInfo(
         identifiers={("ehradio", self._name)},
         name=self._name,
@@ -158,46 +183,91 @@ class ehradioDevice(MediaPlayerEntity):
         configuration_url=device_url if device_url else None,
     )
 
+  @property
+  def available(self):
+    return self._available
+
+  def _schedule_update(self):
+    try:
+      self.async_schedule_update_ha_state()
+    except Exception:
+      pass
+
+  async def refresh_playlist(self):
+    await self.api.load_playlist()
+
   async def async_added_to_hass(self):
     await asyncio.sleep(5)
-    await mqtt.async_subscribe(self.api.hass, self.api.root_topic+'/status', self.status_listener, 0, "utf-8")
-    await mqtt.async_subscribe(self.api.hass, self.api.root_topic+'/playlist', self.playlist_listener, 0, "utf-8")
-    await mqtt.async_subscribe(self.api.hass, self.api.root_topic+'/volume', self.volume_listener, 0, "utf-8")
-    
+    root = self.api.root_topic
+    await mqtt.async_subscribe(self.api.hass, root + '/availability', self.availability_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/state', self.state_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/status', self.status_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/volume', self.volume_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/mode', self.mode_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/ip', self.ip_listener, 0, "utf-8")
+    await mqtt.async_subscribe(self.api.hass, root + '/playlist', self.playlist_listener, 0, "utf-8")
+
+  async def availability_listener(self, msg):
+    self._available = (msg.payload != AVAILABILITY_OFFLINE)
+    if self._available:
+      await self.refresh_playlist()  # a fresh session may have come up with a new address or mode
+    self._schedule_update()
+
+  async def state_listener(self, msg):
+    state = STATE_TOKEN_MAP.get(msg.payload)
+    if state is not None:
+      self._state = state
+      self._schedule_update()
+
   async def status_listener(self, msg):
     try:
       js = json.loads(msg.payload)
-      station_name = js.get('name', '')
-      track_title = js.get('title', '')
-      self._media_title = station_name or track_title
-      self._track_artist = track_title if station_name else None
-      if js['on']==1:
-        self._state = MediaPlayerState.PLAYING if js['status']==1 else MediaPlayerState.IDLE
-      else:
-        self._state = MediaPlayerState.PLAYING if js['status']==1 else MediaPlayerState.OFF
-      self._current_source = str(js['station']) + '. ' + js['name']
-      self._entity_picture = js.get('image_url') or None
-      self._max_volume = js.get('max_volume', self._max_volume)
-      try:
-        self.async_schedule_update_ha_state()
-      except:
-        pass
-    except:
-      pass
-
-  async def playlist_listener(self, msg):
-    await self.api.load_playlist(msg)
-    try:
-      self.async_schedule_update_ha_state()
-    except:
-      pass
+    except Exception as e:
+      _LOGGER.error("Unable to parse the status payload: " + str(e))
+      return
+    station_name = js.get('name', '')
+    track_title = js.get('title', '')
+    self._media_title = station_name or track_title
+    self._track_artist = track_title if station_name else None
+    self._current_source = f"{js.get('station', 0)}. {station_name}"
+    self._entity_picture = js.get('image_url') or None
+    if js.get('max_volume'):
+      self._max_volume = int(js['max_volume'])  # the device knows its own VOLUME_SCALE
+    self._schedule_update()
 
   async def volume_listener(self, msg):
-    self._volume = int(msg.payload) / self._max_volume
     try:
-      self.async_schedule_update_ha_state()
-    except:
-      pass
+      self._volume = int(msg.payload) / self._max_volume
+    except (TypeError, ValueError, ZeroDivisionError):
+      return
+    self._schedule_update()
+
+  async def mode_listener(self, msg):
+    try:
+      mode = int(msg.payload)
+    except (TypeError, ValueError):
+      return
+    if mode == self.api.mode:
+      return
+    self.api.mode = mode
+    await self.refresh_playlist()  # the active station list is a different file on the SD card
+    self._schedule_update()
+
+  async def ip_listener(self, msg):
+    ip = str(msg.payload).strip()
+    if not ip or ip == self.api.ip:
+      return
+    self.api.ip = ip
+    await self.refresh_playlist()
+    self._schedule_update()
+
+  async def playlist_listener(self, msg):
+    revision = str(msg.payload)
+    if revision == self._revision:
+      return
+    self._revision = revision
+    await self.refresh_playlist()
+    self._schedule_update()
 
   @property
   def supported_features(self):
@@ -234,9 +304,10 @@ class ehradioDevice(MediaPlayerEntity):
   @property
   def extra_state_attributes(self):
     attrs = {}
-    device_url = self.api.device_url or self._device_url
+    device_url = self.api.base_url() or self._device_url
     if device_url:
         attrs["device_url"] = device_url
+    attrs["playlist_source"] = "SD card" if self.api.mode else "Web radio"
     return attrs
 
   @property
@@ -312,9 +383,10 @@ class ehradioDevice(MediaPlayerEntity):
       self._state = MediaPlayerState.IDLE
   
   async def async_turn_off(self):
-      await self.api.set_command("turnoff")
-      self._state = MediaPlayerState.OFF
+      # The radio has no power switch: "off" means entering standby, and the state topic confirms it.
+      await self.api.set_command("startstandby")
+      self._state = MediaPlayerState.STANDBY
 
   async def async_turn_on(self, **kwargs):
-      await self.api.set_command("turnon")
-      self._state = MediaPlayerState.ON
+      await self.api.set_command("stopstandby")
+      self._state = MediaPlayerState.IDLE

@@ -22,7 +22,7 @@ void DspCore::initDisplay() {
 
 void DspCore::clearDsp(bool black){ fillScreen(black?0:config.theme.background); }
 void DspCore::flip(){
-#if DSP_WIDTH==240 && DSP_HEIGHT==240
+#if DSP_WIDTH==DSP_HEIGHT
   if(ROTATE_90){
     setRotation(config.store.flipscreen?3:1);
   }else{

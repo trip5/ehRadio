@@ -1,37 +1,43 @@
+=================================================================================
+CURRENT STRUCTURE (added 2026-10-06, when the font system went runtime)
+
+Three STYLES, one folder each, all compiled in and chosen at runtime:
+
+    clockfonts/LEDClock/{10,15,21,28,35,52,70}.png
+    clockfonts/Chunky6/...
+    clockfonts/Chunky6px/...
+
+    py makefont.py LED          ->  clockfonts/LED.h
+
+makefont.py takes the whole folder and ABORTS, naming every missing size, if all seven are
+not there — a style is all seven or it is not a style.  templates/Template_<size>.png are
+the drawing templates, and they live OUTSIDE the style folders so the file count is never
+disturbed.
+
+10, 15, 21 and 28 are the SECONDS sizes and 15, 35, 52 and 70 the CLOCK ones.  Which one a
+panel uses is no longer a build choice: it is clockConf.textsize, a size index in the layout
+(0 = the system font, 1..4 = 15/35/52/70, and the seconds size follows from the same index).
+
+The filename is a CONTRACT, not a label: makefont.py REFUSES a file whose image height does not
+match the number in its name.  Seven sizes are seven separate hand-drawn designs, so a height
+that disagrees can only be a mis-saved export — and built anyway it would put every glyph on the
+wrong grid.  The 8 px seconds font was re-drawn at 10 px: 128x64 OLED is the only panel that
+used that rung, 10 reads better against the 15 px clock, and it still fits inside the clock's ink
+band.  Its digit came out 8 px wide, which is why the seconds' width is now MEASURED from the
+font rather than computed — see ClockWidget::_getTimeBounds().
+
+Gone: TIME_SIZE, font15/font19/font35/font52/font70.h, the Trip5/ folder, DS_DIGI/, and the
+one-PNG png_to_gfxfont.py that makefont.py replaces.
+
+Everything below is Trip5's original note about the fonts themselves, and it still applies to
+the artwork — except the DS_DIGI entries, that font having been deleted.
+=================================================================================
+
 Trip5's Notes about the fonts used by the clock:
 
-This folder ONLY contains fonts used by the clock (and on the volume page screen)
+This folder ONLY contains fonts used by the clock (and on the volume page screen).
 
-yofont5x7 and yofont10x14
-were ONLY used by ILI9225 - but eliminated at some point...
-
-TinyFont5 and TinyFont6
-are ONLY used by displayN5110.h (Nokia) for Clock
-
-font15 = Chunky6_15, Chunky6_15_px
-displaySH1106.h
-displaySSD1306.h (DSP_SSD1306)
-displaySSD1305.h
-
-font19 = DS_DIGI/DS_DIGI15pt7b, DS_DIGI/DS_DIGI15pt7b_mono, Chunky6_15, Chunky6_15_px
-...nothing...?
-
-font35 = DS_DIGI/DS_DIGI28pt7b, DS_DIGI/DS_DIGI28pt7b_mono, Chunky6_35, Chunky6_35_px
-displayGC9106.h
-displayILI9225.h
-displaySSD1322.h
-displaySSD1327.h
-displayST7735.h
-displayST7789.h (for DSP_ST7789_76)
-
-font52 = DS_DIGI/DS_DIGI42pt7b, DS_DIGI/DS_DIGI42pt7b_mono, Chunky6_15, Chunky6_15_px
-displayGC9A01A.h
-displayILI9341.h
-displayST7789.h (for regular DSP_ST7789_76)
-
-font70: DS_DIGI/DS_DIGI56pt7b, DS_DIGI/DS_DIGI56pt7b_mono, Chunky6_15, Chunky6_15_px
-displayILI9488.h
-displayST7796.h
+First, the breakdown of what I found in the yoRadio codebase (and the initial Chunky fonts I added later):
 
 The DS_DIGI fonts marked as 56pt7b actual height: 70 pixels / width: 54 pixels (colon: 24) - non-mono 1 is 29px
                          ...42pt7b actual height: 52 pixels / width: 40 pixels (colon: 15) - non-mono 1 is 15px
@@ -39,15 +45,26 @@ The DS_DIGI fonts marked as 56pt7b actual height: 70 pixels / width: 54 pixels (
                          ...15pt7b actual height: 19 pixels / width: 14 pixels (colon: 6) - non-mono 1 is 6px
 So likely the point size relates to the true type font it was derived from (which may include below the baseline).
 
+Original length of "00:00" was...
+                              ...for 70 pixels: 240 pixels
+                              ...for 52 pixels: 175
+                              ...for 35 pixels: 119
+                              ...for 19 pixels: 62
+
 The link https://tchapi.github.io/Adafruit-GFX-Font-Customiser/ originally appeared in the comments for the font*.h files.
 It is a font editor but not enjoyable to use.
 
 Chunky6 is a Trip5 font designed for pixel displays: https://github.com/trip5/Matrix-Fonts
 
-Let's generate a font from a PNG using my own tool to make the "0123456789:" graphic: https://trip5.github.io/Matrix-Fonts/renderer.html
+Let's generate a font from a PNG using my own tool to make the "0123456789:" graphic: https://trip5.github.io/Matrix-Fonts/renderer.html -
+This tool can be used on ANY BDF font (a python script is also available in that repository).
+
 Numbers are a fixed-width and the colon is half of that width - this including spaces.  The result is the total width will be divisible by 21.
 Note that it adds a 1 or 2 pixel border all around and we then add black borders and trim
-so that there are equal numbers of black pixels left-right and top-bottom, odd ones getting extra space on left and bottom
+so that there are equal numbers of black pixels left-right and top-bottom, odd ones getting extra space on left and bottom...
+
+Or more simply, every digit needs to fit into the following patterns (pixel sizes), with the colon being half of the width of a digit:
+Size (height) x width: 70 x 56, 52 x 40, 35 x 28, 15 x 12...  28, 21, 8 pixel heights added later.
 
 Chunky6_70:    pixel size 14
 Chunky6_70_px: pixel size 11 + 3 pixels space
@@ -67,14 +84,56 @@ Chunky6_35_px: pixel size 6 + 1 pixels space
         width: 4 (includes 1 empty column) * 7 = 28 pixels (per digit) x 10.5 = 294 pixels
 - Time is longer than DS_DIGI28pt7b_mono by 7 pixels
 
+
+*Chunky6_28:    pixel size 5
+Chunky6_15_px: pixel size 5 + 1 pixels space
+       height: 5 * 5 = 25 pixels
+        width: 4 (includes 1 empty column) * 5 = 20 pixels (per digit) x 10.5 = 210 pixels
+
+*Chunky6_21:    pixel size 4
+Chunky6_15_px: pixel size 3 + 1 pixels space
+       height: 5 * 4 = 20 pixels
+        width: 4 (includes 1 empty column) * 4 = 16 pixels (per digit) x 10.5 = 168 pixels
+
 Chunky6_15:    pixel size 3
 Chunky6_15_px: pixel size 2 + 1 pixels space
        height: 5 * 3 = 15 pixels
         width: 4 (includes 1 empty column) * 3 = 12 pixels (per digit) x 10.5 = 126 pixels
 - Time is shorter than DS_DIGI15pt7b_mono by 8 pixels
 
-This is the tool that can do it...
-py .\png_to_gfxfont.py Chunky6_70_px.png Chunky6_70_px.h --glow-char /
-That glow-char switch makes the "glow" character
+*Chunky6_10: Hand-drawn...
+Chunky6_10_px: Hand-drawn...
+       height: ... = 10 pixels
+        width: ... = 84 pixels
+
+
+The glow character (the residual "LED" behind the digits) is ALWAYS "/" now - makefont.py hard-codes
+it, the widget builds its <g><g>:<g><g> from it, and there is no option to pick another slot.
+No extra drawn glyph is needed: the script builds the character as the UNION of the lit pixels across
+digits 0-9 (the colon is not part of it) and injects it into that slot.
+
+The union is now editable.  `py makefont.py <Style> --glow-out` writes it out as one image per size,
+`<Style>/10glow_char.png` ... `<Style>/70glow_char.png` (white on black, on that size's digit cell,
+e.g. 8x10) and does NOT write the .h.  `--glow-out 70` does that one size only, and an existing image
+is only replaced after a y at its prompt - end of input counts as no, so nothing is ever destroyed
+silently.  The union it writes comes from `<size>glow.png` when that strip is present, otherwise from
+`<size>.png`; the file it never reads is `<size>glow_char.png`, which is what it is writing.  Edit
+those images, then run the tool normally.
+
+A run resolves each size's glow from the files alone, in this order (there is no flag for any of it,
+and the choice is per size, so a style can use all three at once):
+
+  1. `<size>glow_char.png` - the finished glow glyph, one cell, used exactly as drawn.
+  2. `<size>glow.png` - an alternative drawing of the SAME ten digits on the same canvas as
+     `<size>.png`; the union is taken from IT, so an exaggerated or reshaped glow can be drawn
+     without touching the font's own artwork.
+  3. neither - the union is computed from `<size>.png` itself.
+
+Because 1 masks 2, an existing `<size>glow_char.png` hides that size's glow strip: edits to the strip
+do nothing until the glyph is regenerated with --glow-out or the glyph file is deleted.  A glow file of
+the wrong size, or a blank one, is a hard error naming it.  (The old --glow-char and --tight-bounds
+switches are gone: every glyph is packed at its full cell, which is what keeps one ink grid per size.)
 
 There is some risk that these slightly wider fonts may not fully fit on all displays...
+
+After creating the font files, the /src/displays/clockfonts/font*.h files need to be edited to include them in builds.

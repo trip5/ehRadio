@@ -218,7 +218,7 @@ void TouchScreen::loop() {
         uint32_t pressTicks = millis()-touchLongPress;
         if (pressTicks >= TS_DEEPSLEEP_MS) {
           #ifndef DEEP_SLEEP_DISABLE
-            utility.doSleepW();
+            utility.requestSleep();   // serviceSleep() holds the message on screen first
           #endif
         } else if (pressTicks > 50) {
           if (_isDoubleTap) {

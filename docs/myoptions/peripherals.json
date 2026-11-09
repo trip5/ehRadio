@@ -1,19 +1,5 @@
 [ { "title": "Peripherals and Build Options",
-    "info": "Compiled-in options and other hardware of the build" },
-  {
-    "name": "Display Font",
-    "info": "Select font to use for display text",
-    "defines": [
-      { "define": "DISPLAYFONT", "type": "enum", "options": ["MATRIXCHUNKY", "MATRIXLIGHT", "X11"], "default": "MATRIXCHUNKY", "optional": true, "comment": "MATRIXCHUNKY (default), MATRIXLIGHT, X11" }
-    ]
-  },
-  {
-    "name": "Clock Font",
-    "info": "Usually the clock font is selected based on display type:\nOLEDs get CHUNKY6, TFTs get CHUNKY6_PX (which is the same but with separators between the 'pixels'.\nSelecting YO_MONO on a TFT will get the classic ёRadio 7-segment font but OLED will use the same font as display text.\nSelecting this overrides the default auto-selection.",
-    "defines": [
-      { "define": "CLOCKFONT", "type": "enum", "options": ["CHUNKY6", "CHUNKY6_PX", "YO_MONO"], "optional": true, "comment": "CHUNKY6 (OLED default), CHUNKY6_PX (TFT default), YO_MONO (7-segment/display font)" }
-    ]
-  },
+    "info": "Compiled-in hardware options of the build" },
   {
     "name": "LED",
     "pins": [ "LED_PIN" ],
@@ -28,11 +14,6 @@
       { "define": "RGB_LED_ORDER", "type": "enum", "options": ["NEO_GRB", "NEO_RGB", "NEO_RGBW"], "default": "NEO_GRB", "optional": true, "comment": "type of pixel (usually NEO_GRB) see https://learn.adafruit.com/adafruit-neopixel-uberguide/arduino-library-use" }
     ],
     "lib_deps": "${library.neopixel}"
-  },
-  {
-    "name": "MQTT Enable",
-    "define": "MQTT_ENABLE", "type": "flag", "optional": false, "comment": "enable MQTT",
-    "info": "This must be checked to enable MQTT"
   },
   {
     "name": "IR Receiver",
@@ -58,6 +39,19 @@
       { "define": "SD_SPI", "type": "spi", "comment": "assign SD to SPI bus" },
       { "define": "SD_CARD_DETECT_PIN", "type": "numeric", "default": 255, "min": 0, "max": 255, "optional": true, "comment": "Pin DETECT is attached to (255 for unused)"},
       { "define": "SD_AUTOPLAY", "type": "boolean", "default": false, "comment": "auto-switch to SD card mode when card is inserted (requires SD_CARD_DETECT_PIN != 255)" }
+    ]
+  },
+  {
+    "name": "SDIO Card Reader (SDMMC: ESP32-S3 only)",
+    "info": "Native SD host instead of SPI. Define CLK, CMD, D0 for 1-bit (some may be marked with SPI: CLK=SCK, CMD=MOSI, D0=MISO). Define also for 4-bit: D1, D2, D3.\nDo NOT use with SD modules that carry a 74LVC125A or other level-shifter chip which blocks bidirectional CMD.",
+    "pins": [ "SDMMC_CLK", "SDMMC_CMD", "SDMMC_D0" ],
+    "defines": [
+      { "define": "SDMMC_D1", "type": "pin", "default": 255, "optional": true },
+      { "define": "SDMMC_D2", "type": "pin", "default": 255, "optional": true },
+      { "define": "SDMMC_D3", "type": "pin", "default": 255, "optional": true },
+      { "define": "SD_CARD_DETECT_PIN", "type": "numeric", "default": 255, "min": 0, "max": 255, "optional": true, "comment": "Pin DETECT is attached to (255 for unused)"},
+      { "define": "SD_AUTOPLAY", "type": "boolean", "default": false, "comment": "auto-switch to SD card mode when card is inserted (requires SD_CARD_DETECT_PIN != 255)" },
+      { "define": "SDMMC_FREQ", "type": "numeric", "default": 0, "min": 0, "max": 40000, "optional": true, "comment": "maximum SD clock in kHz (0 = driver default 40MHz highest speed; lower this if problems)" }
     ]
   }
 ]

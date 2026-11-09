@@ -12,20 +12,36 @@
 #include "netserver.h"
 #include "player.h"
 #include "utility.h"
+#include "coredump.h"
 #include "../locale/dsplocale.h"
+#include "../displays/themeregistry.h"
+#include "../displays/layoutregistry.h"
+#ifdef USE_SD
+  #include "filemanager.h" // the SD manager parks the startup services the way SD playback does
+#endif
 
 Startup startup;
 
+static bool cardInUse(); // the card parks the services - defined with them, below
+
 void Startup::checkSafeMode() {
   if (!config.store.bootStableMarker) {
-    FUNCTIONLOG("SAFE MODE", "Smartstart and Autoupdate disabled for this session; Web mode saved to NVS.");
-    config.store.smartstart = false;
-    config.store.autoupdate = false;
+    _safeMode = true;
+    FUNCTIONLOG("SAFE MODE", "Smartstart and Autoupdate suppressed for this session; Web mode saved to NVS.");
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
   }
   // Mark this boot as in-progress (not yet proven stable)
   config.saveValue(&config.store.bootStableMarker, false);
   _bootStablePending = true;
+}
+
+// The boot-mode glyph for the boot screen line. Deliberately a plain read of the state, with no caching: the caller
+// samples it once, before checkSafeMode() clears bootStableMarker, so the glyph reports how the previous boot ended.
+const char* Startup::icon() const {
+  if (network.offlineMode || config.store.SDoffline) return "\030\031";  // SD_A + SD_B
+  if (!config.store.bootStableMarker)                return "\034";      // PAUSE (safe mode)
+  if (config.store.smartstart)                       return "\035";      // PLAY (smart start)
+  return "\026";                                                         // VOL_75 (default)
 }
 
 void Startup::sdOfflineMode() {
@@ -34,37 +50,82 @@ void Startup::sdOfflineMode() {
   network.ctimer.attach(1, ticks);  // 1ms heartbeat for player audio callbacks (bitrate, etc.)
 }
 
-void Startup::markBootStable() {
+void Startup::markBootStable(const char* reason) {
   config.saveValue(&config.store.bootStableMarker, true);
-  BOOTLOG("Boot stable after %lu ms", millis() - _bootStartMs);
+  BOOTLOG("Boot stable after %lu ms - %s", millis() - _bootStartMs, reason);
 }
 
+void Startup::deferBootStable(const char* reason) {
+  if (!_bootStablePending) return;  // already proven, or this boot never had to prove itself
+  _bootStartMs = millis();
+  // Restart the proof from now if the WebUI is up; if it is not, clear the stamp so it starts when it comes up.
+  _webUpMs = netserver.isListening() ? millis() : 0;
+  FUNCTIONLOG("Boot.stable", "countdown restarted: %s", reason ? reason : "network instability");
+}
+
+// Set before the bring-up task exists and cleared by it, so loop() cannot start a second one.  A bool, not a
+// state machine: begin() sets `listening` before it returns, and isListening() stays the one source of truth.
+static volatile bool webBringUpActive = false;
+static constexpr uint32_t WEB_BRINGUP_STACK_BYTES = WEB_BRINGUP_TASK_STACK_SIZE * 1024;
+
 void Startup::loop() {
+  if (!netserver.isListening() && !webBringUpActive && network.status == CONNECTED &&
+      (_services != SVC_WILL_RUN || cardInUse())) {
+    // Two different reasons reach this line, so it says which: in SD mode the card is what holds the services
+    // back, and they only run if the device is switched to web radio.
+    if (cardInUse()) BOOTLOG("Starting the WebUI - Startup Async Services will run when in web mode...");
+    else            BOOTLOG("Startup Async Services are finished - starting the WebUI...");
+    webBringUpActive = true;
+    if (xTaskCreatePinnedToCore(webBringUpTask, "webBringUp", WEB_BRINGUP_STACK_BYTES, NULL,
+                                LOW_TASK_PRIORITY, NULL, NETWORK_CORE) != pdPASS) {
+      // No task: bring it up here rather than have no WebUI at all.  This is exactly the stall the task exists to
+      // avoid, so it is reported rather than silent.
+      WARNINGLOG("webBringUp task could not be created (%u bytes, free heap %u) - starting the WebUI on the main loop",
+                 (unsigned)WEB_BRINGUP_STACK_BYTES, (unsigned)ESP.getFreeHeap());
+      bringUpWebServer();
+    }
+  }
   if (!_bootStablePending) return;
   if (_bootStartMs == 0) {
     _bootStartMs = millis();  // First loop() call — setup() (including smartstart) is done
     return;
   }
-  if (millis() - _bootStartMs > (BOOT_STABLE_TIME * 1000UL)) {
-    markBootStable();
+  // The WebUI coming up IS the last risky step of a boot - begin() allocates the request queue, the listener, the
+  // PSRAM cache and (on its first connection) the AsyncTCP task - and the first page load is the largest allocation
+  // burst in the session.  So the boot proves itself by the server being up and STAYING up, and nothing here needs
+  // to know whether the startup services ever ran: in SD mode they are parked for the whole session, and a boot
+  // that only parked them is exactly as safe as one that never had them.
+  if (_webUpMs == 0) {
+    if (!netserver.isListening()) return;   // nothing to prove yet
+    _webUpMs = millis();
+  }
+  if ((millis() - _webUpMs) > (BOOT_STABLE_TIME * 1000UL)) {
+    char reason[64];
+    snprintf(reason, sizeof(reason), "%u s after the WebUI came up", (unsigned)BOOT_STABLE_TIME);
+    markBootStable(reason);
     _bootStablePending = false;
   }
 }
 
+// The WebUI bring-up, deliberately off the main loop.  netserver.begin() reads every www file into the PSRAM
+// cache and blocked the loop for 1763 ms when it ran there - long enough to starve the audio refill and lose the
+// stream. Nothing in it needs to be synchronous with the loop.
+void Startup::bringUpWebServer() {
+  netserver.begin();
+  netserver.startLoopTask();
+  display.putRequest(NEWIP, 0);   // the footer IP is the indicator that the WebUI is up
+  webBringUpActive = false;
+  BOOTLOG("WebUI Ready! Go to http://%s/ to configure", WiFi.localIP().toString().c_str());
+  BOOTLOG("-------------------------------------------------------");
+}
+
+void Startup::webBringUpTask(void* param) {
+  startup.bringUpWebServer();
+  vTaskDelete(NULL);
+}
+
 namespace {
 
-bool requiredWebFilesExist() {
-  char fullPath[64];
-  for (size_t i = 0; i < Config::wwwFilesCount; i++) {
-    snprintf(fullPath, sizeof(fullPath), "/www/%s", Config::wwwFiles[i]);
-    String gzPath = String(fullPath) + ".gz";
-    bool plainExists = SPIFFS.exists(fullPath);
-    bool gzExists = SPIFFS.exists(gzPath);
-    if (gzExists && plainExists) SPIFFS.remove(fullPath);
-    if (!plainExists && !gzExists) return false;
-  }
-  return true;
-}
 
 } // namespace
 
@@ -75,7 +136,7 @@ void Startup::deassertCsPins() {
   #if VS1053_CS != 255
     pinMode(VS1053_CS, OUTPUT); digitalWrite(VS1053_CS, HIGH);
   #endif
-  #if SD_CS != 255
+  #if SD_CS != 255 && SD_CS != 254 // 254 = SDMMC sentinel, not a real GPIO
     pinMode(SD_CS, OUTPUT); digitalWrite(SD_CS, HIGH);
   #endif
   #if TFT_CS != 255
@@ -86,23 +147,38 @@ void Startup::deassertCsPins() {
   #endif
 }
 
-void Startup::checkSpiffsandVer() {
-  esp_log_level_set("SPIFFS", ESP_LOG_NONE); // Suppress ESP-IDF "SPIFFS: mount failed, -10025" on first boot.
-  bool spiffsReady = SPIFFS.begin(false); // Try mounting without formatting first; if that fails, format explicitly.
-  if (!spiffsReady) {
-    BOOTLOG("SPIFFS not formatted, formatting now (please be patient)...");
-    spiffsReady = SPIFFS.begin(true);
+void Startup::checkLittleFSandVer() {
+  LITTLEFSTIMELOGRESET();
+  // The esp_littlefs log tag is lowercase "littlefs", not the Arduino class name.
+  esp_log_level_set("littlefs", ESP_LOG_NONE); // Suppress ESP-IDF "littlefs: mount failed, -10025" on first boot.
+  // The partition label is passed explicitly: LittleFS.begin() still defaults to "spiffs".
+  bool fsReady = LittleFS.begin(false, FS_MOUNT_POINT, FS_MAX_OPEN_FILES, FS_PARTITION_LABEL); // Try mounting without formatting first; if that fails, format explicitly.
+  if (!fsReady) {
+    BOOTLOG("LittleFS not formatted, formatting now (please be patient)...");
+    // Say so on the panel before the format starts: display.init() has run and the boot screen is up, so the display
+    // task handles the request while this one blocks on flash erases. putRequest() only queues, hence the pause.
+    display.putRequest(FORMATTING, 0);
+    delay(50);
+    fsReady = LittleFS.begin(true, FS_MOUNT_POINT, FS_MAX_OPEN_FILES, FS_PARTITION_LABEL);
   }
-  esp_log_level_set("SPIFFS", ESP_LOG_ERROR); // allow SPIFFS logging again
-  if (!spiffsReady) {
-    ERRORLOG("SPIFFS Mount Failed");
+  esp_log_level_set("littlefs", ESP_LOG_ERROR); // allow littlefs logging again
+  if (!fsReady) {
+    ERRORLOG("LittleFS Mount Failed");
     return;
   }
-  BOOTLOG("SPIFFS mounted");
+  BOOTLOG("LittleFS mounted");
 
-  // Health check: verify SPIFFS is readable AND writable (can be corrupted after crash).
-  // Retry up to 3 times with remount; reboot if still broken.
-  {
+  LittleFS.mkdir("/www");
+  LittleFS.mkdir("/data");
+
+  LITTLEFSTIMELOG("LittleFS mount & Health setup");
+
+  // Health check: verify LittleFS is readable AND writable (it can be corrupted by an unclean
+  // shutdown). Retry up to 3 times with remount; reboot if still broken.
+  const bool prevBootClean = config.store.bootStableMarker;
+  if (prevBootClean) {
+    BOOTLOG("LittleFS health check skipped (previous boot was clean)");
+  } else {
     bool healthy = false;
     for (int attempt = 1; attempt <= 3; attempt++) {
       // Phase 1: readability — read the last www file (player.html or .gz variant).
@@ -118,11 +194,11 @@ void Startup::checkSpiffsandVer() {
 
         bool probeGz = false;
         const char* probePath = nullptr;
-        if (SPIFFS.exists(gzPath)) { probePath = gzPath; probeGz = true; }
-        else if (SPIFFS.exists(lastPath)) { probePath = lastPath; }
+        if (LittleFS.exists(gzPath)) { probePath = gzPath; probeGz = true; }
+        else if (LittleFS.exists(lastPath)) { probePath = lastPath; }
 
         if (probePath) {
-          File f = SPIFFS.open(probePath, "r");
+          File f = LittleFS.open(probePath, "r");
           if (f) {
             if (probeGz) {
               int b0 = f.read(), b1 = f.read();
@@ -137,55 +213,57 @@ void Startup::checkSpiffsandVer() {
       }
       if (readable) {
         healthy = true;
-        BOOTLOG("SPIFFS read health check passed");
+        BOOTLOG("LittleFS read health check passed");
         break;
       }
 
       // Phase 2: write + read-back test (deeper — catches write/read failures)
       bool writeOk = false;
-      File test = SPIFFS.open("/.ehradio_test", "w");
+      File test = LittleFS.open("/.ehradio_test", "w");
       if (test) {
         test.print('!');
         test.close();
-        File rt = SPIFFS.open("/.ehradio_test", "r");
+        File rt = LittleFS.open("/.ehradio_test", "r");
         if (rt) {
           writeOk = (rt.read() == '!');
           rt.close();
         }
-        SPIFFS.remove("/.ehradio_test");
+        LittleFS.remove("/.ehradio_test");
       }
       if (writeOk) {
         healthy = true;
-        BOOTLOG("SPIFFS write-read health check passed");
+        BOOTLOG("LittleFS write-read health check passed");
         break;
       }
-      BOOTLOG("SPIFFS health check failed (attempt %d/3), remounting...", attempt);
-      SPIFFS.end();
+      BOOTLOG("LittleFS health check failed (attempt %d/3), remounting...", attempt);
+      LittleFS.end();
       delay(100);
-      SPIFFS.begin(false);
+      LittleFS.begin(false, FS_MOUNT_POINT, FS_MAX_OPEN_FILES, FS_PARTITION_LABEL);
     }
     if (!healthy) {
-      ERRORLOG("SPIFFS health check failed after 3 attempts - rebooting...");
+      ERRORLOG("LittleFS health check failed after 3 attempts - rebooting...");
       delay(500);  // flush serial before reboot
       ESP.restart();
     }
   }
+  LITTLEFSTIMELOG("Health check");
 
   String storedVersion = "";
-  if (SPIFFS.exists(VERSION_PATH)) {
-    File verFile = SPIFFS.open(VERSION_PATH, "r");
+  if (LittleFS.exists(VERSION_PATH)) {
+    File verFile = LittleFS.open(VERSION_PATH, "r");
     if (verFile) {
       storedVersion = verFile.readStringUntil('\n');
       storedVersion.trim();
       verFile.close();
     }
   }
+  LITTLEFSTIMELOG("Version file read");
 
   if (storedVersion == String(RADIOVERSION)) {
-    config.wwwFilesExist = requiredWebFilesExist();
-  } else if (!SPIFFS.exists(VERSION_PATH)) {
+    config.wwwFilesExist = utility.verifyLittleFS();
+  } else if (!LittleFS.exists(VERSION_PATH)) {
     BOOTLOG("New install detected.");
-    config.wwwFilesExist = requiredWebFilesExist();
+    config.wwwFilesExist = utility.verifyLittleFS();
     // New install — prevent false Safe Mode on first boot
     { Preferences prefs; prefs.begin("ehradio", false);
     prefs.putBool("bootstablemark", true);
@@ -194,10 +272,15 @@ void Startup::checkSpiffsandVer() {
     BOOTLOG("Version mismatch detected (stored: %s, current: %s)", storedVersion.c_str(), RADIOVERSION);
     config.wwwFilesExist = false;
   }
+  // A crash log is only meaningful against the firmware that produced it, so a version change starts the ring empty.
+  // The pending core dump is deliberately NOT discarded: it is archived into the new ring on this boot, and its body
+  // carries the crashed build's own elf sha256, which is what names the build in the first place.
+  if (storedVersion != String(RADIOVERSION)) coredump::clear();
+  LITTLEFSTIMELOG("wwwFilesExist branch (verifyLittleFS)");
 
-  if (!config.wwwFilesExist || !SPIFFS.exists(VERSION_PATH)) {
-    utility.cleanupSpiffs();
-    File verFile = SPIFFS.open(VERSION_PATH, "w");
+  if (!config.wwwFilesExist || !LittleFS.exists(VERSION_PATH)) {
+    utility.pruneLittleFS();
+    File verFile = LittleFS.open(VERSION_PATH, "w");
     if (verFile) {
       verFile.println(RADIOVERSION);
       verFile.close();
@@ -205,18 +288,44 @@ void Startup::checkSpiffsandVer() {
     }
   }
 
+  // The custom theme slots are optional files, so they are read after the pruning above - which is
+  // what keeps them, and only because their names are in Config::dataFiles[].  config.loadTheme()
+  // already ran, back in config.init() before the filesystem was mounted, so it is re-run here:
+  // only now can a persisted custom id be told apart from a slot whose file is gone.
+  themeLoadSlots();
+  const uint8_t themeIdWanted = config.store.themeId;
+  config.loadTheme();
+  // When the slot WAS gone, the resolved id has to be persisted rather than merely used.  Left in NVS, a
+  // stale id comes back to life the moment anything refills that slot - and reflashing LittleFS takes
+  // every slot file with it - so the device would change theme on a later boot for no reason the user
+  // could see.  This is the only place that can do it correctly: loadTheme()'s earlier call cannot judge a
+  // custom id at all, so persisting from there would forget a perfectly good custom theme on every boot.
+  if (config.store.themeId != themeIdWanted) config.saveValue(&config.store.themeId, config.store.themeId);
+
+  // The custom layout slots are optional files too, and they follow the same two-phase rule: loadLayout()
+  // already ran before the filesystem was mounted, so the id is re-resolved now that the slots are known and
+  // the correction is persisted when it differs, for the reason just given.  A build with no display has no
+  // registry and no slot files at all, so there is nothing to load and nothing to correct.
+  #ifndef DUMMYDISPLAY
+    layoutLoadSlots();
+    const uint8_t layoutIdWanted = config.store.layoutId;
+    config.loadLayout();
+    if (config.store.layoutId != layoutIdWanted) config.saveValue(&config.store.layoutId, config.store.layoutId);
+  #endif
+
   if (!config.wwwFilesExist) {
     utility.deleteMainwwwFile();
     #ifndef UPDATEURL
-      BOOTLOG("SPIFFS is missing files!");
+      BOOTLOG("LittleFS is missing files!");
     #else
-      BOOTLOG("SPIFFS is missing files.  Will attempt to get files from online...");
+      BOOTLOG("LittleFS is missing files.  Will attempt to get files from online...");
     #endif
   }
+  LITTLEFSTIMELOG("Cleanup and write branches");
 }
 
 void Startup::initNetwork() {
-  File file = SPIFFS.open(SSIDS_PATH, "r");
+  File file = LittleFS.open(SSIDS_PATH, "r");
   if (!file || file.isDirectory()) {
     return;
   }
@@ -240,20 +349,28 @@ void Startup::initNetwork() {
 
 void Startup::getDefaultPlaylist() {
   #ifdef PLAYLIST_DEFAULT_URL
-    if (!SPIFFS.exists("/data/playlist.csv")) {
+    if (!LittleFS.exists("/data/playlist.csv")) {
       BOOTLOG("Fetching default playlist");
-      ESPFileUpdater updater(SPIFFS);
+      ESPFileUpdater updater(LittleFS);
       updater.setMaxSize(1024);
       updater.setUserAgent(ESPFILEUPDATER_USERAGENT);
       ESPFileUpdater::UpdateStatus result = updater.checkAndUpdate("/data/playlist.csv", PLAYLIST_DEFAULT_URL, "", ESPFILEUPDATER_VERBOSE);
+      // The CSV alone is not a playlist: index.dat carries one offset per line and is the only place the
+      // station count comes from.  This is the one writer of the four that did not index what it wrote, and
+      // an unindexed CSV is a device that reports no stations until the next boot builds one - see
+      // plans/playlist-index-and-weather-hide.md.
+      if (LittleFS.exists("/data/playlist.csv")) {
+        BOOTLOG("Indexing fetched playlist");
+        utility.indexPlaylist();
+      }
     }
   #endif
 }
 
 void Startup::cleanStaleSearchResults() {
   const char* metaPath = "/www/searchresults.json.meta";
-  if (SPIFFS.exists(metaPath)) {
-    File metaFile = SPIFFS.open(metaPath, "r");
+  if (LittleFS.exists(metaPath)) {
+    File metaFile = LittleFS.open(metaPath, "r");
     metaFile.readStringUntil('\n');
     String timeStr = metaFile.readStringUntil('\n');
     metaFile.close();
@@ -262,9 +379,9 @@ void Startup::cleanStaleSearchResults() {
       time_t now = time(nullptr);
       if (now < 100000000 || (now - fileTime) > 86400) {
         SERIALLOG("Cleaning stale search results.");
-        SPIFFS.remove(metaPath);
-        SPIFFS.remove("/www/searchresults.json");
-        SPIFFS.remove("/www/search.txt");
+        LittleFS.remove(metaPath);
+        LittleFS.remove("/www/searchresults.json");
+        LittleFS.remove("/www/search.txt");
       }
     }
   }
@@ -273,7 +390,7 @@ void Startup::cleanStaleSearchResults() {
 void Startup::getRequiredFiles() {
   #ifdef UPDATEURL
     player.sendCommand({PR_STOP, 0});
-    ESPFileUpdater* updater = new ESPFileUpdater(SPIFFS);
+    ESPFileUpdater* updater = new ESPFileUpdater(LittleFS);
     updater->setMaxSize(1024);
     updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
     char localFileGz[64];
@@ -286,8 +403,8 @@ void Startup::getRequiredFiles() {
       const char* fileName = Config::wwwFiles[i];
       snprintf(localFileGz, sizeof(localFileGz), "/www/%s.gz", fileName);
       snprintf(localFile, sizeof(localFile), "/www/%s", fileName);
-      if (SPIFFS.exists(localFileGz)) SPIFFS.remove(localFileGz);
-      if (SPIFFS.exists(localFile)) SPIFFS.remove(localFile);
+      if (LittleFS.exists(localFileGz)) LittleFS.remove(localFileGz);
+      if (LittleFS.exists(localFile)) LittleFS.remove(localFile);
       bool success = false;
       for (size_t j = 0; j < 2; j++) {
         if (j == 0) {
@@ -324,7 +441,7 @@ void Startup::getRequiredFiles() {
       }
     }
     delete updater;
-    utility.cleanupSpiffs();
+    utility.pruneLittleFS();
     FUNCTIONLOG("REBOOT", "Required Files done. Reboot.");
     config.saveValue(&config.store.bootStableMarker, true);
     delay(250);
@@ -336,8 +453,8 @@ void Startup::checkNewVersionFile() {
   #ifdef UPDATEURL
     const char* newVERSION_PATH = "/data/new_ver.txt";
     netserver.newVersion = String(RADIOVERSION);
-    if (SPIFFS.exists(newVERSION_PATH)) {
-      File newVerFile = SPIFFS.open(newVERSION_PATH, "r");
+    if (LittleFS.exists(newVERSION_PATH)) {
+      File newVerFile = LittleFS.open(newVERSION_PATH, "r");
       if (newVerFile) {
         String line = newVerFile.readStringUntil('\n');
         line.trim();
@@ -357,58 +474,68 @@ void Startup::checkNewVersionFile() {
 }
 
 
+// True while the card has to be left alone: either the player is reading it (SD playback) or the manager is rewriting it
+// SD playback needs the park because it uses DRAM for SPI reads plus MP3 decoding, and the updater's SSL downloads would starve both and drain the audio buffer;
+// SD File Manager needs the same park because the user is editing the card, so nothing may open files or start playback underneath it
+static bool cardInUse() {
+  #ifdef USE_SD
+    if (filemanager.active()) return true;
+  #endif
+  return config.getMode() == PM_SDCARD;
+}
+
 void Startup::startupServicesAsync(void* param) {
-  // Wait until device leaves SD card playback mode before starting
-  // background downloads. SD mode uses DRAM for SPI reads + MP3 decoding;
-  // ESPFileUpdater's SSL downloads would starve both and drain the audio buffer.
-  // The goto allows restarting the entire wait sequence if the user switches
-  // back to SD mode during the countdown delay.
-wait_for_online:
-  if (config.getMode() == PM_SDCARD) FUNCTIONLOG("Services", "Startup Async Services will not begin while in SD Mode", STARTUP_ASYNC_SERVICES_DELAY);
-  while (config.getMode() == PM_SDCARD) {
+  if (cardInUse()) FUNCTIONLOG("Services", "Startup Async Services will not begin while in SD Mode or the SD Manager");
+  while (cardInUse()) {
     vTaskDelay(pdMS_TO_TICKS(2000));
   }
 
-  // Delay to let audio stream buffer fill before background HTTP tasks compete for WiFi.
-  // Check mode each second — if user switched back to SD, restart from the top.
-  FUNCTIONLOG("Services", "Startup Async Services will begin in %d seconds", STARTUP_ASYNC_SERVICES_DELAY);
-  for (int i = 0; i < STARTUP_ASYNC_SERVICES_DELAY; i++) {
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    if (config.getMode() == PM_SDCARD) goto wait_for_online;
-  }
-
-  FUNCTIONLOG("Services", "Startup Async Services starting", STARTUP_ASYNC_SERVICES_DELAY);
+  FUNCTIONLOG("Services", "Startup Async Services starting");
+  // From here to the end of the task the display chokes its redraw rate, because these three downloads
+  // hold a TLS session each on the network core and the audio stream is usually up by the second one.
+  startup._servicesBusy = true;
   #ifdef UPDATEURL
     utility.updateFile(param, "/data/new_ver.txt", CHECKUPDATEURL, CHECKUPDATEURL_TIME, "New version check");
     startup.checkNewVersionFile();
-    if (config.store.autoupdate && netserver.newVersionAvailable) {
+    if (!startup.safeMode() && config.store.autoupdate && netserver.newVersionAvailable) {
       FUNCTIONLOG("AutoUpdate", "New version detected - starting online update");
       startOnlineUpdate();
     }
   #endif
   utility.updateFile(param, "/www/timezones.json.gz", TIMEZONES_JSON_URL, TIMEZONES_JSON_CHECKTIME, "Timezones database file");
   #ifdef CORE_MONITOR
-    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
+    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
   #endif
   utility.updateFile(param, "/www/rb_srvrs.json", RADIO_BROWSER_SERVERS_URL, RB_SERVERS_CHECKTIME, "Radio Browser servers list");
   #ifdef CORE_MONITOR
-    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL) * 4);
+    FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
   #endif
+  // Last act of the services: SVC_DONE releases the WebUI (see Startup::loop()'s trigger).  It no longer starts
+  // the boot-stable countdown - that is the WebUI's job now.
+  startup._servicesBusy = false;
+  startup._services = Startup::SVC_DONE;
   delete (ESPFileUpdater*)param;
   vTaskDelete(NULL);
 }
 
 void Startup::startupServices() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  #ifdef UPDATEURL
+  // Every exit from here means something definite about whether the services will run, and Startup::loop()
+  // relies on that: SVC_NONE is the default, so "not connected" needs no assignment, but the running case
+  // must be recorded before the task can finish, or a fast download could be missed entirely.
+  #ifndef UPDATEURL
+    return;
+  #else
+    if (WiFi.status() != WL_CONNECTED) return;
     if (!config.wwwFilesExist) {
-      getRequiredFiles();
+      getRequiredFiles();   // reboots once the files are back
       return;
     }
 
-    ESPFileUpdater* updater = new ESPFileUpdater(SPIFFS);
+    ESPFileUpdater* updater = new ESPFileUpdater(LittleFS);
     updater->setMaxSize(1024);
     updater->setUserAgent(ESPFILEUPDATER_USERAGENT);
-    xTaskCreatePinnedToCore(Startup::startupServicesAsync, "startupServicesAsync", 8192, updater, LOW_TASK_PRIORITY, NULL, NETWORK_CORE);
+    _services = SVC_WILL_RUN;
+    xTaskCreatePinnedToCore(Startup::startupServicesAsync, "startupServicesAsync",
+                            (STARTUP_TASK_STACK_SIZE * 1024), updater, LOW_TASK_PRIORITY, NULL, NETWORK_CORE);
   #endif
 }

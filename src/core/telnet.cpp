@@ -1,11 +1,11 @@
 #include "options.h"
-#include <ctype.h>
 #include <stdarg.h>
 #include "commandhandler.h"
 #include "config.h"
 #include "logging.h"
 #include "network.h"
 #include "telnet.h"
+#include "utility.h"
 
 Telnet telnet;
 
@@ -56,139 +56,6 @@ bool readStreamLine(Stream& stream, char* buffer, size_t bufferSize, size_t& len
 
 } // namespace
 
-static void normalize_to_crlf(const char *buf, char *outbuf, size_t outbuf_len) {
-  size_t oi = 0;
-  size_t buf_len = strlen(buf);
-  
-  // Quick optimization: check if conversion is needed (look for lone \n without \r)
-  bool needs_conversion = false;
-  for (size_t i = 0; i < buf_len; ++i) {
-    if (buf[i] == '\n' && (i == 0 || buf[i-1] != '\r')) {
-      needs_conversion = true;
-      break;
-    }
-  }
-  
-  // If no conversion needed, just copy the string
-  if (!needs_conversion) {
-    size_t copy_len = (buf_len < outbuf_len - 1) ? buf_len : outbuf_len - 1;
-    memcpy(outbuf, buf, copy_len);
-    outbuf[copy_len] = '\0';
-    return;
-  }
-  
-  // Perform conversion
-  for (size_t i = 0; i < buf_len && oi + 1 < outbuf_len; ++i) {
-    char c = buf[i];
-    if (c == '\n') {
-      if (i > 0 && buf[i-1] == '\r') {
-        // already CRLF, copy '\n'
-        outbuf[oi++] = '\n';
-      } else {
-        // insert CR then LF - ensure space for both characters and null terminator
-        if (oi + 2 < outbuf_len) {
-          outbuf[oi++] = '\r';
-          outbuf[oi++] = '\n';
-        } else {
-          break;  // Not enough space
-        }
-      }
-    } else {
-      outbuf[oi++] = c;
-    }
-  }
-  // Null-terminate
-  if (oi < outbuf_len) outbuf[oi] = '\0'; else outbuf[outbuf_len-1] = '\0';
-}
-
-static void trimInPlace(char* text) {
-  if (!text || text[0] == '\0') return;
-
-  char* begin = text;
-  while (*begin && isspace(static_cast<unsigned char>(*begin))) {
-    ++begin;
-  }
-  if (begin != text) {
-    memmove(text, begin, strlen(begin) + 1);
-  }
-
-  size_t len = strlen(text);
-  while (len > 0 && isspace(static_cast<unsigned char>(text[len - 1]))) {
-    text[--len] = '\0';
-  }
-}
-
-static void stripWrappingQuotes(char* text) {
-  size_t len = strlen(text);
-  if (len < 2) return;
-  if ((text[0] == '"' && text[len - 1] == '"') || (text[0] == '\'' && text[len - 1] == '\'')) {
-    memmove(text, text + 1, len - 2);
-    text[len - 2] = '\0';
-  }
-}
-
-static bool startsWithHttp(const char* text) {
-  return strncmp(text, "http://", 7) == 0 || strncmp(text, "https://", 8) == 0;
-}
-
-static bool parseTelnetCommand(const char* input, char* command, size_t commandSize, char* value, size_t valueSize) {
-  if (!input || input[0] == '\0') return false;
-
-  command[0] = '\0';
-  value[0] = '\0';
-
-  const char* eq = strchr(input, '=');
-  if (eq) {
-    size_t commandLen = static_cast<size_t>(eq - input);
-    if (commandLen >= commandSize) commandLen = commandSize - 1;
-    memcpy(command, input, commandLen);
-    command[commandLen] = '\0';
-    strlcpy(value, eq + 1, valueSize);
-  } else {
-    const char* open = strchr(input, '(');
-    const char* close = strrchr(input, ')');
-    if (open && close && close > open) {
-      size_t commandLen = static_cast<size_t>(open - input);
-      if (commandLen >= commandSize) commandLen = commandSize - 1;
-      memcpy(command, input, commandLen);
-      command[commandLen] = '\0';
-
-      size_t valueLen = static_cast<size_t>(close - open - 1);
-      if (valueLen >= valueSize) valueLen = valueSize - 1;
-      memcpy(value, open + 1, valueLen);
-      value[valueLen] = '\0';
-    } else {
-      const char* space = strchr(input, ' ');
-      if (space) {
-        size_t commandLen = static_cast<size_t>(space - input);
-        if (commandLen >= commandSize) commandLen = commandSize - 1;
-        memcpy(command, input, commandLen);
-        command[commandLen] = '\0';
-        strlcpy(value, space + 1, valueSize);
-      } else {
-        strlcpy(command, input, commandSize);
-      }
-    }
-  }
-
-  trimInPlace(command);
-  trimInPlace(value);
-  stripWrappingQuotes(value);
-
-  if (strcmp(command, "play") == 0) {
-    if (value[0] == '\0') {
-      strlcpy(command, "start", commandSize);
-    } else if (startsWithHttp(value)) {
-      strlcpy(command, "burl", commandSize);
-    }
-  }
-  if (strcmp(command, "mode") == 0 && strcmp(value, "2") == 0) {
-    strlcpy(value, "-1", valueSize);
-  }
-
-  return command[0] != '\0';
-}
-
 bool Telnet::_isIPSet(IPAddress ip) {
   return ip.toString() == "0.0.0.0";
 }
@@ -202,21 +69,14 @@ bool Telnet::begin(bool quiet) {
 
   if (network.status==SDOFFLINE) {
     BOOTLOG("Ready in SD Mode!");
-    BOOTLOG("------------------------------------------------");
-    BOOTLOG("");
+    BOOTLOG("-----------------");
     return true;
   }
   if (!quiet) BOOTLOGX("telnet.begin\t");
   if (WiFi.status() == WL_CONNECTED || _isIPSet(WiFi.softAPIP())) {
     server.begin();
     server.setNoDelay(true);
-    if (!quiet) {
-      SERIALLOG("done");
-      BOOTLOG("");
-      BOOTLOG("Ready! Go to http://%s/ to configure", WiFi.localIP().toString().c_str());
-      BOOTLOG("------------------------------------------------");
-      BOOTLOG("");
-    }
+    if (!quiet) SERIALLOG("done");
     return true;
   } else {
     return false;
@@ -296,7 +156,6 @@ void Telnet::loop() {
       }
       resetInputBuffer(clientInputBuffer[i], clientInputLength[i]);
     }
-    delay(1000);
   }
   handleSerial();
 }
@@ -357,7 +216,7 @@ void Telnet::printf(const char *format, ...) {
   // Normalize line endings: convert lone '\n' to "\r\n"
   // Use larger buffer to handle worst-case CRLF expansion (every \n -> \r\n doubles size)
   char outbuf[MAX_PRINTF_LEN * 2];
-  normalize_to_crlf(buf, outbuf, sizeof(outbuf));
+  utility.normalizeToCRLF(buf, outbuf, sizeof(outbuf));
 
   // Check if this is a prompt or a message
   bool isPrompt = (strcmp(outbuf, "> ") == 0);
@@ -391,7 +250,7 @@ void Telnet::printf(uint8_t id, const char *format, ...) {
   // Normalize line endings
   // Use larger buffer to handle worst-case CRLF expansion (every \n -> \r\n doubles size)
   char outbuf[MAX_PRINTF_LEN * 2];
-  normalize_to_crlf(buf, outbuf, sizeof(outbuf));
+  utility.normalizeToCRLF(buf, outbuf, sizeof(outbuf));
 
   if (id >= MAX_TLN_CLIENTS) return;
 
@@ -440,7 +299,12 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
 
   memset(fallbackCommand, 0, sizeof(fallbackCommand));
   memset(fallbackValue, 0, sizeof(fallbackValue));
-  if (parseTelnetCommand(str, fallbackCommand, sizeof(fallbackCommand), fallbackValue, sizeof(fallbackValue))) {
+  if (utility.parseCommandLine(str, fallbackCommand, sizeof(fallbackCommand), fallbackValue, sizeof(fallbackValue))) {
+    // Telnet-only alias: `mode 2` / `mode=2` means "cycle" here, whereas the board uses -1.
+    if (strcmp(fallbackCommand, "mode") == 0 && strcmp(fallbackValue, "2") == 0) {
+      strlcpy(fallbackValue, "-1", sizeof(fallbackValue));
+    }
+
     if (strcmp(fallbackCommand, "quit") == 0 || strcmp(fallbackCommand, "bye") == 0) {
       disconnectClient(clientId);
       return;
@@ -459,7 +323,7 @@ void Telnet::on_input(const char* str, uint8_t clientId) {
       #ifndef DEEP_SLEEP_DISABLE
         printf(clientId, "  sleep <for>[,<after>]  Sleep timer\r\n");
       #endif
-      printf(clientId, "  mode <0|1|2>           0=Radio(Web), 1=SD Card, 2=Cycle\r\n");
+      printf(clientId, "  mode <0|1|2>           0=Radio(Web), 1=SD card, 2=Cycle\r\n");
       printf(clientId, "\r\n");
       printf(clientId, "For a full list, consult the documentation.\r\n");
       goto show_prompt;

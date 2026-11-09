@@ -1,0 +1,29 @@
+{
+  "name": "ehRadio - Big Color Screen with 1-Button (Full)",
+  "version": "2026.10.30",
+  "funding_url": "https://github.com/sponsors/trip5",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "../firmware/esp32_s3_n16r8_bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "../firmware/esp32_s3_n16r8_partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "../firmware/trip5_ili9488_pcm_1button_full.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ],
+  "filesystem": {
+    "path": "../firmware/esp32_s3_n16r8_filesystem.bin",
+    "offset": 13172736,
+    "size": 3538944
+  }
+}

@@ -18,26 +18,50 @@ function checkSelect(){
   document.getElementById('protocol').innerText="";
 }
 
+// Caption shown under the "Codes for button" title, explaining what the selected button does.
+// Keys are literal strings so src/locale/www_tool.py can discover them (t() pattern scan).
+function irCaption(irid){
+  switch(irid){
+    case 'power':  return t('msg_ir_standby', 'toggle standby');
+    case 'mute':   return t('msg_ir_mute',    'mute');
+    case 'up':     return t('msg_ir_up',      'volume up');
+    case 'down':   return t('msg_ir_down',    'volume down');
+    case 'prev':   return t('msg_ir_prev',    'previous station/track');
+    case 'next':   return t('msg_ir_next',    'next station/track');
+    case 'play':   return t('msg_ir_play',    'start/stop playing');
+    case 'mode':   return t('msg_ir_mode',    'mode switch (stations/SD)');
+    case 'hash':   return t('msg_ir_hash',    'enter playlist / cancel number mode');
+    default: return '';
+  }
+}
+function setIrCaption(irid){
+  var el = document.getElementById("irrecordcaption");
+  if(el) el.textContent = irCaption(irid);
+}
+
 function irbuttonClick(){
   var elements = document.getElementsByClassName("irbutton");
   var hasactive = this.classList.contains("active");
-  var btnid = -1;
   for (var i = 0; i < elements.length; i++) {
     elements[i].classList.remove("active");
-    if(!hasactive && elements[i]==this) btnid=i;
   }
+  // Buttons are identified by their data-irid name (not by DOM order); -1 stops recording.
+  var irid = '-1';
   if(!hasactive) {
-    document.getElementById("irrecordtitle").innerHTML = t('msg_codes_for_button', 'Codes for button') + ' <span>'+this.innerHTML+'</span>';
+    irid = this.getAttribute('data-irid') || '-1';
+    document.getElementById("irrecordtitle").innerHTML = t('msg_codes_for_button', 'Codes for button') + '<br /> <span>'+this.innerHTML+'</span>';
     document.getElementById("irrecord").classList.remove("hidden");
     document.getElementById("irstartrecord").classList.add("hidden");
     this.classList.add("active");
     checkSelect();
+    setIrCaption(irid);
   }else{
     document.getElementById("irrecord").classList.add("hidden");
     document.getElementById("irstartrecord").classList.remove("hidden");
+    setIrCaption(null);
   }
   document.getElementById('protocol').innerText="";
-  websocket.send('irbtn='+btnid);
+  websocket.send('irbtn='+irid);
 }
 function backRecord(){
   var elements = document.getElementsByClassName("irbutton");
@@ -46,6 +70,7 @@ function backRecord(){
   }
   document.getElementById("irrecord").classList.add("hidden");
   document.getElementById("irstartrecord").classList.remove("hidden");
+  setIrCaption(null);
   websocket.send('irbtn=-1');
 }
 function irClear(el){

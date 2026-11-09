@@ -4750,7 +4750,7 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
 
     m_phreh.reset();
     m_phreh.ctime = millis();
-    m_phreh.timeout = 4500; // ms	(HEADER_TIMEOUT))
+    m_phreh.timeout = HEADER_TIMEOUT // 4500; // ms	(HEADER_TIMEOUT))
     m_httpRespHdrBuff.clear();
     uint16_t pos = 0;
 

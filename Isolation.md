@@ -26,7 +26,7 @@ for additional noise filtering.
 | EI14 600:600Ω                   |   1   | 1:1 audio isolation transformer (line-level)         | Any 600:600Ω audio transformer, 10μF DC blocking caps |
 | EC11                            |   1   | Rotary encoder (15 pulse/30 detent) with push switch | KY-040, PEC11, any quadrature encoder with switch |
 | VS1838B                         |   1   | 38kHz IR receiver                                    | TSOP38238, TSOP4838, TSOP31238 |
-| SD Card module                  |   1   | SPI microSD card reader for offline playback         | Built-in display SD slot (check for proper resistors!) |
+| SD card module                  |   1   | SPI microSD card reader for offline playback         | Built-in display SD slot (check for proper resistors!) |
 | XRR6H-6*10-3T                   |   7   | 6-hole ferrite bead (6×10mm, 3-turn); EMI suppression on signal/power lines | Any 6-hole ferrite bead (6×10mm), clip-on ferrite choke, toroidal ferrite core |
 
 ### Capacitors & Resistors
@@ -60,7 +60,7 @@ It is also recommended to use metal film resistors but carbon film resistors are
 | VS1053B module  |   1   | SPI MP3/AAC/FLAC/OGG decoder + DAC    | VS1003 (MP3 only), WM8960 (I2S codec) |
 | 10 kΩ resistor  |   1   | Pull-up on XDCS line                  | Any 10kΩ 1/4W |
 
-## Audio Isolation on a Budget (This design has not been real-world tested yet)
+## Audio Isolation on a Budget (Real-world Built & Tested by Trip5)
 
 A simplified approach that keeps the F0505S-3WR2 isolation core but uses commodity parts
 for the filtering. This costs much less than the full Kle7rx "no compromises" build,
@@ -70,6 +70,8 @@ for the amplifier.
 You may use any I2S decoder and amplifier you like for this build.
 
 - [Budget Isolation Schematic](docs/notebooks/budget_isolation.jpg) (made with [draw.io](https://www.drawio.com/))
+- [Budget Isolation Power PCB](docs/notebooks/budget_isolation_power.jpg) (on a 2x8cm PCB)
+- [Budget Isolation Audio PCB](docs/notebooks/budget_isolation_audio.jpg) (on a 2x8cm PCB)
 
 ### Parts List
 
@@ -77,7 +79,7 @@ You may use any I2S decoder and amplifier you like for this build.
 | ---------------------------------- | :---: | ------------------------------------------------------------------------------ | ----- |
 | F0505S-3WR2                        |   1   | Isolated 5V→5V DC-DC (3W, ~20pF isolation); traps ESP32 noise on digital side  | Alt: B0505S-3WR2 (budget, ~50-100pF isolation so try to avoid); same 3W/600mA |
 | 100μF 10V+ electrolytic            |   1   | Input smoothing for F0505S-3WR2; cleans USB charger noise                      | Standard electrolytic is fine |
-| 10μH axial inductor (0.5W)         |   1   | Inrush limiter on F0505S-3WR2 output; protects converter from 1000μF load      | ***See Below Note***|
+| 10μH axial inductor (0.5W/600mA)   |   2   | Inrush limiter on F0505S-3WR2 output; protects converter from 1000μF load      | ***See Below Note***|
 | 100μH toroidal inductor (≥2A)      |   1   | LC filter inductor for audio rail; replaces PLY17                              | PAM8406 draws ~1.3A peak; search "100μH toroidal inductor 3A" |
 | 2200μF 10V+ electrolytic (Low ESR) |   1   | Audio rail filter capacitor                                                    | Green "high frequency low ESR" type |
 | 1000μF 10V+ electrolytic           |   1   | Digital rail reservoir; handles WiFi/SD current spikes                         | 470μF at a minimum (but bigger is OK too)  |
@@ -85,18 +87,22 @@ You may use any I2S decoder and amplifier you like for this build.
 | EI14 600:600Ω audio transformer    |   1   | Galvanic isolation on audio signal lines; breaks ground loops                  | Any 600:600Ω or 1:1 audio transformer |
 | 5V USB power supply ≥2A            |   1   | Power supply                                                                   |       |
 
-***Note about Inrush Limiter:*** The output of the F0505S-3WR2 is 600mA but the 0.5W rating of a single axial inductor may actually only be 500mA.  Problems will manifest as such:
+***Note about Inrush Limiter:*** The output of the F0505S-3WR2 is 600mA but the 0.5W rating of a single axial inductor may actually only be 300mA.
+If trying to use a single 4.7-10μH inductor that is not rated high enough, problems may manifest as such:
 
   - After 10 min of streaming + display on, touch the inductor. Warm = fine. Too hot to hold = overloaded.
   - Startup failure: F0505S-3WR2 won't start or cycles on/off so the inductor is saturated, cap looks like a short.
   - Brownouts: ESP32 resets under load - inductor's DCR climbed from overheating, voltage sagged too low.
 
-A few solutions to these problems may be possible:
+If induction is too low (≤3.3µH), the current flows too fast, causing high-frequency audio whine and voltage ripple on the isolated 5V line.
 
-  - 1 10μH 1A toroidal inductor (best, but more expensive)
-  - 2x 20μH axial inductors in parallel = 10μH / 1A
-  - 2x 10μH axial inductors in parallel = 5μH / 1A
+If induction is too high (≥15µH), the current is strangled, leading to SD card read failures, display flicker, or DC-DC converter chirping/squealing due to brownouts.
+
+Although Trip5 built with 2x 10μH 0.5W/300mA axial inductors in parallel (equivalent to 5μH / 600mA),
+an alternative inductor may be axial or toroidal as long as it is rated 4.7-10μH and can handle 1W or 600mA of current.
+
+Note that the audio inductor and power inductors in this circuit should be physically separated.
+Be careful not to put them too close together. Ideally, 2 small PCBs can be used when building.
 
 **What's cut vs the full Kle7rx build:** No PLY17 chokes, no XRR6H ferrite beads, no LD06AJSA LED driver,
 no Mean Well PSU. PAM8406 stereo module replaces two LTK5128 mono amps.
-The F0505S-3WR2 isolation is preserved. It's the foundation that makes the approach work.

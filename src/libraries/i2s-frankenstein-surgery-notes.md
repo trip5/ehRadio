@@ -1,5 +1,24 @@
 # I2S Frankenstein Surgery Notes
 
+## Read This With the Other Library's Notes
+
+The two audio libraries share their defect classes, and the dates here and in
+`vs1053-frankenstein-surgery-notes.md` show the same faults surfacing on both: `2026.10.11` (the m3u8 refetch pause, the
+media-sequence resync, the `TIT2` mis-wire), `2026-10-21` (the screensaver's VU gate) and `2026.10.24` (the per-track
+resets and the ID3v2 frame-size guard). Two practices follow:
+
+* **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+* **Expect the VS1053 board to find these first - and this library to be the reference for some of them.** The VS1053
+  library has a hardware decoder, a DREQ-gated SPI feed and the shallower graft, so end-of-stream accounting faults show
+  up there as audible stalls with readable counters, and that file carries the longer record (fixes from 2026-07 on,
+  against 2026-08 here). Working the VS1053 side patiently has produced the diagnosis every time. This library has then
+  either needed the same fix, or turned out to hold the correct version: the three per-track resets lost from the VS1053
+  graft (`m_sumBytesDecoded`, `m_audioDataStart`, `m_audioDataSize`) were present and correct here, and comparing
+  against them is what identified the loss. The reverse also happens - the tail-of-file fix recorded below, dated
+  `2026.10.24`, ended with a prediction that a VS1053 unit stopping at a track end would be the first place to look, and
+  that is exactly what subsequently happened.
+
 ## Purpose
 Graft ehRadio's adaptations from the current I2S library (based on Maleksm v0.9.434m / I2S 3.1.0) onto Maleksm's latest v0.9.720m (I2S 3.4.6w).
 
@@ -7,11 +26,16 @@ Graft ehRadio's adaptations from the current I2S library (based on Maleksm v0.9.
 
 | Name | Folder | Version | Notes |
 |------|--------|---------|-------|
-| **Active** | `src/libraries/I2S_Audio/` | 3.1.0n + Maleksm v0.9.434m | Current ehRadio library |
-| **Active backup** | `I2S_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` | 3.1.0n | Backup of current library |
+| **Active** | `src/libraries/I2S_Audio/` | 3.1.0n + Maleksm v0.9.434m | Current ehRadio library — **the only copy of our own code** |
 | **Maleksm v0.9.434m** | `I2S_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` | 3.1.0n | Base of Active library |
-| **Maleksm v0.9.512m** | `I2S_Audio (yoRadio Maleksm v0.9.512m(13.07.25))` | 3.3.2p | Intermediate: added psram_unique_ptr, more decoder files |
 | **Maleksm v0.9.720m** | `I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))` | 3.4.6w | **GRAFT TARGET** — latest Maleksm |
+
+Two folders were removed on 2026-09-27. `I2S_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` was labelled
+"Active backup" but was a snapshot of `I2S_Audio/` that stopped being accurate as soon as the library was
+patched, and `I2S_Audio (yoRadio Maleksm v0.9.512m(13.07.25))` was an intermediate superseded by
+v0.9.720m. **Git history is the backup for our own code**; folder copies of it are a trap, because
+restoring one silently drops every fix made since it was taken. The upstream folders stay: they are the
+only local copies of code that is not ours, and the graft plan in this file refers to v0.9.720m by name.
 
 ## Trust Order
 Active > Maleksm v0.9.720m (latest)
@@ -29,7 +53,17 @@ The I2S library has far fewer ehRadio changes than VS1053:
 | Header comment | "Some adjustments by Trip5" added | — | Attribution |
 | Config include | `../../core/config.h` | `../core/config.h` | Same reason |
 
-**These are the only differences.** No task changes, no VU meter changes, no PSRAM changes. The I2S library was used essentially as-is from Maleksm.
+The include-path and attribution rows above were the only differences from Maleksm **as it was when the
+library was adopted**. Since then ehRadio has added four things of its own, recorded here so that a
+future graft does not quietly lose them:
+
+| Addition | Where | Why |
+|----------|-------|-----|
+| VU capture window | `Audio.h` / `Audio.cpp`: `_capWin`, `_capPub`, `_capPos`, `_capSeq`, `_capturePublish()`, `getWaveform()`, and a self-contained radix-2 `vuFft()` | The VU widget's waveform, Lissajous and real-spectrum styles need PCM that the level meter does not provide. The window is `VU_CAPTURE_SAMPLES` (512), appended in `computeVUlevel()` and published on the `f_vu` tick behind a sequence counter, so a torn read is dropped rather than drawn. |
+| PSRAM scratch for the transform | `vuScratchAlloc()` plus `vuPsramBytes` (declared in `core/config.h`) | The transform's working set is 8 KB and taking it from the internal heap during boot was enough to tip the device over - the boot services hold three TLS sessions at the same time. It is allocated lazily, which is why the core monitor's `VU FFT` field reads 0 until a spectrum frame has been drawn. |
+| Separate connect timeout | `m_connectTimeout_ms` / `m_connectTimeout_ms_ssl` (1200 ms), used at the four `connect()` sites in `connecttohost()` and the mid-stream reconnects | `connecttohost()` runs on the MAIN task, so its timeout is a UI freeze - no button sampled, no WebUI request answered - and not merely a slow reconnect. It must stay separate from `m_timeout_ms` / `m_timeout_ms_ssl`, which double as the socket READ timeouts and have to remain patient for a slow stream to trickle in. Merging them re-breaks slow streams. |
+
+| Fast-attack / slow-fall hold | `getSpectrum()`: a static `hold[]` per band with `holdN`, `holdMs`, `holdValid`, and the dropped-frame branch | Two reasons, both measured on hardware. A single 512-sample window is a noisy estimate, so a band keeps the highest value it has seen and falls at `VU_SPECTRUM_FALL_MS` - the same shape `VU_FADE_MS` gives the level bars. And the seqlock drops a frame whenever the publisher moves during the staging copy (7% of frames at 30 Hz), which used to be reported as `false`; a painter reads `false` as "this backend has no transform" and switches to its simulated source, which is exactly what the visible flicker was. A dropped frame now repeats the hold, and only "never computed" answers `false`. |
 
 ---
 
@@ -109,7 +143,7 @@ void Audio::performAudioTask() {
 - `setAudioTaskCore(uint8_t coreID)` — same pattern, stops/restarts task
 - `startAudioTask()` uses `xTaskCreateStaticPinnedToCore(..., m_audioTaskCoreId)`
 - **No `AUDIO_CORE` macro used** — needs to be wired to options.h AUDIO_CORE
-- `AUDIO_STACK_SIZE` still 3300 words
+- `AUDIO_STACK_SIZE` raised to **3500** words (was 3300) — see Addendum 2 for the stream that overflowed it
 - Task starts from `I2Sstart()` method, not constructor
 
 ### 6. New Logging System
@@ -189,7 +223,7 @@ With `-std=gnu++2a -fconcepts`, GCC 8.4 crashed with `internal compiler error: i
 Maleksm v0.9.512m+ was developed for ESP-IDF v5.4+ which bundles GCC 13+. The project's Arduino 3.0 framework bundles GCC 8.4. To use Maleksm's newer I2S libraries, the project would need to upgrade to Arduino 3.1+ or direct ESP-IDF v5.3+.
 
 #### Conclusion
-The v0.9.434m I2S library is the **maximum compatible version** for the current toolchain. Both Stage 1 (v0.9.512m) and Stage 2 (v0.9.720m) are blocked until a toolchain upgrade. The active library was restored from backup and builds successfully.
+The v0.9.434m I2S library is the **maximum compatible version** for the current toolchain. Both Stage 1 (v0.9.512m) and Stage 2 (v0.9.720m) are blocked until a toolchain upgrade. The active library was restored from its backup copy and builds successfully — that copy has since been removed (see the note under the library table), so the library that ships is `src/libraries/I2S_Audio/` and its git history is the record.
 
 ---
 
@@ -241,18 +275,384 @@ The v0.9.434m I2S library is the **maximum compatible version** for the current 
 
 `Active` = `src/libraries/I2S_Audio/` — current ehRadio I2S library (Maleksm v0.9.434m base)
 
-`Active backup` = `I2S_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` — backup of current ehRadio I2S library
-
 `Maleksm v0.9.434m` = `I2S_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — original Maleksm I2S 3.1.0n
-
-`Maleksm v0.9.512m` = `I2S_Audio (yoRadio Maleksm v0.9.512m(13.07.25))` — Maleksm I2S 3.3.2p
 
 `Maleksm v0.9.720m` = `I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))` — latest Maleksm I2S 3.4.6w, Stage 2 graft target
 
 Graft result = `src/libraries/I2S_Audio/` — after surgery
 
+Backups: none by folder, for the reason under the library table. Our own code is backed up by git; the
+upstream folders are kept because they are the only local copies of code that is not ours.
+
 ---
 
-## Addendum (problem discovered much later)
+## Post-Graft Patch Fixes (2026-08-10)
 
 Fixed AudioBuffer::bytesWritten() at Audio.cpp:142: m_writePtr == m_endPtr → >= with overflow wrapping (same pattern as bytesWasRead at line 150). Prevents write pointer from overshooting buffer and corrupting adjacent PSRAM.
+
+---
+
+## Post-Graft Patch Fixes (2026-09-28)
+
+`AUDIO_STACK_SIZE` went from **3300 to 3500 words** (13.2 KB → 14 KB) because one station killed the firmware
+in the middle of decoding it: `streams.echoesofbluemars.org:8000/cryosleep`, which the decoder reports as
+`MPEG-2.5, Layer I`.
+
+```
+Guru Meditation Error: Core  0 panic'ed (Unhandled debug exception).
+Debug exception reason: Stack canary watchpoint triggered (PeriodicTask)
+Backtrace: 0x40381e58:0x3fca49a0 0x40380621:0x3fca49e0 0x4037ec48:0x3fca4a10 0x4037ec3e:0xa5a5a5a5 |<-CORRUPTED
+```
+
+`PeriodicTask` is this library's own audio decode task — the static one created around `Audio.cpp:6802` with
+`AUDIO_STACK_SIZE` words and priority 2, pinned to `AUDIO_CORE` — so the canary trip is that task's stack
+ending, not a fault in something it called. 4096 words was tried and the stream was stable; 3500 is what was
+kept, because upstream Maleksm 0.9.720m uses it too (`I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))/Audio.cpp:39`)
+and the stream is stable at that value. One more reason to keep Maleksm's libraries on disk: he had already
+raised this number for the same class of failure.
+
+What this was **not**, since that ground was walked first:
+
+- **Not the task watchdog.** There is no `task_wdt` line in the panic, and `CONFIG_ASYNC_TCP_USE_WDT` makes no
+  difference to it: the canary is a hardware watchpoint at the end of a stack, not the TWDT.
+- **Not the AsyncTCP core or priority.** The panic happened at `CONFIG_ASYNC_TCP_PRIORITY` 2, 3 *and* 4, and on
+  an I2S build `async_tcp` is pinned to `NETWORK_CORE` = 1 while the audio task sits on `AUDIO_CORE` = 0, so the
+  two never shared a core. A fault that is invariant under a setting is not caused by that setting — leave the
+  priority at 3 and the core pinned, because `-1` would let `async_tcp` land on the audio core.
+
+**Where the value lives**: `AUDIO_STACK_SIZE` is a plain `static const size_t` in `Audio.h`, beside the static
+`xAudioStack[]` the task is handed. It is not read from `options.h` and is not scaled by `STACK_MULTIPLIER`, so
+it cannot be tuned from `myoptions.h` — the header itself has to be edited.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.11)
+
+### The m3u8 manifest was re-fetched with a pause that could never re-arm
+
+`Audio::loop()`'s m3u8 branch re-requested the manifest as soon as `parsePlaylist_M3U8()` returned NULL — the
+normal answer while the live playlist has no new segment yet. The pause that exists was armed only when
+`no_host_cnt == 2` **exactly**; the counter keeps incrementing past 2, so it never armed again and the same
+manifest was fetched as fast as the socket allowed.
+
+Measured on a real HLS/AAC station: ten or more `connect to: "…/playlist.m3u8"` lines a second, each a blocking
+connect run on the main loop (`Main loop stalled 819ms, worst stage player+saves`), with the station playing
+nothing and the device barely responsive until paused. The alternating manifest/segment fetches in a healthy log
+are this same mechanism working — HLS polls rather than holds a stream — so the fault is only the answer when
+the manifest has nothing new.
+
+**Fix**: the pause is re-armed on every pass that finds no new segment beyond the first
+(`if(!host && no_host_cnt > 1)`), through a named `M3U8_NO_SEGMENT_WAIT_MS` (2000 ms) so the intent is not a
+bare literal. A successful parse still resets the counter and arms nothing, so a healthy stream polls exactly as
+before. This is the first of the library-visible changes; the other two sides of the same investigation (the
+VS1053 library's `TIT2` wiring and the ehRadio title-line assembly) are recorded in
+`vs1053-frankenstein-surgery-notes.md` and `.github/code-summary.md`.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` only — the m3u8 branch of `Audio::loop()`.
+
+### The media-sequence resync was unreachable, so only a pause/play could bring the stream back
+
+The first field result of the pause above: the wall became one manifest fetch a second, no segment was fetched,
+the stream was silent, and **pause/play cured it**. That last detail is the diagnosis.
+
+`parsePlaylist_M3U8()` clears the parsed playlist at the end of its loop
+(`vector_clear_and_shrink(m_playlistContent)`), and the resynchronisation block that follows opens with
+`if(m_playlistContent.size() == 0) return NULL;`. That guard is therefore **always** true, so `xMedSeq =
+mediaSeq` — the repair — and the `packets lost` report behind it could never run. `xMedSeq` is a function static,
+reset only through `m_f_firstM3U8call`, which `Audio::setDefaults()` sets: a fresh connect. Once the live window
+had slid past the counter, the accept loop's two probes (`xMedSeq`, then `xMedSeq + 1`) both missed, nothing was
+queued, the parse returned NULL, and every later parse repeated that — silence plus a manifest fetch per poll
+period, until the user pressed pause and play. The one-segment gap has a designed heal (the `xMedSeq + 1` probe,
+which logs `mediaseq %llu skipped`); a two-segment gap had no path at all.
+
+**Fix**: in the accept loop, when neither probe matches — which is exact evidence that the counter is out of step,
+so no counter or timeout is needed — rebuild the state a fresh connect builds and say so once per parse:
+
+```cpp
+f_seqResync = true;
+log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
+f_mediaSeq_found = false;
+xMedSeq = 0;
+m_hashQueue.clear();
+```
+
+The rest of the window is then taken by the hash branch in the same pass, and the next parse re-derives the
+sequence from the window under exactly the conditions a connect does. A few seconds of audio may repeat: that is
+what the pause/play the user was doing also does, and it is the behaviour chosen over "join at the newest
+segment".
+
+Also changed: the pause is now armed on **every** empty answer. Arming it only on the second (`no_host_cnt > 1`)
+meant two fetches per period, which is the "one a second" that was measured.
+
+**Not changed**: the hash-scheme path (a station with no derivable media sequence) needs no resynchronisation —
+there is no counter to lose, and its 20-entry queue only withholds a segment until the window advances, which is
+self-healing. Nor was the helper called again: it indexes `m_linesWithSeqNr[2]` while guarding only `size() < 2`,
+so calling it more often would add exposure to a pre-existing out-of-range read on a two-segment window.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` — `parsePlaylist_M3U8()` and the m3u8 branch of
+`Audio::loop()`.
+
+---
+
+## Post-Graft Patch Fixes (2026-10-21)
+
+### The screensaver's VU read zero when the player VU was off
+
+**Symptom**: with `config.store.vumeter` false, the screensaver's own meter looked wrong - the bar family sat
+full, the waveform and Lissajous showed only the graticule, and the spectrum styles showed a fixed shape.
+
+**Root cause**: the audio source, not the widget, was gated on the player page's preference.
+`computeVUlevel()` returned before filling `vuLeft`/`vuRight` or publishing the capture window,
+`get_VUlevel()` returned 0, and `getWaveform()` / `getSpectrum()` returned false. The screensaver's
+`screensaverVU` option only controls whether the widget is created; it never opened the source.
+
+**Fix**: `Config::vuSourceWanted()` (in `core/config.h`) is now the one gate, and the library's four
+checks call it:
+
+```cpp
+const bool ss = isScreensaver;                       // volatile: read once
+return (store.vumeter && !ss) || (ss && store.screensaverVU);
+```
+
+While asleep the player page's setting is ignored - only the screensaver meter's own option decides -
+and while awake the player page's setting is the answer. The source therefore stops when nothing is
+showing a meter, which keeps the CPU saving the old guard was for.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`,
+`getWaveform()`, `getSpectrum()`; `src/core/config.h` - `Config::vuSourceWanted()`.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.26)
+
+The same story as the VS1053 notes file - SD playback stopped silently, six root causes, four of them a per-track
+member this library never resets - but this library differs in three ways that shaped every fix, and they are worth
+knowing before reading a diff:
+
+* **The decoder runs on the audio task and owns nothing else.** `playAudioData()` must never touch the `File` handle, so
+  anything that has to ask the file a question (its size, its position) lives in `processLocalFile()`, which owns it.
+* **The VU meter is real work here** - a 32-band FFT over decoded samples - so it costs CPU on the decode task rather
+  than an SPI register read on a chip.
+* **The end of a track has to be declared by the reader**, because there is no chip to ask "are you still decoding?".
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | SD playback stops dead at a track end: no error, `isRunning()` true, VU at zero, `play pos` frozen with a small tail still buffered | `playAudioData()` sets `lastFrame` when less than a max block remains, then still asks `sendBytes()` for a **full** block; the decoder answers 0, nothing is consumed, and neither end rule can fire | `processLocalFile()` declares EOF once the reader is at EOF **and** `bufferFilled() < getMaxBlockSize()`. All three clauses matter: `bytesAddedToBuffer == 0` alone is also true when the buffer is full, and `position() >= size()` alone fires a whole buffer early because the reader runs ahead of the decoder |
+| 2 | Every ID3v2 track skipped in 0 ms, one after another; tagless files fine | the frame walk reads tag padding as a frame header, gets a garbage size (3.1 GB measured) and state 5 skips to the end of the FILE | state-4 guard, before any skip: `remainingHeaderBytes < 6 \|\| framesize > remainingHeaderBytes - 6` -> state 99 |
+| 3 | No symptom yet - found by reading this library for the VS1053 root causes, which is the practice at the top of this file | `m_sumBytesDecoded` was seeded with a FILE position (`m_resumeFilePos`, `m_audioDataStart`) while it is compared against an audio-relative size | `m_haveNewFilePos` keeps the file position; the counter becomes `m_resumeFilePos - m_audioDataStart`, and `0` on a loop |
+| 4 | `sum` ran ahead of the audio by exactly the guard's `rem` on every guarded tag, so `getAudioCurrentTime()` and the resume position were a few hundred bytes out | `sendBytes()` returns the offset of the first frame it finds - **the tail of the tag**, not audio - and that offset was counted as decoded | consume those bytes without counting them, gated by `m_f_firstSync`: a resync after a decode error is still counted as damaged audio, and a resume clears the flag because it lands mid-audio |
+| 5 | `MPEG-2.5, Layer I` printed for every working MP3 | the getters return enum/table indices while the label was written against the raw 2-bit header field, and the two numberings disagree | map version 0/1/2 to 1/2/2.5 and layer 3/2/1 to III/II/I, and print `Layer ?` when `MP3GetLastFrameInfo()` zero-filled the fields |
+| 6 | Silent web streams after an SD track (the VS1053 latch) | `f_isFile` was latched by `m_f_firstPlayCall`; `setDefaults()` re-arms it here, so this library was correct - one lost reset line away from the same bug | derive it every pass in both libraries, so there is no reset to lose |
+| 7 | A decoder that stops consuming was silent for ever: file open, running, taking nothing | nothing printed for that state at all | `loop()` progress watchdog, `AUDIO_PROGRESS_TIMEOUT_MS` = 5 s, gated on "a file is open and its header parsed" and nothing else |
+| 8 | `zero read` printed on every track, looking like a fault | the buffer-full case is benign and fires constantly | gate it on `availableBytes > 0`, so it prints only when the read had room and returned nothing |
+
+### The instrument that lied, and the one that did not
+
+The decode errors needed a way to see whether the ring was losing bytes. Three instruments, in order:
+
+1. **The error line** (`sum`, `buf`, `rd`, `wr`, `reader`) - it runs on the audio task while the main task writes the
+   ring, so its numbers are samples from different instants. It produced `gap +630,774` - exactly one buffer capacity -
+   on ten tracks, and that turned out to be a **torn sample**, not a lost buffer.
+2. **A 10 s trace from `loop()`** (`track 10s: sum … ring … buf … gap …`) - one task, therefore coherent. Two hours
+   settled it: `gap 0` on every untagged track at every sample (the ring is honest), and a small constant equal to the
+   ID3v2 guard's `rem` on every tagged one (the counter, not the start, was wrong).
+3. The fix that came out of it (row 4), and **the mistake worth remembering**: the first attempt moved the skip into
+   `m_audioDataStart` instead. `Audio-Length` changed by 576 bytes and rejected it - while `gap` did not budge, because
+   moving 576 from `sum` to `start` changes both terms of the same subtraction. **A composed metric can hide a change
+   that two raw ones would show**, and an invariant checked for days is worth more than a clever new number.
+
+Also worth keeping: `MP3FindSyncWord()` now checks the **layer** field, not just bitrate index 15 and sample rate index
+3, because an `FF F1` false sync passed the 11-bit test and was then rejected by `UnpackFrameHeader()`. And when
+`findSync()` returns -1 the search now returns -1 instead of doing `pos += -1; nBytes -= -1`, which walked *past* the
+block.
+
+**Files changed**: `Audio.cpp` - `loop()` (progress watchdog), `processLocalFile()` (zero-read gate, resume and loop
+seeds), `playAudioData()` (first-sync rule, ID3v1 range, per-pass `f_isFile`), `read_ID3_Header()` state 4,
+`setDecoderItems()` (label); `Audio.h` - `m_stallSum`, `m_stallMs`, `m_f_firstSync`; `mp3_decoder/mp3_decoder.cpp` -
+`MP3FindSyncWord()` (layer check, resync guard) and the `MP3GetLayer()` / `MP3GetVersion()` comments.
+
+## Post-Graft Patch Fixes (2026-11-03)
+
+Started from "HLS/AAC stutters and plays slow on I2S only". Ended with the decoder keeping up for the first time.
+Listed as outcomes: what fixed it, then what was tried and failed. Everything below was measured, not reasoned.
+
+### What fixed it
+
+1. **Sample-rate lock.** `setSampleRate()` substituted `44100` whenever it was handed `0`, so a new song's codec
+   setup overwrote a known-good `48000` and nothing re-applied it - the warble. It now ignores `0`, records a
+   *pending* rate, and `playAudioData()` applies it on the audio task via `reconfigI2S()`. `reconfigI2S()` stores
+   `m_i2sAppliedRate` and clears the flag.
+2. **Segment identity from the media sequence, not the URL.** The old accept loop guessed identity by searching each
+   segment URL for the decimal form of a drifting counter, with a one-shot resync that reset it to `0` - which is how
+   the field saw 887 twice, 888 twice, then 892. Now `EXT-X-MEDIA-SEQUENCE` is parsed properly and identity is
+   `base + entry index`, with a persisted watermark (`m_m3u8BaseSeq`, `m_m3u8EntryIdx`, `m_lastM3u8Seq`,
+   `m_m3u8SeqValid`). Also fixed `f_mediaSeq_found`, which was `static` and never cleared per window, so a window
+   without the tag paired a stale base with a fresh index.
+3. **A playlist retry must never be a session reset.** The nothing-new branch called `connecttohost()`, which frees
+   buffers, clears the input ring and rebuilds the decoder - audible as seconds of silence after seconds of audio. It
+   was also a duplicate: `Audio::loop()` already re-requests the media playlist through `httpPrint()`. The call was
+   deleted and the parser now only logs.
+4. **Audio task priority 6** (`AUDIO_TASK_PRIORITY`, was the library default 2). On `AUDIO_CORE` 0 that put the
+   decoder *below* AsyncTCP (4), so every playlist GET, WebUI request and socket log line preempted it. 6 keeps it
+   above AsyncTCP and below lwIP (18), so the network stack still wins.
+5. **IIR filter chains bypassed when the coefficients are identity.** Three chains, each 5 float multiplies + 4 adds
+   + 8 loads + 8 stores per channel per sample pair, all computing `y = 1 * x` with a flat equaliser. They run only
+   when `setTone()` has actually changed the coefficients. This was worth several percent of the audio core.
+6. **Float decode.** `FIXED_POINT` disabled in `aac_decoder/libfaad/neaacdec.h`, so FAAD uses its float paths and the
+   S3's hardware FPU for the FFT and QMF. This is the change that finally closed the gap - `frames/s` reached the
+   clock. Side effect: `MAIN_DEC` is no longer undefined (the fixed-point block is what undid it).
+7. **`#pragma GCC optimize("Os")` on `neaacdec.cpp`.** Required, not cosmetic - see the maintenance note below.
+8. **The instruments.** An `i2s:` line per 10 s carrying `frames/s`, `decode` and `write` ms, `short` writes, worst
+   audio-task `gap`, silence runs, and ring occupancy; plus `lost N seq` on the occupancy line and a `join:` line per
+   segment boundary. Every conclusion above came from these. Keep them while there is any doubt.
+9. **ID3 preload accounting.** The preload copy used `ID3BuffSize` (the *requested* 4096) for both the memcpy length
+   and the byte counter, so a short read would copy uninitialised bytes into the audio ring and end the segment early.
+   Both now use `ID3WritePtr`, the bytes actually read. The `id3 preload` timing line was removed once it had answered
+   its question (one completing read, 8-20 ms).
+10. **Playlist poll back-off.** The pause is `M3U8_NO_SEGMENT_WAIT_MS` (500 ms) multiplied by the count of consecutive
+    empty answers, up to 2000 ms, reset when a window yields a segment. A flat 500 ms cost 5-6 GETs per segment. Note
+    one poll per segment is the floor - see `code-summary.md`.
+11. **HLS read-ahead target raised to 200000** (`HLS_BUFFER_TARGET_BYTES`), with the other buffer/interval values made
+    `#ifndef` overridable.
+12. **Log volume trimmed.** `connect to:` is no longer printed for any `.m3u8` URL, and the five per-segment `id3
+    frame` lines are behind `AUDIO_ID3_LOG`. Per segment the flood went from about ten lines to three.
+
+### Dead ends, all measured
+
+- **Global `-O2`**: decode time unchanged; +181 KB flash. The decoder does not respond to optimisation level.
+- **`AAC_NO_SBR`** (drop SBR and PS): gave ~23% idle CPU and `frames/s` exactly at the 24000 core rate, but the
+  silence detector then showed whole 1024-sample AAC frames of digital silence being written, repeatedly. Reverted.
+- **`SBR_LOW_POWER`**: corrupts the heap on the first HE-AAC frames (bad tail, `multi_heap_free` assert, store fault
+  in `PeriodicTask`). The branch is complete but had never been compiled in this tree. Do not retry blind.
+- **Dropping PS only** was not pursued: the user will not accept mono.
+- **Deeper I2S DMA** (`dma_desc_num` 32 to 64): the worst audio-task gap measured 47-70 ms against a 682 ms DMA, so
+  starvation was never the mechanism. Left in place as harmless headroom.
+- **Fill-based gate on the playlist poll** (`HLS_PLAYLIST_POLL_FILL`): never engaged, because the ring settles below
+  any workable threshold; and one poll per segment is the floor anyway.
+- **Scoping the manifest pause out of `Audio::loop()`**: made it much worse - `frames/s` collapsed, the write stopped
+  blocking (DMA starved) and the ring overfilled past its target. The whole-loop pause is load-bearing; do not touch it.
+- **Refetching the *master* playlist** on a retry: new variant session each time, sequence numbering restarts, decoder
+  rebuilt, segment replays. Always retry the media playlist (`m_lastM3U8host`).
+- **`readBytes()` blocking on the ID3 preload**: refuted by instrumenting it - one completing read, every time.
+- **Display load as the cause**: `DSP_TASK_DELAY` at default, 50 and 200 gave the same `frames/s`, and
+  `DSP_TASK_CORE_ID` is 1, so the display task was never on the audio core.
+- **Enlarging the input ring**: it is already ~640 KB in PSRAM; the working depth is set by the read-ahead gate.
+- **`connecttohost()` as a playlist retry**, listed under fixes, is the same class of error as the master refetch.
+
+### Maintenance notes
+
+- **`neaacdec.cpp` carries `#pragma GCC optimize("Os")` and must keep it while `FIXED_POINT` is off.** The Xtensa
+  GCC 8.4 in this toolchain dies with an internal compiler error (`insn does not satisfy its constraints`, postreload,
+  on a float constant load) at both `-O2` and `-O1` in FAAD's float path. `-Os` is the only level that compiles.
+  Revert the pragma only when reverting to fixed point.
+- **Revert `FIXED_POINT` as a pair with the pragma.** One without the other is either a broken build or a decoder
+  silently pinned to `-Os`.
+- **`FIXED_POINT` off also re-enables `MAIN_DEC`.** If a MAIN-profile stream ever appears, that is why it is accepted.
+- **`no_host_timer > millis()` in the m3u8 branch is not wrap-safe** across the millis rollover. Left alone
+  deliberately: that line is holding the segment pipeline up, and it is the kind of "obvious improvement" that cost a
+  build here.
+- **Comments belong here, not in the library files.** The switch sites in `neaacdec.h` and `Audio.cpp` carry a short
+  pointer only; the reasoning lives in this file.
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `setSampleRate()`, `reconfigI2S()`, `playAudioData()`,
+`playChunk()`, `parsePlaylist_M3U8()`, `m3u8redirection()`, `processWebStreamHLS()`, the m3u8 branch of `loop()`,
+`startAudioTask()`; `Audio.h` - the segment watermark, rate-lock and instrument members;
+`aac_decoder/libfaad/neaacdec.h` - `FIXED_POINT` off, `SBR_LOW_POWER` and `AAC_NO_SBR` left off with their reasons;
+`aac_decoder/libfaad/neaacdec.cpp` - the `optimize` pragma, and a `void*` cast in an `SBR_LOW_POWER` path that had
+never been compiled.
+
+## Post-Graft Patch Fixes (2026.11.03)
+
+Streams that must not be played. Written from `plans/handle-unsupported-unrecognized.md`; the plan holds the evidence
+and the rejected options, this holds what the code now does.
+
+### What the library now refuses
+
+1. **A verdict channel.** `streamRefuse_e` (`NONE`/`UNSUPPORTED`/`NOT_AUDIO`/`NO_HEAD`), one member `m_refuseReason`,
+   one setter `setRefuse(reason, shape)` that logs the shape and the URL and stops the stream, and a public
+   `refuseReason()` getter that `Player::loop()` polls once per tick. The setter is the only writer and the first
+   verdict wins for the life of the connection.
+   - The clear is in `connecttohost()` beside `setDefaults()`, **not** in `stopSong()`/`setDefaults()`:
+     `setDefaults()` calls `stopSong()`, so a clear there would erase the verdict the setter had just written.
+2. **The head sniff, `sniffHead()`.** Eight bytes, no advance: MPEG-4 boxes at offset 4 (`ftyp`/`styp`/`moof`/
+   `mdat`/`moov`) are `UNSUPPORTED`; markup, JSON, PDF, zip, PNG, JPEG and GIF are `NOT_AUDIO`. **Positive signatures
+   only** - an unrecognised head is deliberately not refused, because refusing an unusual-but-working stream is the
+   worse error and the capped ladder in `Player::loop()` already ends a stream that never produces audio. An ID3 tag
+   cannot match any signature, so it passes untouched.
+   - HLS: in `processWebStreamHLS()`'s `firstBytes` block, after the 4096-byte preload and before
+     `read_ID3_Header()`, where the whole segment head is already in `ID3Buff`.
+   - Plain stream: in `processWebStream()` immediately before `m_f_stream` is set, using `InBuff.getReadPtr()` with a
+     `bufferFilled() >= 8` test. `readAudioHeader()` is *not* the seam - it is never called on a live stream.
+3. **The playlist gate in `parsePlaylist_M3U8()`.** `#EXT-X-MAP` (the fMP4 initialiser) and `#EXT-X-KEY` with a
+   method other than `NONE` are conclusive; so is a body whose first non-empty line is not `#EXTM3U`, and a chosen
+   segment URL containing `.m4s`/`.cmfv` or ending `.mp4`. All of it sits above `m_codec = CODEC_AAC`, which is where
+   the default-to-AAC assumption was made.
+4. **Header-time latches.** `unknown contentType` and `unknown content found` call `setRefuse(...)` before
+   `goto exit`. `m_f_timeout` is clear on both paths, so `exit` does not reach the library's own reconnect and the
+   verdict survives to be polled.
+
+`CT_TXT` still adopts `m_expectedCodec` - which is set from the URL extension - and that is how an HTML body served
+for a `.aac` URL used to be decoded as AAC. It is now caught by the body sniff instead of by reordering the
+content-type table: fewer moving parts, and the bytes stay the authority.
+
+### Added for the playlist validator (2026.11.03)
+
+Two inline getters were added after the rest of this patch, and only for the validator - nothing in the library uses
+them. `PlaylistValidator` drives this same audio object to probe every station in the list, so it needs to do two
+things the player never does: empty a verdict between probes (a refusal left latched would outlive the sweep, and
+`Player::loop()` would then raise a station error on the station it had just restored), and ask whether a codec was
+decided, which is how a probe earns a PASS instead of merely staying connected. `CODEC_NONE` is scoped to this header,
+so core cannot compare the codec directly - hence the named predicate rather than an exposed enum.
+
+| file | change |
+|---|---|
+| `Audio.h` | `streamRefuse_e`, `m_refuseReason`, `refuseReason()`, `setRefuse()`, `sniffHead()`, plus `clearRefuse()` and `codecDecided()` for the validator |
+| `Audio.cpp` | both definitions, the clear in `connecttohost()`, the HLS and plain-stream seams, the playlist gate, the two header-time latches |
+
+## Future issues to watch for
+
+- **Two `mp3 err -6` per hour** in the most recent 2-hour soak, both on tracks whose ID3v2 walk mis-sized a frame, so the
+  sync search starts in the tag padding. Playback is unaffected and every track ends normally, but the recovery can lock
+  onto a plausible wrong header - a 128 kbps file was reported as 112000 for a while - and that is audible. The cure is
+  two-frame confirmation: accept a candidate only if another sync sits exactly `frameSize` later.
+- **`MP3FindSyncWord()` and `UnpackFrameHeader()` must stay in step.** The layer check was added because `FF F1` passed
+  the 11-bit test and was then rejected by the parser; every field the parser requires should be checked by the search.
+- **`audiofile.position()` is not "bytes delivered".** The reader runs a whole buffer ahead of the decoder, so new code
+  must not derive progress from the file position - use the ring counters or `m_sumBytesDecoded`.
+- **The error line is a cross-task sample.** It reads ring state from the audio task while the main task writes it, so
+  never reason from a composed figure there. The `track 10s` trace exists because it is taken on one task.
+- **The `stopSong()` probe is quiet for real ends** (they set `m_f_eof` first) but fires on a manual track change, which
+  is legitimate - read its numbers as "was the counter short at that moment", never as a fault by itself.
+- **When migrating upstream**, diff `setDefaults()` against the ancestor's first - the reset that goes missing there is
+  the one that hurts - then compare against Maleksm v0.9.720m for the decoder abstraction and the VU meter.
+
+## Post-Graft Patch Fixes (2026.11.04)
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`, `m3u8redirection()`.
+Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
+
+1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** The return packs the length *cleared* from the
+   loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - i.e. a fully lit bar. The old
+   `if(!config.vuSourceWanted() || config.vuThreshold==0) return 0;` therefore lit both bars to **maximum** every time
+   the reference was zeroed: `Config::setTitle()` does that on every title change and `_play()` on every start, so the
+   bars snapped full at each track boundary and then drained back over `VU_FADE_MS`. It now answers EMPTY -
+   `(dimension << 8) | dimension` - when the source is not wanted, and clamps the reference to 1 (it is also `map()`'s
+   divisor) so silence maps to `dimension`, which is exactly what the VS1053 path already did.
+2. **The reference releases again, but in real time.** The two `if(vuLeft > config.vuThreshold) ...` lines - a
+   high-water mark that never came down while playing - are now one call to `Config::vuRefTrack(vuLeft, vuRight)`:
+   raise at once, then fall by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6% per 250 ms, ~22%/s, a 2.8 s half-life),
+   never below the live reading. This supersedes the earlier "removing the decay makes the reference the loudest
+   reading since the last stop" decision: the decay is back, but it is timed off `millis()` rather than the call rate
+   and it cannot undershoot the signal, which is what made the old per-call decay pin the bar at full. The rule lives
+   in `config.h` so this path and the VS1053 one share it instead of forking it.
+
+**Side effect, accepted:** the sample styles scale by `256 / config.vuThreshold`, so the waveform and the spectrum now
+normalise to the last few seconds too and brighten through a quiet passage - the same normalisation the bars get.
+
+3. **The codec table could not choose the profile, and one of its positions was wrong.** `m3u8redirection()` matched
+   each `CODECS=` line with `indexOf()`, and `mp4a.40.2` is a literal prefix of `mp4a.40.29`. So every HE-AAC v2 line
+   scored as AAC LC, ties were decided by whichever variant the manifest happened to list first, and the 2026-11-03
+   "sorted by decode cost" order was **inert for exactly the case it was written for**. A match followed by a digit is
+   now rejected, so the index in the table finally decides the profile. Order is now LC, v1, v2, xHE - xHE last here,
+   while **v2 is last on the VS1053**, because that chip does no Parametric Stereo and renders v2 as mono. The two
+   forks differ in exactly that one position, deliberately; the VS1053 notes carry the hardware proof.

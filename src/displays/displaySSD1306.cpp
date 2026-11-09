@@ -47,7 +47,17 @@ void DspCore::initDisplay() {
 }
 
 void DspCore::clearDsp(bool black){ fillScreen(TFT_BG); }
-void DspCore::flip(){ setRotation(config.store.flipscreen?2:0); }
+void DspCore::flip(){
+#if DSP_WIDTH==DSP_HEIGHT
+  if(ROTATE_90){
+    setRotation(config.store.flipscreen?3:1);
+  }else{
+    setRotation(config.store.flipscreen?2:0);
+  }
+#else
+  setRotation(config.store.flipscreen?2:0);
+#endif
+}
 void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }
 void DspCore::sleep(void){ ssd1306_command(SSD1306_DISPLAYOFF); }
 void DspCore::wake(void){ ssd1306_command(SSD1306_DISPLAYON); }

@@ -1,0 +1,8 @@
+# This partition scheme gives 3.19 MB to app0 and breaks OTA updates (no app1 partition)
+# Name,   Type, SubType, Offset,  Size,     Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x330000,
+littlefs, data, spiffs,  0x340000,0x0C0000,
+#                END =    0x400000
+# nvs: 20 KB, otadata: 8 KB, app0: 3.19 MB, littlefs: 768 KB

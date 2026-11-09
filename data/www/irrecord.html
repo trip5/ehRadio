@@ -3,53 +3,73 @@
     <div id="playerwrap">
       <div id="irwrap">
         <div id="irremote">
-          <div class="irblank"></div><div class="irbutton blue">
-          <svg viewBox="0 0 16 16" class="fill">
-            <path d="M8.00003 7.82842L12.5858 12.4142L15.4142 9.58578L8.00003 2.17157L0.585815 9.58578L3.41424 12.4142L8.00003 7.82842Z"/>
-          </svg>
-          </div><div class="irblank"></div>
-          <div class="irbutton blue">
-          <svg viewBox="0 0 16 16" class="fill">
-            <path d="M7.82842 8.00003L12.4142 3.41424L9.58578 0.585815L2.17157 8.00003L9.58578 15.4142L12.4142 12.5858L7.82842 8.00003Z"/>
-          </svg>
-          </div><div class="irbutton red">
-          <svg viewBox="0 0 16 16" class="fill">
-            <path d="M1 14H3L9 8L3 2H1V14Z"/><path d="M15 2H13V14H15V2Z"/><path d="M9 2H11V14H9V2Z"/>
-          </svg>
-          </div><div class="irbutton blue">
-          <svg viewBox="0 0 16 16" class="fill">
-            <path d="M8.1716 8.00003L3.58582 3.41424L6.41424 0.585815L13.8285 8.00003L6.41424 15.4142L3.58582 12.5858L8.1716 8.00003Z"/>
-          </svg>
+          <div class="irbutton red" data-irid="power">
+            <svg viewBox="0 -0.5 16 16" class="fill">
+              <path d="M8 0a1 1 0 00-1 1v6a1 1 0 002 0V1a1 1 0 00-1-1z"></path>
+              <path d="M12.665 2.781a1 1 0 10-1.333 1.491 5 5 0 11-6.665.001 1 1 0 00-1.333-1.49 7 7 0 109.331-.002z"></path>
+            </svg>
           </div>
-          <div class="irblank"></div><div class="irbutton blue">
-          <svg viewBox="0 0 16 16" class="fill">
-            <path d="M8.00003 8.1716L3.41424 3.58582L0.585815 6.41424L8.00003 13.8285L15.4142 6.41424L12.5858 3.58582L8.00003 8.1716Z"/>
-          </svg>
-          </div><div class="irblank"></div>
-          <div class="irbutton">1</div><div class="irbutton">2</div><div class="irbutton">3</div>
-          <div class="irbutton">4</div><div class="irbutton">5</div><div class="irbutton">6</div>
-          <div class="irbutton">7</div><div class="irbutton">8</div><div class="irbutton">9</div>
-          <div class="irbutton red">
-          <svg viewBox="0 0 512 512" class="fill">
-            <polygon class="st0" points="501.539,169.221 453.886,86.7 303.669,173.449 303.669,0 208.365,0 208.365,173.479 58.114,86.73 
-              10.461,169.261 160.674,255.99 10.501,342.71 58.154,425.231 208.365,338.482 208.365,512 303.669,512 303.669,338.542 
-              453.846,425.271 501.499,342.74 351.267,255.99 	"/>
-          </svg>
-          </div><div class="irbutton">0</div><div class="irbutton red">#</div>
+          <div class="irblank"></div>
+          <div class="irbutton blue" data-irid="mute">
+            <svg viewBox="1.2 2.5 14 14" class="fill">
+              <path d="M7.676 4.938v9.63c0 .61-.353.756-.784.325l-2.896-2.896H2.02A1.111 1.111 0 0 1 .911 10.89V8.618a1.112 1.112 0 0 1 1.108-1.109h1.977l2.896-2.896c.43-.43.784-.284.784.325zm7.251 6.888a.554.554 0 1 1-.784.784l-2.072-2.073-2.073 2.073a.554.554 0 1 1-.784-.784l2.073-2.073L9.214 7.68a.554.554 0 0 1 .784-.783L12.07 8.97l2.072-2.073a.554.554 0 0 1 .784.783l-2.072 2.073z"></path>
+            </svg>
+          </div>
+          <div class="irblank"></div>
+          <div class="irbutton blue" data-irid="up">
+            <svg viewBox="0 0 16 16" class="fill">
+              <path d="M8.00003 7.82842L12.5858 12.4142L15.4142 9.58578L8.00003 2.17157L0.585815 9.58578L3.41424 12.4142L8.00003 7.82842Z"/>
+            </svg>
+          </div>
+          <div class="irblank"></div>
+          <div class="irbutton blue" data-irid="prev">
+            <svg viewBox="0 0 16 16" class="fill">
+              <path d="M7.82842 8.00003L12.4142 3.41424L9.58578 0.585815L2.17157 8.00003L9.58578 15.4142L12.4142 12.5858L7.82842 8.00003Z"/>
+            </svg>
+          </div>
+          <div class="irbutton red" data-irid="play">
+            <svg viewBox="0 0 16 16" class="fill">
+              <path d="M1 14H3L9 8L3 2H1V14Z"/><path d="M15 2H13V14H15V2Z"/><path d="M9 2H11V14H9V2Z"/>
+            </svg>
+          </div>
+          <div class="irbutton blue" data-irid="next">
+            <svg viewBox="0 0 16 16" class="fill">
+              <path d="M8.1716 8.00003L3.58582 3.41424L6.41424 0.585815L13.8285 8.00003L6.41424 15.4142L3.58582 12.5858L8.1716 8.00003Z"/>
+            </svg>
+          </div>
+          <div class="irblank"></div>
+          <div class="irbutton blue" data-irid="down">
+            <svg viewBox="0 0 16 16" class="fill">
+              <path d="M8.00003 8.1716L3.41424 3.58582L0.585815 6.41424L8.00003 13.8285L15.4142 6.41424L12.5858 3.58582L8.00003 8.1716Z"/>
+            </svg>
+          </div>
+          <div class="irblank"></div>
+          <div class="irbutton" data-irid="n1">1</div><div class="irbutton" data-irid="n2">2</div><div class="irbutton" data-irid="n3">3</div>
+          <div class="irbutton" data-irid="n4">4</div><div class="irbutton" data-irid="n5">5</div><div class="irbutton" data-irid="n6">6</div>
+          <div class="irbutton" data-irid="n7">7</div><div class="irbutton" data-irid="n8">8</div><div class="irbutton" data-irid="n9">9</div>
+          <div class="irbutton red" data-irid="mode">
+            <svg viewBox="0 0 512 512" class="fill">
+              <polygon class="st0" points="501.539,169.221 453.886,86.7 303.669,173.449 303.669,0 208.365,0 208.365,173.479 58.114,86.73 
+                10.461,169.261 160.674,255.99 10.501,342.71 58.154,425.231 208.365,338.482 208.365,512 303.669,512 303.669,338.542 
+                453.846,425.271 501.499,342.74 351.267,255.99 	"/>
+            </svg>
+          </div><div class="irbutton" data-irid="n0">0</div><div class="irbutton red" data-irid="hash">#</div>
         </div><!--irremote-->
         <div id="irform">
-          <div id="irstartrecord"><h3 data-i18n="msg_ir_press_button">Press a button on the left to record an IR remote code.</h3>
-          <a href="/" class="button fb hl" id="done_ir" data-i18n="btn_done">Done</a>
+          <div id="irstartrecord">
+            <h3 data-i18n="msg_ir_press_button">Press a button on the left to record an IR remote code.</h3>
+            <a href="/" class="fb done" id="done_ir" data-i18n="btn_done">Done</a>
           </div>
           <div id="irrecord" class="hidden">
             <h3 id="irrecordtitle"></h3>
+            <div id="irrecordcaption"></div>
             <form id="irrecordfields">
               <div class="irrecordrow"><div class="irradio" data-id="0"><span></span></div><div class="irrecordvalue">0xAF00B5</div><div class="irclear" onclick="irClear(this)"></div></div>
               <div class="irrecordrow"><div class="irradio" data-id="1"><span></span></div><div class="irrecordvalue"></div><div class="irclear" onclick="irClear(this)"></div></div>
               <div class="irrecordrow"><div class="irradio" data-id="2"><span></span></div><div class="irrecordvalue"></div><div class="irclear" onclick="irClear(this)"></div></div>
             </form>
             <div id="protocol"></div>
-            <div class="button fb hl" id="back_ir" onclick="backRecord()" data-i18n="btn_done">Done</div>
+            <div class="fb done" id="back_ir" onclick="backRecord()" data-i18n="btn_done">Done</div>
           </div>
         </div><!--irform-->
       </div><!--irwrap-->

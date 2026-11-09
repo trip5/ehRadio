@@ -20,26 +20,36 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     loadThemes();
     loadLayouts();
+    loadVisuals();
+    loadSystemFonts();
+    loadClockFonts();
     loadTimezones();
     loadLocales();
     loadDisplayLocales();
     setupWeatherProviderToggle();
+    setupMqttToggle();
     setupDimmingControls();
   });
 } else {
   // DOM already loaded (script loaded dynamically)
   loadThemes();
   loadLayouts();
+  loadVisuals();
+  loadSystemFonts();
+  loadClockFonts();
   loadTimezones();
   loadLocales();
   loadDisplayLocales();
   setupWeatherProviderToggle();
+  setupMqttToggle();
   setupDimmingControls();
 }
 
 /** THEME & LAYOUT dropdowns **/
-let themeData = null, layoutData = null;
-let pendingThemeId = null, pendingLayoutId = null;
+let themeData = null, layoutData = null, visualsData = null;
+let systemFontData = null, clockFontData = null;
+let pendingThemeId = null, pendingLayoutId = null, pendingVustyle = null, pendingScrstyle = null;
+let pendingSystemFontId = null, pendingClockFontId = null;
 
 async function loadThemes() {
   try {
@@ -69,6 +79,54 @@ async function loadLayouts() {
   } catch(e) { console.error('Failed to load layouts:', e); }
 }
 
+async function loadVisuals() {
+  try {
+    const r = await fetch('visuals.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    visualsData = await r.json();
+    populateNamedDropdown('vustyle', visualsData);
+    populateNamedDropdown('scrstyle', visualsData);
+    if (pendingVustyle !== null) {
+      const sel = getId('vustyle');
+      if (sel) sel.value = pendingVustyle;
+      pendingVustyle = null;
+    }
+    if (pendingScrstyle !== null) {
+      const sel = getId('scrstyle');
+      if (sel) sel.value = pendingScrstyle;
+      pendingScrstyle = null;
+    }
+  } catch(e) { console.error('Failed to load visuals:', e); }
+}
+
+async function loadSystemFonts() {
+  try {
+    const r = await fetch('fonts.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    systemFontData = await r.json();
+    populateNamedDropdown('systemFontId', systemFontData);
+    if (pendingSystemFontId !== null) {
+      const sel = getId('systemFontId');
+      if (sel) sel.value = pendingSystemFontId;
+      pendingSystemFontId = null;
+    }
+  } catch(e) { console.error('Failed to load fonts:', e); }
+}
+
+async function loadClockFonts() {
+  try {
+    const r = await fetch('clockfonts.json');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    clockFontData = await r.json();
+    populateNamedDropdown('clockFontId', clockFontData);
+    if (pendingClockFontId !== null) {
+      const sel = getId('clockFontId');
+      if (sel) sel.value = pendingClockFontId;
+      pendingClockFontId = null;
+    }
+  } catch(e) { console.error('Failed to load clock fonts:', e); }
+}
+
 function populateNamedDropdown(elemId, data) {
   const sel = getId(elemId);
   if (!sel) return;
@@ -81,9 +139,13 @@ function populateNamedDropdown(elemId, data) {
   });
   sel.addEventListener('change', () => {
     if (sel.dataset.prev !== sel.value) {
-      const cmd = elemId === 'themeId' ? 'theme' : 'layout';
+      const cmdMap = { themeId: 'theme', layoutId: 'layout', vustyle: 'vustyle',
+                       systemFontId: 'sysfont', clockFontId: 'clockfont',
+                       scrstyle: 'screensavervustyle' };
+      const cmd = cmdMap[elemId] || elemId;
       websocket.send(`${cmd}=${sel.value}`);
       sel.dataset.prev = sel.value;
+      if (elemId === 'themeId') document.documentElement.setAttribute('data-theme', sel.value);
     }
   });
 }
@@ -99,6 +161,22 @@ window.afterSetupElement = (function(orig) {
     if (id === 'layoutId') {
       if (layoutData) getId('layoutId').value = value;
       else pendingLayoutId = value;
+    }
+    if (id === 'vustyle') {
+      if (visualsData) getId('vustyle').value = value;
+      else pendingVustyle = value;
+    }
+    if (id === 'scrstyle') {
+      if (visualsData) getId('scrstyle').value = value;
+      else pendingScrstyle = value;
+    }
+    if (id === 'systemFontId') {
+      if (systemFontData) getId('systemFontId').value = value;
+      else pendingSystemFontId = value;
+    }
+    if (id === 'clockFontId') {
+      if (clockFontData) getId('clockFontId').value = value;
+      else pendingClockFontId = value;
     }
   };
 })(window.afterSetupElement);
@@ -172,14 +250,12 @@ function setupDimmingControls() {
 function setupWeatherProviderToggle() {
   const wapiSelect = document.getElementById('wapi');
   if (!wapiSelect) return;
-  
   function toggleWeatherFields() {
     const provider = wapiSelect.value;
     const isOpenWeather = (provider === 'OW25' || provider === 'OW30');
     const langRow = document.getElementById('weatherlangrow');
     const keyRow = document.getElementById('weatherkeyrow');
-    
-    if (langRow) {
+      if (langRow) {
       if (isOpenWeather) {
         langRow.classList.remove('hidden');
       } else {
@@ -194,12 +270,33 @@ function setupWeatherProviderToggle() {
       }
     }
   }
-  
   // Add change listener
   wapiSelect.addEventListener('change', toggleWeatherFields);
-  
   // Trigger once on load to set initial state
   toggleWeatherFields();
+}
+
+/** MQTT **/
+function setupMqttToggle() {
+  const toggle = getId('mqttenable');
+  const settings = getId('mqttsettings');
+  if (!toggle || !settings) return;
+
+  const sync = () => settings.classList.toggle('hidden', !toggle.classList.contains('checked'));
+
+  // script.js toggles the .checked class on the same click event, so sync once that has run
+  toggle.addEventListener('click', () => setTimeout(sync, 0));
+
+  // getmqtt restores the stored value through setupElement -> afterSetupElement
+  const previousAfterSetupElement = window.afterSetupElement;
+  window.afterSetupElement = (id, value, element) => {
+    if (typeof previousAfterSetupElement === 'function') {
+      previousAfterSetupElement(id, value, element);
+    }
+    if (id === 'mqttenable') sync();
+  };
+
+  sync(); // the markup starts hidden, so settle it now (useful when the WebSocket data is late)
 }
 
 /** LOCALE **/
@@ -325,7 +422,6 @@ function applyPendingLocaleData() {
   const newLocaleCode = pendingLocaleData.locale_webui;
   const oldLocaleCode = window.originalLocaleWebui;
   const localeChangedByReset = (oldLocaleCode !== null && newLocaleCode !== oldLocaleCode);
-  
   let webuiDone = false, dispDone = false;
   // Set WebUI locale dropdown
   if (select && localesData) {
@@ -349,12 +445,10 @@ function applyPendingLocaleData() {
     dispDone = true;
   }
   if (webuiDone && dispDone) pendingLocaleData = null;
-  
   // If locale was changed by reset, trigger apply automatically to show message and reload
   if (localeChangedByReset) {
     applyLocale(); // This checks: select.value !== window.originalLocaleWebui (still old value)
   }
-  
   // Update original value after potential applyLocale call
   window.originalLocaleWebui = newLocaleCode;
 }
@@ -444,7 +538,8 @@ function getWiFi(path){
 }
 
 /** SYSTEM **/
-function rebootSystem(info, waitSeconds = 15, autoReload = true){
+// 60 s is a CEILING, not a wait: redirectWhenReady polls /ready every second and returns as soon as the device has been seen down and then up again
+function rebootSystem(info, waitSeconds = 60, autoReload = true){
   getId("settingscontent").innerHTML=`<h2>${info}</h2>`;
   getId("settingsdone").classList.add("hidden");
   getId("navigation").classList.add("hidden");
@@ -486,26 +581,26 @@ function hideDangerConfirm() {
   });
 }
 
+// Rows behind the three unlock switches are found by class, so one added to the Danger Zone joins the group
+function setDangerZoneVisible(visible) {
+  classEach('dangerzone', el => el.classList.toggle('hidden', !visible));
+}
+
 function checkDangerZone() {
   const sw1 = getId('dangerzone_sw1');
   const sw2 = getId('dangerzone_sw2');
   const sw3 = getId('dangerzone_sw3');
   if(!sw1 || !sw2 || !sw3) return;
-  
   const allChecked = sw1.classList.contains('checked') && 
                      sw2.classList.contains('checked') && 
                      sw3.classList.contains('checked');
-  
-  const dangerzone = getId('dangerzone');
   const txt = getId('dangerzone_txt');
   if(allChecked) {
-    if(dangerzone) {
-      dangerzone.classList.remove('hidden');
-      scrollToBottom();
-    }
+    setDangerZoneVisible(true);
+    scrollToBottom();
     if(txt) txt.textContent = t('lbl_dz_careful', 'Be Careful!');
   } else {
-    if(dangerzone) dangerzone.classList.add('hidden');
+    setDangerZoneVisible(false);
     if(txt) txt.textContent = t('lbl_dz_unlock', 'Turn on all switches to unlock');
   }
 }
@@ -526,7 +621,6 @@ function initDangerZone() {
   });
   const txt = getId('dangerzone_txt');
   if(txt) txt.textContent = t('lbl_dz_unlock', 'Turn on all switches to unlock');
-  const dangerzone = getId('dangerzone');
-  if(dangerzone) dangerzone.classList.add('hidden');
+  setDangerZoneVisible(false);
   hideDangerConfirm();
 }

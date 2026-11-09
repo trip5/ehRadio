@@ -13,17 +13,16 @@
     "board_upload.maximum_size": "16777216",
     "default_pins": [{
       "SPIA_SCK": 12 , "SPIA_MISO": 255, "SPIA_MOSI": 11,
-      "SPIB_SCK": 38 , "SPIB_MISO": 39, "SPIB_MOSI": 40,
       "I2C_SDA": 16, "I2C_SCL": 15, "RGB_LED_PIN": 42,
-      "BTN_NEXT": 0, "SD_CS": 47
+      "BTN_NEXT": 0, "SDMMC_CLK": 38, "SDMMC_CMD": 40, "SDMMC_D0": 39
     }],
-    "default_selects": [ "A", "B", "DSP_MODEL DSP_ILI9341", "USE_ES8311", "TS_MODEL TS_MODEL_FT6336", {
+    "default_selects": [ "A", "DSP_MODEL DSP_ILI9341", "USE_ES8311", "TS_MODEL TS_MODEL_FT6336", {
       "TFT_DC": 46, "TFT_CS": 10, "TFT_RST": -1, "BRIGHTNESS_PIN": 45, "DSP_INVERT_QUIRK": true,
       "I2S_MCLK": 4, "I2S_BCLK": 5, "I2S_LRC": 7, "I2S_DOUT": 8, "I2S_DIN": 6,
       "MUTE_PIN": 1, "ES8311_I2C_SDA": 16, "ES8311_I2C_SCL": 15,
       "MUTE_VAL": "HIGH", "ES8311_MAX_I2S": 180, "PLAYER_FORCE_MONO": true,
       "TS_SDA": 16, "TS_SCL": 15, "TS_INT": 17, "TS_RST": 18,
-      "SD_SPI": "B"
+      "SDMMC_D1": 41, "SDMMC_D2": 48, "SDMMC_D3": 47 
     }],
     "spi": [ "A", "B" ],
     "safe_pins": [ 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42 ],

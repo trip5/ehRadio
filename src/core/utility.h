@@ -3,25 +3,30 @@
 #pragma once
 
 #include "options.h"
+#include "config.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <Ticker.h>
+
+bool clockTrustworthy();
+
+// Fills 'out' with the current local time and returns true only when the system clock is real
+// (past the one-year epoch floor).  The single place the time(NULL)/localtime_r() read lives.
+bool systemLocalTime(struct tm& out);
 
 /* ===== Deep Sleep Wake GPIO Mask =====
    All defined input pins on RTC-capable GPIOs are automatically used as wake sources.
    ANY interaction (button press release, rotary turn) wakes the device.
    If no pins are RTC-capable, deep sleep is disabled (no way to wake). */
 
-/* Per-board RTC GPIO validator — true if pin 'p' is RTC-capable for the target chip */
+// Per-board RTC GPIO validator — true if pin 'p' is RTC-capable for the target chip
 #if defined(ARDUINO_ESP32_DEV)
   #define _IS_RTC(p) ((p)==0||(p)==2||(p)==4||((p)>=12&&(p)<=15)||((p)>=25&&(p)<=27)||((p)>=32&&(p)<=39))
 #elif defined(ARDUINO_ESP32S3_DEV)
   #define _IS_RTC(p) ((p)<=21)
-#elif defined(ARDUINO_ESP32C3_DEV)
-  #define _IS_RTC(p) ((p)!=255)  // any input-capable GPIO works with esp_deep_sleep_enable_gpio_wakeup
 #endif
 
-/* Build individual wake bits: only include pins on RTC GPIOs; skip pins left at 255 */
+// Build individual wake bits: only include pins on RTC GPIOs; skip pins left at 255
 #if _IS_RTC(ENC_DT)
   #define _WENC_DT     (1ULL << ENC_DT)
 #else
@@ -88,12 +93,12 @@
   #define _WTS_INT     0ULL
 #endif
 
-/* Final GPIO mask — OR of all valid wake pins */
+// Final GPIO mask — OR of all valid wake pins
 #define WAKE_GPIO_MASK (_WENC_DT | _WENC_CLK | _WENC_SW | _WENC2_DT | _WENC2_CLK | _WENC2_SW | \
                         _WBTN_PREV | _WBTN_PLAY | _WBTN_NEXT | _WBTN_UP | _WBTN_DOWN | _WBTN_MODE | \
                         _WTS_INT)
 
-/* Block deep sleep when no physical wake source exists */
+// Block deep sleep when no physical wake source exists
 #if WAKE_GPIO_MASK == 0
   #define DEEP_SLEEP_DISABLE
 #endif
@@ -104,6 +109,9 @@ public:
   void stripWrappingQuotes(char* text);
   char* ipToStr(IPAddress ip);
   void escapeQuotes(const char* input, char* output, size_t maxLen);
+  void normalizeToCRLF(const char* input, char* output, size_t outputSize);
+  bool isHttpUrl(const char* text);
+  bool parseCommandLine(const char* input, char* command, size_t commandSize, char* value, size_t valueSize);
   bool parseCSV(const char* line, char* name, char* url, int& ovol);
   bool parseWsCommand(const char* line, char* cmd, char* val, uint8_t cSize);
   bool parseSsid(const char* line, char* ssid, char* pass);
@@ -119,15 +127,21 @@ public:
   char* stationByNum(uint16_t num);
   uint16_t fillPlaylistRange(int from, uint8_t count, char names[][STATION_FIELD_LENGTH / 2]);
   void doSleepW();
+  static void requestSleep();
+  static void requestSleepWake();
+  void serviceSleep();
   void sleepForAfter(uint16_t sleepfor, uint16_t sa = 0);
-  void cleanupSpiffs();
+  void stopStandby();
+  void startStandby();
+  void toggleStandby();
+  bool verifyLittleFS();
+  void pruneLittleFS();
   void deleteMainwwwFile();
   void updateFile(void* param, const char* localFile, const char* onlineFile, const char* updatePeriod, const char* simpleName);
-  void updateLocaleFile();
-  bool updateLocaleFileAsync(const char* localeCode, uint8_t clientId);
 
 private:
   static uint16_t sleepfor;
+  static volatile uint8_t sleepWanted;   // 0 = none, 1 = doSleepW (no wake timer), 2 = doSleep (wake after sleepfor)
   static void sleepCore();
   static void doSleep();
   char ipBuf[16] = {0};
@@ -142,5 +156,7 @@ uint32_t fileCRC32(File& f, size_t len);
 
 // UTF-8 safe trim: returns src truncated to at most 15 code points (static buffer)
 const char* utf8_trim15(const char* src);
+
+uint8_t rssiLevel(int rssi);
 
 #endif // utility_h

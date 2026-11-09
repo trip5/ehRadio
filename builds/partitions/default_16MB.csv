@@ -3,7 +3,7 @@ nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x640000,
 app1,     app,  ota_1,   0x650000,0x640000,
-spiffs,   data, spiffs,  0xc90000,0x360000,
+littlefs, data, spiffs,  0xc90000,0x360000,
 coredump, data, coredump,0xFF0000,0x10000,
 #                END =    0x1000000
-# nvs: 20 KB, otadata: 8 KB, app0: 6.31 MB, app1: 6.31 MB, spiffs: 3.38 MB
+# nvs: 20 KB, otadata: 8 KB, app0: 6.31 MB, app1: 6.31 MB, littlefs: 3.38 MB

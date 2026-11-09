@@ -6,8 +6,9 @@
 #include "../dspfont.h"               // DSP_UNICODE_FONT definition
 #include "../icons.h"                  // ICON_TABLE for icon rendering
 #include "pretext.h"                   // preText() pipeline
+#include "dspstats.h"                  // Core Monitor counters
 
-/* PSRAM framebuffer size tracker — updated by psFrameBuffer on allocation */
+// PSRAM framebuffer size tracker — updated by psFrameBuffer on allocation
 extern size_t psramFrameBufferBytes;
 
 class  psFrameBuffer : public Adafruit_GFX {
@@ -23,21 +24,31 @@ class  psFrameBuffer : public Adafruit_GFX {
       return 1;
     }
 
-    /* Reset the UTF-8 decoder state so a partial sequence from a previous
-       print() call does not corrupt the first glyph of the next frame. */
+    // Reset the UTF-8 decoder state so a partial sequence from a previous print() call does not corrupt the first
+    // glyph of the next frame.
     void resetUTF8() { _utf8_remaining = 0; }
 
     psFrameBuffer(int16_t w, int16_t h):Adafruit_GFX(w, h){ setTextWrap(false); cp437(true); }
     ~psFrameBuffer(){ freeBuffer(); }
     bool ready() { return _ready; }
+    // True once display() has put this window on the panel.  An erase uses it to skip a window the panel never
+    // received - the same guard freeBuffer() applies before it fills the rect - so a widget that was begun but
+    // never shown cannot paint its background over whatever shares its band.
+    bool painted() { return _painted; }
     
     void freeBuffer(){
       _ready = false;
       if(buffer) {
-        _dspl->fillRect(_ll, _tt, _ww, _hh, _bgcolor);
-        psramFrameBufferBytes -= _hh * _ww * sizeof(uint16_t);
+        // Only erase the panel if this window ever reached it.  A buffer that was begun and then
+        // dropped before its first display() holds nothing, and filling its rect would wipe pixels
+        // this window never owned - which is what a shrinking ScrollWidget window would do to
+        // whatever shares the row (the codec badge, in the reported case).
+        if (_painted) _dspl->fillRect(_ll, _tt, _ww, _hh, _bgcolor);
+        if (_psram) psramFrameBufferBytes -= _hh * _ww * sizeof(uint16_t);
         free(buffer);
       }
+      _painted = false;
+      _psram = false;
       buffer = nullptr;
     }
     bool begin(yoDisplay *dspl, int16_t l, int16_t t, int16_t w, int16_t h, uint16_t bgcolor = 0){
@@ -70,9 +81,9 @@ class  psFrameBuffer : public Adafruit_GFX {
       uint16_t &pixel = buffer[x + y * _ww];
       if (pixel != color) pixel = color;  // skip write if already target color
     }
+    // Into the PSRAM buffer, clipped to the window - nothing here reaches the panel; display() is what pushes it.
+    // Overriding fillRect is enough: the base writeFillRect() calls this (virtual), so both spellings land in the buffer.
     void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color){
-      // Write directly to PSRAM buffer — do NOT use base-class writeFillRect
-      // which bypasses the framebuffer and writes to the display over SPI.
       if(!buffer) return;
       if(x < 0){ w += x; x = 0; }
       if(y < 0){ h += y; y = 0; }
@@ -86,7 +97,9 @@ class  psFrameBuffer : public Adafruit_GFX {
     }
     void display(){
       if(!buffer) return;
+      _painted = true;                 // from here the panel shows this window, so it owns those pixels
       _dspl->startWrite();
+      cmCountPush();
       _dspl->setAddrWindow(_ll, _tt, _ww, _hh);
       _dspl->writePixels((uint16_t*)buffer,  _ww * _hh);
       _dspl->endWrite();
@@ -99,46 +112,58 @@ class  psFrameBuffer : public Adafruit_GFX {
     int16_t height(){ return _hh; }
   private:
     int16_t _ll, _tt, _ww, _hh;
-    yoDisplay *_dspl;
+    yoDisplay *_dspl = nullptr;
     uint16_t *buffer=nullptr;
     bool _ready = false;
+    bool _painted = false;           // true once display() has put this window on the panel
+    bool _psram = false;
     uint16_t _bgcolor;
     void _createBuffer(){
-      #if (defined(USE_FBUFFER) && USE_FBUFFER)
-        if(psramInit()) {
-          buffer = (uint16_t*) ps_calloc(_hh * _ww, sizeof(uint16_t));
-          psramFrameBufferBytes += _hh * _ww * sizeof(uint16_t);
-        } else {
-          buffer = (uint16_t*) calloc(_hh * _ww, sizeof(uint16_t));
-        }
-      #endif
+      if(psramInit()) {
+        buffer = (uint16_t*) ps_calloc(_hh * _ww, sizeof(uint16_t));
+        _psram = true;
+        psramFrameBufferBytes += _hh * _ww * sizeof(uint16_t);
+      } else {
+        buffer = (uint16_t*) calloc(_hh * _ww, sizeof(uint16_t));
+        _psram = false;
+      }
       if(buffer){
         for (int i = 0; i < _hh * _ww; i++)
           buffer[i] = _bgcolor;
+        _painted = false;              // a fresh buffer holds only the background; the panel owes it nothing
         _ready = true;
       }
     }
 
   private:
-    void _writeGlyph(uint16_t cp) {
-      const GFXfont *f = &DisplayFont;
+    // cp is 32-bit: the decoder can produce four-byte sequences and truncating
+    // them here would turn a supplementary codepoint into a different glyph.
+    void _writeGlyph(uint32_t cp) {
+      cmCountGlyph();
+      const GFXfont *f = displayFont();
       // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE.
       // Must precede \n / \r checks so that \015 (0x0D = CR)
       // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
-        const uint8_t* const *table = ICON_TABLE;
         if (cp < 32) {
-          const uint8_t* icon = (const uint8_t*)pgm_read_ptr(&table[cp]);
-          if (icon) {
+          // Same cell rule as commongfx: iconAt() only returns a divisor of textsize.
+          // Clear bits are never painted; the buffer already holds the background.
+          const IconSel sel = (textsize_x == textsize_y) ? iconAt((uint8_t)cp, textsize_x)
+                                                        : IconSel{ iconBits((uint8_t)cp, 1), 1 };
+          if (sel.bits) {
+            const uint8_t k = sel.scale;
+            const uint8_t psx = textsize_x / k, psy = textsize_y / k;
+            const uint8_t w = 6 * k, h = 8 * k;
+            const uint8_t *bits = (const uint8_t *)sel.bits;
             int16_t renderY = cursor_y + (int16_t)pgm_read_byte(&f->yAdvance) * textsize_y;
-            for (uint8_t row = 0; row < 8; row++) {
-              uint8_t line = pgm_read_byte(icon + row);
-              for (uint8_t col = 0; col < 6; col++) {
-                if (line & (0x20 >> col)) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    drawPixel(cursor_x + col, renderY - 8 + row, textcolor);
-                  else
-                    writeFillRect(cursor_x + col * textsize_x, renderY + (int16_t)(row - 8) * textsize_y, textsize_x, textsize_y, textcolor);
+            for (uint8_t row = 0; row < h; row++) {
+              const uint32_t line = (k == 1) ? pgm_read_byte(bits + row)
+                                             : pgm_read_dword(bits + row * 4);
+              for (uint8_t col = 0; col < w; col++) {
+                if (line & (1UL << (w - 1 - col))) {
+                  const int16_t x = cursor_x + (int16_t)col * psx;
+                  const int16_t y = renderY + (int16_t)((int16_t)row - h) * psy;
+                  fillRect(x, y, psx, psy, textcolor);   // this class's fillRect: into the buffer, clipped
                 }
               }
             }
@@ -156,13 +181,20 @@ class  psFrameBuffer : public Adafruit_GFX {
         cursor_x += (int16_t)spaceAdv * textsize_x;
         return;
       }
-      // Run optional pre-processing (allcaps, accent folding)
-      cp = preText(cp, f);
-
+      // Clock font dispatch happens BEFORE preText(), so the resolver is never
+      // asked about a font other than the one that will draw the glyph - the
+      // clock font has its own glyph set and the stock write() is single-byte.
       if (gfxFont != NULL && gfxFont != (GFXfont *)f) {
         Adafruit_GFX::write((uint8_t)(cp & 0xFF));
         return;
       }
+      // Resolve against the font actually used: keep the glyph when the font has
+      // it, fold to a base character when it does not, substitute otherwise.
+      // Returns a renderable codepoint, never 0.
+      // preText() narrows to a BMP codepoint, so the lookups below are 16-bit
+      // again - anything the font carries is inside its own (BMP) range.
+      uint16_t resolved = preText(cp, f);
+      cp = resolved;
       uint16_t first = pgm_read_word(&f->first);
       uint16_t last  = pgm_read_word(&f->last);
       if (cp >= first && cp <= last) {
@@ -181,36 +213,40 @@ class  psFrameBuffer : public Adafruit_GFX {
           uint8_t *bitmap = (uint8_t *)pgm_read_ptr(&f->bitmap);
           uint16_t bo = pgm_read_word(&glyph->bitmapOffset);
           uint8_t bits = 0, bit = 0;
+          const int16_t adv = (int16_t)pgm_read_byte(&glyph->xAdvance);
           for (uint8_t yy = 0; yy < h; yy++) {
             for (uint8_t xx = 0; xx < w; xx++) {
               if (bit == 0) { bits = pgm_read_byte(&bitmap[bo++]); bit = 0x80; }
-              if ((int16_t)(xo + xx) < (int16_t)pgm_read_byte(&glyph->xAdvance)) {
+              if ((int16_t)(xo + xx) < adv) {
                 if (bits & bit) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    drawPixel(cursor_x + xo + xx, renderY + yo + yy, textcolor);
-                  else
-                    writeFillRect(cursor_x + (xo + xx) * textsize_x, renderY + (yo + yy) * textsize_y, textsize_x, textsize_y, textcolor);
+                  // Per DISPLAY pixel, never a textsize-wide block - the same rule the textsize-1 path has always
+                  // used.  A glyph entering a scrolling line always straddles the window edge, and fillRect handles a
+                  // straddling block by SHAVING its width, which is a different clip from the per-pixel test and looks
+                  // like a glyph that arrives whole at some text sizes.  drawPixel clips per pixel at every size.
+                  const int16_t gx = cursor_x + (int16_t)(xo + xx) * textsize_x;
+                  const int16_t gy = renderY + (int16_t)(yo + yy) * textsize_y;
+                  for (uint8_t py = 0; py < (uint8_t)textsize_y; py++) {
+                    for (uint8_t px = 0; px < (uint8_t)textsize_x; px++) {
+                      drawPixel(gx + px, gy + py, textcolor);
+                    }
+                  }
                 }
               }
               bit >>= 1;
             }
           }
         } else {
-          // Empty glyph slot — try fallback mapping
-          uint16_t mapped = checkFallbackGlyph(cp, f);
-          if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
-          // No fallback available — advance cursor by one space width so
-          // the missing glyph appears as a visible gap instead of being
-          // silently deleted (xAdvance is 0 for empty slots).
+          // preText() promises a renderable codepoint, so an empty slot here can
+          // only mean the font changed underneath us (clock font swap mid-frame).
+          // Advance one space width rather than drawing a zero-width glyph.
           uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
           cursor_x += (int16_t)spaceAdv * textsize_x;
           return;
         }
         cursor_x += (int16_t)pgm_read_byte(&glyph->xAdvance) * textsize_x;
       } else {
-        uint16_t mapped = checkFallbackGlyph(cp, f);
-        if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
-        // Unrenderable codepoint — advance by one character cell.
+        // Same defensive case as above: outside [first..last] after resolution
+        // means the font changed, not that preText() failed to find a glyph.
         uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
         cursor_x += (int16_t)spaceAdv * textsize_x;
       }
@@ -223,6 +259,12 @@ class  psFrameBuffer : public Adafruit_GFX {
 struct psFrameBuffer {
   bool ready() { return false; }
   void display() {}
+  // No buffer, so there is nothing to count and nowhere to push: the WIDGET_DEBUG probe reads these and reports -1.
+  int16_t columnInk(int16_t) { return -1; }
+  int16_t left()   { return -1; }
+  int16_t top()    { return -1; }
+  int16_t width()  { return -1; }
+  int16_t height() { return -1; }
 };
 #endif //#ifdef PSFBUFFER
 

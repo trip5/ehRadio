@@ -3,12 +3,18 @@
 deletelayout.py — List or delete layouts from a conf file.
 
 USAGE:
+    py deletelayout.py                              # Pick a conf file, then a layout, then delete
     py deletelayout.py <conf_file>                  # List layouts with indices
     py deletelayout.py <conf_file> <index>          # Delete layout at index (0-based)
+    py deletelayout.py -h | --help                  # Show this help
+
+Deleting ALWAYS asks for confirmation — including when the index is passed on
+the command line.  There is no bypass flag.
 
 EXAMPLES:
-    py deletelayout.py displayTFT480x320conf.h
-    py deletelayout.py displayTFT480x320conf.h 1
+    py deletelayout.py
+    py deletelayout.py displayOLED128x64conf.h
+    py deletelayout.py displayOLED128x64conf.h 3
 """
 
 import re, sys, os
@@ -74,7 +80,66 @@ def _parse_entries(content):
     return entries, m.start()
 
 
+def _conf_files(script_dir):
+    """Return the sorted list of display*conf.h files in script_dir."""
+    return sorted(f for f in os.listdir(script_dir)
+                  if f.startswith('display') and f.endswith('conf.h'))
+
+
+def list_conf_files(script_dir):
+    """Print the conf files numbered the same way as layouts.  Returns the list."""
+    files = _conf_files(script_dir)
+    print()
+    if not files:
+        print(f"No display*conf.h files found in {script_dir}.")
+        return files
+    print(f"Conf files in {script_dir} ({len(files)}):")
+    print()
+    for i, fname in enumerate(files):
+        print(f"[{i}] {fname}")
+    return files
+
+
+def _ask_index(prompt, count, what):
+    """Prompt for a 0-based index into 'count' entries.  Blank/EOF/^C cancels (None)."""
+    while True:
+        try:
+            resp = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if resp == '':
+            return None
+        if resp.isdigit() and 0 <= int(resp) < count:
+            return int(resp)
+        print(f"  Please enter 0-{count - 1} for the {what}, or blank to cancel.")
+
+
+def interactive_delete(script_dir):
+    """No-argument flow: choose a conf file, choose a layout, then delete it."""
+    files = list_conf_files(script_dir)
+    if not files:
+        return
+    fi = _ask_index(f"\nChoose a conf file [0-{len(files) - 1}] (blank to cancel): ", len(files), "conf file")
+    if fi is None:
+        print("Cancelled. Nothing was changed.")
+        return
+    target = os.path.join(script_dir, files[fi])
+
+    names = list_layouts(target)
+    if not names:
+        return
+    li = _ask_index(f"\nDelete which layout? [0-{len(names) - 1}] (blank to cancel): ", len(names), "layout")
+    if li is None:
+        print("Cancelled. Nothing was changed.")
+        return
+
+    print()
+    delete_layout(target, li)
+
+
 def list_layouts(target):
+    """List the layouts in a conf file, numbered.  Returns the names list."""
     if not os.path.exists(target):
         print(f"ERROR: {target} not found.")
         sys.exit(1)
@@ -84,10 +149,13 @@ def list_layouts(target):
     names, _, _ = _parse_names(content)
     if not names:
         print("No layouts found.")
-        return
+        return names
+    print()
     print(f"Layouts in file ({len(names)}):")
+    print()
     for i, name in enumerate(names):
         print(f"[{i}] {name}")
+    return names
 
 
 def delete_layout(target, index):
@@ -175,8 +243,20 @@ def delete_layout(target, index):
         sys.exit(1)
 
     orig_end = comma + 1
+    # Consume the entry's own line terminator as well, so its neighbours end up on
+    # adjacent lines instead of leaving a blank one behind.
+    if orig_end < len(orig) and orig[orig_end] == '\n':
+        orig_end += 1
 
-    print(f"Deleting: [{index}] {target_name}")
+    print(f"About to delete: [{index}] {target_name}  (from {os.path.basename(target)})")
+    try:
+        reply = input("This cannot be undone. Continue? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        reply = ''
+    if reply not in ('y', 'yes'):
+        print("Cancelled. Nothing was changed.")
+        return False
 
     # Remove name from names list
     del names[index]
@@ -187,15 +267,17 @@ def delete_layout(target, index):
     # Fix excessive blank lines
     new_orig = re.sub(r'\n{4,}', '\n\n\n', new_orig)
 
-    # Rebuild _layoutNames in the original
-    indented = '\n'.join(f'    "{n}",' for n in names)
-    new_names_block = f'const char _layoutNames[][64] PROGMEM = {{\n{indented}\n}};'
-
-    # Find _layoutNames position in new_orig (after entry removal)
+    # Rebuild _layoutNames in the original, keeping the file's own trailing-comma
+    # style so a delete rewrites only the removed name's line.
     nm = re.search(r'const char _layoutNames\[\]\[\d+\] PROGMEM = \{', new_orig)
     if nm:
         be = new_orig.find('\n};', nm.end())
         if be != -1:
+            keeps_trailing_comma = new_orig[nm.end():be].rstrip().endswith(',')
+            lines = [f'    "{n}",' for n in names]
+            if not keeps_trailing_comma:
+                lines[-1] = lines[-1][:-1]
+            new_names_block = f'const char _layoutNames[][64] PROGMEM = {{\n' + '\n'.join(lines) + '\n};'
             new_orig = new_orig[:nm.start()] + new_names_block + new_orig[be + 1:]
 
     # Clean up };}; duplication
@@ -205,19 +287,25 @@ def delete_layout(target, index):
         f.write(new_orig)
 
     print(f"Deleted [{index}] {target_name}")
-    print()
     list_layouts(target)
+    return True
 
 
 def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     argv = sys.argv[1:]
+
+    # No arguments: pick a conf file, pick a layout in it, then confirm the delete.
     if not argv:
+        interactive_delete(script_dir)
+        return
+
+    if argv[0] in ('-h', '--help'):
         print(__doc__)
-        sys.exit(1)
+        return
 
     target = argv[0]
     if not os.path.exists(target):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         alt = os.path.join(script_dir, target)
         if os.path.exists(alt):
             target = alt
@@ -229,7 +317,7 @@ def main():
     if len(argv) == 1:
         list_layouts(target)
     elif len(argv) == 2 and argv[1].lstrip('-').isdigit():
-        delete_layout(target, argv[1])
+        delete_layout(target, argv[1])  # asks for confirmation, always
     else:
         print(__doc__)
         sys.exit(1)

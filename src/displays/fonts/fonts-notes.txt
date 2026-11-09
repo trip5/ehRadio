@@ -1,0 +1,29 @@
+Notes regarding conversion:
+- originally used 04FF / 1279 as the upper limit but 1169 is enough for most...
+
+
+Matrix Chunky from https://trip5.github.io/Matrix-Fonts/
+Updated as of 2026.10.08
+  Source File: MatrixChunky8x6.bdf
+    py bdf2adafruit3.py MatrixChunky\MatrixChunky8x6.bdf 0x21 1169 -o MatrixChunky\MatrixChunky8x6.h
+
+Matrix Light from https://trip5.github.io/Matrix-Fonts/
+Updated as of 2026.10.08
+  Source File: MatrixLight8x6.bdf
+    py bdf2adafruit3.py MatrixLight\MatrixLight8x6.bdf 0x21 1169 -o MatrixLight\MatrixLight8x6.h
+
+Unix X11 from https://www.cl.cam.ac.uk/~mgk25/ucs-fonts.html
+Updated as of 2026.10.08
+  Source File: UnixX11_6x9.bdf
+    py bdf2adafruit3.py UnixX11\UnixX11_6x9.bdf 0x21 1169 -o UnixX11\UnixX11_6x9.h
+      - Note: Bottom row clipped?  Top?
+
+HP 100LX from https://int10h.org/oldschool-pc-fonts/
+Updated as of 2026.10.08
+  Source Files: BmPlus_HP_100LX_6x8.otb (converted to BDF with FontForge)
+    py bdf2adafruit3.py HP100LX\BmPlus_HP_100LX_6x8.bdf 0x21 1169 -o HP100LX\BmPlus_HP_100LX_6x8.h
+
+ATI SmallW from https://int10h.org/oldschool-pc-fonts/
+Updated as of 2026.10.08
+  Source Files: Bm437_ATI_SmallW_6x8.otb (converted to BDF with FontForge)
+    py bdf2adafruit3.py ATISmallW\Bm437_ATI_SmallW_6x8.bdf 0x21 966 -o ATISmallW\Bm437_ATI_SmallW_6x8.h

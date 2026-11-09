@@ -7,7 +7,7 @@ TEMP_BACKUP_DIR = Path(".pio/temp_www_backup")
 LOCK_FILE = Path(".pio/temp_www_backup.lock")
 
 def restore_and_cleanup(source, target, env):
-    """Restore original files and delete all .gz files after SPIFFS build"""
+    """Restore original files and delete all .gz files after LittleFS build"""
     print("\n" + "="*70)
     print("POST-BUILD: Restoring original files and cleaning up...")
     print("="*70)
@@ -53,14 +53,6 @@ def restore_and_cleanup(source, target, env):
     else:
         print(f"No backup directory found at {TEMP_BACKUP_DIR}")
     
-    # Clean up deployed locale files (deployed during pre-build, should not remain in source)
-    import re
-    locale_pattern = re.compile(r'^[a-z]{2}_[A-Z]{2}\.json$')
-    for locale_file in data_dir.glob("*.json"):
-        if locale_pattern.match(locale_file.name):
-            locale_file.unlink()
-            print(f"Removed {locale_file.name}")
-    
     # Release the build lock
     if LOCK_FILE.exists():
         LOCK_FILE.unlink()
@@ -71,4 +63,4 @@ def restore_and_cleanup(source, target, env):
     print("="*70 + "\n")
 
 # Register the post-build action
-env.AddPostAction("$BUILD_DIR/spiffs.bin", restore_and_cleanup)
+env.AddPostAction("$BUILD_DIR/littlefs.bin", restore_and_cleanup)

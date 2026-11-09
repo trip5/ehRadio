@@ -3,7 +3,12 @@
 #include "common.h"
 
 #if IR_PIN!=255
-  enum : uint8_t { IR_UP=0, IR_PREV=1, IR_PLAY=2, IR_NEXT=3, IR_DOWN=4, IR_1=5, IR_2=6, IR_3=7, IR_4=8, IR_5=9, IR_6=10, IR_7=11, IR_8=12, IR_9=13, IR_AST=14, IR_0=15, IR_HASH=16 };
+  // IR button BEHAVIOUR ids. These are not storage indexes: IR codes live in the named fields of Config::irstore and
+  // are selected by name ("power", "n7", ...) through the irKeyMap table in config.cpp.
+  enum irAction_e : uint8_t {
+    IRACT_POWER=0, IRACT_MUTE=1, IRACT_UP=2, IRACT_DOWN=3, IRACT_PREV=4,
+    IRACT_NEXT=5, IRACT_PLAY=6, IRACT_MODE=7, IRACT_HASH=8, IRACT_DIGIT=9
+  };
 #endif
 
 #if (ENC_DT!=255 && ENC_CLK!=255) || (ENC2_DT!=255 && ENC2_CLK!=255)
@@ -20,6 +25,7 @@ public:
   void controlsEvent(bool toRight, int8_t volDelta = 0);
   void onBtnClick(int id);
   void checkButtonsHeldOnBoot();  // bare GPIO check before controls.init() — hold MODE/ENC_SW to force SD mode
+  bool screenSaverExit();
 private:
   int lpId = -1;
   unsigned long lpDelay = 0;
@@ -37,7 +43,6 @@ private:
   void onBtnLongPressStart(int id);
   void onBtnLongPressStop(int id);
   boolean checklpdelay(int m, unsigned long &tstamp);
-  bool screenSaverExit();
   void onBtnDuringLongPress(int id);
   void onBtnDoubleClick(int id);
   static void btnClickCb(void* p);

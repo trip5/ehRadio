@@ -7,16 +7,18 @@
         <path d="M9 17v-13h10v13"></path>
         <path d="M9 8h10"></path>
       </svg>
-      <svg viewBox="0 0 24 24" class="fill hidden" id="sdsvg">
-       <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
-      </svg>
+      <div id="sdmanbtn" class="gb nb local hidden" data-command="sdfilemanager">
+        <svg viewBox="0 0 24 24" class="fill">
+          <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
+        </svg>
+      </div>
     </div>
     <div id="logo"></div>
-    <div class="gb nb local" data-command="settings">
+    <div class="gb nb local" id="settingsbtn" data-command="settings">
       <svg viewBox="0 0 24 24" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"></path>
-          <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
-        </svg>
+        <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"></path>
+        <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"></path>
+      </svg>
     </div>
   </div><!--logow-->
   <div>
@@ -45,6 +47,11 @@
         <path d="M20 5l0 14"></path>
       </svg>
     </div>
+    <div class="gb local hidden" id="shuffle" data-command="shuffle">
+      <svg viewBox="0 0 24 24" class="fill snfknob">
+        <path id="a" d="m4 17c-0.55228 0-1-0.44772-1-1s0.44772-1 1-1h2l3-3-3-3h-2c-0.55 0-1-0.44755-1-0.99877 0-0.55123 0.45-1.0012 1-1.0012h3l4 4 4-4h2v-2l4 3.0012-4 2.9988v-2h-1l-3 3 3 3h1v-2l4 3-4 3v-2h-2l-4-4-4 4z" fill-rule="evenodd"/>
+      </svg>
+    </div>
     <div class="cmdbutton gb modeweb hidden" id="voldownbutton" data-command="voldown">
       <svg viewBox="0 0 24 24" class="stroke">
         <path d="M15 8a5 5 0 0 1 0 8"></path>
@@ -60,12 +67,13 @@
     </div>
     <div class="modeitem gb" data-command="sd" id="modeweb">
       <svg viewBox="0 0 24 24" class="fill">
-       <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
+        <path d="m6 7.828v12.172h12v-16h-8.172zm-1.707-1.12 4.707-4.708h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1h-14a1 1 0 0 1-1-1v-13.586a1 1 0 0 1 0.293-0.707zm10.707-1.708h2v4h-2zm-3 0h2v4h-2zm-3 1h2v3h-2z"/>
       </svg>
     </div>
     <div class="modeitem gb hidden" data-command="web" id="modesd">
-      <svg viewBox="0 0 24 24" class="fill">
-       <path d="m9.8382 18.447c0.17206 0.3225 0.34436 0.6131 0.50906 0.8706-1.7498-0.3935-3.2682-1.3986-4.3189-2.779 0.69343-0.3905 1.5816-0.7953 2.6493-1.0915 0.30346 1.1902 0.73158 2.1955 1.1606 2.9999zm1.3236-0.7059c-0.3727-0.6987-0.7462-1.5713-1.0153-2.6052 0.5793-0.086 1.1977-0.1356 1.8536-0.1356 0.6558 0 1.2742 0.0496 1.8534 0.1355-0.2691 1.034-0.6426 1.9066-1.0153 2.6053-0.2988 0.5603-0.5965 1.0076-0.8382 1.3349-0.2417-0.3273-0.5394-0.7746-0.8382-1.3349zm-1.4118-5.7408c0 0.5841 0.0393 1.1385 0.1086 1.6619 0.6683-0.1025 1.3828-0.1619 2.1415-0.1619 0.7586 0 1.4731 0.0593 2.1413 0.1619 0.0693-0.5235 0.1086-1.0778 0.1086-1.6619s-0.0393-1.1384-0.1086-1.6619c-0.6682 0.1025-1.3827 0.1619-2.1413 0.1619-0.7587 0-1.4732-0.0594-2.1415-0.1619-0.0693 0.5234-0.1086 1.0778-0.1086 1.6619zm-1.3631-1.9712c-0.08711 0.619-0.13688 1.2766-0.13688 1.9712s0.04977 1.3522 0.13688 1.9712c-1.2735 0.3419-2.3281 0.824-3.1436 1.2879-0.47626-0.9855-0.74324-2.0911-0.74324-3.2591s0.26698-2.2736 0.74323-3.2591c0.81549 0.46384 1.8701 0.94598 3.1436 1.2879zm1.7596-1.1644c0.5793 0.08597 1.1977 0.13555 1.8536 0.13555 0.6558 0 1.2742-0.04957 1.8534-0.13553-0.2691-1.0339-0.6426-1.9065-1.0153-2.6053-0.2988-0.56026-0.5965-1.0076-0.8382-1.3349-0.2417 0.32724-0.5394 0.77462-0.8382 1.3349-0.3727 0.69873-0.7462 1.5714-1.0153 2.6053zm5.4666 1.1644c0.0871 0.619 0.1369 1.2766 0.1369 1.9711 0 0.6946-0.0498 1.3521-0.1369 1.9711 1.2735 0.342 2.3281 0.8241 3.1437 1.288 0.4762-0.9856 0.7432-2.0912 0.7432-3.2591s-0.267-2.2735-0.7432-3.2591c-0.8155 0.46384-1.8701 0.94597-3.1437 1.288zm2.3585-2.5671c-0.6935 0.39053-1.5816 0.79527-2.6492 1.0915-0.3035-1.1902-0.7316-2.1956-1.1606-3-0.1721-0.32255-0.3444-0.61307-0.5091-0.87062 1.7499 0.39353 3.2683 1.3987 4.3189 2.7791zm-9.294 1.0915c-1.0676-0.29624-1.9558-0.70098-2.6493-1.0915 1.0507-1.3804 2.5691-2.3855 4.3188-2.779-0.1646 0.25755-0.3369 0.54806-0.50897 0.8706-0.42899 0.80437-0.85711 1.8097-1.1606 3zm6.6448 6.8934c-0.3035 1.1903-0.7316 2.1956-1.1606 3-0.1721 0.3225-0.3444 0.6131-0.5091 0.8706 1.7499-0.3935 3.2683-1.3987 4.319-2.7791-0.6935-0.3905-1.5816-0.7952-2.6493-1.0915zm-3.3224 5.5533c4.9706 0 9-4.0294 9-9 0-4.9706-4.0294-9-9-9-4.9706 0-9 4.0294-9 9 0 4.9706 4.0294 9 9 9z" clip-rule="evenodd" fill-rule="evenodd"/>
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="2"></circle>
+        <path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"></path>        
       </svg>
     </div>
     <div class="gb local" id="eqalbutton" data-command="toggle" data-target="equalizerbg">
@@ -106,8 +114,15 @@
         </li>
       </ul>
     </div>
-    <div id="volslider">
-      <input type="range" id="volume" data-slaveid="volinfo" data-command="volume" min="0" max="255" value="0">
+    <div id="volrow">
+      <div id="mutebutton" class="cmdbutton" data-command="mute">
+        <svg viewBox="1.6 3.6 20.5 17.0" class="fill">
+          <path d="M12.43,4.1a1,1,0,0,0-1,.12L6.65,8H3A1,1,0,0,0,2,9v6a1,1,0,0,0,1,1H6.65l4.73,3.78A1,1,0,0,0,12,20a.91.91,0,0,0,.43-.1A1,1,0,0,0,13,19V5A1,1,0,0,0,12.43,4.1ZM11,16.92l-3.38-2.7A1,1,0,0,0,7,14H4V10H7a1,1,0,0,0,.62-.22L11,7.08ZM19.91,12l1.8-1.79a1,1,0,0,0-1.42-1.42l-1.79,1.8-1.79-1.8a1,1,0,0,0-1.42,1.42L17.09,12l-1.8,1.79a1,1,0,0,0,0,1.42,1,1,0,0,0,1.42,0l1.79-1.8,1.79,1.8a1,1,0,0,0,1.42,0,1,1,0,0,0,0-1.42Z"/>
+        </svg>
+      </div>
+      <div id="volslider">
+        <input type="range" id="volume" data-slaveid="volinfo" data-command="volume" min="0" max="255" value="0">
+      </div>
     </div>
 <!-- SD position slider disabled: VBR MP3 time calculations bounce, seek takes 5-10s,
      produces unrecoverable errors on both I2S and VS1053 backends...
@@ -125,13 +140,18 @@
     <div id="info">
       <div class="infoitem"><span data-i18n="lbl_volume">Volume</span>: <span id="volinfo">0</span></div>
       <div class="infoitem" id="bitinfo"></div>
-      <div id="shuffle" class="local hidden" data-command="shuffle">
-        <svg viewBox="0 0 24 24" class="fill snfknob">
-          <path id="a" d="m4 17c-0.55228 0-1-0.44772-1-1s0.44772-1 1-1h2l3-3-3-3h-2c-0.55 0-1-0.44755-1-0.99877 0-0.55123 0.45-1.0012 1-1.0012h3l4 4 4-4h2v-2l4 3.0012-4 2.9988v-2h-1l-3 3 3 3h1v-2l4 3-4 3v-2h-2l-4-4-4 4z" fill-rule="evenodd"/>
-        </svg>
+      <div class="infoitem hidden" id="batteryinfo"><span data-i18n="ttl_battery">Battery</span>: <span id="battery" class="text"></span></div>
+      <div class="infoitem" id="rsiinfo">
+        <span id="rssibars">
+          <svg viewBox="0 0 12 12" role="img">
+            <title id="rssititle"></title>
+            <path d="M0,9h2.4v3H0V9z"/>
+            <path d="M3.2,6h2.4v6H3.2V6z"/>
+            <path d="M6.4,3h2.4v9H6.4V3z"/>
+            <path d="M9.6,12V0h2.4v12H9.6z"/>
+          </svg>
+        </span>
       </div>
-      <div class="infoitem" id="rsiinfo"><span data-i18n="lbl_rssi">RSSI</span>: <span id="rssi" class="text">-</span><span data-i18n="unit_dbm">dBm</span></div>
-      <div class="infoitem hidden" id="batteryinfo"><span id="battery" class="text"></span></div>
     </div>
     <ul id="playlist"></ul>
   </div><!--equalizerwrap-->
@@ -148,7 +168,7 @@
 	      <path d="M15.5071469,14.0062893 L14.7166953,14.0062893 L14.4365352,13.7361349 C15.4170955,12.5954831 16.0074328,11.1146369 16.0074328,9.50371641 C16.0074328,5.91166381 13.095769,3 9.50371641,3 C5.91166381,3 3,5.91166381 3,9.50371641 C3,13.095769 5.91166381,16.0074328 9.50371641,16.0074328 C11.1146369,16.0074328 12.5954831,15.4170955 13.7361349,14.4365352 L14.0062893,14.7166953 L14.0062893,15.5071469 L19.0091481,20.5 L20.5,19.0091481 L15.5071469,14.0062893 L15.5071469,14.0062893 L15.5071469,14.0062893 Z M9.50371641,14.0062893 C7.01229274,14.0062893 5.00114351,11.9951401 5.00114351,9.50371641 C5.00114351,7.01229274 7.01229274,5.00114351 9.50371641,5.00114351 C11.9951401,5.00114351 14.0062893,7.01229274 14.0062893,9.50371641 C14.0062893,11.9951401 11.9951401,14.0062893 9.50371641,14.0062893 L9.50371641,14.0062893 L9.50371641,14.0062893 Z"></path>
         </svg>
 	    </div>
-    <span data-i18n="ttl_playlist_editor">Playlist Editor</span>
+    <span id="pleditortitle" data-i18n="ttl_playlist_editor">Playlist Editor</span>
       <div class="gb local" data-command="toggle" data-target="pleditorwrap">
         <svg viewBox="0 0 24 24" class="stroke">
           <path d="M18 6l-12 12"></path>
@@ -157,17 +177,18 @@
       </div>
     </h2>
     <div id="plImportWarning" class="pleditorwarning hidden" data-i18n="lbl_save_changes">Save to keep changes!</div>
-    <div id="pleheader"><span class="grabbable">&#8693;</span><span class="space"><input type="checkbox" id="selectAllCheckbox" onclick="selectAll(this)" /></span><span class="plename" data-i18n="lbl_name">Name</span><span class="pleurl" data-i18n="lbl_url">URL</span><span class="pleovol" data-i18n="lbl_ovol">Ovol</span></div>
+    <div id="pleheader"><span class="grabbable">&#8693;</span><span class="space"><input type="checkbox" id="selectAllCheckbox" onclick="selectAll(this)" /></span><span class="plename" data-i18n="lbl_name">Name</span><span class="pleurl" data-i18n="lbl_url">URL</span><span class="pleovol pl-editor-only" data-i18n="lbl_ovol">Ovol</span><span class="plestatus" data-i18n="lbl_status">Status</span></div>
     <ol id="pleditorcontent">
     </ol><!--pleditorcontent-->
     <div class="formbuttons">
-      <div class="fb local" data-command="pladd" data-i18n="btn_pl_add">Add</div>
+      <div class="fb local pl-editor-only" data-command="pladd" data-i18n="btn_pl_add">Add</div>
       <div class="fb local" data-command="pldel" data-i18n="btn_pl_remove">Remove</div>
-      <label class="fb" data-name="plreplace" onclick="triggerImport('replace')" data-i18n="btn_pl_replace">Replace</label>
-      <label class="fb" data-name="plmerge" onclick="triggerImport('merge')" data-i18n="btn_pl_merge">Merge</label>
+      <div id="plvalidatebtn" class="fb local pl-validator-only" data-command="plvalidate" data-i18n="btn_pl_validate">Check All Streams</div>
+      <label class="fb pl-editor-only" data-name="plreplace" onclick="triggerImport('replace')" data-i18n="btn_pl_replace">Replace</label>
+      <label class="fb pl-editor-only" data-name="plmerge" onclick="triggerImport('merge')" data-i18n="btn_pl_merge">Merge</label>
       <input id="file-upload" type="file" accept=".txt, .csv, .json" onchange="doPlImport(this)" hidden/>
-      <div class="fb local" data-command="plexport" data-i18n="btn_export">Export</div>
-      <div class="fb local" data-command="plshare" data-i18n="btn_share">Share</div>
+      <div class="fb local pl-editor-only" data-command="plexport" data-i18n="btn_export">Export</div>
+      <div class="fb local pl-editor-only" data-command="plshare" data-i18n="btn_share">Share</div>
       <div class="fb local" data-command="plsubmit" data-i18n="btn_save">Save</div>
       <div class="fb local" data-command="plundo" data-i18n="btn_pl_undo">Undo</div>
     </div>

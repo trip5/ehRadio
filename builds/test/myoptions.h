@@ -9,7 +9,7 @@
 // Do not use at as a good example of myoptions.h!
 //
 // Two test environments are defined in builds/test/platformio.ini:
-//   TEST_CI_PCM      I2S PCM decoder, DSP_ILI9341, Battery, RGB LED, MQTT
+//   TEST_CI_PCM      I2S PCM decoder, DSP_ILI9341, Battery, RGB LED
 //   TEST_CI_VS1053   VS1053 hardware decoder, SH1106 OLED, SD Card, Rotary, Button
 //
 // ==========================================================================
@@ -34,7 +34,6 @@
   #define BATTERY_PIN        1
   #define BATTERY_DIVIDER_RATIO 2.0
   #define BATTERY_ADC_REF_MV 3300
-  #define MQTT_ENABLE
 #elif defined(TEST_CI_VS1053)
   #define USE_BUILTIN_LED    false
   #define LED_BUILTIN_S3     255

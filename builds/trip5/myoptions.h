@@ -28,7 +28,7 @@
 //#define SH1106_VS1053_3BUTTONS       // Ali Speaker with OLED, VS1053, 3 Buttons
 //#define ST7735_PCM_1BUTTON           // Color TFT (red board) with PCM I2S, 1 Button
 //#define ILI9488_PCM_1BUTTON          // Big Screen with PCM, 1 button
-//#define ILI9488_VS1053_1BUTTON       // the same but with a VS1053 decoder
+//#define ILI9488_PCM_1BUTTON_FULL     // Big Screen with PCM, 1 button, RTC, IR
 //#define ES3C28P                      // ESP32-S3 ES3C28P Dev Board (attached 240x320 screen and ES8311 + FM8002E Decoder)
 
 /* --- Firmware File & Board --- */
@@ -61,11 +61,11 @@
 #endif
 #if defined(ILI9488_PCM_1BUTTON)
   #define FIRMWARE "trip5_ili9488_pcm_1button.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
-  #define FIRMWARE_NAME "Big Color Screen with 1-Button" // "https://trip5.github.io/ehRadio/myoptions/generator.html#eyJibiI6IkVTUDMyLVMzLURldktpdEMtMSBOMTZSOCAoMTZNQiBGbGFzaCA4TUIgUFNSQU0pIiwiZGQiOiJEU1BfTU9ERUwgRFNQX0lMSTk0ODgiLCJkbiI6IklMSTk0ODggKFNQSSBURlQpIiwiYW4iOiJJMlMgKFBDTSBJMlMgRGVjb2RlcikiLCJjaSI6WyJSb3RhcnkgRW5jb2RlciJdLCJjcCI6WyJNUVRUX0VOQUJMRSIsIlNEIENhcmQgUmVhZGVyIl0sImNzIjpbIkEiLCJCIl0sImNvIjpbIlRGVF9SU1QiLCJCUklHSFRORVNTX1BJTiIsIkRTUF9ESU1NSU5HX0VOQUJMRUQiLCJEU1BfSU5WRVJUX1FVSVJLIiwiQklHX0JPT1RfTE9HTyIsIkxFRF9JTlZFUlQiXSwiY2QiOlsiVElNRVpPTkUiLCJDTE9DS19UV0VMVkUiLCJPTkVfQ0xJQ0tfU1dJVENIIiwiUExBWUxJU1RfREVGQVVMVF9VUkwiLCJTQ1JFRU5fRkxJUCIsIlNTX1BMQVlJTkciLCJTRF9TSFVGRkxFIiwiU0hPV19CVUZGRVJCQVIiLCJTSE9XX1ZVX01FVEVSIiwiU01BUlRfU1RBUlQiLCJTTlRQXzEiLCJTTlRQXzIiLCJWT0xVTUVfUEFHRSIsIldFQVRIRVJfTEFUIiwiV0VBVEhFUl9MT04iLCJXSUZJX1NDQU5fQkVTVF9SU1NJIl0sInAiOnsiU1BJQV9TQ0siOiIxMiIsIlNQSUFfTUlTTyI6IjI1NSIsIlNQSUFfTU9TSSI6IjExIiwiU1BJQl9TQ0siOiIyMSIsIlNQSUJfTUlTTyI6IjIiLCJTUElCX01PU0kiOiIxIiwiVEZUX0RDIjoiMTAiLCJURlRfQ1MiOiI5IiwiVEZUX1JTVCI6Ii0xIiwiQlJJR0hUTkVTU19QSU4iOiI0IiwiSTJTX0RPVVQiOiIxNSIsIkkyU19CQ0xLIjoiNyIsIkkyU19MUkMiOiI2IiwiRU5DX0NMSyI6IjQwIiwiRU5DX0RUIjoiMzkiLCJFTkNfU1ciOiIzOCIsIlNEX0NTIjoiNDcifSwidiI6eyJTRF9TUEkiOiJCIiwiVElNRVpPTkUiOiJDYW5hZGEvQXRsYW50aWMiLCJEU1BfRElNTUlOR19FTkFCTEVEIjoidHJ1ZSIsIkRTUF9JTlZFUlRfUVVJUksiOiJ0cnVlIiwiQklHX0JPT1RfTE9HTyI6InRydWUiLCJDTE9DS19UV0VMVkUiOiJ0cnVlIiwiT05FX0NMSUNLX1NXSVRDSCI6InRydWUiLCJTQ1JFRU5fRkxJUCI6InRydWUiLCJTU19QTEFZSU5HIjoidHJ1ZSIsIlNEX1NIVUZGTEUiOiJ0cnVlIiwiU0hPV19CVUZGRVJCQVIiOiJ0cnVlIiwiU0hPV19WVV9NRVRFUiI6InRydWUiLCJTTUFSVF9TVEFSVCI6InRydWUiLCJWT0xVTUVfUEFHRSI6InRydWUiLCJXSUZJX1NDQU5fQkVTVF9SU1NJIjoidHJ1ZSIsIkZJUk1XQVJFX05BTUUiOiJpbGk5NDg4X3BjbV8xYnV0dG9uIiwiUExBWUxJU1RfREVGQVVMVF9VUkwiOiJodHRwczovL2dpdGh1Yi5jb20vdHJpcDUvd2Vic3RhdGlvbnMvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL3RyaXA1LXJhZGlvLXBsYXlsaXN0LmNzdiIsIlNOVFBfMSI6ImNhLnBvb2wubnRwLm9yZyIsIlNOVFBfMiI6InBvb2wubnRwLm9yZyIsIldFQVRIRVJfTEFUIjoiNDQuNjQ3MzgiLCJXRUFUSEVSX0xPTiI6Ii02My41ODAyIn19"
+  #define FIRMWARE_NAME "Big Color Screen with 1-Button" // "https://trip5.github.io/ehRadio/myoptions/generator.html#eyJibiI6IkVTUDMyLVMzLURldktpdEMtMSBOMTZSOCAoMTZNQiBGbGFzaCA4TUIgUFNSQU0pIiwiZGQiOiJEU1BfTU9ERUwgRFNQX0lMSTk0ODgiLCJkbiI6IklMSTk0ODggKFNQSSBURlQpIiwiYW4iOiJJMlMgKFBDTSBJMlMgRGVjb2RlcikiLCJjaSI6WyJSb3RhcnkgRW5jb2RlciIsIkJ1dHRvbjogTmV4dCBTdGF0aW9uL1RyYWNrIl0sImNwIjpbIk1RVFRfRU5BQkxFIiwiU0QgQ2FyZCBSZWFkZXIiXSwiY3MiOlsiQSIsIkIiXSwiY28iOlsiVEZUX1JTVCIsIkJSSUdIVE5FU1NfUElOIiwiRFNQX0RJTU1JTkdfRU5BQkxFRCIsIkRTUF9JTlZFUlRfUVVJUksiLCJCSUdfQk9PVF9MT0dPIiwiTEVEX0lOVkVSVCJdLCJjZCI6WyJUSU1FWk9ORSIsIkNMT0NLX1RXRUxWRSIsIk9ORV9DTElDS19TV0lUQ0giLCJQTEFZTElTVF9ERUZBVUxUX1VSTCIsIlNDUkVFTl9GTElQIiwiU1NfUExBWUlORyIsIlNEX1NIVUZGTEUiLCJTSE9XX0JVRkZFUkJBUiIsIlNIT1dfVlVfTUVURVIiLCJTTUFSVF9TVEFSVCIsIlNOVFBfMSIsIlNOVFBfMiIsIlZPTFVNRV9QQUdFIiwiV0VBVEhFUl9MQVQiLCJXRUFUSEVSX0xPTiIsIldJRklfU0NBTl9CRVNUX1JTU0kiXSwicCI6eyJTUElBX1NDSyI6IjEyIiwiU1BJQV9NSVNPIjoiMjU1IiwiU1BJQV9NT1NJIjoiMTEiLCJTUElCX1NDSyI6IjIxIiwiU1BJQl9NSVNPIjoiMiIsIlNQSUJfTU9TSSI6IjEiLCJURlRfREMiOiIxMCIsIlRGVF9DUyI6IjI1NSIsIlRGVF9SU1QiOiItMSIsIkJSSUdIVE5FU1NfUElOIjoiNCIsIkkyU19ET1VUIjoiMTUiLCJJMlNfQkNMSyI6IjciLCJJMlNfTFJDIjoiNiIsIkVOQ19DTEsiOiI0MCIsIkVOQ19EVCI6IjM5IiwiRU5DX1NXIjoiMzgiLCJCVE5fTkVYVCI6IjQyIiwiU0RfQ1MiOiI0NyJ9LCJ2Ijp7IlNEX1NQSSI6IkIiLCJUSU1FWk9ORSI6IkNhbmFkYS9BdGxhbnRpYyIsIkRTUF9ESU1NSU5HX0VOQUJMRUQiOiJ0cnVlIiwiRFNQX0lOVkVSVF9RVUlSSyI6InRydWUiLCJCSUdfQk9PVF9MT0dPIjoidHJ1ZSIsIkNMT0NLX1RXRUxWRSI6InRydWUiLCJPTkVfQ0xJQ0tfU1dJVENIIjoidHJ1ZSIsIlNDUkVFTl9GTElQIjoidHJ1ZSIsIlNTX1BMQVlJTkciOiJ0cnVlIiwiU0RfU0hVRkZMRSI6InRydWUiLCJTSE9XX0JVRkZFUkJBUiI6InRydWUiLCJTSE9XX1ZVX01FVEVSIjoidHJ1ZSIsIlNNQVJUX1NUQVJUIjoidHJ1ZSIsIlZPTFVNRV9QQUdFIjoidHJ1ZSIsIldJRklfU0NBTl9CRVNUX1JTU0kiOiJ0cnVlIiwiRklSTVdBUkVfTkFNRSI6ImlsaTk0ODhfcGNtXzFidXR0b25fZnVsbCIsIlBMQVlMSVNUX0RFRkFVTFRfVVJMIjoiaHR0cHM6Ly9naXRodWIuY29tL3RyaXA1L3dlYnN0YXRpb25zL3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC90cmlwNS1yYWRpby1wbGF5bGlzdC5jc3YiLCJTTlRQXzEiOiJjYS5wb29sLm50cC5vcmciLCJTTlRQXzIiOiJwb29sLm50cC5vcmciLCJXRUFUSEVSX0xBVCI6IjQ0LjY0NzM4IiwiV0VBVEhFUl9MT04iOiItNjMuNTgwMiJ9fQ%3D%3D"
 #endif
-#if defined(ILI9488_VS1053_1BUTTON)
-  #define FIRMWARE "trip5_ili9488_vs1053_1button.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
-  #define FIRMWARE_NAME "Big Color Screen with 1-Button Redux" // "https://trip5.github.io/ehRadio/myoptions/generator.html#eyJibiI6IkVTUDMyLVMzLURldktpdEMtMSBOMTZSOCAoMTZNQiBGbGFzaCA4TUIgUFNSQU0pIiwiZGQiOiJEU1BfTU9ERUwgRFNQX0lMSTk0ODgiLCJkbiI6IklMSTk0ODggKFNQSSBURlQpIiwiYW4iOiJWUzEwNTMgKFNQSSBBdWRpbyBEZWNvZGVyKSIsImNpIjpbIlJvdGFyeSBFbmNvZGVyIiwiQnV0dG9uOiBOZXh0IFN0YXRpb24vVHJhY2siXSwiY3AiOlsiTVFUVF9FTkFCTEUiLCJTRCBDYXJkIFJlYWRlciJdLCJjcyI6WyJBIiwiQiJdLCJjbyI6WyJURlRfUlNUIiwiQlJJR0hUTkVTU19QSU4iLCJEU1BfRElNTUlOR19FTkFCTEVEIiwiRFNQX0lOVkVSVF9RVUlSSyIsIkJJR19CT09UX0xPR08iLCJWUzEwNTNfUlNUIiwiTEVEX0lOVkVSVCJdLCJjZCI6WyJUSU1FWk9ORSIsIkNMT0NLX1RXRUxWRSIsIk9ORV9DTElDS19TV0lUQ0giLCJQTEFZTElTVF9ERUZBVUxUX1VSTCIsIlNTX1BMQVlJTkciLCJTRF9TSFVGRkxFIiwiU0hPV19CVUZGRVJCQVIiLCJTSE9XX1ZVX01FVEVSIiwiU01BUlRfU1RBUlQiLCJTTlRQXzEiLCJTTlRQXzIiLCJWT0xVTUVfUEFHRSIsIldFQVRIRVJfTEFUIiwiV0VBVEhFUl9MT04iLCJXSUZJX1NDQU5fQkVTVF9SU1NJIl0sInAiOnsiU1BJQV9TQ0siOiIxMiIsIlNQSUFfTUlTTyI6IjEzIiwiU1BJQV9NT1NJIjoiMTEiLCJTUElCX1NDSyI6IjE4IiwiU1BJQl9NSVNPIjoiMTciLCJTUElCX01PU0kiOiIxNiIsIlRGVF9EQyI6IjEwIiwiVEZUX0NTIjoiOSIsIlRGVF9SU1QiOiItMSIsIkJSSUdIVE5FU1NfUElOIjoiNCIsIlZTMTA1M19DUyI6IjE1IiwiVlMxMDUzX0RDUyI6IjciLCJWUzEwNTNfRFJFUSI6IjYiLCJWUzEwNTNfUlNUIjoiLTEiLCJFTkNfQ0xLIjoiNDAiLCJFTkNfRFQiOiIzOSIsIkVOQ19TVyI6IjM4IiwiQlROX05FWFQiOiI0MiIsIlNEX0NTIjoiNDcifSwidiI6eyJWUzEwNTNfU1BJIjoiQiIsIlNEX1NQSSI6IkEiLCJUSU1FWk9ORSI6IkNhbmFkYS9BdGxhbnRpYyIsIkRTUF9ESU1NSU5HX0VOQUJMRUQiOiJ0cnVlIiwiRFNQX0lOVkVSVF9RVUlSSyI6InRydWUiLCJCSUdfQk9PVF9MT0dPIjoidHJ1ZSIsIkNMT0NLX1RXRUxWRSI6InRydWUiLCJPTkVfQ0xJQ0tfU1dJVENIIjoidHJ1ZSIsIlNTX1BMQVlJTkciOiJ0cnVlIiwiU0RfU0hVRkZMRSI6InRydWUiLCJTSE9XX0JVRkZFUkJBUiI6InRydWUiLCJTSE9XX1ZVX01FVEVSIjoidHJ1ZSIsIlNNQVJUX1NUQVJUIjoidHJ1ZSIsIlZPTFVNRV9QQUdFIjoidHJ1ZSIsIldJRklfU0NBTl9CRVNUX1JTU0kiOiJ0cnVlIiwiRklSTVdBUkVfTkFNRSI6ImlsaTk0ODhfdnMxMDUzXzFidXR0b24iLCJQTEFZTElTVF9ERUZBVUxUX1VSTCI6Imh0dHBzOi8vZ2l0aHViLmNvbS90cmlwNS93ZWJzdGF0aW9ucy9yZWxlYXNlcy9sYXRlc3QvZG93bmxvYWQvdHJpcDUtcmFkaW8tcGxheWxpc3QuY3N2IiwiU05UUF8xIjoiY2EucG9vbC5udHAub3JnIiwiU05UUF8yIjoicG9vbC5udHAub3JnIiwiV0VBVEhFUl9MQVQiOiI0NC42NDczOCIsIldFQVRIRVJfTE9OIjoiLTYzLjU4MDIifX0%3D"
+#if defined(ILI9488_PCM_1BUTTON_FULL)
+  #define FIRMWARE "trip5_ili9488_pcm_1button_full.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
+  #define FIRMWARE_NAME "Big Color Screen with 1-Button (Full)" // "https://trip5.github.io/ehRadio/myoptions/generator.html#eyJibiI6IkVTUDMyLVMzLURldktpdEMtMSBOMTZSOCAoMTZNQiBGbGFzaCA4TUIgUFNSQU0pIiwiZGQiOiJEU1BfTU9ERUwgRFNQX0lMSTk0ODgiLCJkbiI6IklMSTk0ODggKFNQSSBURlQpIiwiYW4iOiJJMlMgKFBDTSBJMlMgRGVjb2RlcikiLCJjaSI6WyJSb3RhcnkgRW5jb2RlciIsIkJ1dHRvbjogTmV4dCBTdGF0aW9uL1RyYWNrIl0sImNwIjpbIk1RVFRfRU5BQkxFIiwiSVIgUmVjZWl2ZXIiLCJSZWFsLVRpbWUgQ2xvY2siLCJTRCBDYXJkIFJlYWRlciJdLCJjcyI6WyJBIiwiQiJdLCJjbyI6WyJURlRfUlNUIiwiQlJJR0hUTkVTU19QSU4iLCJEU1BfRElNTUlOR19FTkFCTEVEIiwiRFNQX0lOVkVSVF9RVUlSSyIsIkJJR19CT09UX0xPR08iLCJMRURfSU5WRVJUIl0sImNkIjpbIlRJTUVaT05FIiwiQ0xPQ0tfVFdFTFZFIiwiT05FX0NMSUNLX1NXSVRDSCIsIlBMQVlMSVNUX0RFRkFVTFRfVVJMIiwiU0NSRUVOX0ZMSVAiLCJTU19QTEFZSU5HIiwiU0RfU0hVRkZMRSIsIlNIT1dfQlVGRkVSQkFSIiwiU0hPV19WVV9NRVRFUiIsIlNNQVJUX1NUQVJUIiwiU05UUF8xIiwiU05UUF8yIiwiVk9MVU1FX1BBR0UiLCJXRUFUSEVSX0xBVCIsIldFQVRIRVJfTE9OIiwiV0lGSV9TQ0FOX0JFU1RfUlNTSSJdLCJwIjp7IlNQSUFfU0NLIjoiMTIiLCJTUElBX01JU08iOiIyNTUiLCJTUElBX01PU0kiOiIxMSIsIlNQSUJfU0NLIjoiMjEiLCJTUElCX01JU08iOiIyIiwiU1BJQl9NT1NJIjoiMSIsIlRGVF9EQyI6IjEwIiwiVEZUX0NTIjoiMjU1IiwiVEZUX1JTVCI6Ii0xIiwiQlJJR0hUTkVTU19QSU4iOiI0IiwiSTJTX0RPVVQiOiIxNSIsIkkyU19CQ0xLIjoiNyIsIkkyU19MUkMiOiI2IiwiRU5DX0NMSyI6IjQwIiwiRU5DX0RUIjoiMzkiLCJFTkNfU1ciOiIzOCIsIkJUTl9ORVhUIjoiNDIiLCJJUl9QSU4iOiI0MSIsIlJUQ19TREEiOiIxNyIsIlJUQ19TQ0wiOiIxOCIsIlNEX0NTIjoiNDcifSwidiI6eyJSVENfTU9EVUxFIjoiRFMzMjMxIiwiU0RfU1BJIjoiQiIsIlRJTUVaT05FIjoiQ2FuYWRhL0F0bGFudGljIiwiRFNQX0RJTU1JTkdfRU5BQkxFRCI6InRydWUiLCJEU1BfSU5WRVJUX1FVSVJLIjoidHJ1ZSIsIkJJR19CT09UX0xPR08iOiJ0cnVlIiwiQ0xPQ0tfVFdFTFZFIjoidHJ1ZSIsIk9ORV9DTElDS19TV0lUQ0giOiJ0cnVlIiwiU0NSRUVOX0ZMSVAiOiJ0cnVlIiwiU1NfUExBWUlORyI6InRydWUiLCJTRF9TSFVGRkxFIjoidHJ1ZSIsIlNIT1dfQlVGRkVSQkFSIjoidHJ1ZSIsIlNIT1dfVlVfTUVURVIiOiJ0cnVlIiwiU01BUlRfU1RBUlQiOiJ0cnVlIiwiVk9MVU1FX1BBR0UiOiJ0cnVlIiwiV0lGSV9TQ0FOX0JFU1RfUlNTSSI6InRydWUiLCJGSVJNV0FSRV9OQU1FIjoiaWxpOTQ4OF9wY21fMWJ1dHRvbl9mdWxsIiwiUExBWUxJU1RfREVGQVVMVF9VUkwiOiJodHRwczovL2dpdGh1Yi5jb20vdHJpcDUvd2Vic3RhdGlvbnMvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL3RyaXA1LXJhZGlvLXBsYXlsaXN0LmNzdiIsIlNOVFBfMSI6ImNhLnBvb2wubnRwLm9yZyIsIlNOVFBfMiI6InBvb2wubnRwLm9yZyIsIldFQVRIRVJfTEFUIjoiNDQuNjQ3MzgiLCJXRUFUSEVSX0xPTiI6Ii02My41ODAyIn19"
 #endif
 #if defined(ES3C28P)
   #define FIRMWARE "trip5_es3c28p.bin" // "esp32_s3_n16r8", "ESP32-S3", "Trip5"
@@ -87,25 +87,17 @@
   #define SPIB_SCK           21        /* Bus B pins (SD) */
   #define SPIB_MISO          2
   #define SPIB_MOSI          1
-#elif defined(ILI9488_PCM_1BUTTON)
+#elif defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON_FULL)
   #define SPIA_DEFAULT_XMISO           /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
-  #define SPIB_SCK           21        /* Bus B pins (SD & VS1053) */
+  #define SPIB_SCK           21        /* Bus B pins (SD) */
   #define SPIB_MISO          2
   #define SPIB_MOSI          1
-#elif defined(ILI9488_VS1053_1BUTTON)
-  #define SPIA_DEFAULT                 /* SCK/CLK 12, MOSI/SDA 11, MISO 13 (Display and SD)*/
-  #define SPIB_SCK           18        /* Bus B pins (VS1053) */
-  #define SPIB_MISO          16
-  #define SPIB_MOSI          17
 #elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
   #define SPIA_SCK           21        /* Bus A pins (SD) - no Bus B device, no need for default pins */
   #define SPIA_MISO          13
   #define SPIA_MOSI          14
 #elif defined(ES3C28P)
   #define SPIA_DEFAULT_XMISO           /* SCK/CLK 12 and MOSI/SDA 11 (no MISO) */
-  #define SPIB_SCK           38        /* Bus B pins (SD) */
-  #define SPIB_MISO          39
-  #define SPIB_MOSI          40
 #endif
 
 
@@ -120,7 +112,7 @@
 #endif
 
 /* Display config for SPI displays */
-#if defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_VS1053_1BUTTON)
+#if defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON_FULL)
   #define DSP_MODEL          DSP_ILI9488 /* Big Display */
   #define TFT_DC             10
   #define TFT_CS             9
@@ -128,7 +120,6 @@
   #define TFT_RST            -1        /* set to -1 if connected to ESP EN pin */
   #define DSP_DIMMING_ENABLED true
   #define DSP_INVERT_QUIRK   true
-  /* modify src\displays\displayILI9488.cpp -- in section DspCore::initDisplay and add setRotation(3); to do 180 degree rotation */
 #elif defined(ST7735_PCM_1BUTTON)
   #define DSP_MODEL          DSP_ST7735         /* Red board / 1.8" Black Tab, if problems try one of DTYPE */
   /* DSP_ST7735 DTYPES BELOW (add if needed but so far, not needed)*/
@@ -160,13 +151,8 @@
   #define VS1053_DCS         14
   #define VS1053_DREQ        10
   #define VS1053_RST         -1        /* set to -1 if connected to ESP EN pin */
-#elif defined(ILI9488_VS1053_1BUTTON)
-  #define VS1053_SPI         'B'       /* assign VS1053 to Bus B */
-  #define VS1053_CS          15
-  #define VS1053_DCS         7
-  #define VS1053_DREQ        6
-  #define VS1053_RST         -1        /* set to -1 if connected to ESP EN pin */
-#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
+  #define VS_PATCH_ENABLE    true
+#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON_FULL)
   #define I2S_DOUT           15
   #define I2S_BCLK           7
   #define I2S_LRC            6
@@ -210,8 +196,16 @@
   #define BTN_DOWN           7
   #define BTN_UP             15
   #define WAKE_PIN           18
-#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_VS1053_1BUTTON)
+#elif defined(ST7735_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON)
   #define BTN_NEXT           42
+#elif defined(ILI9488_PCM_1BUTTON_FULL)
+  #define BTN_NEXT           13
+  #define IR_BUTTON_MODE     0xFF0FF0
+  #define IR_BUTTON_UP       0xFFCF30
+  #define IR_BUTTON_DOWN     0xFF2FD0
+  #define IR_BUTTON_PREV     0xFF8F70
+  #define IR_BUTTON_NEXT     0xFF4FB0
+  #define IR_BUTTON_PLAY     0xFFAF50
 #elif defined(ES3C28P)
   #define TS_MODEL           TS_MODEL_FT6336
   #define TS_SDA             16
@@ -222,15 +216,13 @@
 #endif
 
 #if defined(SH1106_VS1053_3BUTTONS) || defined(ST7735_PCM_1BUTTON) ||\
-    defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_VS1053_1BUTTON) || defined(SH1106_PCM_REMOTE)
+    defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON_FULL) ||\
+    defined(SH1106_PCM_REMOTE)
   #define ENC_CLK            40
   #define ENC_DT             39
   #define ENC_SW             38
   #if defined(SH1106_PCM_REMOTE)
     #define ENC_STEPS          4
-  #endif
-  #if defined(ILI9488_VS1053_1BUTTON)
-    #define VS_PATCH_ENABLE true
   #endif
 #elif defined(SH1106_PCM_1BUTTON)
   #define ENC_CLK            7
@@ -252,15 +244,36 @@
 #endif
 
 #if defined(ST7735_PCM_1BUTTON) || defined(SH1106_VS1053_3BUTTONS) ||\
-   defined(ILI9488_PCM_1BUTTON) || defined(ES3C28P)
+   defined(ILI9488_PCM_1BUTTON) || defined(ILI9488_PCM_1BUTTON_FULL)
   #define SD_SPI          'B'     /* assign SD to Bus B */
   #define SD_CS           47
-#elif defined(ILI9488_VS1053_1BUTTON) || defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
+#elif defined(SH1106_PCM_REMOTE) || defined(SH1106_PCM_1BUTTON)
   #define SD_SPI          'A'     /* assign SD to Bus B */
   #define SD_CS           47
 #endif
 
-#define MQTT_ENABLE
+#if defined(ILI9488_PCM_1BUTTON_FULL)
+  #define IR_PIN          14
+  #define RTC_MODULE      DS1307
+  #define RTC_SDA         17
+  #define RTC_SCL         18
+  //#define RTC_CS         8 //oops
+#endif
+
+#if defined(ES3C28P)
+  //old SPI config:
+  //#define SD_SPI          'B'     /* assign SD to Bus B */
+  //#define SD_CS           47
+  #define SDMMC_CLK 38
+  #define SDMMC_CMD 40
+  #define SDMMC_D0 39
+  #define SDMMC_D1 41
+  #define SDMMC_D2 48
+  #define SDMMC_D3 47
+  //#define SDMMC_FREQ 20000 // in kHz: 0 = driver default (BOARD_MAX_SDMMC_FREQ = SDMMC_FREQ_HIGHSPEED, 40MHz); set
+#endif
+
+/* MQTT is enabled and configured from the WebUI (Settings > MQTT) - no build-time define needed. */
 
 /* --- Battery --- */
 
@@ -333,9 +346,18 @@
 //#define WEBUI_LOCALE "de_DE" // can set a default WebUI locale different than the display - check locale/webui folder .json files (user-configurable)
 
 /* --- Debug? --- */
-//#define ALL_DEBUG_LOGS
-//#define CORE_MONITOR
-//#define BATTERY_FORCE_DISPLAY 75 // 0, 25, 50, 75, 100
+/* A normal build prints [ERROR] (something is broken) and nothing else.  Everything below, the [Warning] level
+   included, is extra detail and is off unless you ask for it. */
+//#define ALL_DEBUG_LOGS         // turns on every switch below at once - very noisy, and every print costs ms
+//#define CORE_MONITOR           // CPU core load plus heap, PSRAM and LittleFS, every 5s
+//#define BOOTLOG_TIME           // prefix BOOT lines with the time since power-on
+//#define WIDGET_DEBUG           // widget text and the VU draw cost
+//#define AUDIO_DEBUG            // per-track audio chatter: tag and file sizes, syncwords, the 10s ring arithmetic, ID3 frame walk
+//#define METADATA_LOG           // every ID3 field and each ICY title and station name - the switch for "no title on this station"
+//#define CONFIG_KEY_DEBUG       // every Prefs key and the value written to it
+//#define WARNINGS_LOG           // show [Warning] lines: handled, expected or recoverable events. Never write "0" - a flag is on whatever its value
+//#define SD_PLAY_TRACE_MS 30000 // the two [SD] trace lines (0 = off): the pair that says whether the card or the decoder stopped
+//#define ESPFILEUPDATER_VERBOSE true
 
 /* --- Display --- */
 // Display Font:
@@ -347,19 +369,11 @@
 //#define CLOCKFONT CHUNKY6
 //#define CLOCKFONT CHUNKY6_PX
 //#define CLOCKFONT YO_MONO
-
-// Transform:
-//#define PRETEXT_ALLCAPS
-//#define PRETEXT_FOLDACCENT
-//#define PRETEXT_FOLDCYRILLIC
-//#define WWW_CASETRANSFORM
-//#define CLOCKGLOW false
-//#define PLAYLIST_MODE_PAGED false
+//#define CLOCKFONT LEDCLOCK
+//#define NIXIE_TUBE
 
 // Other:
+//#define EVERYDAY_IS_CANADA_DAY
 //#define DEEP_SLEEP_DISABLE
-
-//#undef VS_PATCH_ENABLE    
-//#define VS_PATCH_ENABLE true
 
 #endif // myoptions_h

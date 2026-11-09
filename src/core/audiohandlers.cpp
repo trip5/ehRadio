@@ -11,8 +11,14 @@
 #include "netserver.h"
 #include "player.h"
 #include "utility.h"
+#include "playlistvalidator.h"
 
 namespace {
+
+// How long a title half is held for its partner before it is shown alone.  The two halves of one item arrive
+// together - in one ID3 tag block, or in one #EXTINF line - so this only ever decides a lone half, and a half
+// older than this is never paired with a newer partner.
+const uint32_t META_SETTLE_MS = 1500;
 
 char metadataUrlBuffer[MQTT_URL_SIZE + 1] = {0};
 
@@ -118,6 +124,17 @@ static bool handleAccountError(const char* info) {
   return false;
 }
 
+// Both audio libraries pass the raw HTTP status line ("HTTP/1.1 404 File Not Found") through
+// audio_showstreamtitle on any status above 310.  Returns the code, or 0 if this is not a status line.
+static int httpStatusCode(const char* info) {
+  if (!info || strncmp(info, "HTTP/", 5) != 0 || strlen(info) < 12) return 0;
+  const char* p = info + 9;
+  if (!isdigit(static_cast<unsigned char>(p[0])) ||
+      !isdigit(static_cast<unsigned char>(p[1])) ||
+      !isdigit(static_cast<unsigned char>(p[2]))) return 0;
+  return (p[0] - '0') * 100 + (p[1] - '0') * 10 + (p[2] - '0');
+}
+
 } // namespace
 
 AudioHandlers audioHandlers;
@@ -181,6 +198,16 @@ bool AudioHandlers::isPrintable(const char* info) const {
   return true;
 }
 
+/* --- The audio library's event channel --- */
+// AUDIO_INFO() is a callback and several messages change behaviour, so only the PRINT is gated here.
+// Level 2 = ERRORLOG, 1 = WARNINGLOG; anything not listed needs AUDIO_DEBUG or METADATA_LOG to print.
+static const struct { const char* phrase; uint8_t level; } kInfoSeverity[] = {
+  { "no decode progress",     2 },  // the watchdog closed a track that had stopped feeding
+  { "mp3 err ",               1 },  // the resync recovers
+  { "zero read:",             1 },
+  { "ring overrun prevented", 1 },  // a guard fired, the data was kept
+};
+
 void AudioHandlers::handleInfo(const char* info) {
   if (player.lockOutput) return;
 
@@ -188,17 +215,38 @@ void AudioHandlers::handleInfo(const char* info) {
     publishArtworkIfChanged(setArtworkUrl(metadataUrlBuffer));
   }
 
-  if (strcmp(info, "StreamTitle=''") != 0) FUNCTIONLOG("Audio.info", "%s", info);
+  if (strcmp(info, "StreamTitle=''") != 0) {
+    uint8_t level = 0;
+    for (const auto& entry : kInfoSeverity) {
+      if (strncmp(info, entry.phrase, strlen(entry.phrase)) == 0) { level = entry.level; break; }
+    }
+    if (level == 2) {
+      ERRORLOG("%s", info);
+    } else if (level == 1) {
+      WARNINGLOG("%s", info);
+    } else if (strncmp(info, "StreamTitle=", 12) == 0 || strncmp(info, "StreamUrl=", 10) == 0) {
+      #ifdef METADATA_LOG
+        FUNCTIONLOG("Metadata", "%s", info);
+      #endif
+    } else {
+      #ifdef AUDIO_DEBUG
+        FUNCTIONLOG("Audio.info", "%s", info);
+      #endif
+    }
+  }
   
 
-  if (strstr(info, "format is mp3") != NULL) { config.setBitrateFormat(BF_MP3); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is aac") != NULL) { config.setBitrateFormat(BF_AAC); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is flac") != NULL) { config.setBitrateFormat(BF_FLAC); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is wav") != NULL) { config.setBitrateFormat(BF_WAV); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is ogg") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is vorbis") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); }
-  if (strstr(info, "format is opus") != NULL) { config.setBitrateFormat(BF_OPU); display.putRequest(DBITRATE); }
+  if (strstr(info, "format is mp3") != NULL) { config.setBitrateFormat(BF_MP3); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is aac") != NULL) { config.setBitrateFormat(BF_AAC); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is flac") != NULL) { config.setBitrateFormat(BF_FLAC); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is wav") != NULL) { config.setBitrateFormat(BF_WAV); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is ogg") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is vorbis") != NULL) { config.setBitrateFormat(BF_VOR); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
+  if (strstr(info, "format is opus") != NULL) { config.setBitrateFormat(BF_OPU); display.putRequest(DBITRATE); netserver.requestOnChange(BITRATE, 0); }
   if (strstr(info, "skip metadata") != NULL) config.setTitle(config.station.name);
+  // Belt and braces only: the connecting placeholder is owned by Player::loop(), which clears it from player state
+  // because this message is not emitted on every library route (an HLS playlist stream never sends it). Kept because on
+  // the routes that DO announce it, this clears the placeholder a loop earlier.
   if (strstr(info, "stream ready") != NULL) {
     if (strcmp_P(config.station.title, l10n(L10N_MSG_CONNECT)) == 0) config.setTitle("");
   }
@@ -211,14 +259,20 @@ void AudioHandlers::handleInfo(const char* info) {
 }
 
 void AudioHandlers::handleBitrate(const char* info) {
-  FUNCTIONLOG("Audio.bitrate", "%s", info);
+  #ifdef AUDIO_DEBUG
+    FUNCTIONLOG("Audio.bitrate", "%s", info);
+  #endif
   config.station.bitrate = atoi(info) / 1000;
   display.putRequest(DBITRATE);
   netserver.requestOnChange(BITRATE, 0);
 }
 
 void AudioHandlers::handleShowStation(const char* info) {
+  if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   bool printable = isPrintable(info) && (strlen(info) > 0);
+  #ifdef METADATA_LOG
+    FUNCTIONLOG("Metadata", "ICY station \"%s\"%s", info ? info : "", printable ? "" : " (not printable)");
+  #endif
   if (player.remoteStationName) {
     config.setStation(printable ? info : config.station.name);
     display.putRequest(NEWSTATION);
@@ -227,16 +281,44 @@ void AudioHandlers::handleShowStation(const char* info) {
 }
 
 void AudioHandlers::handleShowStreamTitle(const char* info) {
+  if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   if (handleAccountError(info)) return;  // error handled, don't display raw HTTP response as title
-  bool printable = isPrintable(info) && (strlen(info) > 0);
+  const int status = httpStatusCode(info);
+  if (status == 404 || status == 410) { player.noteFatalStream(); return; }
   #ifdef DEBUG_TITLES
     config.setTitle(DEBUG_TITLES);
-  #else
-    config.setTitle(printable ? info : config.station.name);
+    return;
   #endif
+  #ifdef METADATA_LOG
+    // The refusal is the interesting half: a title that arrived and was not printable explains "no title on this
+    // station" without anyone having to guess about encoding.
+    if (!isPrintable(info)) FUNCTIONLOG("Metadata", "ICY title refused as non-printable: %.48s", info ? info : "");
+    else                    FUNCTIONLOG("Metadata", "ICY title \"%s\"", info);
+  #endif
+  if (!isPrintable(info) || info[0] == '\0') {
+    // A stream with nothing to say shows its own name in the first line, and no second line survives it.
+    _setHalf(_song, config.station.name, META_PLAYLIST, false);
+    _clearHalf(_second);
+    _schedulePublish();
+    return;
+  }
+  // "song - second": both halves arrive in one line, so they are written as one item.
+  const char* sep = strstr(info, " - ");
+  if (sep == nullptr) { _putHalf(_song, info, META_PLAYLIST, false); return; }
+  char song[META_HALF_LN];
+  size_t len = static_cast<size_t>(sep - info);
+  if (len >= sizeof(song)) len = sizeof(song) - 1;
+  memcpy(song, info, len);
+  song[len] = '\0';
+  _putHalf(_song, song, META_PLAYLIST, false);
+  _putHalf(_second, sep + 3, META_PLAYLIST, false);
 }
 
 void AudioHandlers::handleError(const char* info) {
+  if (playlistValidator.active()) return;   // a failed probe is expected, not an error to display
+  // AUDIO_ERROR expands to this callback, so a refusal's own line would become the title. Keep it a log line: the
+  // user is told once, in words that are true, by noteFatalStream(). See handle-unsupported-unrecognized.md §17.2.
+  if (player.refuseReason() != STREAM_REFUSE_NONE) { ERRORLOG("%s", info); return; }
   player.setError(info);
 }
 
@@ -246,65 +328,50 @@ void AudioHandlers::handleIcyLogo(const char* info) {
 }
 
 void AudioHandlers::handleId3Artist(const char* info) {
-  if (config.getMode() != PM_SDCARD) return;
-  if (isPrintable(info)) config.setStation(info);
-  display.putRequest(NEWSTATION);
-  netserver.requestOnChange(STATION, 0);
+  if (playlistValidator.active()) return;
+  if (config.getMode() == PM_SDCARD) {
+    // SD: the artist names the station, never the second title line.
+    if (isPrintable(info)) config.setStation(info);
+    display.putRequest(NEWSTATION);
+    netserver.requestOnChange(STATION, 0);
+    return;
+  }
+  if (player.lockOutput) return;
+  if (isPrintable(info)) _putHalf(_second, info, META_ID3, true);
 }
 
 void AudioHandlers::handleId3Album(const char* info) {
+  if (playlistValidator.active()) return;
   if (player.lockOutput) return;
-  if (isPrintable(info)) {
-    strlcpy(_albumBuf, info, sizeof(_albumBuf));
-    if (strlen(config.station.title) == 0) {
-      config.setTitle(info);
-    } else {
-      char tmp[STATION_FIELD_LENGTH];
-      size_t titleLen = strlen(config.station.title);
-      size_t infoLen = strlen(info);
-      if (titleLen + 3 + infoLen + 1 <= STATION_FIELD_LENGTH) {
-        snprintf(tmp, STATION_FIELD_LENGTH, "%s - %s", config.station.title, info);
-        config.setTitle(tmp);
-      } else {
-        config.setTitle(info);
-      }
-    }
-  }
+  if (!isPrintable(info)) return;
+  if (_second.artist && _second.text[0]) return;  // artist outranks album for the current item
+  _putHalf(_second, info, META_ID3, false);
 }
 
 void AudioHandlers::handleId3Title(const char* info) {
+  if (playlistValidator.active()) return;
   if (player.lockOutput) return;
-  if (isPrintable(info)) {
-    strlcpy(_titleBuf, info, sizeof(_titleBuf));
-    _tryCombineTitleAlbum();
-  }
-}
-
-void AudioHandlers::_tryCombineTitleAlbum() {
-  if (_titleBuf[0] == '\0') return;  // no title yet
-  if (_albumBuf[0] != '\0') {
-    char tmp[STATION_FIELD_LENGTH];
-    snprintf(tmp, sizeof(tmp), "%s - %s", _titleBuf, _albumBuf);
-    config.setTitle(tmp);
-  } else {
-    config.setTitle(_titleBuf);
-  }
+  if (isPrintable(info)) _putHalf(_song, info, META_ID3, false);
 }
 
 void AudioHandlers::handleBeginSdRead() {
+  resetMetadata();
   config.setTitle("");
-  _titleBuf[0] = '\0';
-  _albumBuf[0] = '\0';
 }
 
 void AudioHandlers::handleId3Data(const char* info) {
   if (player.lockOutput) return;
-  FUNCTIONLOG("Audio.id3", "%s", info);
+  #ifdef METADATA_LOG
+    FUNCTIONLOG("Metadata", "%s", info);
+  #else
+    (void)info;
+  #endif
 }
 
 void AudioHandlers::handleEofMp3(const char* info) {
   (void)info;
   config.sdResumePos = 0;
+  player.autoAdvance = true;  // EOF auto-advance: mute must survive this track change
   player.next();
 }
 
@@ -324,6 +391,86 @@ void AudioHandlers::handleProgress(uint32_t startPos, uint32_t endPos) {
   player.sd_min = startPos;
   player.sd_max = endPos;
   netserver.requestOnChange(SDLEN, 0);
+}
+
+/* ==== The title line: two halves, two sources ==== */
+
+void AudioHandlers::tick() {
+  if (!_publishPending) return;
+  if ((int32_t)(millis() - _publishAt) < 0) return;
+  _publishComposed();
+}
+
+void AudioHandlers::resetMetadata() {
+  _clearHalf(_song);
+  _clearHalf(_second);
+  _publishPending = false;
+}
+
+// An SD file's two tags are one item by construction, so the window does not apply to it.
+uint32_t AudioHandlers::_settleMs() const {
+  return (config.getMode() == PM_SDCARD) ? 0 : META_SETTLE_MS;
+}
+
+bool AudioHandlers::_isFresh(const MetaHalf& half) const {
+  const uint32_t settle = _settleMs();
+  if (settle == 0) return true;
+  return (int32_t)(millis() - half.ms) <= (int32_t)settle;
+}
+
+bool AudioHandlers::_pairComplete() const {
+  if (!_song.text[0] || !_second.text[0]) return false;
+  const uint32_t settle = _settleMs();
+  if (settle == 0) return true;
+  const int32_t gap = (int32_t)(_song.ms - _second.ms);
+  return gap >= -(int32_t)settle && gap <= (int32_t)settle;
+}
+
+void AudioHandlers::_clearHalf(MetaHalf& half) {
+  half.text[0] = '\0';
+  half.ms = 0;
+  half.src = META_NONE;
+  half.artist = false;
+}
+
+void AudioHandlers::_setHalf(MetaHalf& half, const char* value, uint8_t src, bool artist) {
+  strlcpy(half.text, value ? value : "", sizeof(half.text));
+  half.ms = millis();
+  half.src = src;
+  half.artist = artist;
+}
+
+void AudioHandlers::_putHalf(MetaHalf& half, const char* value, uint8_t src, bool artist) {
+  const char* next = value ? value : "";
+  if (strcmp(half.text, next) == 0) {
+    half.ms = millis();  // the same value: only its arrival time moves
+    if (src == META_ID3) half.src = META_ID3;
+  } else if (src == META_PLAYLIST && half.src == META_ID3 && _isFresh(half)) {
+    return;  // ID3 outranks the playlist for the same item
+  } else {
+    _setHalf(half, next, src, artist);
+    // A new song starts a new item, so any artist known for the previous one stops claiming the second line.
+    if (&half == &_song) _second.artist = false;
+  }
+  _schedulePublish();
+}
+
+void AudioHandlers::_schedulePublish() {
+  const uint32_t settle = _settleMs();
+  if (settle == 0 || _pairComplete()) { _publishComposed(); return; }  // nothing else is coming
+  _publishPending = true;
+  _publishAt = millis() + settle;  // give the partner half its window before showing a lone half
+}
+
+void AudioHandlers::_publishComposed() {
+  char line[META_HALF_LN * 2 + 4];
+  if (_pairComplete())      snprintf(line, sizeof(line), "%s - %s", _song.text, _second.text);
+  else if (_song.text[0])   strlcpy(line, _song.text, sizeof(line));
+  else if (_second.text[0]) strlcpy(line, _second.text, sizeof(line));  // nothing else to show it in
+  else                      line[0] = '\0';
+  _publishPending = false;
+  if (strcmp(line, config.station.title) == 0) return;  // the live field is the last string published
+  config.setTitle(line);
 }
 
 void audio_info(const char* info) { audioHandlers.handleInfo(info); }

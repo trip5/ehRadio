@@ -69,7 +69,7 @@
 #include "SPI.h"
 #include "SD.h"
 #include "SD_MMC.h"
-#include "SPIFFS.h"
+#include "LittleFS.h"
 #include "FS.h"
 #include "FFat.h"
 #include "WiFiClient.h"
@@ -154,6 +154,24 @@ public:
     uint32_t getReadPos();                      // read position relative to the beginning
     void     resetBuffer();                     // restore defaults
 
+    // The 8.47 collapse announced itself as bookkeeping that cannot be true - a filled length larger than the whole
+    // buffer - so check the fields rather than trying to police the memory around them.  Returns NULL when consistent.
+    const char* invariantFault() const {
+        if(!m_buffer) return NULL;
+        const uintptr_t base = (uintptr_t)m_buffer;
+        const uintptr_t end  = base + m_buffSize;
+        if(m_writePtr && ((uintptr_t)m_writePtr < base || (uintptr_t)m_writePtr > end)) return "write pointer outside buffer";
+        if(m_readPtr  && ((uintptr_t)m_readPtr  < base || (uintptr_t)m_readPtr  > end)) return "read pointer outside buffer";
+        if(m_endPtr != m_buffer + m_buffSize) return "end pointer no longer matches the buffer end";
+        // bufferFilled() RECOMPUTES m_dataLength from the pointers every call, so the cached field proves nothing -
+        // checking it was why this guard stayed silent while the monitor printed 2818KB in a 295903-byte buffer.
+        const size_t filled = (m_writePtr >= m_readPtr)
+                            ? (size_t)(m_writePtr - m_readPtr)
+                            : (size_t)((m_endPtr - m_readPtr) + (m_writePtr - m_buffer));
+        if(m_buffSize && filled > m_buffSize) return "filled length exceeds buffer size";
+        return NULL;
+    }
+
 protected:
     const size_t m_buffSizePSRAM    = 300000;   // most webstreams limit the advance to 100...300Kbytes
     //const size_t m_buffSizeRAM      = 1600 * 10;
@@ -174,11 +192,24 @@ protected:
 //----------------------------------------------------------------------------------------------------------------------
 
 // [Maleksm graft] FreeRTOS audio task stack (feeds VS1053 independently of Arduino loop)
-static const size_t AUDIO_STACK_SIZE = 3300;                             // words (13.2KB on ESP32-S3)
+// 3300 -> 3500 for parity with the I2S library, which needed the extra room for a stream whose software decode
+// overflowed this task's stack (panic: Stack canary watchpoint triggered (PeriodicTask)) - see
+// i2s-frankenstein-surgery-notes.md, Addendum 2.  This backend hands the bitstream to a hardware decoder, so it
+// never reaches that depth, but the two should not disagree about the number.
+static const size_t AUDIO_STACK_SIZE = 3500;                             // words (14KB on ESP32-S3)
 static StaticTask_t __attribute__((unused)) xAudioTaskBuffer;
 static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 
 struct Audio;
+
+// A permanent verdict on a stream, set only by Audio::setRefuse().  Keep the order and the values identical in both
+// forks - core matches on these names, never on numbers.  See plans/handle-unsupported-unrecognized.md.
+enum streamRefuse_e : uint8_t {
+    STREAM_REFUSE_NONE = 0,     // nothing to refuse
+    STREAM_REFUSE_UNSUPPORTED,  // recognised container or codec we cannot decode (fMP4, encrypted HLS, ...)
+    STREAM_REFUSE_NOT_AUDIO,    // a page, an API, an image, an unknown content type: not a stream at all
+    STREAM_REFUSE_NO_HEAD       // the probe never got its eight bytes: stop, but the ladder may retry (capped)
+};
 
 class Audio : private AudioBuffer{
 
@@ -277,6 +308,11 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     size_t          m_audioDataSize = 0;            //
     uint32_t        m_avr_bitrate = 0;
     bool            m_localBitrateSend = true;
+    /* Per-stream bitrate estimate.  A stream that never sends an icy-br header has no other route to a number on this
+       board: this library has no showCodecParams() to ask the chip, and the one routine that can read the value out of
+       the decoder, getAudioCurrentTime(), has SD-only callers.  m_brFromHeader keeps the server's own value final. */
+    volatile bool   m_brFromHeader = false;         // an icy-br: header supplied the bitrate - do not overwrite it
+    volatile bool   m_brEstimated  = false;         // an estimate has succeeded for this connection
     uint32_t        m_audioDataStart = 0;           // in bytes
     int             m_id3Size=0;                    // length id3 tag
     bool            m_f_ssl=false;
@@ -307,17 +343,21 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     uint16_t        m_streamUrlHash = 0;            // remember streamURL, ignore multiple occurence in metadata
     uint16_t        m_timeout_ms = 250;
     uint16_t        m_timeout_ms_ssl = 2700;
+    uint16_t        m_connectTimeout_ms = 1200;
+    uint16_t        m_connectTimeout_ms_ssl = 1200;
     uint32_t        m_metacount=0;                  // Number of bytes in metadata
     uint16_t        m_m3u8_targetDuration = 10;     //
     int             m_controlCounter = 0;           // Status within readID3data() and readWaveHeader()
     bool            m_f_running = false;
     bool            m_f_ogg=false;                  // Set if oggstream
     bool            m_f_stream_ready=false;         // Set after connecttohost and first streamdata are available
+    uint8_t         m_refuseReason = STREAM_REFUSE_NONE;  // see setRefuse()
     // [Maleksm graft] variables needed by task-coordinated playAudioData()
     bool            m_f_stream = false;             // stream ready for output?
     bool            m_f_eof = false;                // end of file reached
     bool            m_f_ID3v1TagFound = false;      // ID3v1 tag found
     uint32_t        m_sumBytesDecoded = 0;          // used for streaming position tracking
+    bool            m_f_paused = false;             // user pause: the no-progress watchdog must not end a paused track
     uint32_t        m_bytesNotDecoded = 0;          // pictures or other non-audio data in stream
     int16_t         m_validSamples = {0};           // samples still to play (I2S leftover, may be 0 for VS1053)
     bool            m_f_unsync = false;
@@ -332,7 +372,17 @@ protected:
     inline void DCS_LOW()  {(dcs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << (dcs_pin - 32) : GPIO.out_w1tc = 1 << dcs_pin;}
     inline void CS_HIGH()  {( cs_pin&0x20) ? GPIO.out1_w1ts.data = 1 << ( cs_pin - 32) : GPIO.out_w1ts = 1 <<  cs_pin;}
     inline void CS_LOW()   {( cs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << ( cs_pin - 32) : GPIO.out_w1tc = 1 <<  cs_pin;}
-    inline void await_data_request() {while(!digitalRead(dreq_pin)) NOP();}    // Very short delay
+    /* Bounded wait for DREQ.  This used to spin for ever, so a decoder that stopped accepting data (DREQ stuck low)
+       hung the caller instead of reporting a problem - and both send paths and stopSong() call it.  50 ms is two
+       orders of magnitude above the longest legitimate wait, so a false answer always means the chip is wedged. */
+    inline bool await_data_request(uint32_t timeoutUs = 50000) {
+        const uint32_t start = micros();
+        while(!digitalRead(dreq_pin)) {
+            if((uint32_t)(micros() - start) > timeoutUs) return false;
+            NOP();
+        }
+        return true;
+    }
     inline bool data_request()     {return(digitalRead(dreq_pin) == HIGH);}
 
     void     initInBuff();
@@ -341,6 +391,7 @@ protected:
     void     data_mode_on();
     void     data_mode_off();
     uint16_t read_register ( uint8_t _reg ) ;
+    uint16_t read_register_nowait ( uint8_t _reg ) ;     // same, minus the DREQ wait - VU poll only
     void     write_register ( uint8_t _reg, uint16_t _value );
     void     sdi_send_buffer ( uint8_t* data, size_t len ) ;
     size_t   sendBytes(uint8_t* data, size_t len);
@@ -373,6 +424,8 @@ protected:
     bool     STfromEXTINF(char* str);
     size_t   process_m3u8_ID3_Header(uint8_t* packet);
     bool     parseContentType(char* ct);
+    void     setRefuse(uint8_t reason, const char* shape);
+    uint8_t  sniffHead(const uint8_t* p, size_t n, const char** shape);
     bool     latinToUTF8(char* buff, size_t bufflen, bool UTF8check = true);
     bool     parseHttpResponseHeader();
     void     UTF8toASCII(char* str);
@@ -411,6 +464,9 @@ public:
     bool     connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
     bool     connecttospeech(const char* speech, const char* lang);
     bool     isRunning() {return m_f_running;}
+    uint8_t  refuseReason() {return m_refuseReason;}   // non-zero: a verdict for Player::loop() to act on
+    void     clearRefuse() {m_refuseReason = STREAM_REFUSE_NONE;}   // consumed between validator probes
+    uint8_t  chipDeadStrikes() const { return m_chipDeadStrikes; }  // 0 = answering, see sendBytes()
     bool     pauseResume();
     uint32_t getFileSize();
     uint32_t getFilePos();
@@ -422,6 +478,7 @@ public:
     size_t   bufferFree();
     void     loadUserCode();
     int getCodec() {return m_codec;}
+    bool codecDecided() {return m_codec != CODEC_NONE;}   // the library understood the payload
     const char *getCodecname() {return codecname[m_codec];}
     size_t   inBufferFilled(){ return bufferFilled(); }
     size_t   inBufferFree(){ return bufferFree(); }
@@ -437,14 +494,52 @@ private:
     static void     taskWrapper(void *param);
     void            audioTask();
     void            performAudioTask();
+    void            endLocalFile();        // the single end-of-track path for a local file
     uint8_t         m_audioTaskCoreId = 1;
     bool            m_f_audioTaskIsRunning = false;
+    // SDI liveness, written by sendBytes() and read by the VU flat-meter report: total bytes handed to the
+    // decoder and when the last non-zero write happened.  Two stores per feed call, no gate.
+    volatile uint32_t m_feedBytes = 0;
+    volatile uint32_t m_feedLastMs = 0;
+    // Stalled feeds against a chip that answers 0x0000 in SCI_MODE: not backpressure, nothing driving MISO.  Cleared
+    // on any byte moved and in begin(), never in setDefaults() - the track changes are what prove it.
+    volatile uint8_t  m_chipDeadStrikes = 0;
+    // Silent exit counters.  Every one of these exits returns without logging, so a stalled audio task is
+    // indistinguishable from a healthy one; these name the exit instead.  Only the printing is gated.
+    volatile uint32_t m_dbgStopCalls = 0;
+    volatile uint32_t m_dbgDefaultsCalls = 0;
+    volatile uint32_t m_dbgTaskCalls = 0;
+    volatile uint32_t m_dbgEarlyRun = 0;
+    volatile uint32_t m_dbgEarlyStream = 0;
+    volatile uint32_t m_dbgEarlyCodec = 0;
+    volatile uint32_t m_dbgPlayCalls = 0;
+    volatile uint32_t m_dbgPlayEof = 0;
+    volatile uint32_t m_dbgPlayValid = 0;
+    volatile uint32_t m_dbgPlayLock = 0;
+    volatile uint32_t m_dbgPlayTakes = 0;
+    // Reader telemetry: the end-of-track path in processLocalFile() is not being reached, so publish what the reader
+    // itself sees rather than inferring it.  Only the reader task writes these, the display task only reads them.
+    volatile uint32_t m_dbgReaderCalls = 0;
+    volatile uint32_t m_dbgReaderEof = 0;
+    volatile uint32_t m_dbgReadPos = 0;
+    volatile uint32_t m_dbgLastRoom = 0;
+    volatile int32_t  m_dbgLastAdded = 0;
+    volatile uint32_t m_dbgTrackStartMs = 0;   // set by setDefaults(), drives the per-track report
+    volatile bool     m_dbgTrackReported = true; // true until the next connection arms it
 
 public:
     /* VU METER */
     void     setVUmeter();
     uint16_t get_VUlevel(uint16_t dimension);
     void     computeVUlevel();
+    // Two-line diagnostic report; defined only under AUDIO_DEBUG (a declaration without a definition is legal).
+    void     vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR);
+    /* No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
+       these return false, which keeps the widget's "is there a spectrum?" path the same on both audio
+       backends.  The spectrum style is still offered on this build - it is drawn from the synthesised
+       band source - and only the waveform and the Lissajous are absent from /visuals.json. */
+    bool     getWaveform(int16_t *out, uint16_t n);
+    bool     getSpectrum(uint8_t *bands, uint8_t n);
     bool     eofHeader;
     // implement several function with respect to the index of string
     void strlower(char *str){

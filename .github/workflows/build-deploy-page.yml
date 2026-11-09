@@ -13,27 +13,32 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install mkdocs-material
+        run: pip install mkdocs-material==9.7.7
 
-      - name: Copy README and images to docs
+      - name: Stage docs from README
         run: |
+          mkdir -p docs
           cp README.md docs/index.md
           for f in *.md; do
             [ "$f" != "README.md" ] && cp "$f" docs/
@@ -94,20 +99,46 @@ jobs:
           PY
           fi
 
-      - name: Convert relative YAML links to GitHub URLs
+      - name: Convert relative repo links to GitHub URLs
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          sed -i 's|](\([^:)]*\.yaml\))|](https://github.com/${{ github.repository }}/blob/main/\1)|g' docs/index.md
+          BASE="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${DEFAULT_BRANCH}"
+          RAW="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEFAULT_BRANCH}"
+          #
+          # 1. Asset targets (images, media, archives) go to RAW urls, and must be done
+          #    first: a blob url is an HTML page, so it renders as a broken image in
+          #    ![alt](image.png) or ![alt](./dir/pic.png), whereas a raw url is the
+          #    image bytes themselves.  The rewritten urls contain a colon, so the
+          #    repo-file rewrite below leaves them alone.
+          #    NOTE: '%' is the s delimiter here, not '|', because the pattern below
+          #    uses '|' for alternation.  A leading './' is dropped so the raw url is
+          #    repo-root relative.
+          sed -i -E "s%]\((\./)?([^)#:/][^)#:]*\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|mp4|webm|pdf|zip|apk))\)%](${RAW}/\2)%gI" docs/index.md
+          #
+          # 2. Any other repo-relative target becomes a blob url.  MkDocs only resolves
+          #    links between documentation pages, so repo files such as
+          #    [LICENSE](LICENSE) would 404 on the site.  A target without a colon is
+          #    repo-relative; anything containing ':' (https:, mailto:), starting with
+          #    a '#' anchor or starting with '/' (site-absolute) is left untouched.
+          #    Nothing is hardcoded, so forks rewrite against their own repo + branch.
+          sed -i -E "s|]\(([^)#/][^):]*)\)|](${BASE}/\1)|g" docs/index.md
+          echo "Asset links rewritten against ${RAW}/"
+          echo "Repo file links rewritten against ${BASE}/"
 
-      - name: Customize firmware.html
+      - name: Customize firmware.html and flasher.html
         if: github.repository_owner != 'trip5'
         run: |
-          if [ -f "docs/firmware.html" ]; then
-            sed -i "s|const GITHUB_OWNER = '.*'|const GITHUB_OWNER = '${{ github.repository_owner }}'|g" docs/firmware.html
-            sed -i "s|const REPO_NAME = '.*'|const REPO_NAME = '${{ github.event.repository.name }}'|g" docs/firmware.html
-            sed -i "s|github.com/trip5/ehRadio/releases|github.com/${{ github.repository }}/releases|g" docs/firmware.html
-            sed -i "s|<!-- <p>Forked by XYZ from</p> -->|<p>Forked by ${{ github.repository_owner }} from</p>|g" docs/firmware.html
-            echo "✅ Customized firmware.html for ${{ github.repository_owner }}"
-          fi
+          # One loop, both pages: they share the constants and the marker described above.
+          for page in docs/firmware.html docs/flasher.html; do
+            if [ -f "$page" ]; then
+              sed -i "s|const GITHUB_OWNER = '.*'|const GITHUB_OWNER = '${{ github.repository_owner }}'|g" "$page"
+              sed -i "s|const REPO_NAME = '.*'|const REPO_NAME = '${{ github.event.repository.name }}'|g" "$page"
+              sed -i "s|github.com/trip5/ehRadio/releases|github.com/${{ github.repository }}/releases|g" "$page"
+              sed -i "s|<!-- <p>Forked by XYZ from</p> -->|<p>Forked by ${{ github.repository_owner }} from</p>|g" "$page"
+              echo "✅ Customized $page for ${{ github.repository_owner }}"
+            fi
+          done
 
       - name: Download latest release firmware (.bin files)
         run: |
@@ -127,13 +158,13 @@ jobs:
           echo "  HTML files: $(find docs -name '*.html' | wc -l)"
 
       - name: Build documentation
-        run: mkdocs build
+        run: mkdocs build --strict
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./site
 
@@ -146,4 +177,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

@@ -61,7 +61,7 @@
   },
   {
     "name": "Volume Page",
-    "define": "VOLUME_PAGE", "type": "boolean", "optional": true, "default": false
+    "define": "VOLUME_PAGE", "type": "boolean", "optional": true, "default": true
   },
   {
     "name": "Weather Metric",

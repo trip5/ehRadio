@@ -64,10 +64,26 @@ void DspCore::initDisplay() {
 void DspCore::clearDsp(bool black){ fillScreen(TFT_BG); }
 void DspCore::flip(){
 #if DSP_MODEL==DSP_SH1107
-  setRotation(config.store.flipscreen?3:1);
+  #if DSP_WIDTH==DSP_HEIGHT
+    if(ROTATE_90){
+      setRotation(config.store.flipscreen?0:2);
+    }else{
+      setRotation(config.store.flipscreen?3:1);
+    }
+  #else
+    setRotation(config.store.flipscreen?3:1);
+  #endif
 #endif
 #if DSP_MODEL==DSP_SH1106
-  setRotation(config.store.flipscreen?2:0);
+  #if DSP_WIDTH==DSP_HEIGHT
+    if(ROTATE_90){
+      setRotation(config.store.flipscreen?3:1);
+    }else{
+      setRotation(config.store.flipscreen?2:0);
+    }
+  #else
+    setRotation(config.store.flipscreen?2:0);
+  #endif
 #endif
 }
 void DspCore::invert(){ invertDisplay(config.displayIsInverted != DSP_INVERT_QUIRK); }

@@ -11,13 +11,27 @@
 #include "network.h"
 #include "rgbled.h"
 #include "utility.h"
+#include "playlistvalidator.h"
 #include "../locale/dsplocale.h"
+#ifdef USE_SD
+  #include "filemanager.h"
+#endif
 
 #ifdef USE_ES8311
   #include "../libraries/ES8311_Audio/es8311.h"
 #endif
 
-#define NETWORK_TASK_STACK_BYTES (NETWORK_TASK_STACK_SIZE * 1024)
+static constexpr uint32_t PLQ_SEND_DELAY = 100; // ms; xQueueSend timeout in player.sendCommand()
+static constexpr uint32_t PLQ_CRITICAL_WAIT = 500; // ms; how long a queued COMMAND keeps trying a full queue
+
+// A URL that connects and then never produces audio is not a verdict, so it may retry - but only this many times.
+// STREAM_SETTLE_MS of audio with bytes in the ring is what proves an attempt was not the silent kind.
+static constexpr uint8_t  STREAM_START_MAX_ATTEMPTS = 3;
+static constexpr uint32_t STREAM_SETTLE_MS = 10000;
+// Nothing else notices a connection that is never closed and never delivers: the libraries' only watchdog
+// (streamDetection) runs after the first audio byte, so this deadline is what turns a silent endpoint into a
+// stopped attempt the capped ladder can act on.
+static constexpr uint32_t STREAM_START_DEADLINE_MS = 30000;
 
 Player player;
 QueueHandle_t playerQueue;
@@ -49,6 +63,7 @@ void Player::init() {
     setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT, I2S_DIN, I2S_MCLK);
   #else
     // SPI.begin(); // started in config.init()
+    if (VS_PATCH_ENABLE) display.putRequest(BOOTVSPATCH);
     if (VS1053_RST>0) ResetChip();
     begin(); // chip query + patch load now handled inside begin()
   #endif
@@ -79,11 +94,28 @@ void Player::init() {
   SERIALLOG("done");
 }
 
+// Two classes, because losing one of them is much worse than losing the other.  The periodic ticks (PR_CHECKSD,
+// PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a queue that is even nearly full may refuse
+// them - the field logged exactly that ("playerQueue overflow, dropped cmd=7") on a whole-card delete, and the fix then
+// was to drain the queue more often.  Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP,
+// PR_PREV, PR_NEXT, PR_TOGGLE, PR_VOL, PR_BURL): losing one eats a user's Next, or leaves a queued PR_STOP behind a
+// later PR_PLAY, so those wait for room rather than being dropped.  See plans/big-text-title2-weather-overlap.md.
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
-  if (xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) != pdTRUE) {
-    FUNCTIONLOG("Queue", "playerQueue overflow, dropped cmd=%d", request.type);
+  const bool tick = (request.type == PR_CHECKSD || request.type == PR_VUTONUS);
+  // A tick never takes a slot a command might need: one free slot is kept back for exactly that.  With the ticks out of
+  // the way the queue can only fill with commands, which is why the wait below is the rare path and not a stall risk.
+  if (tick && uxQueueSpacesAvailable(playerQueue) <= 1) {
+    FUNCTIONLOG("Queue", "playerQueue nearly full, tick cmd=%d skipped", request.type);
+    return;
   }
+  bool sent = xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) == pdTRUE;
+  const uint32_t waitFrom = millis();
+  while (!sent && !tick && (millis() - waitFrom) < PLQ_CRITICAL_WAIT) {
+    delay(1);
+    sent = xQueueSend(playerQueue, &request, pdMS_TO_TICKS(PLQ_SEND_DELAY)) == pdTRUE;
+  }
+  if (!sent) FUNCTIONLOG("Queue", "playerQueue overflow, dropped cmd=%d", request.type);
 }
 
 void Player::resetQueue() {
@@ -94,9 +126,33 @@ void Player::stopSync() {
   _stop();  // synchronous stop — closes the audio file so SD can be unmounted safely
 }
 
+// Close the audio stream without _stop()'s side effects (a "[stopped]" title and client notifications).
+// The playlist validator drives the audio directly and must not churn the title between stations.
+void Player::stopStream() {
+  stopSong();
+}
+
 void Player::stopInfo() {
   //telnet.info();
   netserver.requestOnChange(MODE, 0);
+}
+
+// Lives here because this file already owns the display locale: duplicating dsplocale.h into another
+// translation unit embeds a second copy of every locale table, which costs tens of KB of flash.
+void Player::setReady() {
+  setError("");
+  #ifdef USE_SD
+    if (network.status == SDOFFLINE && !sdman.ready) { config.setTitle(l10n(L10N_MSG_NO_SD_CARD)); return; }
+  #endif
+  if (config.station.url[0] != '\0') config.setTitle(l10n(L10N_MSG_READY));
+}
+
+bool Player::isConnecting() {
+  return strcmp_P(config.station.title, l10n(L10N_MSG_CONNECT)) == 0;
+}
+
+const char* Player::validatingLabel() {
+  return l10n(L10N_LBL_VALIDATING);
 }
 
 void Player::setError(const char *e) {
@@ -107,6 +163,17 @@ void Player::setError(const char *e) {
   }
 }
 
+// The host answered 404/410: the URL is gone, so the ladder would only replay a guaranteed failure.
+// Cancel any running ladder and let the arm gate stop instead of re-arming.
+void Player::noteFatalStream() {
+  _fatalStream = true;
+  network.lostPlaying = false;  // a dead URL is not a resume IOU; also stops ticks() re-spawning the ladder
+  network.cancelStreamRetry();
+  char errbuf[STATION_FIELD_LENGTH];
+  snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
+  setError(errbuf);
+}
+
 void Player::_stop(bool alreadyStopped) {
   log_i("%s called", __func__);
   if (config.getMode()==PM_SDCARD && !alreadyStopped) config.sdResumePos = player.getFilePos();
@@ -114,7 +181,11 @@ void Player::_stop(bool alreadyStopped) {
   _playingStationId = 0;
   setOutputPins(false);
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
-  if (!hasError()) config.setTitle((display.mode()==LOST || display.mode()==UPDATING)?"":l10n(L10N_MSG_STOPPED));
+  // An empty url means the station table was deliberately emptied - an empty card, or a playlist with nothing in
+  // it - and config.setTitle("") was just written for exactly that reason.  Announcing "[stopped]" over it is what
+  // kept a title line alive on a card with nothing to play.
+  const bool noStation = (config.station.url[0] == '\0');
+  if (!hasError() && !noStation) config.setTitle((display.mode()==LOST || display.mode()==UPDATING)?"":l10n(L10N_MSG_STOPPED));
   config.station.bitrate = 0;
   config.setBitrateFormat(BF_UNKNOWN);
   netserver.requestOnChange(BITRATE, 0);
@@ -149,11 +220,17 @@ void Player::loop() {
   playerRequestParams_t requestP;
   if (xQueueReceive(playerQueue, &requestP, isRunning()?PL_QUEUE_TICKS:PL_QUEUE_TICKS_ST)) {
     switch (requestP.type) {
-      case PR_STOP: _stop(); break;
+      case PR_STOP: _clearMute(); _stop(); break;
       case PR_PLAY: {
         if (requestP.payload>0) {
           config.setLastStation((uint16_t)requestP.payload);
         }
+        // Manual next/prev/playlist pick/station selection clears mute; the EOF auto-advance keeps it.
+        if (!autoAdvance) _clearMute();
+        // Re-derived on every PR_PLAY, which is the only call site of _play(): an EOF advance must not wake the panel,
+        // restart its countdown or force a mode change, because none of that was the user's doing.
+        _autoAdvancePlay = autoAdvance;
+        autoAdvance = false;
         _play((uint16_t)abs(requestP.payload)); 
         break;
       }
@@ -162,6 +239,7 @@ void Player::loop() {
         break;
       }
       case PR_VOL: {
+        _clearMute();   // explicit volume change is a user action: clear mute
         config.setVolume(requestP.payload);
         config.saveValueButWait(&config.store.volume, (uint8_t)requestP.payload, 3000);
         uint8_t i2sVol = volToI2S(requestP.payload);
@@ -173,10 +251,24 @@ void Player::loop() {
       }
       #ifdef USE_SD
         case PR_CHECKSD: {
-          if (config.getMode()==PM_SDCARD) {
-            if (!sdman.cardPresent()) {
-              sdman.stop();
-              config.changeMode(PM_WEB);
+          // Debounced: one failed raw read is a busy card, not a removal, and acting on it dropped the mode to web
+          // right after the SD File Manager closed on a freshly remounted card.
+          if (config.getMode()==PM_SDCARD && !sdman.cardPresentStable()) {
+            // The probe shares the bus with the file being read, so three misses mean "busy" as easily as "gone" -
+            // and unmounting under an open handle strands the audio library with no way to report it.  Close the
+            // file first, then ask once more with nothing reading the card.
+            FUNCTIONLOG("SD", "card probe failed %u times - stopping the file before the verdict", (unsigned)sdman.cardGoneStrikes());
+            stopSync();
+            vTaskDelay(pdMS_TO_TICKS(50));  // let the card finish the block the closed read left in flight
+            if (sdman.cardPresent()) {
+              FUNCTIONLOG("SD", "card answers again - resuming the track");
+              sendCommand({PR_PLAY, config.lastStation()});
+            } else if (network.status == SDOFFLINE) {
+              sdman.stop();  // changeMode() refuses to act offline, so this mode does it here
+              display.putRequest(NEWMODE, PLAYER);
+              setReady();
+            } else {
+              config.changeMode(PM_WEB);  // stops (already stopped), unmounts, re-indexes
             }
           }
           break;
@@ -194,19 +286,126 @@ void Player::loop() {
     }
   }
   Audio::loop();
-  if (!isRunning() && _status==PLAYING) {
-    // Stream died unexpectedly - trigger reconnection if WiFi is still up
-    if (config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
-      FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
-      network.lostPlaying = true;
-      // Launch retry task if not already running
-      if (streamRetryTaskHandle == NULL) {
-        xTaskCreatePinnedToCore(retryStreamConnection, "streamRetry", NETWORK_TASK_STACK_BYTES, NULL, NET_TASK_PRIORITY, &streamRetryTaskHandle, NETWORK_CORE);
+  audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
+
+  // The audio library gives up on a URL exactly once and records why. A refusal is a STATION that will not play, not
+  // a system fault: no LOST page and no fatal latch. The library has already stopped the stream, so the arm gate below
+  // counts the attempt like any other and the cap decides when to give up - handle-unsupported-unrecognized.md §16.1.
+  // The verdict is held until the next connection clears it, hence the seen-guard: act once, not once per tick.
+  {
+    const uint8_t why = refuseReason();
+    if (why == STREAM_REFUSE_NONE) {
+      _verdictSeen = STREAM_REFUSE_NONE;
+    } else if (why != _verdictSeen) {
+      _verdictSeen = why;
+      // The playlist validator probes URLs on purpose, so a refusal here is its finding, not a station error.
+      if (playlistValidator.active()) {
+        ;  // consumed: never acted on later, when the validator has moved on
+      } else {
+        // A permanent verdict was reached by reading the FIRST answer, so a retry cannot change it: one attempt, the
+        // message, no ladder. NO_HEAD stays a failed attempt - it is the genuinely ambiguous case (§12.5, §17.1).
+        if (why == STREAM_REFUSE_NO_HEAD) {
+          FUNCTIONLOG("Player", "stream produced no usable head - counted as a failed attempt");
+        } else {
+          noteFatalStream();                  // the message and no re-arm; the page stays where the user is
+          FUNCTIONLOG("Player", "stream refused - not retried");
+        }
+        radioBrowserCancelClick();   // nothing played, so nothing is owed to the station directory (§16.2)
+      }
+    }
+  }
+
+  #if defined(USE_AUDIO_VS1053)
+    // A decoder that answers 0x0000 to every register read is unpowered, held in reset, or has lost MISO.  No software
+    // reset can reach it: softReset() is what begin() already does, and RST is not wired on these modules.  So stop,
+    // instead of walking the playlist at five seconds a track.
+    if (!_decoderDead && chipDeadStrikes() >= VS_CHIP_DEAD_STRIKES) {
+      _decoderDead = true;
+      sendCommand({PR_STOP, 0});
+      noteFatalStream();                     // no ladder, and the arm gate must not re-arm
+      setError("decoder not responding");    // sets the title and logs the reason
+      FUNCTIONLOG("Player", "decoder unresponsive: %u stalled feeds with SCI_MODE 0x0000 - LOST", (unsigned)chipDeadStrikes());
+      display.putRequest(NEWMODE, LOST);
+    }
+  #endif
+
+  #ifdef USE_SD
+    // A card file that stops feeding prints no audio line at all, so this heartbeat is the record of when it stopped.
+    // Re-armed on every entry, which makes the first line of a play land immediately.
+    if (SD_PLAY_TRACE_MS > 0 && _status==PLAYING && isRunning() && config.getMode()==PM_SDCARD) {
+      const uint32_t now = millis();
+      if (_traceNextMs == 0 || (int32_t)(now - _traceNextMs) >= 0) {
+        _traceNextMs = now + SD_PLAY_TRACE_MS;
+        FUNCTIONLOG("SD", "play pos %u buffer %u card %u/%u", (unsigned)getFilePos(), (unsigned)inBufferFilled(),
+            (unsigned)sdman.ready, (unsigned)sdman.cardGoneStrikes());
+      }
+    } else {
+      _traceNextMs = 0;
+    }
+  #endif
+
+  // Clear the "connecting" placeholder on player state
+  if (isRunning() && isConnecting()) {
+    config.setTitle("");
+  }
+
+  // Audio in the ring, for a while, is what makes an attempt a real one. A silent endpoint never gets past a few
+  // trickled bytes, never settles, and so never earns back the retry budget.
+  if (_status == PLAYING && isRunning() && inBufferFilled() > 4096) {
+    _connectMs = 0;
+    if (_playingSince == 0) _playingSince = millis();
+    else if (millis() - _playingSince >= STREAM_SETTLE_MS) _startAttempts = 0;
+  } else {
+    _playingSince = 0;
+    // The validator drives its own connects and owns the indicator, so the deadline stays out of its way.
+    if (_status == PLAYING && isRunning() && config.getMode() == PM_WEB && !playlistValidator.active()) {
+      if (_connectMs == 0) _connectMs = millis();
+      else if (millis() - _connectMs >= STREAM_START_DEADLINE_MS) {
+        _connectMs = 0;
+        FUNCTIONLOG("Player", "no data in %u ms after connect - stopping this attempt", (unsigned)STREAM_START_DEADLINE_MS);
+        stopSong();   // the same transition a dropped stream makes, so the capped arm gate below decides
+      }
+    } else {
+      _connectMs = 0;
+    }
+  }
+
+  if (!playlistValidator.active() && !isRunning() && _status==PLAYING) {
+    // Name the state whenever the engine goes down under a live PLAYING status.  A clean end of track passes through
+    // here too - it clears m_f_running inside Audio::loop() a few statements earlier - so an in-flight EOF advance is
+    // not a fault and gets no line of its own; the two [Audio.info] lines already record it.  Anything else is news.
+    if (!autoAdvance) {
+      #ifdef USE_SD
+        FUNCTIONLOG("Player", "audio stopped while PLAYING: pos %u dur %u buffer %u mode %u card %u/%u",
+            (unsigned)getFilePos(), (unsigned)getAudioFileDuration(), (unsigned)inBufferFilled(),
+            (unsigned)config.getMode(), (unsigned)sdman.ready, (unsigned)sdman.cardGoneStrikes());
+      #else
+        FUNCTIONLOG("Player", "audio stopped while PLAYING: pos %u dur %u buffer %u mode %u",
+            (unsigned)getFilePos(), (unsigned)getAudioFileDuration(), (unsigned)inBufferFilled(),
+            (unsigned)config.getMode());
+      #endif
+    }
+    // Stream died unexpectedly - trigger reconnection if WiFi is still up and this is not a dead URL.
+    // The attempts are capped: a station that answers and says nothing would otherwise loop forever, and the log
+    // shows each cycle also costs a byurl lookup and a pending click.
+    if (!_fatalStream && config.getMode() == PM_WEB && WiFi.status() == WL_CONNECTED && !network.lostPlaying) {
+      if (_startAttempts >= STREAM_START_MAX_ATTEMPTS) {
+        noteFatalStream();                   // the message and no re-arm; the page stays where the user is
+        FUNCTIONLOG("Player", "no audio after %u attempts - giving up on this station", (unsigned)_startAttempts);
+      } else {
+        _startAttempts++;
+        FUNCTIONLOG("Player", "Stream stopped unexpectedly. Starting reconnection attempts...");
+        network.lostPlaying = true;
+        // Launch retry task if not already running.  spawnStreamRetry() checks the create result, so a spawn that
+        // failed on a fragmented heap cannot leave lostPlaying set with no task behind it - which used to close
+        // this gate until a reboot (nothing else clears the flag except a fresh WiFi reconnect event).
+        spawnStreamRetry();
       }
     }
     _stop(true);
   }
   if (strlen(burl) > 0) browseUrl();
+  playlistValidator.loop();
 }
 
 bool Player::queueResolvedUrl(const char* url) {
@@ -229,6 +428,7 @@ bool Player::resumeLastWebSource() {
   if (config.store.lastStationUrl[0] != '\0') {
     uint16_t foundIdx = utility.findStationByUrl(config.store.lastStationUrl);
     if (foundIdx > 0) {
+      _ladderResume = true;   // the ladder's own resume must not reset the attempt budget (§16.3)
       sendCommand({PR_PLAY, foundIdx});
       return true;
     }
@@ -238,6 +438,7 @@ bool Player::resumeLastWebSource() {
   uint16_t stationId = config.lastStation();
   if (stationId == 0) return false;
 
+  _ladderResume = true;
   sendCommand({PR_PLAY, stationId});
   return true;
 }
@@ -250,16 +451,53 @@ void Player::setOutputPins(bool isPlaying) {
 
 void Player::_play(uint16_t stationId) {
   log_i("%s called, stationId=%d", __func__, stationId);
+  #ifdef USE_SD
+    // Nothing new starts while the SD File Manager is open
+    if (filemanager.active()) {
+      FUNCTIONLOG("SDFileManager", "play refused, SD File Manager is open");
+      return;
+    }
+    // ...or while its close-time re-index is walking the card.  The walk is writing the derived pair, and a play
+    // reads the same card underneath it - that contention is what the presence probe reports as a removed card, and
+    // it is also what used to queue NEWMODE PLAYER over the scan screen.
+    if (filemanager.rebuilding()) {
+      FUNCTIONLOG("SDFileManager", "play refused, the SD index is being rebuilt");
+      return;
+    }
+  #endif
   if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
+  #ifdef USE_SD
+    if(config.getMode()==PM_SDCARD && config.store.sdshuffle && stationId > 0 && !_shuffleWalkOwns) {
+      _shuffleRestart(stationId);  // Selkecting track manually resets the shuffle
+    }
+    _shuffleWalkOwns = false;
+  #endif
+  // A new track is starting: blank the screensaver's info line before anything about it is published.  This has to
+  // be here, AHEAD of the title write further down, because that write is the first thing that repaints the line -
+  // and over the gap nothing is playing (player.isRunning() is the audio engine's flag, and it let go at EOF), so
+  // the line would be repainted with the WEATHER.  The handler gates on config.isScreensaver, which also excludes a
+  // manual skip: screenSaverExit() queues its mode change before this request, so the device is awake by then.
+  // See plans/screensaver-line-hold.md.
+  display.putRequest(SSHOLD);
   setError("");
+  _fatalStream = false;  // a new station clears a previous permanent-error stop
+  _verdictSeen = STREAM_REFUSE_NONE;  // ...and the library verdict that went with it
+  _decoderDead = false;  // ...including a dead decoder: this play is the retry
+  if (_ladderResume) {
+    _ladderResume = false;   // a ladder resume is not a user play: the attempt budget carries over
+  } else {
+    _startAttempts = 0;      // a user play earns the station the full retry budget again
+  }
+  _playingSince = 0;
+  _connectMs = 0;
   setDefaults();
+  audioHandlers.resetMetadata();  // a new station: no half of the previous one may pair with this one's
   remoteStationName = false;
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
-  config.setDspOn(1);
+  if (!_autoAdvancePlay) config.setDspOn(1);   // setDspOn(true) wakes a blanked panel
   config.vuThreshold = 0;
   //display.putRequest(PSTOP);
-  config.screensaverTicks=SCREENSAVERSTARTUPDELAY;
-  config.screensaverPlayingTicks=SCREENSAVERSTARTUPDELAY;
+  if (!_autoAdvancePlay) config.resetScreensaverTimers(SCREENSAVERSTARTUPDELAY);
   if (config.getMode()!=PM_SDCARD) {
     display.putRequest(PSTOP);
   }
@@ -269,41 +507,49 @@ void Player::_play(uint16_t stationId) {
   config.setTitle(config.getMode()==PM_WEB?l10n(L10N_MSG_CONNECT):"[next track]");
   config.station.bitrate=0;
   config.setBitrateFormat(BF_UNKNOWN);
-  
+
   _loadVol(config.store.volume);
   display.putRequest(DBITRATE);
   display.putRequest(NEWSTATION);
   netserver.requestOnChange(STATION, 0);
   bool isConnected = false;
   if (config.getMode()==PM_SDCARD && SD_CS!=255) {
-    uint32_t _t_cfs = millis();
+    // Belt for the station table: a card-mode play with no file to point at must never reach the audio library,
+    // which would try to open the mount point as a track and report a garbage format name.
+    if (config.station.url[0] == '\0') {
+      FUNCTIONLOG("SD", "nothing to play: station %u has no file (empty card?)", (unsigned)stationId);
+      return;
+    }
+    #if (SD_PLAY_TRACE_MS > 0)
+      uint32_t _t_cfs = millis();
+    #endif
     isConnected=connecttoFS(sdman,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min);
-    FUNCTIONLOG("SD", "connecttoFS: %lums", millis() - _t_cfs);
+    #if (SD_PLAY_TRACE_MS > 0)
+      FUNCTIONLOG("SD", "connecttoFS: %lums", millis() - _t_cfs);
+    #endif
   } else {
     config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB));
   }
   if (config.getMode()==PM_WEB) {
     uint32_t _t_cth = millis();
     isConnected=connecttohost(config.station.url);
-    FUNCTIONLOG("SD", "connecttohost: %lums", millis() - _t_cth);
-    // Note: Removed blind retry - if connection fails (timeout/404/refused), retrying 1.5s later
-    // won't help and just adds 20+ seconds of delay. Stream reconnection is now handled by the
-    // retryStreamConnection task which monitors for unexpected disconnects during playback.
+    lastConnectMs = millis() - _t_cth;
+    FUNCTIONLOG("Player", "connecttohost: %lums", (unsigned long)lastConnectMs);
   }
   if (isConnected) {
-  //if (config.store.play_mode==PM_WEB?connecttohost(config.station.url):connecttoFS(SD,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min)) {
     _status = PLAYING;
     _playingStationId = stationId;
+    _loadVol(config.store.volume);   // re-apply volume (respects _muted) after connect* — setDefaults() inside it must not win
     if (config.getMode()==PM_SDCARD) {
       config.sdResumePos = 0;
-      config.saveValue(&config.store.lastSdStation, stationId);
+      config.saveValueButWait(&config.store.lastSdStation, stationId, 3000);  // an NVS write here stalls the loop
     } else {
       config.saveLastStationUrl(config.station.url);
     }
     //config.setTitle("");
     netserver.requestOnChange(MODE, 0);
     setOutputPins(true);
-    display.putRequest(NEWMODE, PLAYER);
+    if (!_autoAdvancePlay) display.putRequest(NEWMODE, PLAYER);   // NEWMODE PLAYER is what leaves the screensaver
     display.putRequest(PSTART);
     #ifdef RADIO_BROWSER_SEND_CLICKS
       if (config.getMode()==PM_WEB && !network.lostPlaying) radioBrowserSendClick(config.station.url);
@@ -312,22 +558,25 @@ void Player::_play(uint16_t stationId) {
     rgbled.playing();
     backlightControls.restart();
   } else {
-    // Self-healing: if SD file vanished, force re-index so next/prev uses fresh index
+    // Self-healing: if the SD file vanished, the index no longer describes the card, so a re-index is owed.
     #ifdef USE_SD
       if (config.getMode()==PM_SDCARD && !sdman.exists(config.station.url)) {
-        FUNCTIONLOG("SD", "File not found. Re-indexing.");
-        display.putRequest(PSTOP);                   // clear playback screen
-        display.putRequest(NEWMODE, SDCHANGE);       // show on-screen counter
-        config.initSDPlaylist(true);
-        display.putRequest(NEWMODE, PLAYER);         // restore player mode
-        display.putRequest(NEWSTATION);
+        // This used to walk the card right here, on the player task, with no scan screen to show for it - and it
+        // could do it beside the File Manager's own close-time walk, writing the same temp pair.  Now it only marks
+        // the card as changed: FileManager::loop() pays the debt once, on its one visible path.
+        FUNCTIONLOG("SD", "File not found. A re-index is owed.");
+        filemanager.markCardChanged();
       }
     #endif
     ERRORLOG("Error connecting to %s", config.station.url);
     char errbuf[STATION_FIELD_LENGTH];
     snprintf_P(errbuf, sizeof(errbuf), l10n(L10N_MSG_CONNECT_ERROR), config.station.url);
     player.setError(errbuf);
+    _clearMute();
     _stop(true);
+    if (config.getMode() == PM_WEB && !network.lostPlaying) {
+      network.noteConnectFailure(config.station.url);
+    }
   };
 }
 
@@ -339,15 +588,23 @@ void Player::browseUrl() {
 
 void Player::playUrl(const char* url) {
   setError("");
+  _fatalStream = false;
+  _verdictSeen = STREAM_REFUSE_NONE;
+  _clearMute();
   remoteStationName = true;
+  audioHandlers.resetMetadata();
   if (audioHandlers.clearArtwork()) netserver.requestOnChange(ARTWORK, 0);
   config.setDspOn(1);
   resumeAfterUrl = _status==PLAYING;
   display.putRequest(PSTOP);
   setOutputPins(false);
   config.setTitle(l10n(L10N_MSG_CONNECT));
-  if (connecttohost(url)) {
+  uint32_t _t_ctu = millis();
+  const bool _urlConnected = connecttohost(url);
+  lastConnectMs = millis() - _t_ctu;
+  if (_urlConnected) {
     _status = PLAYING;
+    _loadVol(config.store.volume);
     config.saveLastStationUrl(url);
     config.setTitle("");
     netserver.requestOnChange(MODE, 0);
@@ -361,44 +618,127 @@ void Player::playUrl(const char* url) {
   } else {
     ERRORLOG("Error connecting to %s", url);
     SET_PLAY_ERROR("Error connecting to %s", url);
+    _clearMute();
     _stop(true);
+    if (!network.lostPlaying) {
+      network.noteConnectFailure(url);
+    }
   }
 }
 
+// The shuffle walk:
+// A Feistel network shuffle gives predictable shuffle without storing anything: the k-th track of a pass is computed from
+// k and a per-pass key, and outputs >= n are skipped ("cycle-walking").  The domain is the smallest EVEN-bit power of two >= n,
+// so fewer than half of all values are skipped and a step costs two checks on average.  Being a permutation it is invertible.
+
+// The walk's raw value for counter x, before cycle-walking.  Four balanced Feistel rounds round the key.
+uint32_t Player::_shuffleEnc(uint32_t x, uint32_t bits) {
+    const uint32_t half = bits / 2;
+    const uint32_t mask = (1ul << half) - 1ul;
+    uint32_t l = (x >> half) & mask;
+    uint32_t r = x & mask;
+    for(uint32_t round = 0; round < 4; round++) {
+        uint32_t f = (r ^ _shuffleKey ^ (0x9E3779B9ul * (round + 1ul))) * 2654435761ul;
+        f ^= f >> 16;
+        f &= mask;
+        uint32_t t = l ^ f;
+        l = r;
+        r = t;
+    }
+    return ((l & mask) << half) | (r & mask);
+}
+
+// The first id this key would produce, without advancing the walk; -1 if the walk is degenerate.
+int32_t Player::_shuffleFirst() {
+    for(uint32_t c = 0; c < 4096; c++) {
+        uint32_t v = _shuffleEnc(c, _shuffleBits);
+        if(v < _shuffleN) return (int32_t)(v + 1);
+    }
+    return -1;
+}
+
+// Start a pass over the playlist.  Re-key until the pass does not OPEN with the track that just played, so the boundary
+// between two passes cannot repeat a track either - the walk itself stays a permutation, nothing is dropped.
+void Player::_shuffleStartPass(uint16_t avoidId) {
+    for(uint8_t attempt = 0; attempt < 8; attempt++) {
+        _shuffleKey = ((uint32_t)random(0x7FFFFFFF) << 1) ^ (uint32_t)micros() ^ ((uint32_t)millis() << 12);
+        int32_t first = _shuffleFirst();
+        if(first < 0 || (uint16_t)first != avoidId) break;
+    }
+    _shuffleRaw = 0;
+    _shufflePass = 0;
+    FUNCTIONLOG("Player", "shuffle pass over %u tracks", (unsigned)_shuffleN);
+}
+
+void Player::_shuffleRestart(uint16_t avoidId) {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return;
+    _shuffleBits = 0;
+    while(_shuffleBits < 32 && (1ul << _shuffleBits) < n) _shuffleBits++;
+    if(_shuffleBits & 1) _shuffleBits++;  // a balanced Feistel split needs an even width
+    _shuffleN = n;
+    _shuffleStartPass(avoidId);
+}
+
+uint16_t Player::_shuffleNext() {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return n ? 1 : 0;  // nothing to shuffle
+    if(_shuffleN != n) _shuffleRestart(config.lastStation());  // first shuffled next(), or the playlist changed
+    if(_shufflePass >= _shuffleN) _shuffleStartPass(config.lastStation());  // that pass is complete
+    for(uint16_t guard = 0; guard < 4096; guard++) {
+        uint32_t v = _shuffleEnc(_shuffleRaw++, _shuffleBits);
+        if(v < _shuffleN) { _shufflePass++; return (uint16_t)(v + 1); }
+    }
+    return (uint16_t)random(1, (long)n + 1);  // cannot happen: keep playing rather than stop
+}
+
+uint16_t Player::_shufflePrev() {
+    uint16_t n = utility.playlistLength();
+    if(n < 2) return n ? 1 : 0;
+    if(_shuffleN != n) return 0;  // no walk for this playlist yet, so there is no "back"
+    uint32_t c = (_shuffleRaw > 0) ? _shuffleRaw - 1 : 0;   // the counter that produced the current track
+    uint16_t guard = 0;
+    while(c > 0 && guard++ < 4096) {
+        c--;
+        uint32_t v = _shuffleEnc(c, _shuffleBits);
+        if(v < _shuffleN) {
+            _shuffleRaw = c + 1;  // a following next() reproduces the track we came from
+            if(_shufflePass) _shufflePass--;
+            return (uint16_t)(v + 1);
+        }
+    }
+    return 0;  // this is the first track of the pass
+}
+
 void Player::prev() {
-  if (streamRetryTaskHandle != NULL) {
-    network.lostPlaying = false;
-    vTaskDelete(streamRetryTaskHandle);
-    streamRetryTaskHandle = NULL;
-  }
-  uint16_t lastStation = config.lastStation();
+  network.cancelStreamRetry();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
+    uint16_t lastStation = config.lastStation();
     if (lastStation == 1) config.lastStation(utility.playlistLength()); else config.lastStation(lastStation-1);
+  } else {
+    uint16_t id = _shufflePrev();
+    if (id) { _shuffleWalkOwns = true; config.lastStation(id); }  // 0 = nothing behind this one: it restarts the track
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }
 
 void Player::next() {
-  if (streamRetryTaskHandle != NULL) {
-    network.lostPlaying = false;
-    vTaskDelete(streamRetryTaskHandle);
-    streamRetryTaskHandle = NULL;
-  }
-  uint16_t lastStation = config.lastStation();
+  // A dead decoder ends the playlist walk.  Only the automatic advance is refused: a hand-picked track is still the
+  // user's attempt at a retry, and it clears the latch in _play().
+  if (_decoderDead && autoAdvance) { autoAdvance = false; return; }
+  network.cancelStreamRetry();
   if (config.getMode()==PM_WEB || !config.store.sdshuffle) {
+    uint16_t lastStation = config.lastStation();
     if (lastStation == utility.playlistLength()) config.lastStation(1); else config.lastStation(lastStation+1);
   } else {
-    config.lastStation(random(1, utility.playlistLength()));
+    uint16_t id = _shuffleNext();
+    if (id) { _shuffleWalkOwns = true; config.lastStation(id); }
   }
   sendCommand({PR_PLAY, config.lastStation()});
 }
 
 void Player::toggle() {
-  if (streamRetryTaskHandle != NULL) {
-    network.lostPlaying = false;
-    vTaskDelete(streamRetryTaskHandle);
-    streamRetryTaskHandle = NULL;
-  }
+  network.cancelStreamRetry();
   if (_status == PLAYING) {
     sendCommand({PR_STOP, 0});
   } else {
@@ -435,7 +775,7 @@ uint8_t Player::volToI2S(uint8_t volume) {
     float vnorm = (float)volume / (float)maxIn; // 0..1
     if (vnorm < 0.0f) vnorm = 0.0f;
     if (vnorm > 1.0f) vnorm = 1.0f;
-    /* Apply gamma curve (sqrt) to make low volumes more audible and top end less aggressive */
+    // Apply a gamma curve (sqrt) to make low volumes more audible and the top end less aggressive
     const float gamma = 0.5f;
     float vout = powf(vnorm, gamma);
     int vol = (int)(vout * (float)VOLUME_SCALE + 0.5f);
@@ -451,9 +791,32 @@ uint8_t Player::volToI2S(uint8_t volume) {
 }
 
 void Player::_loadVol(uint8_t volume) {
-  setVolume(volToI2S(volume));
+  uint8_t v = _muted ? 0 : volToI2S(volume);
+  setVolume(v);
+  #ifdef USE_ES8311
+    es.setVolume((uint8_t)map(v, 0, VOLUME_SCALE, 0, 100));
+  #endif
 }
 
 void Player::setVol(uint8_t volume) {
   player.sendCommand({PR_VOL, volume});
+}
+
+void Player::_clearMute() {
+  if (!_muted) return;
+  _muted = false;
+  display.putRequest(DRAWVOL);   // the footer keeps the mute glyph until it is repainted
+}
+
+void Player::mute() {
+  if (!_muted && config.store.volume == 0) return;   // already silent: there is nothing to mute
+  if (_muted) {
+    _muted = false;
+    _loadVol(_muteVol);
+  } else {
+    _muteVol = config.store.volume;
+    _muted = true;
+    _loadVol(config.store.volume);
+  }
+  display.putRequest(DRAWVOL);   // the footer glyph follows the mute state, not the stored volume
 }

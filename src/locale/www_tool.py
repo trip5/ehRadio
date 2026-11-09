@@ -8,6 +8,9 @@ NOTE:
 USAGE:
     python www_tool.py <locale> [mode] [options]
     python www_tool.py * [mode] [options]
+    python www_tool.py <locale> --merge <file.json> [options]
+    python www_tool.py <locale|*> --newkeys [file.json] [options]
+    python www_tool.py <locale> --extract [file]
 
 TARGET:
     <locale>         One locale → .json file in the www folder (en_US → en_US.json)
@@ -19,28 +22,50 @@ MODES:
     --every, -e      Prompt to review every single key using HTML Found text (detailed proofreading)
     --diff, -d       Only prompt when HTML text differs from JSON (to compare hardcoded)
     --ndiff, -n      Only prompt when HTML text is same as JSON (to fix untranslated text)
+    --merge, -m FILE Merge a partial locale JSON into ONE locale file
+    --extract, -x [FILE]
+                     Print the locale's values for the keys the --newkeys template lists, as a labelled sheet for a
+                     native-speaker check.  With no FILE the sheet goes to the console; with a FILE it is APPENDED
+                     to that file - which is never read back or rewritten, so a www check and a display check can
+                     share one sheet.  Nothing else has a function in this mode.
 
 OPTIONS:
-    --translate, -t  Translate HTML Found text (can't use with --diff)
+    --translate, -t  Translate HTML Found text (can't use with --diff).  An unchanged or failed translation asks
+                     [y]es / [a]lways for this key / [n]o - stop, in --fast; the interactive modes ask yes/no
     --clean, -c      Auto-delete unused keys (no prompt)
     --sort, -s       Auto-sort keys hierarchically at end (no prompt)
-    --create         Auto-create missing locale JSON from en_US.json with empty values
+    --newkeys, -k    Write the keys that are in the source but not yet in the locale(s) into a template file
+                     for a translator to fill in and send back for --merge
+    --key NAME       Work on one key only, across every locale: NAME key must be in HTML/JS files and is written
+                     even where the locale already has it, and no other key is examined
 
 EXAMPLES:
     # Interactive check of one file
     py www_tool.py fr_FR
 
-    # Interactive check of each key with translation (cleaned & sorted file)
-    py www_tool.py * --translate --clean --sort
-
-    # Fast mode WITH translation (auto-translate all missing keys in all files)
-    py www_tool.py * --translate --fast --clean --sort
+    # Fast mode WITH translation (auto-translate all missing keys in all files, put new keys in www_newkeys.json)
+    py www_tool.py * --translate --fast --clean --sort --newkeys
 
     # Diff mode (never uses translation, useful for checking that hard-coded text and locale file are same)
     py www_tool.py en_US --diff
 
     # Ndiff mode (prompt only when text matches - to find/fix untranslated text with translation)
     py www_tool.py de_DE --ndiff --translate --clean --sort
+
+    # Merge a contributor's partial file (only their keys), then tidy the file
+    py www_tool.py ru_RU --merge changes.json --clean --sort
+
+    # Collect every key the locales still lack into a template for the translators
+    py www_tool.py * --newkeys --sort
+
+    # Show what one locale currently says for the recently added keys, to paste into a forum post
+    py www_tool.py ru_RU --extract
+
+    # The same, appended to a sheet beside this script (a display check can follow it into the same file)
+    py www_tool.py ru_RU --extract checknewkeys.txt
+
+    # Redo one key everywhere, after its text in the page changed
+    py www_tool.py * --translate --fast --clean --sort --key msg_sd_manager_closed
 """
 
 import os
@@ -343,13 +368,45 @@ def scan_www_folder(www_path):
     return all_keys
 
 
-def confirm_source_text_use(key, source_text, reason, keep_existing=False):
-    """Ask before writing source text when translation is missing/unchanged."""
+# Keys the user answered "always" for during an automatic translation pass: their source text is used for the rest of
+# the run without asking again.  A run over * asks about the same key once per locale, and an unchanged translation is
+# usually a property of the key itself, so one answer has to cover the whole run.
+_source_text_always = set()
+
+
+def confirm_source_text_use(key, source_text, reason, keep_existing=False, auto_pass=False):
+    """Ask before writing source text when translation is missing or unchanged.
+
+    The automatic pass offers [a]lways, which settles that key for the rest of the run, and treats [n]o as "stop": a
+    translation that keeps failing needs the user, and quietly skipping the key in every remaining locale is the one
+    outcome nobody wants.  The interactive caller keeps the plain yes/no it always had - there [n]o means "not this
+    key", and answering yes hands the key to the normal edit prompt anyway, so stopping would be wrong.
+    """
+    if auto_pass and key in _source_text_always:
+        return True
     print(f"\n⚠ {reason}: {key}")
     print(f"[Source] {source_text}")
-    suffix = "(n keeps JSON)" if keep_existing else "(n skips key)"
-    print(f"Use source text anyway? [y/n] {suffix}: ", end='', flush=True)
-    return input().strip().lower() == 'y'
+    if auto_pass:
+        print("Use source text anyway? [y]es / [a]lways for this key / [n]o - stop and check: ", end='', flush=True)
+    else:
+        suffix = "(n keeps JSON)" if keep_existing else "(n skips key)"
+        print(f"Use source text anyway? [y/n] {suffix}: ", end='', flush=True)
+    answer = input().strip().lower()
+    if auto_pass and answer == 'a':
+        _source_text_always.add(key)
+        print(f"  → always: the source text is used for {key} for the rest of this run")
+        return True
+    if answer == 'y':
+        return True
+    if auto_pass:
+        print(f"\nStopped: no usable translation for {key}.")
+        print("  Two things worth checking before running the command again:")
+        print("    - the key's source text: a string of symbols or punctuation often comes back unchanged, and may")
+        print("      simply need translating by hand;")
+        print("    - the translation service: it may be down or rate-limited, in which case waiting a little helps.")
+        print("  Locales finished before this point are saved; the one in progress is not written.")
+        sys.exit(1)
+    return False
 
 
 def prompt_for_key(key, found_text, json_text=None, filename=None, mode='missing', locale_code=None, use_translate=False):
@@ -548,40 +605,287 @@ def sort_json_data(data):
     return {key: data[key] for key in sorted_keys}
 
 
-def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto_sort, use_translate=False, auto_create=False):
+def load_json_safe(path):
+    """Load JSON, attempting to repair a trailing comma error before giving up."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        if 'trailing comma' in str(e).lower() or 'illegal trailing comma' in str(e).lower():
+            print(f"⚠ Found trailing comma error in JSON file - attempting to fix...")
+            with open(path, 'r', encoding='utf-8') as f:
+                json_text = f.read()
+            fixed_json = re.sub(r',(\s*[}\]])', r'\1', json_text)
+            try:
+                data = json.loads(fixed_json)
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                print(f"✓ Automatically fixed and saved {os.path.basename(path)}")
+                return data
+            except json.JSONDecodeError as e2:
+                print(f"\nError: Could not parse JSON file even after fixing trailing commas")
+                print(f"  {e2}")
+                return None
+        print(f"\nError: Invalid JSON in {path}")
+        print(f"  {e}")
+        return None
+
+
+DEFAULT_NEWKEYS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'www_newkeys.json')
+
+
+def newkeys_www(locale_paths, www_path, out_path, auto_clean, auto_sort):
+    """
+    Write the keys that are in the source but not yet in one or more locale files.
+
+    The result is a template to hand out: key -> current source text, so a translator can see what they are
+    translating, and send the file back for --merge.  Nothing here touches a locale file - a missing key stays
+    missing until someone merges a filled-in template.  With several locales the missing keys are unioned and the
+    template is written once, because a key absent from one locale is almost always absent from the rest.
+
+    An existing template is never rebuilt: keys it already has keep their values, which may be a translator's work
+    in progress, and only the keys it lacks are added.  It lives beside the tools rather than in the locale folders,
+    which both generators glob as locale files.
+    """
+    print(f"\n{'='*60}")
+    print(f"Collecting new keys into {os.path.basename(out_path)}")
+    print(f"{'='*60}")
+
+    print(f"Reading master keys from {www_path}...")
+    found_keys = scan_www_folder(www_path)
+    print(f"Found {len(found_keys)} master keys in HTML/JS files")
+
+    missing = {}   # key -> source text, unioned over every locale given
+    for code, json_path in locale_paths:
+        if not os.path.exists(json_path):
+            print(f"  {code}: file not found, skipped")
+            continue
+        data = load_json_safe(json_path)
+        if data is None:
+            return False
+        gone = [k for k in found_keys if k not in data]
+        print(f"  {code}: {len(gone)} of {len(found_keys)} key(s) missing")
+        for key in gone:
+            missing.setdefault(key, found_keys[key]['text'])
+
+    print(f"\nUnion across {len(locale_paths)} locale(s): {len(missing)} key(s)")
+
+    template = {}
+    if os.path.exists(out_path):
+        template = load_json_safe(out_path)
+        if template is None:
+            return False
+        if not isinstance(template, dict):
+            print(f"Error: {out_path} does not contain a JSON object")
+            return False
+        print(f"Existing template holds {len(template)} key(s); their values are kept as they are")
+
+    added = 0
+    for key in sorted(missing):
+        if key not in template:
+            template[key] = missing[key]
+            added += 1
+    print(f"✓ Template: {added} added, {len(missing) - added} already present")
+
+    # The only thing --clean can mean here: a template key the source no longer knows, left over from an earlier run.
+    if auto_clean:
+        dropped = [k for k in sorted(template) if k not in found_keys]
+        for key in dropped:
+            del template[key]
+        print(f"✓ Auto-deleted {len(dropped)} retired key(s)" if dropped else "✓ Nothing to clean")
+
+    if auto_sort:
+        template = sort_json_data(template)
+        print("✓ Auto-sorted keys hierarchically")
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    temp_path = out_path + '.tmp'
+    with open(temp_path, 'w', encoding='utf-8') as f:
+        json.dump(template, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, out_path)
+    print(f"\n✓ Saved {out_path} ({len(template)} key(s))")
+    print("  Fill it in, send it back, then apply it with:  --merge <file>")
+    return True
+
+
+def extract_keys(json_path, template_path, out_path, label):
+    """
+    Print or append this locale's values for the keys the template lists, as a sheet for a native-speaker check.
+
+    The template is what --newkeys wrote: the keys that were recently added, still holding their SOURCE text.  This
+    mode answers the next question - what does this locale currently say for them - so a translator, or a forum, can
+    check the wording in place.  Keys the locale does not have yet are SKIPPED: there is no value to check, and an
+    empty string would read as a translation of nothing.  The count is reported instead, so a short sheet is never
+    mistaken for the whole template.
+
+    The output is a SHEET rather than a file the tools will read back - a label naming the tool and the locale, then a
+    blank line, then the JSON block: the shape that goes into a forum post.  It is deliberately never read, parsed or
+    rewritten, and with a filename it is only ever APPENDED to, so a www check and a display check can end up in one
+    document.  The block uses the locale files' own formatting (real characters, two-space indent) so it can be edited
+    in place and then clipped by hand into an input file for --merge.
+    """
+    if not os.path.exists(template_path):
+        print(f"Error: template not found: {template_path}")
+        print("       --newkeys writes it, and it holds the keys this mode reads - run that first.")
+        return False
+    if not os.path.exists(json_path):
+        print(f"Error: locale file not found: {json_path}")
+        return False
+
+    template = load_json_safe(template_path)
+    if template is None:
+        return False
+    if not isinstance(template, dict):
+        print(f"Error: {template_path} does not contain a JSON object")
+        return False
+    data = load_json_safe(json_path)
+    if data is None:
+        return False
+
+    # Template order, so the sheet reads in the order the keys were added rather than the locale's own order.
+    picked = {key: data[key] for key in template if key in data}
+    skipped = [key for key in template if key not in data]
+    block = label + "\n\n" + json.dumps(picked, ensure_ascii=False, indent=2) + "\n"
+
+    if out_path is None:
+        print(block)
+    else:
+        # APPEND ONLY.  The file may already hold a display or a www check - or a translator's edits - so it is never
+        # opened for reading, and a block that follows another starts after a blank line.
+        empty = (not os.path.exists(out_path)) or os.path.getsize(out_path) == 0
+        with open(out_path, 'a', encoding='utf-8') as f:
+            if not empty:
+                f.write("\n")
+            f.write(block)
+        print(f"Appended to {out_path} ({len(picked)} key(s))")
+
+    if skipped:
+        print(f"Note: {len(picked)} of {len(template)} template key(s) are in this locale; "
+              f"skipped {', '.join(skipped)}")
+    return True
+
+
+def resolve_merge_path(given, locale_dir):
+    """Find the merge file as given, then inside the locale folder. Returns None when it is nowhere."""
+    if os.path.exists(given):
+        return os.path.abspath(given)
+    candidate = os.path.join(locale_dir, given)
+    if os.path.exists(candidate):
+        return os.path.abspath(candidate)
+    print(f"Error: merge file not found: {given}")
+    print(f"       Also looked in {locale_dir}")
+    return None
+
+
+def merge_partial_file(locale_code, www_path, json_path, merge_path, auto_clean, auto_sort):
+    """
+    Merge a partial locale JSON into one locale file.
+
+    The partial is upserted: the keys it carries are updated, the keys the target lacks are added, and equal values
+    are left alone.  A key the master does not know is skipped and named, not written: a translator working from an
+    older copy of the file will hand back keys that have since been retired, and that is no reason to throw away the
+    rest of their work - while writing such a key is exactly what has to be avoided, since a key nothing else uses
+    would sit here dead and the generators reject extra keys.  Unlike the normal pass this never prompts, so a
+    contributor's file can be merged unattended - clean and sort happen only when they are asked for.
+    """
+    print(f"\n{'='*60}")
+    print(f"Merging into: {locale_code}.json")
+    print(f"{'='*60}")
+
+    if not os.path.exists(json_path):
+        print(f"Error: JSON file not found at {json_path}")
+        print("       A merge fills a locale that is already there: copy the master, or another locale, to this")
+        print("       name and translate it first, or name a locale that exists.")
+        return False
+
+    partial = load_json_safe(merge_path)
+    if partial is None:
+        return False
+    if not isinstance(partial, dict):
+        print(f"Error: {merge_path} does not contain a JSON object")
+        return False
+
+    locale_data = load_json_safe(json_path)
+    if locale_data is None:
+        return False
+
+    print(f"Reading master keys from {www_path}...")
+    found_keys = scan_www_folder(www_path)
+    print(f"Found {len(found_keys)} master keys in HTML/JS files")
+    print(f"Loaded {len(locale_data)} keys from {locale_code}.json")
+    print(f"Loaded {len(partial)} keys from {os.path.basename(merge_path)}")
+
+    # locale_code follows the filename, which make_dsplocale.py validates, so a partial may not overwrite it.
+    if 'locale_code' in partial and partial['locale_code'] != locale_code:
+        print(f"  Ignoring locale_code '{partial['locale_code']}' from the merge file: the filename is the authority")
+
+    unknown = sorted(k for k in partial
+                     if k not in found_keys and k not in ('locale_code', 'locale', 'locale_en'))
+    if unknown:
+        print(f"\n{'='*60}")
+        print(f"Ignored: {len(unknown)} key(s) in {os.path.basename(merge_path)} are not in the master key set")
+        print(f"{'='*60}")
+        for key in unknown:
+            print(f"  {key}")
+        print("\nEither the key name is wrong, the key is old, or is new and belongs in the source and en_US.json first.")
+        print("Everything else in the file is merged as usual.")
+        for key in unknown:
+            del partial[key]
+
+    added = updated = unchanged = 0
+    for key, value in partial.items():
+        if key == 'locale_code':
+            continue
+        if key not in locale_data:
+            added += 1
+        elif locale_data[key] != value:
+            updated += 1
+        else:
+            unchanged += 1
+        locale_data[key] = value
+
+    print(f"\n✓ Merged {added + updated + unchanged} key(s): {added} added, {updated} updated, {unchanged} unchanged")
+
+    # What the file still owes, which is the part that decides whether the page reads in this language at all.
+    missing = [k for k in found_keys if k not in locale_data]
+    empty = [k for k in sorted(locale_data)
+             if k not in ('locale_code', 'locale', 'locale_en')
+             and isinstance(locale_data[k], str) and not locale_data[k].strip()]
+    for label, keys in (("not in this file", missing), ("present but empty", empty)):
+        if keys:
+            shown = ', '.join(keys[:20]) + (" ..." if len(keys) > 20 else "")
+            print(f"⚠ {len(keys)} master key(s) {label}: {shown}")
+
+    # Clean and sort only when asked - a merge never prompts, see the docstring.
+    if auto_clean:
+        dropped = [k for k in sorted(locale_data)
+                   if k not in found_keys and k not in ('locale_code', 'locale', 'locale_en')]
+        for key in dropped:
+            del locale_data[key]
+        print(f"✓ Auto-deleted {len(dropped)} unused key(s)" if dropped else "✓ Nothing to clean")
+
+    if auto_sort:
+        locale_data = sort_json_data(locale_data)
+        print("✓ Auto-sorted keys hierarchically")
+
+    temp_path = json_path + '.tmp'
+    with open(temp_path, 'w', encoding='utf-8') as f:
+        json.dump(locale_data, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, json_path)
+    print(f"\n✓ Saved {json_path}")
+
+    return True
+
+
+def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto_sort, use_translate=False, only_key=None):
     """Process a single locale file."""
     print(f"\n{'='*60}")
     print(f"Processing: {locale_code}.json")
     print(f"{'='*60}")
     
     if not os.path.exists(json_path):
-        if auto_create and locale_code != 'en_US':
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            master_path = os.path.join(script_dir, 'www', 'en_US.json')
-            if os.path.exists(master_path):
-                with open(master_path, 'r', encoding='utf-8') as f:
-                    master_data = json.load(f)
-                new_data = {}
-                for key, value in master_data.items():
-                    if key == 'locale_code':
-                        new_data[key] = locale_code
-                    elif key in ('locale', 'locale_en'):
-                        new_data[key] = ''
-                    elif key.startswith('ttl_') or key.startswith('lbl_') or key.startswith('btn_') or key.startswith('msg_') or key.startswith('unit_'):
-                        new_data[key] = ''
-                    else:
-                        new_data[key] = value  # preserve locale_* metadata values (empty)
-                # Ensure directory exists
-                os.makedirs(os.path.dirname(json_path), exist_ok=True)
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(new_data, f, ensure_ascii=False, indent=2)
-                print(f"✓ Created {locale_code}.json from en_US.json with empty values")
-            else:
-                print(f"Error: Master en_US.json not found at {master_path}")
-                return False
-        else:
-            print(f"Error: JSON file not found at {json_path}")
-            return False
+        print(f"Error: JSON file not found at {json_path}")
+        return False
     
     # Load JSON with automatic trailing comma fix
     try:
@@ -640,23 +944,38 @@ def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto
     
     # Show missing keys summary if in missing or fast mode
     if mode in ('missing', 'fast'):
-        missing_keys = [(key, data) for key, data in found_keys.items() if locale_data.get(key) is None]
-        if missing_keys:
+        if only_key is not None:
             print("\n" + "="*60)
-            print(f"Keys in HTML/JS files not found in JSON{locale_display}:")
+            print(f"Redoing one key in {locale_code}{locale_display}:")
             print("="*60)
-            for key, data in missing_keys:
-                print(f"  {key} = {data['text']}")
-            print(f"\nTotal: {len(missing_keys)} missing key(s)")
+            if only_key in found_keys:
+                print(f"  {only_key} = {found_keys[only_key]['text']}")
+            else:
+                print(f"  {only_key} is not used by the sources - nothing to do")
             print("=" * 60)
+        else:
+            missing_keys = [(key, data) for key, data in found_keys.items() if locale_data.get(key) is None]
+            if missing_keys:
+                print("\n" + "="*60)
+                print(f"Keys in HTML/JS files not found in JSON{locale_display}:")
+                print("="*60)
+                for key, data in missing_keys:
+                    print(f"  {key} = {data['text']}")
+                print(f"\nTotal: {len(missing_keys)} missing key(s)")
+                print("=" * 60)
     
     # Process keys
     updates = {}
     processed_count = 0
     
     if mode == 'fast':
-        # Fast mode: add all missing keys at once
-        missing_keys = [(key, data) for key, data in found_keys.items() if locale_data.get(key) is None]
+        # Fast mode: add all missing keys at once.  With --key it is the one target instead, and it is written
+        # whether or not the locale already has it - that is what redoing a key means.  Translation and the
+        # unchanged-text prompt behave exactly as they do for a key that was missing.
+        if only_key is not None:
+            missing_keys = [(only_key, found_keys[only_key])] if only_key in found_keys else []
+        else:
+            missing_keys = [(key, data) for key, data in found_keys.items() if locale_data.get(key) is None]
         if missing_keys:
             # Prepare translations/text FIRST (show progress)
             pending_updates = {}
@@ -664,7 +983,7 @@ def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto
             if use_translate and locale_code != 'en_US':
                 # Auto-translate all missing keys and show progress
                 print(f"\nAuto-translating {len(missing_keys)} missing keys...")
-                print("  (✓ = translated, → = source confirmed, - = source skipped)\n")
+                print("  (✓ = translated, → = source text used, n stops the run)\n")
                 
                 for key, data in missing_keys:
                     found_text = data['text']
@@ -677,11 +996,10 @@ def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto
                         print(f"  ✓ {key}: {translated_text}")
                     else:
                         reason = "Translation failed" if not translated_text else "Translation returned unchanged source text"
-                        if confirm_source_text_use(key, found_text, reason):
-                            pending_updates[key] = found_text
-                            print(f"  → {key}: {found_text}")
-                        else:
-                            print(f"  - {key}: skipped")
+                        # This can only return yes or end the run, so the key is always recorded afterwards.
+                        confirm_source_text_use(key, found_text, reason, auto_pass=True)
+                        pending_updates[key] = found_text
+                        print(f"  → {key}: {found_text}")
             else:
                 # No translation: just prepare hardcoded text
                 for key, data in missing_keys:
@@ -689,19 +1007,32 @@ def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto
 
             updates.update(pending_updates)
             processed_count = len(pending_updates)
-            print(f"\n✓ Added {processed_count} key(s) to JSON")
+            # A --key run replaces a value that was already there, so "Added" would read wrong for it.
+            if only_key is not None:
+                print(f"\n✓ Wrote {processed_count} key(s) to JSON")
+            else:
+                print(f"\n✓ Added {processed_count} key(s) to JSON")
     
     elif mode in ('missing', 'every', 'diff', 'ndiff'):
-        for key, data in found_keys.items():
+        # --key narrows this loop to one entry, and to nothing at all if the sources have dropped the key.
+        if only_key is not None:
+            keys_to_process = [(only_key, found_keys[only_key])] if only_key in found_keys else []
+        else:
+            keys_to_process = list(found_keys.items())
+        for key, data in keys_to_process:
             found_text = data['text']
             json_text = locale_data.get(key)
             filename = data['files'][0] if data['files'] else 'unknown'
             
             if mode == 'missing':
-                if json_text is not None:
+                # A key the locale already has is normally left alone.  With --key it is the whole point, so the
+                # prompt happens anyway - through the 'all' layout when a value exists, which shows it as [JSON]
+                # and lets ESC keep it, instead of the source text replacing it without being seen.
+                if json_text is not None and only_key is None:
                     continue
-                new_text = prompt_for_key(key, found_text, json_text, filename, mode='missing', locale_code=locale_code, use_translate=use_translate)
-                if new_text is not None:
+                prompt_mode = 'all' if (only_key is not None and json_text is not None) else 'missing'
+                new_text = prompt_for_key(key, found_text, json_text, filename, mode=prompt_mode, locale_code=locale_code, use_translate=use_translate)
+                if new_text is not None and new_text != json_text:
                     updates[key] = new_text
                     processed_count += 1
             
@@ -791,6 +1122,14 @@ def process_locale_file(locale_code, www_path, json_path, mode, auto_clean, auto
 
 
 def main():
+    # Reconfigure stdout for the Windows cp949 terminal.  Every locale this tool handles is Cyrillic, Greek, Thai and
+    # so on, and the console is not UTF-8 by default there, so printing any of it raises UnicodeEncodeError - the same
+    # fault that once crashed a run on a mere "✓" in a progress line.
+    if sys.platform == 'win32':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     # Show help if no arguments provided
     if len(sys.argv) == 1:
         print(__doc__)
@@ -809,7 +1148,10 @@ def main():
     parser.add_argument('--ndiff', '-n', action='store_true', help='Only prompt when text is same (to fix untranslated)')
     parser.add_argument('--clean', '-c', action='store_true', help='Auto-delete unused keys (no prompt)')
     parser.add_argument('--sort', '-s', action='store_true', help='Auto-sort keys hierarchically (no prompt)')
-    parser.add_argument('--create', action='store_true', help='Auto-create missing locale JSON from en_US.json with empty values')
+    parser.add_argument('--key', metavar='NAME', default=None, help='Work on one key only, in every locale: write it even where it exists, ignore every other key (refused with --merge/--newkeys)')
+    parser.add_argument('--merge', '-m', metavar='FILE', default=None, help='Merge a partial locale JSON into one locale file (upsert, no prompts)')
+    parser.add_argument('--newkeys', '-k', nargs='?', const=DEFAULT_NEWKEYS_PATH, default=None, metavar='FILE', help='Write the keys the locale(s) lack into a template file (default: www_newkeys.json), keyed to the source text')
+    parser.add_argument('--extract', '-x', nargs='?', const='', default=None, metavar='FILE', help='Print this locale\'s values for the keys the --newkeys template lists, as a labelled sheet for a native-speaker check; with FILE, append the sheet to it instead (no other option applies in this mode)')
     args = parser.parse_args()
     
     # Validate argument combinations
@@ -817,7 +1159,64 @@ def main():
     if mode_count > 1:
         print("Error: Only one mode can be specified (--fast, --every, --diff, --ndiff)")
         sys.exit(1)
+
+    if args.merge:
+        # A partial file is written for one language, so the wildcard has nothing to mean here.
+        if args.locale == '*':
+            print("Error: --merge works on one locale at a time - name the locale, never *")
+            sys.exit(1)
+        if mode_count:
+            print("Error: --merge cannot be combined with --fast, --every, --diff, or --ndiff")
+            sys.exit(1)
+        if args.translate:
+            print("Error: --merge cannot be combined with --translate - the values are already written")
+            sys.exit(1)
+        if args.key:
+            print("Error: --merge writes a whole partial file, so --key has nothing to select")
+            sys.exit(1)
+
+    if args.newkeys is not None:
+        # The wildcard is the point here: one pass, the union of what every locale lacks, one file written.
+        # It composes with the pass below on purpose - the collection runs first, while the keys are still missing,
+        # and the pass then fills the locales, so one command yields both.
+        if args.merge is not None:
+            print("Error: --newkeys and --merge are opposite directions - collect, or apply, not both")
+            sys.exit(1)
+        if args.key is not None:
+            print("Error: --newkeys collects the keys the locales lack, --key redoes one key they already have - use one or the other")
+            sys.exit(1)
     
+    if args.extract is not None:
+        # A sheet is built from ONE locale file, so the wildcard has nothing to mean here; --merge would write the
+        # very file being read, which is the opposite direction.  Everything else is inert BY DESIGN - this mode only
+        # reads the template and the locale and writes a sheet - so any that were typed are named rather than
+        # silently ignored, which is how a stray --translate would otherwise look like it had done something.
+        if args.locale == '*':
+            print("Error: --extract works on one locale at a time - name the locale, never *")
+            sys.exit(1)
+        if args.merge is not None:
+            print("Error: --extract reads a locale to build a sheet, --merge writes one - use one or the other")
+            sys.exit(1)
+        inert = [name for name, given in (('--translate', args.translate), ('--clean', args.clean),
+                                          ('--sort', args.sort), ('--fast', args.fast), ('--every', args.every),
+                                          ('--diff', args.diff), ('--ndiff', args.ndiff),
+                                          ('--newkeys', args.newkeys is not None),
+                                          ('--key', args.key is not None)) if given]
+        if inert:
+            print(f"Note: {' '.join(inert)} ignored in --extract mode")
+
+        # Resolved here rather than below, because this mode leaves before the interactive machinery is set up.
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        json_path = os.path.join(script_dir, 'www', f'{args.locale}.json')
+        out_path = None
+        if args.extract:
+            # A bare name lands beside this script and the template, so a sheet is never a mystery path.
+            out_path = args.extract if os.path.isabs(args.extract) else os.path.join(script_dir, args.extract)
+            out_path = os.path.abspath(out_path)
+        print()
+        ok = extract_keys(json_path, DEFAULT_NEWKEYS_PATH, out_path, f"New www keys: {args.locale}")
+        sys.exit(0 if ok else 1)
+
     if args.translate and args.diff:
         print("Error: --translate cannot be used with --diff mode")
         sys.exit(1)
@@ -837,12 +1236,20 @@ def main():
         mode = 'ndiff'
     else:
         mode = 'missing'
+
+    # A collect-only run (--newkeys with no mode) writes the template and stops.  It must not fall through into
+    # the interactive pass, which would prompt; with a mode given, the same run collects first and then continues.
+    collect_only = args.newkeys is not None and mode == 'missing'
     
     # Blank line for readability
     print()
     
-    # Check translation service availability BEFORE any file work
-    service = detect_translation_service()
+    # Check translation service availability BEFORE any file work.  A merge never prompts and never translates, so
+    # it skips the detection outright - otherwise mode 'missing' would stop and ask about the service before the
+    # merge even starts.
+    # Skipped for a collect-only run so it cannot stop and ask about the service; if --translate was given anyway,
+    # detection still runs so the answer is honest rather than a misleading "unavailable".
+    service = None if (args.merge or (collect_only and not args.translate)) else detect_translation_service()
     
     if service:
         if not args.translate:
@@ -874,7 +1281,7 @@ def main():
             print("⚠ No translation service (add API key to trans_<service>.key)")
             print(f"{'='*60}")
             sys.exit(1)
-        elif mode == 'missing':
+        elif mode == 'missing' and not args.merge and not collect_only:
             # Interactive mode without translation service - show helpful warning
             print(f"{'='*60}")
             print("⚠ Warning: No translation service found.")
@@ -890,7 +1297,31 @@ def main():
     if not os.path.exists(www_path):
         print(f"Error: www folder not found at {www_path}")
         sys.exit(1)
+
+    # Check the targeted key against the sources before touching any locale, so a typo stops the run once here
+    # instead of printing the same complaint for every locale file.  The HTML/JS sources are this tool's master,
+    # so that is where the key has to exist.
+    if args.key is not None:
+        if args.key not in scan_www_folder(www_path):
+            print(f"Error: key '{args.key}' does not appear in any HTML/JS file under {www_path}")
+            print("       The sources are the master for this tool, so a key nothing uses cannot be redone.")
+            sys.exit(1)
+        print(f"Single key: {args.key}\n")
     
+    # --newkeys: collect first, so the template holds the keys that were missing when this run started - a mode
+    # given below then fills the locales in the same run.  A collect-only run stops here.
+    if args.newkeys is not None:
+        www_locale_dir = os.path.join(script_dir, 'www')
+        if args.locale == '*':
+            locale_paths = [(os.path.splitext(os.path.basename(p))[0], p)
+                            for p in sorted(glob.glob(os.path.join(www_locale_dir, '*.json')))]
+        else:
+            locale_paths = [(args.locale, os.path.join(www_locale_dir, f'{args.locale}.json'))]
+        if not newkeys_www(locale_paths, www_path, args.newkeys, args.clean, args.sort):
+            sys.exit(1)
+        if collect_only:
+            return
+
     # Process file(s)
     if args.locale == '*':
         # Process all locale files
@@ -906,7 +1337,7 @@ def main():
         success_count = 0
         for json_path in sorted(json_files):
             locale_code = os.path.splitext(os.path.basename(json_path))[0]
-            if process_locale_file(locale_code, www_path, json_path, mode, args.clean, args.sort, args.translate, args.create):
+            if process_locale_file(locale_code, www_path, json_path, mode, args.clean, args.sort, args.translate, args.key):
                 success_count += 1
         
         print(f"\n{'='*60}")
@@ -916,7 +1347,16 @@ def main():
     else:
         # Process single locale file
         json_path = os.path.join(script_dir, 'www', f'{args.locale}.json')
-        process_locale_file(args.locale, www_path, json_path, mode, args.clean, args.sort, args.translate, args.create)
+
+        if args.merge:
+            merge_path = resolve_merge_path(args.merge, os.path.join(script_dir, 'www'))
+            if merge_path is None:
+                sys.exit(1)
+            if not merge_partial_file(args.locale, www_path, json_path, merge_path, args.clean, args.sort):
+                sys.exit(1)
+            return
+
+        process_locale_file(args.locale, www_path, json_path, mode, args.clean, args.sort, args.translate, args.key)
 
 
 if __name__ == '__main__':

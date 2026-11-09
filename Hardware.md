@@ -8,13 +8,12 @@ which also contains tips about the hardware.
 
 ## ESP Board
 
+Only ESP32 and ESP32-S3 are supported. PSRAM is required.
+
 It is strongly recommended to use an ESP32-S3 board with at least 2MB of PSRAM and 8MB of flash.
 
 It may be possible to use a board with 4MB of flash but will require special partitioning.
-
-This code may still run on an ESP32 but without PSRAM will have serious issues that may be unfixable.
-
-It is also possible to build with an ESP32-C3 but since that is not a dual-core CPU, it would be prudent to avoid larger and/or SPI displays.
+Due to how LittleFS works, it is recommended to use an 8MB partition file even if a 4MB board would otherwise be sufficient.
 
 ### External Antenna
 
@@ -35,7 +34,7 @@ Most modules have onboard regulators anyway.
 It is recommended to use a minimum of 470µF 10V capacitor somewhere in your circuit across the `5V` and `GND` (attach negative to `GND`).
 It helps to stablize the system during boot and smooth out the sudden power draw during operations like initializing the decoder, screen, wi-fi, etc.
 The capacitor should be as near as possible to the ESP's `5V` and `G` pins, so it's easiest to just solder the capacitor directly to the dev board.
-If that's a problem, it's not catastrophic to put elsewhere on the 5V rail. The SD Card Reader and display's 5V pins may be used.
+If that's a problem, it's not catastrophic to put elsewhere on the 5V rail. The SD card Reader and display's 5V pins may be used.
 You may size up either number, but µF is the only number that matters.  To be extra safe, use a 1000 µF capacitor.
 There is no benefit to using a higher volt rating like 16V or 25V or 250V. So, use what's convenient.
 
@@ -61,9 +60,11 @@ Building with a display is not strictly necessary.
 
 Too many displays are supported to show pictures of them all here.
 
+Big thanks to kle7rx for the great photos!
+
 ### TFT / IPS Color Displays
 
-SPI color TFT displays all look pretty good (IPS versions will always look better even if they don't photograph well).
+SPI color TFT displays all look pretty good (IPS versions will always look better), with varying degrees of color-accuracy.
 
 | Display | Default Resolution | Other Resolutions Supported | Note |
 | ------- | ------------------ | --------------------------- | ---- |
@@ -71,8 +72,9 @@ SPI color TFT displays all look pretty good (IPS versions will always look bette
 | GC9106  | 160x80             | No                          |      |
 | ILI9225 | 220x176            | Yes                         |      |
 | ILI9341 | 320x240            | No                          |      |
-| ILI9488 | 480x320            | Yes                         | uses a 24-bit bus so can be slow to update (choose the ST7796 if you want a display that updates faster) |
+| ILI9488 | 480x320            | Yes                         | uses a 24-bit bus so can be slow to update (choose the ST7796 if you want a big display with a better refresh rate) |
 | ILI9486 | 480x320            | Yes                         | not fully tested - see notes inside the library regarding gamma correction |
+| NV3007  | 428x142            | No                          |      |
 | ST7735  | 160x128            | * see below *               | works well, cheap |
 | ST7789  | 320x240            | Yes                         |      |
 | ST7796  | 480x320            | Yes                         |      |
@@ -84,41 +86,45 @@ The ST7735 has several subtypes in the Adafruit driver, as specified by `DTYPE`,
 
 | ST7735 Subtype | Resolution | Note |
 | -------------- | ---------- | ---- |
-| BLACKTAB       | 160x128    | default unless DYTPE is specified |
-| GREENTAB       | 160x128    |      |
-| REDTAB         | 160x128    |      |
-| 144GREENTAB    | 128x128    |      |
-| MINI160x80     | 160x80     |      |
+| `BLACKTAB`     | 160x128    | default unless `DYTPE` is specified |
+| `GREENTAB`     | 160x128    |      |
+| `REDTAB`       | 160x128    |      |
+| `144GREENTAB`  | 128x128    |      |
+| `MINI160x80`   | 160x80     |      |
 
-If you have a `160x128` and the default `BLACKTAB` doesn't work, try `GREENTAB` and `REDTAB`.
+If you have a `160x128` and the default `BLACKTAB` doesn't work, try `GREENTAB` or `REDTAB`.
 
-### OLED Monoochrome Displays
+#### NV3007
 
-OLEDs are cheap, beautiful (in a retro way) and just as functional.
+![image](images/kle7rx_NV3007_ru.jpg)
 
-| Display | Interface  | Default Resolution |
-| ------- | ---------- | ------------------ |
-| SH1106  | SPI or I2C | 128x64 |
-| SH1107  | SPI or I2C | 128x64 |
-| SSD1305 | SPI or I2C | 128x64 |
-| SSD1306 | SPI or I2C | 128x64 |
-| SSD1322 | SPI only   | 256x64 |
-| SSD1327 | SPI or I2C | 128x64 |
+#### ST7796
+
+![image](images/kle7rx_ST7796_ru.jpg)
+
+### Monochrome OLED Displays
+
+OLEDs are cheap, beautiful (in a retro way) and just as functional. They are available in various tints: blue, white, yellow, and green.
+
+| Display | Interface  | Default Resolution | Note |
+| ------- | ---------- | ------------------ | ---- |
+| SH1106  | SPI or I2C | 128x64             |      |
+| SH1107  | SPI or I2C | 128x64             |      |
+| SSD1305 | SPI or I2C | 128x64             |      |
+| SSD1306 | SPI or I2C | 128x64             |      |
+| SSD1322 | SPI only   | 256x64             | Greyscale |
+| SSD1327 | SPI or I2C | 128x64             | Greyscale unsupported so treated as monochrome |
 
 All OLED displays support various resolutions: `256x64`, `128x128`, `128x64`, and `128x32`.
 Non-default width or height must be specified in `myoptions.h`.
 
-### LCD Displays
+#### SSD1327
 
-Not recommended but supported anyways, thanks to inheriting ёRadio display architecture.
-LCD displays like the 1602, 2004, and Nokia 5110 may work but will not be as good-looking as the others.
+![image](images/kle7rx_SSD1327_ru.jpg)
 
-| Display   | Interface       | Default Resolution |
-| --------- | --------------- | ------------------ |
-| 1602      | Parallel or I2C | 16x2 characters    |
-| 2004      | Parallel or I2C | 20x4 characters    |
-| NOKIA5110 | SPI             | 84x48 dot-matrix   |
-| ST7920    | SPI             | 128x64 dot-matrix  |
+#### SSD1322 (Greyscale)
+
+![image](images/kle7rx_SSD1322xx_ru.jpg)
 
 ---
 
@@ -350,7 +356,7 @@ That adds interference. The easy fix is to disable dimming and tie the BL pin to
 
 ### Full Audio/Power Isolation
 
-You can read some (untested) schematics to achieve [Audio/Power Isolation](Isolation.md).
+You can read some schematics to achieve [Audio/Power Isolation](Isolation.md).
 
 ---
 
@@ -393,36 +399,69 @@ IR receivers like the VS1838 are cheap and work well.  You may need a pullup res
 
 ---
 
-## SD Card Reader
+## SD card reader
 
-An SD card reader may be added to the build. It is recommended to be wary of SD readers built onto displays.
-Although some may work, it is well-known that some may be lacking proper resistors or will interfere with display because it is forced onto the same SPI bus.
+An SD card reader may be added to the build. It is recommended to be wary of SPI SD readers built onto displays.
+Although some may work, it is well-known that some may be lacking proper resistors or will get signal interferance because it is forced onto the same SPI bus as the display.
 
-It is highly recommended to use an SD card reader with a power regulator and a 74VHCT125A buffer.
+### SPI SD card module
+
+These modules (with a power regulator and a 74VHCT125A buffer) are better-suited when sharing the SPI bus with another device.
+They can be slower than SDIO modules when uploading files in the SD File Manager.
+
 If needing to make this type fit with a case, the excess PCB around the slot may be cut off carefully with a knife, sandpaper, or grinding tool.
 Wear a mask if filing or grinding! Fiberglass is bad for your lungs!
 
 ![image](images/hardware/sdreader.jpg)
 
-A simpler SD card reader may work but may cause random, unsolvable issues.
-Do not use on the same SPI bus as other devices.
+This type of module with a 74VHCT125A or similar level-shifter can not be used in SDIO/SDMMC mode.
+
+### SDIO SD card module (Only with ESP32-S3)
+
+It is recommended to use an SDIO module in SDMMC mode. If using this type of simpler-looking SD card reader using SPI, you may see random, unsolvable issues.
+
+Do not use this type as SPI if on the same SPI bus as other peripherals.
+The peripherals will interfere with each other and you will hear random pops and clicks.
 
 ![image](images/hardware/sdreader2.jpg)
+
+An SDMMC module has major advantages:
+- It does not use an SPI bus at all which frees SPI buses for other peripherals.
+- It is faster and more reliable than SPI (uploads are faster).
+- It is less picky about what kind of SD cards can be used.
+
+There must be pull-ups on `CMD` and `D0`.
+
+If the card has been used in SPI mode, you must fully power-cycle the board if you switch the firmware to use SDMMC.
+An SD card latches its interface mode at powerup and only a full power cycle re-runs that detection.
+Reflashing or rebooting is not enough and you will see `sdmmc_init_ocr: send_op_cond ... returned 0x107` in the log.
+
+### SD Cards
+
+Certain brands are known to work better than others: Sandisks are highly recommended for both speed and reliability, especially if using SPI.
+They do not have to be high-end.
+
+"Class 10" or "UHS-I U1" cards are known to work better and be faster for both read and write.
+
+Smaller sizes (32GB and smaller) may also work better and be faster to navigate.
+
+Always format the SD card with FAT32.
+
+If experiencing random problems with the SD card, try a different SD card, preferably from a different brand.
+
+### File Encoding
 
 It is recommended to encode files on SD card using MP3 at a constant bit rate of 256kbps or less
 to avoid system stress and get maximum compatibility with the decoders.
 ABR and CBR encoding may work (mostly) but may also result in pops and clicks.
 Errors/bugs could happen if you use other codecs or too-high bitrates or other codecs.
 
-### SD Cards
+### ID3 Tags
 
-SD cards on these cheap SD readers can be pretty finicky.
-Certain brands are known to work better than others: Sandisks and Samsungs are recommended.
-Make sure it's "Class 10" or "UHS-I U1" and formatted FAT32.
-Smaller sizes (32GB and smaller) may also work better.
-Windows disk format does not like formatting larger SD cards but the command line `format /FS:FAT32 X: /Q` will work for larger sizes.
+It is recommended to use ID3v2 tags.
 
-When in doubt or experiencing problems, try a different SD card.
+ID3v1 tags are at the end of the file so will not appear on the display while the track is playing.
+The display will show a derivation of the file name.
 
 ### SD Offline Mode
 
@@ -436,10 +475,21 @@ If you wish to use a special pin, add something like `#define SDOFFLINE_BTN 2` o
 Remember that certain GPIOs may cause issues if held while powering-up (so best not to attach buttons to `GPIO0` or `GPIO3`).
 Most users will not remember the difference between "shortly after power-up" and "during power-up".
 
+### Limitation
+
+Due to the playlist being stored as a 16-bit number internally, the limit is 65,535 audio files.
+
+### Special Note Regarding `/ehradio.data`
+
+This folder contains special index files to enable faster file-seeking during playback.
+
+If moving your files from one SD card to another, remove this folder.
+
+
 ---
 
 ## RTC
 
-An I2C RTC module may be added to the build as well.  This *should* keep the time when network connectivity is unavailable.
+An I2C RTC module may be added to the build as well.  This will keep the time when in SD Offline Mode.
 
 Supported RTC modules include DS3231 and DS1307.

@@ -1,0 +1,36 @@
+Locales Workflows:
+
+WebUI Locales:
+
+After adding strings to HTML/JS files (use `data-i18n="btn_load_index"` inside tags):
+
+  py www_tool.py * --translate --fast --clean --sort --newkeys
+
+www_newkeys.json will be created showing the English of all strings added to the .json files.
+
+This will pull out a specific translation for proofreading to the console or a file:
+
+  py www_tool.py ru_RU --extract
+  py www_tool.py ru_RU --extract checknewkeys.txt
+
+Post both files for translators.
+
+Put a translator's work back into changes.json and this will merge their changes:
+
+  py www_tool.py ru_RU --merge changes.json --clean --sort
+
+Don't forget to rebuild the wwwlocale.h file with:
+
+  py make_wwwlocale.py
+
+
+Display Locale Workflows are pretty similar:
+
+  py display_tool.py * --translate --fast --clean --sort --newkeys
+
+  py display_tool.py ru_RU --extract
+  py display_tool.py ru_RU --extract checknewkeys.txt
+
+  py display_tool.py ru_RU --merge changes.json --clean --sort
+
+  py make_dsplocale.py

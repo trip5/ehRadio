@@ -2,20 +2,22 @@
     </div>
     <div id="playerwrap">
       <div id="uploaderwrap">
-        <div id="uploadstatus" data-i18n="lbl_choose_file">Please choose firmware or SPIFFS *.bin file</div>
+        <div id="uploadstatus" data-i18n="lbl_choose_file">Please choose firmware or LittleFS *.bin file</div>
         <form id="updateform" method="POST" action="/update" enctype="multipart/form-data">
           <div class="row">
             <label for="uploadtype1"><input type="radio" id="uploadtype1" name="updatetarget" value="fw" checked /><span class="checkmark"></span><span data-i18n="lbl_fw">Firmware</span></label>
-            <label for="contactChoice2"><input type="radio" id="uploadtype2" name="updatetarget" value="spiffs" /><span class="checkmark"></span><span data-i18n="lbl_spiffs">SPIFFS</span></label>
+            <label for="contactChoice2"><input type="radio" id="uploadtype2" name="updatetarget" value="littlefs" /><span class="checkmark"></span><span data-i18n="lbl_spiffs">LittleFS</span></label>
           </div>
           <div class="row rowinput">
             <input id="binfile" type="file" accept=".bin,.hex" name="update" />
-            <input type="button" class="fb" style="margin-right: 0;" value="Update" onclick="doUpdate(this)" data-i18n="btn_update" />
+          </div>
+          <div class="row rowinput inputwrap center">
+            <input type="button" class="fb" value="Update" onclick="doUpdate(this)" data-i18n="btn_update">
           </div>
         </form>
         <input type="button" class="fb onlineupdatebutton hidden" id="check_online_update" value="Check for Online Update" onclick="checkOnlineUpdate(this)" data-i18n="btn_check_online"/>
         <progress id="updateprogress" max="100" value="70" hidden></progress>
-        <a href="/" class="fb hl" id="update_cancel_button" data-i18n="btn_cancel">Cancel</a>
+        <a href="/" class="fb" id="update_cancel_button" data-i18n="btn_cancel">Cancel</a>
       </div><!--uploaderwrap-->
     </div><!--playerwrap-->
   <div id="copy">powered by <a target="_blank" href="https://trip5.github.io/ehRadio/">ehRadio</a> | <span id="version"></span></div>

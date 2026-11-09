@@ -1,5 +1,32 @@
 # Frankenstein Surgery Notes — VS1053 Library
 
+## Read This With the Other Library's Notes
+
+The two audio libraries share their defect classes, and the dates in this file and in
+`i2s-frankenstein-surgery-notes.md` show the same faults surfacing on both: `2026.10.11` (the m3u8 refetch pause, the
+media-sequence resync, the `TIT2` mis-wire), `2026-10-21` (the screensaver's VU gate) and `2026.10.24` (the per-track
+resets and the ID3v2 frame-size guard). Two practices follow:
+
+* **A fix in one library is a question about the other.** Check the counterpart before closing the issue, and record
+  whether it needed the same change or was already correct.
+* **The VS1053 board finds these first; the I2S library is the better reference.** This library has a hardware decoder,
+  a DREQ-gated SPI feed and the shallower graft, so end-of-stream accounting faults show up here as audible stalls with
+  readable counters - and this file carries the longer record (fixes from 2026-07 on, against the I2S file's 2026-08).
+  Patient work here has produced the diagnosis every time. But do not assume I2S is "already fine" because it is not
+  the board failing: the three per-track resets that this graft had lost were present and correct in `I2S_Audio`, and
+  copying them back - then correcting the origin the copy brought with it - is what fixed playback. Diff the other
+  library; sometimes it is the fault, sometimes it is the reference.
+
+## ehRadio Additions After the Graft (read this first)
+
+Recorded for the same reason as the graft itself: so a future migration does not quietly lose them.
+
+| Addition | Where | Why |
+|----------|-------|-----|
+| Separate connect timeout | `audioVS1053Ex.h`: `m_connectTimeout_ms` / `m_connectTimeout_ms_ssl` (1200 ms), applied at the `connect()` inside `connecttohost()` | Parity with the I2S library. `connecttohost()` runs on the MAIN task, so a long timeout is a UI freeze - no button sampled, no WebUI request answered - rather than merely a slow reconnect. Deliberately separate from `m_timeout_ms` / `m_timeout_ms_ssl`, which double as the socket READ timeouts and must stay patient for a slow stream. |
+
+Deliberately *not* carried over: the second `connect()` inside the FreeRTOS worker path (`_client->connect(params->hostwoext, params->port)`) stays as found - it is commented out in the original, and giving it a timeout would change behaviour that has never been exercised.
+
 ## Purpose
 This document records the complete process of grafting Maleksm's anti-skip FreeRTOS task infrastructure into the PR226 audio core (which handles VS1053 patches correctly). It serves as both a record and a template for future library migrations.
 
@@ -9,11 +36,15 @@ This document records the complete process of grafting Maleksm's anti-skip FreeR
 
 | Name | Folder | Description |
 |------|--------|-------------|
-| **Grafted (current)** | `src/libraries/VS1053_Audio/` | Result of this surgery — PR226 core + Maleksm task + ehRadio adaptations |
-| **Backup of current** | `src/libraries/VS1053_Audio (ehRadio nsteplanets PR226 frankenstein)` | Backup of this surgery — PR226 core + Maleksm task + ehRadio adaptations |
+| **Grafted (current)** | `src/libraries/VS1053_Audio/` | Result of this surgery — PR226 core + Maleksm task + ehRadio adaptations. **The only copy of our own library.** |
 | **ehRadio PR226 copy** | `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` | PR226 with Trip5's minimal ehRadio adaptations. **This was the graft base.** |
-| **Active (old)** | `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` | Backup of previous Maleksm-based library, preserved for reference |
+| **Active (old)** | `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` | The previous (pre-PR226) Maleksm-based ehRadio library, kept for reference |
 | **Maleksm** | `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` | Original Maleksm v0.9.434m — FreeRTOS task infrastructure originates here |
+
+There is **no folder backup of the current library**. The one that existed (`VS1053_Audio (ehRadio
+nsteplanets PR226 frankenstein)`) was a snapshot taken at the graft and never refreshed, so it was
+removed on 2026-09-27: restoring from it would have silently reverted every post-graft fix recorded
+below. `src/libraries/VS1053_Audio/` is the only copy, and its git history is the backup.
 
 ---
 
@@ -30,7 +61,7 @@ When in doubt during grafting: prefer the Active library's patterns, then Maleks
 |---------|--------|----------|
 | VS1053 patches cause silence | Maleksm library audio core | Use PR226's init sequence + audio code |
 | Audio skipping during display updates | PR226 has no FreeRTOS task | Graft Maleksm's anti-skip task |
-| VU meter stuck at 99-100% | PR226 narrow 85-92 mapping | Graft Maleksm's 0-95 range + peak-hold decay |
+| VU meter stuck at 99-100% | PR226 narrow 85-92 mapping | Graft Maleksm's peak-hold decay. The 0-95 range was grafted, found to make it worse, and reverted — see Bug Fix 2 below. |
 | SM_CANCEL stuck after redirects | Both libraries | Graft Maleksm's SM_CANCEL clearing fix |
 
 ---
@@ -54,8 +85,8 @@ For future migrations, do both comparisons before starting the graft.
 ### FreeRTOS Task Infrastructure Is From Maleksm
 The original Maleksm library contains `startAudioTask()`, `performAudioTask()`, `mutex_playAudioData`, `mutex_audioTask`, `m_f_audioTaskIsRunning`, etc. in both `.h` (lines 264-267, 460-467) and `.cpp`. Maleksm added the task to solve skipping on yoRadio. The old Active library kept it unchanged.
 
-### Stack Size: 3300 Words
-`AUDIO_STACK_SIZE = 3300` words (13.2KB on ESP32-S3). This value was "mostly fixed" after earlier overflow testing and is used in Maleksm, Active, and the ehRadio Maleksm backup.
+### Stack Size: 3500 Words
+`AUDIO_STACK_SIZE = 3500` words (14KB on ESP32-S3), raised from Maleksm's 3300 for parity with the I2S library. Maleksm's value was "mostly fixed" after his own overflow testing and is used in Maleksm, Active, and the ehRadio Maleksm backup; the I2S side needed 3500 because a specific stream's software decode overflowed the task's stack (`Stack canary watchpoint triggered (PeriodicTask)` — see `i2s-frankenstein-surgery-notes.md`, Addendum 2). VS1053 feeds a hardware decoder and never reaches that depth, so this is alignment rather than a fix.
 
 ### Mutex Type Mismatch (Documented, Not a Bug)
 `mutex_playAudioData` is created with `xSemaphoreCreateMutex()` (non-recursive) but the connect functions use `xSemaphoreTakeRecursive()`. This works in practice because the mutex is never recursively taken — always take-once-give-once per function. No action needed.
@@ -104,7 +135,7 @@ Copy all files from `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` into `src
 
 **Added static task buffers** (between AudioBuffer class and Audio class):
 ```cpp
-static const size_t AUDIO_STACK_SIZE = 3300;
+static const size_t AUDIO_STACK_SIZE = 3500;   // was 3300; see the Stack Size note above
 static StaticTask_t __attribute__((unused)) xAudioTaskBuffer;
 static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 ```
@@ -261,6 +292,24 @@ See "Critical Bug" section above. Added at 5 stream-ready locations + resets in 
 
 ---
 
+## Notes For Future Use
+
+`Maleksm's original` = `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — from Maleksm's yoRadio mod: https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228
+
+`Active` (old ehRadio) = `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` — Maleksm adapted for ehRadio
+
+`ehRadio PR226 copy` = `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — PR226 adapted for ehRadio
+
+Graft result = `src/libraries/VS1053_Audio/` — current production library
+
+Backups: none by folder. A copy of our own library decays the moment the first patch lands, so it is
+worse than no copy at all — the graft-time one was removed on 2026-09-27, leaving git history as the
+record. The upstream folders stay because they are the only local copies of code that is not ours.
+
+Someday these files may be needed again...
+
+---
+
 ## Post-Graft Patch Fixes (2026-07-01)
 
 Two reliability issues found during hardware testing with `VS_PATCH_ENABLE=true`:
@@ -330,29 +379,544 @@ Online streams didn't pop because `processWebStream()` was correctly fill-only.
 
 ---
 
-## Open Items
+## Post-Graft Patch Fixes (2026-09-13)
 
-1. **Mutex guards on connect functions** (Step 9 deferred): `connecttohost()` and `connecttoFS()` should be wrapped with `mutex_playAudioData` to prevent race conditions. Same pattern Maleksm used.
+### VU Meter Attack — `everyn` 4 → 1
 
-2. **`m_validSamples` in performAudioTask()**: The `while(m_validSamples)` loop is an I2S leftover. For VS1053, `m_validSamples` is initialized to 0 and never incremented, so this loop never executes. Safe to leave as-is or remove.
+**Symptom**: on VS1053 builds the VU attack was abrupt and visibly stepped; the same music looked
+smooth on I2S builds.
 
-3. **Core assignment**: `m_audioTaskCoreId` defaults to 1. Maleksm recommends opposite core from Arduino loop. For ESP32-S3 where loop runs on Core 1, task should be on Core 0. Adjust via `setAudioTaskCore(0)`.
+**Root cause**: `computeVUlevel()` has no caller other than `get_VUlevel()`, which the VU widget
+calls once per display refresh. `everyn = 4` therefore made the `SCI_AICTRL3` read rate a quarter
+of the widget's refresh rate — about **7.5 Hz**, against roughly **86 Hz** for the I2S path. The
+throttle was written against an older display loop that ran much faster, so the VS1053's *audio*
+measurement rate was being set by the *display* refresh.
 
-4. **Future comparison recommendations**: When migrating to a new upstream library version, always compare:
-   - New upstream vs `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — what changed in the audio core?
-   - New upstream vs `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — what Maleksm changes need re-grafting?
-   - Then re-apply the graft steps documented here, adapting for any API changes.
+**Fix**: `everyn` 4 → 1, reading the register on every widget refresh. Then, the same day, the `millis()`
+gate described in the amplitude-curve entry below replaced the throttle entirely. Confirmed by ear as a
+large improvement.
+
+**Correction (2026-09-14)**: ~30 Hz was the ceiling this was expected to reach, not what happened. The
+register read itself costs 17.4 ms (see the 2026-09-14 section), which slows the display loop until the
+gate starts skipping iterations, so the steady state was **~20 Hz**. The read is the limiter, not the
+gate — worth remembering when reading the rate figures below.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — the `everyn` constant.
+
+**Note**: this widens the window in which a display-task `read_register()` can interleave with the
+audio task's `sendBytes()` on the shared SPI bus. No artefacts observed so far, but see Future issues to watch for.
+
+### VU Meter — Integer Division by Zero on a Zeroed Threshold
+
+**Symptom**: none reported — found by inspection while investigating the attack.
+
+**Root cause**: `get_VUlevel()` calls `map(vuLeft, config.vuThreshold, 0, 0, dimension)`, so `map()`
+divides by `in_max - in_min` = `0 - vuThreshold`. `config.vuThreshold` is a `volatile uint16_t` that
+is deliberately zeroed by `player.cpp` (on stop), by `config.cpp` (on every title change) and by the
+threshold decay below. The widget keeps calling `get_VUlevel()` while stopped, because that is how
+the bar drains. A zero reference is therefore reachable, and it is an integer division by zero.
+
+**Fix**: clamp the reference — `uint16_t ref = config.vuThreshold ? config.vuThreshold : 1;`. This
+also maps silence to `dimension`, the correct *empty* bar. Reinstating the old
+`vuThreshold == 0` early return would have been the wrong repair: in the widget's convention a
+returned 0 means a *fully lit* bar, which is presumably what the "chicken-and-egg deadlock" comment
+was describing.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — `get_VUlevel()`.
+
+### VU Reads Too High on Wide-Dynamic-Range Sources — Fixed with an Amplitude Curve
+
+**Symptom**: on classical music the VS1053 build sits in the upper half of the bar and pins at the
+top, while the same station on an I2S build sits around a quarter of the bar.
+
+**Analysis**: `get_VUlevel()` maps the dB register linearly — `lit = len * vuLeft / vuThreshold` —
+so the bar shows the current reading as a fraction of the peak reference. Of the three inputs, two
+are ours:
+
+1. The **window** is linear in dB (`map(reg, 85, 92, 0, 255)`). dB compresses dynamic range by
+   construction, so a musically large change moves the bar very little, and anything at or above
+   92 dB saturates.
+2. The **reference** is a *decaying* peak in this path (`VU_THRESHOLD_DECAY` every
+   `VU_DECAY_INTERVAL`), whereas the I2S path raises `vuThreshold` and never decays it during
+   playback. A decaying reference chases the signal downward, so the fraction stays near 1 and the
+   bar never falls back — at steady volume it even creeps up toward full.
+3. The plugin's dB scale is not ours to change.
+
+This is the same defect Bug Fix 2 met from the other direction: a wider linear window compresses
+the bar, and a narrower one fixes that but sets a hard floor and saturates. Re-tuning the endpoints
+cannot fix it, because the *curve* is the problem.
+
+**Fix (implemented)**: the dB reading is converted to a **linear amplitude** before use, and the peak
+hold no longer decays:
+
+```cpp
+static uint8_t vuDbToAmp(uint8_t db) {
+  if(db > VU_VS1053_DB_FULL) db = VU_VS1053_DB_FULL;
+  float a = 255.0f * powf(10.0f, (float)((int)db - (int)VU_VS1053_DB_FULL) / 20.0f);
+  return (uint8_t)(a + 0.5f);
+}
+```
+
+`vuLeft`/`vuRight`/`vuThreshold` are therefore amplitudes, and `get_VUlevel()` is now structurally
+the same map the I2S path uses. Worth knowing: `VU_VS1053_DB_FULL` **cancels out** of the bar length,
+because the bar is `vuLeft / vuThreshold`. The constant therefore affects only the *resolution* of the
+`uint8_t` values, never the shape of the response — so 95 (the scale's documented maximum) is a safe
+default and lowering it to the loudest value a given source produces merely buys finer steps.
+
+Removing the decay makes the reference the loudest reading since the last stop or title change, which
+is exactly the I2S behaviour; both of those events zero `config.vuThreshold` in shared code.
+
+**Also added**: `VU_VS1053_READ_MS`, a `millis()` gate replacing the `everyn` throttle, so the VU
+sample rate has a constant ceiling regardless of `VU_REFRESH_MS` or of the panel; and `VU_VS1053_LOG`
+(set to 1), which prints the raw dB range once a second for calibrating `VU_VS1053_DB_FULL` — and,
+since 2026-09-14, also how long the register read takes.
+
+All three are `#ifndef` defaults at the top of `audioVS1053Ex.cpp`. They were first added to
+`options.h` under Visual Tweaks and were moved into the library, because they are VS1053 internals
+rather than ehRadio tweaks — a `myoptions.h` override still works.
+
+**Status**: implemented and ear-tested — on the same station the VS1053 and I2S meters now read alike.
+Builds for both VS1053 targets.
 
 ---
 
-## Notes For Future Use
+## Post-Graft Patch Fixes (2026-09-14)
 
-`Maleksm's original` = `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` — from Maleksm's yoRadio mod: https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228
+### Every VU Read Was a 17.4 ms Busy-Wait on DREQ
 
-`Active` (old ehRadio) = `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` — Maleksm adapted for ehRadio
+**Symptom**: no audio fault at all, but the core monitor showed the display task pinned at 38 loops/s
+(25.91 ms/loop) with `Max Main Loop Time` around 22 ms, where 100 loops/s (10.00 ms, its
+`DSP_TASK_DELAY` floor) had been seen at another time.
 
-`ehRadio PR226 copy` = `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` — PR226 adapted for ehRadio
+**How it was found**: it could not be reasoned out, because the first A/B was worthless — with the
+widget already gating redraws at `VU_REFRESH_MS` 33, `VU_VS1053_READ_MS` 10 and 33 behave identically,
+so that experiment could not distinguish anything. The fix was to stop guessing and time the read
+itself: `VU_VS1053_LOG` was extended to wrap `read_register()` in `micros()`, and it answered
+immediately.
 
-Graft result = `src/libraries/VS1053_Audio/` — current production library
+| | value |
+|---|---|
+| `read_register(SCI_AICTRL3)` average | 17.3 – 17.9 ms |
+| worst | 18.5 ms |
+| reads per second | 20 |
+| raw dB observed | 66..83, both channels |
 
-Someday these files may be needed again...
+**Root cause**: `await_data_request()` is a spin with no yield:
+
+```cpp
+inline void await_data_request() {while(!digitalRead(dreq_pin)) NOP();}    // Very short delay
+```
+
+`read_register()` calls it after the two-byte transfer, so the whole call blocks on the DREQ pin — and
+DREQ stays low for ~17 ms at a time, which is nothing like the "very short delay" that comment claims.
+`get_VUlevel()` has exactly one caller, `VuWidget::_levels()`, so this ran on the **display task** of all
+places. At 20 calls/s that is 348 ms of every second spent spinning, and because the spin never yields it
+also starves the Arduino main loop sharing that core — hence the 22 ms worst-case main loop.
+
+The display task's second, fully accounted for:
+
+| per second (display task, core 1) | cost |
+|---|---|
+| 38 × `vTaskDelay(DSP_TASK_DELAY)` | 380 ms |
+| 20 × 17.4 ms DREQ spin | 348 ms |
+| drawing | ~270 ms |
+
+This also disposed of the 100 loops/s reading: 100 iterations × the 10 ms delay is the entire second, so
+that figure can only describe a display task doing no work at all — a static screen with no VU reads. It
+was never a state to get back to.
+
+**Fix**: `Audio::read_register_nowait()` — the same sequence as `read_register()` minus the trailing
+`await_data_request()`. Only the VU poll uses it.
+
+Safe because:
+
+- the wait exists so the next **data** write does not start before the chip is ready, and every data path
+  already waits itself — `sdi_send_buffer()` and `sdi_send_fillers()` both call `await_data_request()`
+  inside their loop **before** the first chunk;
+- DREQ gates writes, not reads, so a control-mode read is legal at any time;
+- the 16 bits are transferred before the wait would have happened, so the value cannot change.
+
+`control_mode_on()`/`control_mode_off()` still wrap the read, so `beginTransaction`/`endTransaction` still
+hold the SPI bus — this does not widen the mutex-less window noted under Future issues to watch for.
+
+**Measured effect** (SH1106 build, same station):
+
+| | before | after |
+|---|---|---|
+| Display task | 38 loops/s (25.91 ms) | 54 – 58 loops/s (17.1 – 18.3 ms) |
+| `Max Main Loop Time` | 22.5 ms | 3.7 – 7.4 ms |
+| Forced to redraw continuously (scrolling the playlist) | ~1 loop/s | 8 – 11 loops/s |
+| Flash size | — | +84 bytes (sh1106), +28 bytes (ili9488) |
+
+The residual ~7 ms per display iteration is drawing, not waiting: the display task now sits just above
+its `DSP_TASK_DELAY` floor, which is where it belongs. Under the forced-redraw stress the main loop still
+peaks at 115 ms, but that is sustained screen work, not a spin — and the audio core no longer needs to
+be nursed to survive it.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` (new `read_register_nowait()`;
+`computeVUlevel()` calls it) and `audioVS1053Ex.h` (its declaration).
+
+**Kept deliberately**: the read timing stays in the `VU_VS1053_LOG` diagnostic as a regression check.
+Anything in the hundreds of microseconds there means the DREQ wait has crept back into the VU path.
+
+
+---
+
+## Post-Graft Patch Fixes (2026-09-26)
+
+### A Failed Reconnect Erased the Only Host the Library Could Retry
+
+**Symptom**: nothing crashed and nothing rebooted, but after a network hiccup the VS1053 build could go
+silent and stay silent, while an I2S build over the same kind of night recovered by itself.
+
+**How it was found**: by diffing the two backends' failure paths rather than by reading the log harder.
+Everything above the library — `network.cpp`'s reset ladder and resume latch — is the same code either
+way, so the difference had to be in the audio core. It was.
+
+**Root cause**: the two cores treat `m_lastHost` differently when a connect fails.
+
+| on `AUDIO_ERROR("Request %s failed!")` | I2S (`I2S_Audio/Audio.cpp`) | VS1053 (`VS1053_Audio/audioVS1053Ex.cpp`) |
+|---|---|---|
+| metadata callbacks cleared | yes, all four | yes, all four |
+| `m_f_running` | set `false` | not touched in this branch |
+| `m_lastHost` | **left intact** | **zeroed: `m_lastHost[0] = '\0';`** |
+
+Both library-level retry paths read that host:
+
+- `parseHttpResponseHeader()` on `HEADER_TIMEOUT` → `if(m_f_timeout) connecttohost(m_lastHost);`
+- `streamDetection()` after 5 s with no data → `connecttohost(m_lastHost);`
+
+With the host erased, both of them became `connecttohost("")` — a guaranteed failure — so a single failed
+reconnect left the library with nothing to retry, and ehRadio's own ladder was the only way back. That is
+the asymmetry: the I2S core has two independent recovery paths, the VS1053 core had effectively none.
+
+**Fix**:
+
+1. Removed the `m_lastHost[0] = '\0';` from the failed-connect branch. The four metadata clears stay, and a
+   comment records why the host must survive:
+
+   ```cpp
+   /* m_lastHost is deliberately KEPT here.  streamDetection() retries it every 5 s while no data arrives,
+      so erasing it turned every later library-level retry into connecttohost("") - a guaranteed failure
+      for the rest of the session, which left ehRadio's ladder as the only way back.  The I2S backend keeps
+      the host in the same situation (see the "Request %s failed!" branch in I2S_Audio/Audio.cpp). */
+   ```
+
+2. Added a guard at the top of `streamDetection()`, because one path *does* still clear the host
+   deliberately — `parseHttpResponseHeader()` on `HEADER_TIMEOUT` ("Host not available"):
+
+   ```cpp
+   if(!m_lastHost || m_lastHost[0] == '\0') return false;
+   ```
+
+   Without it, that case would sit in the 5 s retry loop calling `connecttohost("")` forever, spinning a
+   doomed connect plus a log line per attempt.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` only — the failed-connect branch and the
+head of `streamDetection()`. The I2S core was left alone: it already behaved the way we want.
+
+**Not covered here**: the other half of the same investigation lives in `src/core/network.cpp` and
+`src/core/player.cpp` — a checked `xTaskCreatePinnedToCore()` for the stream-retry task, a 5 s respawn in
+`tick()` for the case where that task died while a resume was still owed, and the `WiFiReconnected` re-arm.
+Those are ehRadio-side and are recorded in `.github/code-summary.md`; this note is only the library-side
+half, which is the part a future re-graft would otherwise quietly lose.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.11)
+
+### `TIT2` was routed to the album callback, not the title one
+
+`showID3Tag()` sent the Title tag to `audio_id3album()` (line 3711), so the album slot received the song's own
+title and ehRadio's second title line showed the song twice — or, when the station's `#EXTINF` line carried its
+own "Title - Artist" pair, a mixture of the two sources. Every neighbouring tag in that function is wired to its
+own callback; `audio_id3title` was declared in `audioVS1053Ex.h` and never called anywhere in the library, which
+is what identified it as a mis-wire rather than a deliberate choice.
+
+**Fix**: `TIT2` calls `audio_id3title(value)`. One line. Without it, ehRadio's title assembly cannot work on
+this backend: the artist would be paired with the song's own title.
+
+### The m3u8 manifest was re-fetched with no wait at all
+
+`Audio::loop()`'s m3u8 branch re-requested the manifest as soon as `parsePlaylist_M3U8()` returned NULL — the
+normal answer while the live playlist has no new segment yet — and, unlike the I2S library, it had no pause of
+any kind to fall back on. The same manifest was therefore fetched as fast as the socket allowed: on a real
+HLS/AAC station, ten or more `new request:` lines a second, each a blocking connect on the main loop, with the
+device barely responsive. (The alternating manifest/segment requests in a healthy log are this same mechanism
+working — HLS polls rather than holds a stream — so only the empty answer is the fault.)
+
+**Fix**: added `no_host_cnt` / `no_host_timer` to the m3u8 branch and armed `M3U8_NO_SEGMENT_WAIT_MS` (2000 ms)
+on every pass that finds no new segment beyond the first. A successful parse resets the counter and arms
+nothing, so a healthy stream polls exactly as before.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` only — `showID3Tag()` and the m3u8 branch of
+`Audio::loop()`. The ehRadio-side half of the same investigation (the two halves of the title line, and the
+deferred publish) is in `src/core/audiohandlers.cpp` and is recorded in `.github/code-summary.md`; the I2S
+library's matching refetch pause is in `i2s-frankenstein-surgery-notes.md`.
+
+### The media-sequence resync was unreachable, so only a pause/play could bring the stream back
+
+The first field result of the pause above: the repeated requests became one a second, no segment was fetched,
+the stream was silent, and **pause/play cured it**. That last detail is the diagnosis.
+
+`parsePlaylist_M3U8()` clears the parsed playlist at the end of its loop
+(`vector_clear_and_shrink(m_playlistContent)`, line 1822), and the resynchronisation block that follows opens
+with `if(m_playlistContent.size() == 0) return NULL;` (line 1843). That guard is therefore **always** true, so
+`xMedSeq = mediaSeq` — the repair — and the `packets lost` report behind it could never run. `xMedSeq` is a
+function static, reset only through `m_f_firstM3U8call`, which `setDefaults()` sets: a fresh connect. Once the
+live window had slid past the counter, the accept loop's two probes (`xMedSeq`, then `xMedSeq + 1`) both missed,
+nothing was queued, the parse returned NULL, and every later parse repeated that — silence plus a manifest
+request per poll period, until the user pressed pause and play. The one-segment gap has a designed heal (the
+`xMedSeq + 1` probe, which logs `mediaseq %llu skipped`); a two-segment gap had no path at all.
+
+**Fix**: in the accept loop, when neither probe matches — exact evidence that the counter is out of step, so no
+counter or timeout is needed — rebuild the state a fresh connect builds and say so once per parse:
+
+```cpp
+f_seqResync = true;
+log_w("m3u8 mediaseq %llu not in the window - resyncing", xMedSeq);
+f_mediaSeq_found = false;
+xMedSeq = 0;
+m_hashQueue.clear();
+```
+
+The rest of the window is then taken by the hash branch in the same pass, and the next parse re-derives the
+sequence from the window under exactly the conditions a connect does. A few seconds of audio may repeat: that is
+what the pause/play the user was doing also does, and it is the behaviour chosen over "join at the newest
+segment".
+
+Also changed: the pause is now armed on **every** empty answer, replacing the `no_host_cnt > 1` condition that
+allowed one immediate retry per cycle — two requests per period, the "one a second" that was measured.
+
+**Not changed**: the hash-scheme path (a station with no derivable media sequence) needs no resynchronisation —
+there is no counter to lose, and its 20-entry queue only withholds a segment until the window advances, which is
+self-healing.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` — `parsePlaylist_M3U8()` and the m3u8 branch of
+`Audio::loop()`.
+
+---
+
+## Post-Graft Patch Fixes (2026-10-21)
+
+### The screensaver's VU read zero when the player VU was off
+
+**Symptom**: with `config.store.vumeter` false, the screensaver's meter sat full and did not track the audio.
+
+**Root cause**: `computeVUlevel()` and `get_VUlevel()` were gated on the player page's `vumeter` option. The
+screensaver's `screensaverVU` option only controls whether the widget is created; it never opened the source, so
+`get_VUlevel()` returned 0.
+
+**Fix**: both guards now call `Config::vuSourceWanted()` - see the I2S note for the rule. While asleep the player
+page's setting is ignored and `screensaverVU` decides; while awake `vumeter` decides.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`;
+`src/core/config.h` - `Config::vuSourceWanted()`.
+
+---
+
+## Post-Graft Patch Fixes (2026.10.26)
+
+Everything from 2026.10.24 to today, consolidated: SD playback stopped silently, and finding out why took six root
+causes. Four of them are one defect - **a per-track member the graft never resets**: the ancestor resets it, the graft
+lost the reset, so it carries over from the previous track or from the boot. The I2S library has every one of these
+fixed in the same commit, because the walk, the tail test and the counter are the same code.
+
+| # | Symptom | Root cause | Fix |
+|---|---|---|---|
+| 1 | Every ID3v2 track skipped in 0 ms, one per second; tagless (ID3v1) files fine | the ID3 frame walk reads tag padding as a frame header, gets a garbage size (measured 1.4 GB) and state 5 skips to the end of the FILE | in state 4, before any skip: `if(remainingHeaderBytes < 6 \|\| framesize > remainingHeaderBytes - 6) { m_controlCounter = 99; return 0; }` - fall through to the normal tag end, which a healthy tag never reaches |
+| 2 | Audio dies seconds after the screensaver meter appears; only a power cycle recovers; reader frozen with the buffer FULL | the VU read asserts SCI while the audio task holds SDI low mid-chunk, the chip refuses data (DREQ low), and `await_data_request()` waited for ever - including inside `stopSong()` | `await_data_request(timeoutUs = 50000)` returns bool and abandons the chunk on false; `computeVUlevel()` runs under `mutex_audioTask` with a 2 ms timeout (skip the sample, never wait) |
+| 3 | Every track after the first is born past its end: `sum 3470048` against `size 3411531` | `m_sumBytesDecoded` is incremented twice and assigned nowhere - a running total for the boot | reset in `setDefaults()` |
+| 4 | Tracks end early by exactly their own tag size, within 600 bytes | the counter was seeded with `m_audioDataStart` (file-relative) but compared against `m_audioDataSize` (audio-relative) | seed `0`, or `m_resumeFilePos - m_audioDataStart` on a resume |
+| 5 | `Audio-Length` short by the previous track's tag plus its own (`67935 = 43441 + 24494`) | `m_audioDataStart += id3Size` with nothing resetting it | reset `m_audioDataStart`, `m_audioDataSize`, `m_bytesNotDecoded` in `setDefaults()` |
+| 6 | Silent web streams after an SD track in the same boot, with a half-second burst per station change | `f_isFile` was a function-static latched by `m_f_firstPlayCall`, which is initialised `true` and never re-armed - the first play of a boot chose the branch for the whole boot | derive it every pass: `M3U8 ? false : datamode == AUDIO_LOCALFILE ? true : streamType == ST_WEBFILE ? true : false` |
+
+Also, and easily missed: the ID3v1 tail test is a **range** (`<= 128`, not `== 128`). `sendBytes()` is handed a full max
+block and the error path skips 200 bytes, so an exact test is stepped over whenever a frame straddles the tag boundary,
+and the decoder reads the 128-byte tag as audio.
+
+### What made it findable, and what nearly stopped it
+
+- **A detector may require that _something is open_, never that _everything is healthy_.** The first watchdog tested
+  `m_f_running && m_f_stream_ready && !m_f_eof`, so a stalled track silenced the very report that would have named it.
+  It now tests `audiofile != nullptr && !m_f_paused`, and nothing else.
+- **Count the silent exits before theorising.** `playAudioData()` and `performAudioTask()` had seven `return`s with no
+  log between them; four theories lived and died in that silence. Each has a counter now, printed beside the state it
+  explains in the `track10s` report.
+- **A member that only accumulates, or is written on one path, is a bug waiting.** Grep every member for `=` and `+=`
+  and compare the count against the ancestor - that audit turned four separate hunts into one shape.
+- **Read the counters, not the audio.** `buf 295903` is the ring's *capacity*, so a constant `[SD] play pos` means the
+  consumer stopped. `HDAT1 0xFFFB` / `HDAT0 0x8064` are the current frame header, so a non-zero HDAT during silence
+  means the decoder is fine and the fault is downstream. `STATUS 0x0240` with `MODE 0x4800` is the known-good pair, and
+  use `read_register_nowait()` when measuring, because `read_register()` busy-waits 50 ms first.
+- **`setDefaults()` is the reset point that matters.** Diff it against the ancestor's before trusting a graft.
+
+### Reports to keep
+
+| line | when | why |
+|---|---|---|
+| `zero read: room … pos … ctrl … filled … stream …` | once per file, at a zero-length read | separates a real end of track (`pos == size`) from a failed read - `room` and `ctrl` say which |
+| `track10s:` (two lines) | 10 s after every connection | records every track whether or not the meter moved, with the counters above |
+| `vu stuck` / `vu flat` / `vu deep` | counter frozen 3 s / meter at the floor | the only detectors for a decoder that goes silent while data keeps flowing |
+| `no decode progress for 5 s` | watchdog in `loop()` | closes the track and advances; `endLocalFile()` is the one path both endings use |
+| `mp3 err -6 … <4 header bytes> … last <frame size>` | decode error | separates a false sync from mid-frame misalignment |
+| `peof` climbing to match `play` with `eof 1` | the `track10s` line, on a connection making no sound | the file/stream branch is being decided wrongly (the 2026.10.26 latch) |
+
+---
+
+## Post-Graft Patch Fixes (2026.10.29)
+
+### `latinToUTF8()` was handed a pointer, so the limit was 4
+
+`readID3Tag()` ended with `latinToUTF8(m_chbuf, sizeof(m_chbuf))`. `m_chbuf` is a `char*`, so `sizeof` is 4 - the
+pointer, not the buffer. The function takes the buffer's *capacity* and refuses a conversion that would not fit, so
+any latin-1 ID3 text longer than three characters stayed latin-1 and reached the display as mojibake. `readMetadata()`
+on the other hand already passed `m_chbufSize`, which is how the mistake was visible.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.cpp:4020` | `sizeof(m_chbuf)` -> `m_chbufSize` |
+
+The remaining `latinToUTF8(..., sizeof(...))` call sites pass local arrays, where `sizeof` is correct. This is a text
+defect, not a memory one: the short limit makes the conversion decline rather than overrun.
+
+### A dead decoder made the player walk the whole playlist, five seconds per track
+
+The chip can stop answering SPI mid-session: every register reads `0x0000`, `DREQ` stays low and no byte moves. It is
+not an init failure - `begin()` reads `SCI_STATUS` and reports `VS chip: VS1053` on both affected boots, and the
+registers only go to zero later under playback. All-zero reads mean nothing is driving MISO: unpowered, held in reset,
+or a broken MISO path. No software recovery exists: `softReset()` is `SM_RESET` and `begin()` already calls it before
+the chip read and the patch load, and calling it at runtime would leave the clock, MODE and the FLAC patch unloaded.
+`RST` is `-1` on these modules, so `ResetChip()` is dead code.
+
+The defect on our side is what happened next: `no decode progress for 5 s` closed the track, the player advanced, and
+the next track died the same way - 74 stops in one reported session - and since the playlist wraps, it never ended.
+
+`sendBytes()` now counts a strike when a feed moves no bytes **and** `SCI_MODE` reads 0, cleared by any byte moved and
+in `begin()`, deliberately never in `setDefaults()` (the track changes are what prove it). At `VS_CHIP_DEAD_STRIKES`
+(3) the player stops, latches `_decoderDead`, refuses the automatic advance in `next()`, sets the error that the title
+shows, and asks for `LOST`. A hand-picked track clears the latch, so one press is one retry.
+
+### Verified on hardware, and why a soft restart strands the chip
+
+2026.10.29, on the bench: with the radio playing SD, a data pin was disturbed by hand and the device went to `LOST`
+immediately - `SCI_MODE` read 0, three strikes, done, in well under the 5 s progress watchdog. The detector works on
+real hardware.
+
+The same session showed why the chip gets stranded at all: **`XRST` is not an independent VS1053 reset on this
+module.** Grounding it reset the whole radio (`rst:0x1 POWERON`), so the pin is tied to the board's reset supervisor.
+That means `esp_restart()` - a software reset, `rst:0xc RTC_SW_CPU_RST` - does not touch the chip: the VS1053 keeps
+running while the ESP32 reboots and comes back mid-stream. Every dead-decoder boot in the logs followed a software
+restart; every cold boot was healthy. There is no pin to pulse, which is why stopping is the only honest response.
+
+A `recoveryReboot()` on the third strike was considered and rejected. With EN untouched, an ESP32 restart does not reset
+the chip either, so it would land in the same LOST twenty seconds later - and LOST is the better answer anyway, because
+it prompts a power toggle, which is the one thing on this board that does reset the VS1053.
+
+The teardown was the other half of the problem. `stopSong()` pushes 86,400 filler bytes *before* it tests `SM_CANCEL`,
+and against a chip answering `0x0000` every chunk waits out the DREQ timeout - seen as `Main loop stalled 3076ms,
+worst stage player+saves`, once per dead track, on the **main** task, because `Player::loop()` calls `Audio::loop()`.
+`stopSong()` now reads `SCI_MODE` first and clears `m_f_running` when it is 0, so the drain is skipped: a dead chip has
+nothing to drain. The `Song stopped correctly after 0 msec` line was the giveaway - that loop exits on its first pass
+when `SM_CANCEL` reads 0, so the seconds were never being spent there.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.cpp` | strike counting, outside `#ifdef AUDIO_DEBUG`; reset in `begin()`; `stopSong()` skips the drain when `SCI_MODE` reads 0 |
+| `audioVS1053Ex.h` | `m_chipDeadStrikes` and a public `chipDeadStrikes()` |
+| `player.h` / `player.cpp` | `VS_CHIP_DEAD_STRIKES`, `_decoderDead`, the LOST latch and the `next()` guard |
+
+## Post-Graft Patch Fixes (2026.11.03)
+
+Streams that must not be played, mirrored from the I2S fork so the two behave identically. The plan
+(`plans/handle-unsupported-unrecognized.md`) holds the evidence; this holds what the code now does.
+
+- **A verdict channel.** `streamRefuse_e` (`NONE`/`UNSUPPORTED`/`NOT_AUDIO`/`NO_HEAD`), `m_refuseReason`, one setter
+  `setRefuse(reason, shape)` that logs the shape and the URL and stops, and a public `refuseReason()` that
+  `Player::loop()` polls. Cleared in `connecttohost()` beside `setDefaults()` - never in `stopSong()`/`setDefaults()`,
+  which calls `stopSong()` and would erase the verdict just written.
+- **`sniffHead()`**, positive signatures only: MPEG-4 boxes at offset 4 are `UNSUPPORTED`; markup, JSON, PDF, zip,
+  PNG, JPEG, GIF are `NOT_AUDIO`. Applied in two places - `processWebStreamHLS()`'s `firstBytes` block (the segment
+  head is already in the `heapq`-allocated `ID3Buff`) and `processWebStream()` immediately before `f_stream` is set.
+  An unrecognised head is not refused: the attempt cap in `Player::loop()` ends a stream that never produces audio,
+  and refusing an unusual-but-working stream would be the worse error.
+- **The playlist gate** in `parsePlaylist_M3U8()`: `#EXT-X-MAP`, `#EXT-X-KEY` with a method other than `NONE`, a body
+  whose first non-empty line is not `#EXTM3U`, and a segment URL containing `.m4s`/`.cmfv` or ending `.mp4`. All
+  above the `m_codec = CODEC_AAC` default at what the plan lists as line 1913.
+- **Header-time latches** at `parseContentType()` returning false and at `unknown content found`. The latter used to
+  print both `AUDIO_INFO` and `AUDIO_ERROR` for one event; it now prints the single verdict line instead.
+
+### Added for the playlist validator (2026.11.03)
+
+Two inline getters, added after the rest of this patch and unused by the library itself. The validator probes every
+station through this same audio object, so it needs to empty a verdict between probes (a latched refusal would outlive
+the sweep and `Player::loop()` would raise it on the station it had just restored) and to ask whether a codec was
+decided, which is what turns "still connected" into a real PASS. `CODEC_NONE` is scoped to this header, so core
+cannot compare the codec - hence the named predicate.
+
+| file | change |
+|---|---|
+| `audioVS1053Ex.h` | `streamRefuse_e`, `m_refuseReason`, `refuseReason()`, `setRefuse()`, `sniffHead()`, plus `clearRefuse()` and `codecDecided()` for the validator |
+| `audioVS1053Ex.cpp` | both definitions, the clear in `connecttohost()`, the two seams, the playlist gate, the two header-time latches |
+
+## Future issues to watch for
+
+Not bugs in hand - things a future reader should know are still true, in the order they are likely to bite.
+
+- **`connecttohost()` / `connecttoFS()` take no mutex.** `mutex_playAudioData` is created and destroyed but never taken,
+  so a connect can race the feeder. Never observed to fail, and it is the last unbounded window in the library.
+- **`m_validSamples` gates the task loop and is never incremented** on this backend (an I2S leftover). `m_dbgPlayCalls`
+  against `m_dbgTaskCalls` in the `track10s` line would show it the day that changes.
+- **The audio task runs on core 1**, the same core as the Arduino loop. Maleksm's advice is the opposite core;
+  `setAudioTaskCore(0)` is the intended setting for this board and has never been tried.
+- **`stop` and `defaults` advance four and three times per track** where one or two is expected. Constant per track, so
+  nothing accumulates - but it dilutes the counters used to spot a real double-stop, so it is worth one look.
+- **Two `mp3 err -6` per hour on the I2S board**, both on tracks whose ID3v2 walk mis-sizes a frame, so the search
+  starts in the tag padding. Playback is unaffected. The cure is to accept a sync only if another one sits exactly one
+  frame away.
+- **`read_register()` / `write_register()` elsewhere still take no mutex.** Only the VU path was guarded (2026.10.26);
+  nothing else reads the chip outside the feeder today.
+- **When migrating upstream**, compare the new version against `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` for the
+  audio core and against `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` for Maleksm's graft, then re-apply the
+  steps above. Diff `setDefaults()` first: four per-track resets were lost that way.
+
+## Post-Graft Patch Fixes (2026.11.04)
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`,
+`m3u8redirection()`. Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
+
+1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** Its return packs the length *cleared* from the
+   loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - a fully lit bar. The early
+   `if(!_vuInitalized || !config.vuSourceWanted()) return 0;` therefore lit both bars to **maximum** whenever the
+   source was not wanted, and the same happened through the reference clamp's other half on every title change (which
+   is when `Config::setTitle()` zeroes `vuThreshold`). It now answers EMPTY - `(dimension << 8) | dimension` - for the
+   not-wanted case; the zero-reference case was already right here (clamped to 1, so silence maps to `dimension`).
+   Both paths now agree.
+2. **The reference releases again, but in real time.** The "Peak hold, rising only" pair is one call to
+   `Config::vuRefTrack(vuLeft, vuRight)`: raise at once, then fall by `VU_REF_DECAY_PCT` every `VU_REF_DECAY_MS` (6%
+   per 250 ms, ~22%/s, a 2.8 s half-life), never below the live reading. This supersedes the earlier
+   "Removing the decay makes the reference the loudest reading since the last stop or title change" decision - the
+   decay is back, but the failure that motivated its removal (the per-`computeVUlevel()`-call decay chasing the signal
+   and pinning the bar near full) cannot recur: the interval is timed off `millis()` and the reference can never fall
+   below the reading it is being compared against. The rule lives in `config.h`, so the I2S path shares it.
+
+**Side effect, accepted:** the synthesized spectrum scales by `256 / config.vuThreshold`, so it now normalises to the
+last few seconds too and brightens through a quiet passage - the same normalisation the bars get. Also worth knowing:
+`VU_VS1053_DB_FULL` still cancels out of the bar length, and the reference's *release* is now the only thing that
+decides how quickly quiet material empties.
+
+3. **HE-AAC v2 plays as MONO, because this chip does no Parametric Stereo.** `mp4a.40.29` (HE-AAC v2) ranked above
+   `mp4a.40.5` (v1) in `m3u8redirection()`. v2's AAC core is mono by construction - the stereo image exists only if the
+   decoder runs PS - and the VS1053 does not. Confirmed on hardware 2026-11-04 by forcing v1: stereo came back at once
+   with everything else unchanged. v2 is now ranked **last** on this path; LC and v1 are above it. Two code faults had
+   to be fixed before the order meant anything:
+   - `for(uint8_t j = 0; j < sizeof(codecString); j++)` walked 99 iterations over a 9-element array. Now the element
+     count.
+   - The match was a substring test, and `mp4a.40.2` is a prefix of `mp4a.40.29`, so **every v2 line scored as AAC LC**
+     and ties went to whichever variant the manifest listed first. A match followed by a digit is now rejected.
+   - `AUDIO_INFO("variant: %s", ...)` names the chosen STREAM-INF line once per master redirect, which is what made
+     the test readable.
+
+   **Do not move v2 back above v1 for bandwidth or quality reasons without re-testing on the chip.** It is not a
+   preference here, it is a lost channel. The I2S fork keeps xHE last and v2 above it, because there PS runs; the two
+   tables differ in exactly that one position on purpose.

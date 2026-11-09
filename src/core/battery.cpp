@@ -203,16 +203,6 @@ const BatteryStatus& Battery::getStatus() {
   return battStatus;
 }
 
-void Battery::formatStatusLine(const BatteryStatus& status, char* buffer,
-                               size_t buffer_size, bool /*include_warning*/) {
-  if (!status.present) {
-    snprintf(buffer, buffer_size, "##CLI.BATTERY#: not detected");
-    return;
-  }
-  snprintf(buffer, buffer_size, "##CLI.BATTERY#: %dmV, %d%%",
-           status.voltage_mv, status.percentage);
-}
-
 bool Battery::calibrate(int meas_mv) {
   if (meas_mv < 2500 || meas_mv > 4500) return false;
   BatteryStatus b = getStatus();

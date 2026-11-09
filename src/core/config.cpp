@@ -1,12 +1,11 @@
 #include "options.h"
+#include <esp_system.h>
 #include <ctype.h>
 #include <cstddef>
 #include <esp_log.h>
 #include <ESPFileUpdater.h>
 #include <nvs_flash.h>
-#ifndef ARDUINO_ESP32C3_DEV
-  #include <driver/rtc_io.h>
-#endif
+#include <driver/rtc_io.h>
 #include "config.h"
 #include "backlightcontrols.h"
 #include "battery.h"
@@ -22,18 +21,21 @@
 #include "utility.h"
 #include "../displays/dspcore.h"
 #include "../displays/themes.h"
+#include "../displays/themeregistry.h"
+#include "../displays/layoutregistry.h"
 #ifdef USE_SD
   #include "sdmanager.h"
 #endif
 
 
-const char* const Config::wwwFiles[] = {"curated.js", "options.js", "script.js", "script2.js", "search.js",
-                                        "logo.svg", "icon.png", "style.css", "theme.css", "rb_srvrs.json", "timezones.json",
-                                        "curated.html", "irrecord.html", "options.html", "search.html", "updform.html",
+const char* const Config::wwwFiles[] = {"options.js", "script.js", "script2.js",
+                                        "logo.svg", "icon.png", "style.css", "themes.css", "rb_srvrs.json", "timezones.json",
+                                        "curated.html", "editor.html", "irrecord.html", "options.html", "sdmanager.html", "search.html", "updform.html",
                                         "player.html"}; // keep main page at end (deleted when upgraded, last to be downloaded, so user sees emptyfs_html with wait message)
 const size_t Config::wwwFilesCount = sizeof(Config::wwwFiles) / sizeof(Config::wwwFiles[0]);
 
-const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE};
+const char* const Config::dataFiles[] = {PLAYLIST_FILE, SSIDS_FILE, VERSION_FILE, THEME_SLOT_FILES, LAYOUT_SLOT_FILES};
+// The theme and layout slots are optional files rather than required ones, so they are here purely to keep pruneLittleFS() from deleting them
 const size_t Config::dataFilesCount = sizeof(Config::dataFiles) / sizeof(Config::dataFiles[0]);
 
 #if defined(SPI_BUS_SECONDARY)
@@ -41,7 +43,8 @@ const size_t Config::dataFilesCount = sizeof(Config::dataFiles) / sizeof(Config:
 #endif
 
 Config config;
-uint8_t _activeLocale = 0;  // default is whatever is first (likely be_BY), updated at boot from config.store.locale_display
+uint32_t vuPsramBytes = 0; // to be used for what the VU visualiser has taken from PSRAM (the spectrum's FFT scratch)
+uint8_t _activeLocale = 0; // default is whatever is first (likely be_BY), updated at boot from config.store.locale_display
 
 bool wasUpdated(ESPFileUpdater::UpdateStatus status) { return status == ESPFileUpdater::UPDATED; }
 
@@ -59,30 +62,20 @@ void u8fix(char *src) {
   if ((uint8_t)last >= 0xC2) src[strlen(src)-1]='\0';
 }
 
-bool Config::_wwwFilesExist() {
-  char fullpath[64];
-  for (size_t i = 0; i < Config::wwwFilesCount; i++) {
-    sprintf(fullpath, "/www/%s", Config::wwwFiles[i]);
-    String gzPath = String(fullpath) + ".gz";
-    bool plainExists = SPIFFS.exists(fullpath);
-    bool gzExists = SPIFFS.exists(gzPath);
-    if (gzExists && plainExists) SPIFFS.remove(fullpath);
-    if (!plainExists && !gzExists) return false;
-  }
-  return true;
-}
-
 void Config::init() {
+  CONFIGTIMELOGRESET();
   loadPreferences();
+  CONFIGTIMELOG("loadPreferences");
   if (!config.store.bootStableMarker) delay(1000);  // Allow serial monitor to connect before logging in Safe mode
+  CONFIGTIMELOG("Safe mode delay 1000ms");
   bootInfo();
+  CONFIGTIMELOG("bootInfo");
   #if RTCSUPPORTED
-    BOOTLOG("RTC begin(SDA=%d,SCL=%d)", RTC_SDA, RTC_SCL);
     if (rtc.init()) {
-      BOOTLOG("RTC.init done");
+      BOOTLOG("RTC.init\tdone");
       _rtcFound = true;
     } else {
-      BOOTLOG("[ERROR] - Couldn't find RTC");
+      ERRORLOG("RTC.init\tfailed");
     }
   #endif
   #if defined(SPIA_SCK) && (SPIA_SCK != 255)
@@ -92,16 +85,20 @@ void Config::init() {
     SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI);
   #endif
   store.play_mode = store.play_mode & 0b11;
-  if (store.play_mode>1) store.play_mode=PM_WEB;
+  if (store.play_mode>1) store.play_mode = PM_WEB;
+  _sdOfflineSession = store.SDoffline;  // the one-shot reboot flag, read before setup() clears it
+  CONFIGTIMELOG("RTC & SPI.begin & play_mode");
   _initHW();
+  CONFIGTIMELOG("_initHW");
   #ifdef USE_SD
-    _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&SPIFFS:_SDplaylistFS);
+    _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&LittleFS:_SDplaylistFS);
   #else
-    _SDplaylistFS = &SPIFFS;
+    _SDplaylistFS = &LittleFS;
   #endif
 }
 
 void Config::loadPreferences() {
+  CONFIGTIMELOGRESET();
   prefs.begin("ehradio", false);
   // Check config_set_magic first
   uint16_t configSetValue = 0;
@@ -117,14 +114,24 @@ void Config::loadPreferences() {
     setDefaults();
     return;
   }
+  CONFIGTIMELOG("prefs.begin & sentinel");
   // Load all fields in keyMap
+  size_t keyCount = 0;
   for (size_t i = 0; keyMap[i].key != nullptr; ++i) {
     uint8_t* field = (uint8_t*)&store + keyMap[i].fieldOffset;
     size_t sz = keyMap[i].size;
     size_t read = prefs.getBytes(keyMap[i].key, field, sz);
+    keyCount++;
+  }
+  {
+    char nm[40];
+    snprintf(nm, sizeof(nm), "keyMap reads (%u keys)", (unsigned)keyCount);
+    CONFIGTIMELOG(nm);
   }
   deleteOldKeys();
+  CONFIGTIMELOG("deleteOldKeys");
   prefs.end();
+  CONFIGTIMELOG("prefs.end");
 }
 
 void Config::saveLastStationUrl(const char* url, uint16_t waitMs) {
@@ -146,7 +153,6 @@ void Config::changeMode(int newmode) {
       FUNCTIONLOG("REBOOT", "Marking NVS Pref keys for intentional reboot to SD Offline mode. Rebooting.");
       saveValue(&store.bootStableMarker, true);
       saveValue(&store.SDoffline, true);
-      saveValue(&store.play_mode, static_cast<uint8_t>(PM_SDCARD));
       display.putRequest(NEWMODE, CLEAR);
       delay(100);
       ESP.restart();
@@ -154,7 +160,7 @@ void Config::changeMode(int newmode) {
     if (!sdman.ready && newmode!=PM_WEB) {
       #if SD_CARD_DETECT_PIN!=255
         if (digitalRead(SD_CARD_DETECT_PIN)==HIGH) {
-          ERRORLOG("SD card not inserted");
+          WARNINGLOG("SD card not inserted");
           netserver.requestOnChange(GETPLAYERMODE, 0);
           sdman.stop();
           return;
@@ -162,7 +168,7 @@ void Config::changeMode(int newmode) {
       #endif
       uint32_t _t_sdstart = millis();
       if (!sdman.start()) {
-        ERRORLOG("SD card not found");
+        WARNINGLOG("SD card not found");
         netserver.requestOnChange(GETPLAYERMODE, 0);
         sdman.stop();
         return;
@@ -177,7 +183,9 @@ void Config::changeMode(int newmode) {
     }
     saveValue(&store.play_mode, store.play_mode);
     player.resetQueue();  // clear stale ticks commands before mode transition
-    _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&SPIFFS:_SDplaylistFS);
+    _SDplaylistFS = getMode()==PM_SDCARD?&sdman:(true?&LittleFS:_SDplaylistFS);
+    player.clearMute();   // a mode change always cancels mute
+    netserver.requestOnChange(GETPLAYERMODE, 0);
     if (getMode()==PM_SDCARD) {
       if (pir) player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, SDCHANGE);
@@ -210,42 +218,80 @@ void Config::changeMode(int newmode) {
     FUNCTIONLOG("SD", "initPlaylistMode: %lums", millis() - _t_plinit);
     if (pir) player.sendCommand({PR_PLAY, getMode()==PM_WEB?store.lastStation:store.lastSdStation});
     netserver.resetQueue();
-    //netserver.requestOnChange(GETPLAYERMODE, 0);
     netserver.requestOnChange(GETINDEX, 0);
-    //netserver.requestOnChange(GETMODE, 0);
-    // netserver.requestOnChange(CHANGEMODE, 0);
+    netserver.requestOnChange(PLAYLISTREADY, 0);
     display.resetQueue();
+    player.setReady();
     display.putRequest(NEWMODE, PLAYER);
     display.putRequest(NEWSTATION);
+    display.putRequest(NEWTITLE);
+    // The footer IP line carries the mode in its icon (the card pair in SD playback mode), and only a real page
+    // change re-derives it: WEB -> SD passes through the SDCHANGE count screen, but SD -> WEB leaves the player
+    // screen already up, so _switchMode() returns at its "same mode" guard and nothing rewrites the line.  Ask.
+    display.putRequest(NEWIP, 0);
   #endif //#ifdef USE_SD
 }
 
 void Config::syncSDFS() {
   #ifdef USE_SD
-    _SDplaylistFS = (getMode()==PM_SDCARD) ? (FS*)&sdman : (FS*)&SPIFFS;
+    _SDplaylistFS = (getMode()==PM_SDCARD) ? (FS*)&sdman : (FS*)&LittleFS;
   #endif
+}
+
+void Config::beginOfflineSdSession() {
+  _sdOfflineSession = true;
+  syncSDFS();  // SDPLFS() has to answer &sdman from here on
+}
+
+// The "there is nothing to play" state, in one place.  The placeholder name is what the meta line shows
+// (_station() renders config.station.name), and clearing the title is what blanks the two title lines (_title()
+// renders config.station.title, split on " - ") - without it a web stream's title survives a card swap or a switch
+// back to an empty card.  Neither line repaints on its own, so the caller must send NEWSTATION/NEWTITLE afterwards.
+static void setNoStationState() {
+  memset(config.station.url, 0, STATION_FIELD_LENGTH);
+  memset(config.station.name, 0, STATION_FIELD_LENGTH);
+  strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
+  config.station.ovol = 0;
+  config.setTitle("");
 }
 
 void Config::initSDPlaylist(bool force) {
   #ifdef USE_SD
     bool doIndex = force || !sdman.exists(INDEX_SD_PATH);
     if (!doIndex) {
-      File index = sdman.open(INDEX_SD_PATH, "r");  // use sdman directly — SDPLFS() may be SPIFFS after safe mode
+      File index = sdman.open(INDEX_SD_PATH, "r");  // use sdman directly — SDPLFS() may be LittleFS after safe mode
       // Footer: [magic:4][count:4] = 8 bytes
-      if (index && index.size() >= 12) {  // min: 1 entry (4) + footer (8)
+      const size_t idxSize = index ? index.size() : 0;
+      if (index && idxSize >= 12) {  // min: 1 entry (4) + footer (8)
         uint32_t magic, storedCount;
-        index.seek(index.size() - 8);
+        index.seek(idxSize - 8);
         index.readBytes((char*)&magic, 4);
         index.readBytes((char*)&storedCount, 4);
         uint32_t currentCount = sdman.countAudioFiles();
         FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
                     storedCount, magic, currentCount);
+        // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's zero-fill
+        // width is taken from, until the re-index below replaces it with the count the new index holds.
+        store.countStation = (uint16_t)currentCount;
         if (magic != 0x1867) {
           FUNCTIONLOG("SD", "Magic mismatch (should be 1867). Re-indexing.");
+          doIndex = true;
+        } else if (idxSize != (size_t)storedCount * 4 + 8) {
+          FUNCTIONLOG("SD", "Index is %u bytes for %u tracks (expected %u). Re-indexing.",
+                      (unsigned)idxSize, (unsigned)storedCount, (unsigned)((size_t)storedCount * 4 + 8));
           doIndex = true;
         } else if (storedCount != currentCount) {
           FUNCTIONLOG("SD", "File count mismatch. Re-indexing.");
           doIndex = true;
+        } else if (currentCount > 0) {
+          File csv = sdman.open(PLAYLIST_SD_PATH, "r");
+          const size_t csvSize = csv ? csv.size() : 0;
+          if (csv) csv.close();
+          if (csvSize < (size_t)currentCount * 16) {
+            FUNCTIONLOG("SD", "Playlist file holds %u bytes for %u tracks. Re-indexing.",
+                        (unsigned)csvSize, (unsigned)currentCount);
+            doIndex = true;
+          }
         }
       } else {
         FUNCTIONLOG("SD", "Index open failed or too small. Re-indexing.");
@@ -257,7 +303,16 @@ void Config::initSDPlaylist(bool force) {
       FUNCTIONLOG("SD", "Waiting for SD card indexing.");
       sdman.indexSDPlaylist();
       store.countStation = utility.playlistLength();
-      lastStation(_randomStation());
+      if (store.countStation > 0) {
+        lastStation(_randomStation());   // a re-index picks a station, the way entering SD mode always has
+      } else {
+        // An empty card has no station to point at: _randomStation() would answer 1 for a list of nothing, and
+        // the previous stream's title would stay on screen.  This is also the path a "delete everything, then
+        // Done" takes, which never goes through initPlaylistMode().
+        FUNCTIONLOG("SD", "no playable station after the re-index");
+        lastStation(0);
+        setNoStationState();
+      }
       sdResumePos = 0;
     } else {
       store.countStation = utility.playlistLength();
@@ -266,8 +321,10 @@ void Config::initSDPlaylist(bool force) {
 }
 
 void Config::initPlaylistMode() {
+  CONFIGTIMELOGRESET();
   uint16_t _lastStation = 0;
   uint16_t cs = utility.playlistLength();
+  CONFIGTIMELOG("PlaylistLength #1");
   #ifdef USE_SD
     if (getMode()==PM_SDCARD) {
       #if SD_CARD_DETECT_PIN!=255
@@ -277,8 +334,8 @@ void Config::initPlaylistMode() {
             strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
             return;  // no SD — nothing more to init
           } else {
-            store.play_mode=PM_WEB;
-            ERRORLOG("SD card not inserted.");
+            store.play_mode = PM_WEB;
+            WARNINGLOG("SD card not inserted.");
             changeMode(PM_WEB);
             _lastStation = store.lastStation;
           }
@@ -286,17 +343,17 @@ void Config::initPlaylistMode() {
       #endif
       if (!sdman.ready && !sdman.start()) {
         if (network.status == SDOFFLINE) {
-          FUNCTIONLOG("SD", "SD mount failed. Staying in offline mode.");
+          FUNCTIONLOG("SD", "SD mount failed so staying in offline mode");
           strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
           return;  // no SD — nothing more to init
         } else {
-          store.play_mode=PM_WEB;
+          store.play_mode = PM_WEB;
           ERRORLOG("SD mount failed");
           changeMode(PM_WEB);
           _lastStation = store.lastStation;
         }
       } else {
-        FUNCTIONLOG("SD", "SD card mounted.");
+        FUNCTIONLOG("SD", "SD card mounted");
         initSDPlaylist();
         cs = utility.playlistLength();  // refresh after potential re-index
         FUNCTIONLOG("SD", "SD card ready");
@@ -310,13 +367,22 @@ void Config::initPlaylistMode() {
       _lastStation = store.lastStation;
     }
   #else
-    store.play_mode=PM_WEB;
+    store.play_mode = PM_WEB;
     _lastStation = store.lastStation;
   #endif //ifdef USE_SD
-  if (getMode()==PM_WEB && _wwwFilesExist()) {
+  CONFIGTIMELOG("SD/WEB mode branch");
+  const bool wwwOk = (getMode()==PM_WEB) && config.wwwFilesExist;
+  CONFIGTIMELOG("wwwFilesExist (cached)");
+  if (wwwOk) {
     utility.initPlaylist();
+    CONFIGTIMELOG("initPlaylist");
     cs = utility.playlistLength();
+    CONFIGTIMELOG("PlaylistLength #2");
   }
+  // The cached total the big number zero-fills to and _randomStation() picks from, and it has to describe the
+  // playlist THIS mode browses.  One line here covers boot and every mode change in both directions, whatever
+  // wwwOk decided - which is what kept an SD card's count on a web playlist.
+  setCountStation(cs);
   log_i("%d" ,_lastStation);
   // Validate station number is within range
   if (cs == 0) {
@@ -334,33 +400,36 @@ void Config::initPlaylistMode() {
       _lastStation = _randomStation();  // SD mode: pick a random track
     }
   }
+  CONFIGTIMELOG("Station validation & findStationByUrl");
   lastStation(_lastStation);
-  saveValue(&store.play_mode, store.play_mode);
+  // SD Offline Mode is a session, so the stored mode is left alone.
+  if (!_sdOfflineSession) saveValue(&store.play_mode, store.play_mode);
+  CONFIGTIMELOG("lastStation & saveValue");
   _bootDone = true;
-  if (_lastStation == 0 && cs > 0) {
-    // Playlist exists but we couldn't determine the last station:
-    // show "ehRadio" instead of misleading first-station name
-    memset(config.station.url, 0, STATION_FIELD_LENGTH);
-    memset(config.station.name, 0, STATION_FIELD_LENGTH);
-    strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
-    config.station.ovol = 0;
-  } else {
-    utility.loadStation(_lastStation);
+  // Ask the only question that matters: is there a station we can actually load?  A count cannot answer it -
+  // playlistLength() derives the SD count from the index file's size, and an index holding no entries is still
+  // large enough to report one - so an empty card used to resolve to a station that does not exist and keep
+  // whatever name was already there.  A failed read leaves the table untouched (by design), so the placeholder
+  // has to be applied on top of it.
+  const bool haveStation = (_lastStation > 0) && utility.loadStation(_lastStation);
+  if (!haveStation) {
+    FUNCTIONLOG("SD", "no playable station (playlist length %u) - showing the ehRadio placeholder", (unsigned)cs);
+    setNoStationState();
   }
+  // Paint the two derived text lines from what the table now holds.  _station() renders the meta line from
+  // config.station.name and _title() renders both title lines from config.station.title, and neither repaints on
+  // its own - this is the only place the boot path passes through, which is why a meta line nothing had drawn
+  // stayed blank until some other path happened to request it.  While a screen we own is up both requests are
+  // dropped, and changeMode() sends them again after its own page switch.
+  display.putRequest(NEWSTATION);
+  display.putRequest(NEWTITLE);
 }
 
 void Config::_initHW() {
   loadTheme();
+  loadLayout();
   #if IR_PIN!=255
-    prefs.begin("ehradio", false);
-    memset(&ircodes, 0, sizeof(ircodes));
-    size_t read = prefs.getBytes("ircodes", &ircodes, sizeof(ircodes));
-    if (read != sizeof(ircodes) || ircodes.ir_set != 4224) {
-      FUNCTIONLOG("_initHW", "ircodes not initialized or corrupt, resetting...");
-      prefs.remove("ircodes");
-      memset(ircodes.irVals, 0, sizeof(ircodes.irVals));
-    }
-    prefs.end();
+    loadIR();
   #endif
   #if BRIGHTNESS_PIN!=255
     pinMode(BRIGHTNESS_PIN, OUTPUT);
@@ -371,10 +440,32 @@ void Config::_initHW() {
   #endif
 }
 
+// theme_t is filled by memcpy from a ThemeData, field for field, so the two shapes are one contract: the
+// element table is asserted against ThemeData in themes.h, and this closes the other end of it.
+static_assert(sizeof(theme_t) == sizeof(ThemeData),
+              "theme_t and ThemeData have drifted: a field was added to one and not the other.");
+
 void Config::loadTheme() {
-  uint8_t count = sizeof(_themes) / sizeof(_themes[0]);
-  if (config.store.themeId >= count) config.store.themeId = 0;
-  memcpy_P(&theme, &_themes[config.store.themeId], sizeof(ThemeData));
+  // Through the registry rather than straight off the table: the id may name a user slot, and it may
+  // name a slot whose file has since been deleted.  themeValidId() answers both - it hands back the
+  // id when a theme is really there and 0 otherwise, so the persisted id cannot dangle.  The id is
+  // resolved on every class: it is the editor/WebUI's bookkeeping, not the panel's ink.
+  config.store.themeId = themeValidId(config.store.themeId);
+  // The colours are copied only on a colour panel.  On a mono or greyscale one, config.theme is NOT a
+  // theme: it is the driver's fixed palette, applied in DspCore::initDisplay() by tools/oledcolorfix.h
+  #ifdef DSP_TFT
+    if (!themeCopy(config.store.themeId, &theme)) themeCopy(0, &theme);
+  #endif
+}
+
+void Config::loadLayout() {
+  // Through the registry for the same reason loadTheme() is: the id may name a user slot, and it may name
+  // one whose file has since been deleted, so layoutValidId() resolves it to something real or to 0.  The
+  // values themselves are read by the display task, which copies from this same id into activeLayout.
+  // A build with no display has no registry and no layouts at all, so the stored id is left exactly as it was.
+  #ifndef DUMMYDISPLAY
+    config.store.layoutId = layoutValidId(config.store.layoutId);
+  #endif
 }
 
 void Config::defaultSettings(const char *val, uint8_t clientId) {
@@ -391,22 +482,37 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
   }
   if (strcmp(val, "screen") == 0) {
     saveValue(&store.flipscreen, (bool)SCREEN_FLIP);
-    display.flip();
+    display.flip();                 // a setRotation: the repaint the single request below queues shows it
     saveValue(&store.invertdisplay, (bool)SCREEN_INVERT);
     saveValue(&store.inverttitle, INVERT_TITLE);
     saveValue(&store.themeId, (uint8_t)0);
-    display.applyTheme(0);
     saveValue(&store.layoutId, (uint8_t)0);
-    display.applyLayout(0);
+    saveValue(&store.systemFontId, (uint8_t)DISPLAYFONT);
+    saveValue(&store.clockFontId, (uint8_t)CLOCKFONT);
+    saveValue(&store.pretextALLCAPS, (bool)PRETEXT_ALLCAPS);
     saveValue(&store.numplaylist, (bool)NUMBERED_PLAYLIST);
+    saveValue(&store.playlistPages, (bool)PLAYLIST_MODE_PAGED);
     saveValue(&store.clock12, (bool)CLOCK_TWELVE);
+    saveValue(&store.clockglow, (bool)CLOCKGLOW);
+    saveValue(&store.digitsglow, (bool)DIGITSGLOW);
+    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
     saveValue(&store.bufferbar, (bool)SHOW_BUFFERBAR);
     saveValue(&store.vumeter, (bool)SHOW_VU_METER);
-    saveValue(&store.volumepage, (bool)VOLUME_PAGE);
-    saveValue(&store.dspon, true);
+    saveValue(&store.vupeak, (bool)SHOW_VU_PEAK);
+    saveValue(&store.vustyle, (uint8_t)VU_STYLE_DEFAULT);
+    saveValue(&store.dimmingEnabled, (bool)DIMMING_ENABLED);
+    saveValue(&store.dimmingTimeout, (uint16_t)DIMMING_TIMEOUT);
+    saveValue(&store.dimmingBrightness, (uint8_t)DIMMING_BRIGHTNESS);
+    store.dspon = true;  // runtime state only: the display is always on at boot/reset, never restored from NVS
     store.brightness = (uint8_t)SCREEN_BRIGHTNESS; setBrightness(false);
-    saveValue(&store.contrast, (uint8_t)SCREEN_CONTRAST);
-    display.setContrast();
+    backlightControls.restart();
+    // One screen update
+    display.applyFonts((uint8_t)DISPLAYFONT, (uint8_t)CLOCKFONT);
+    netserver.requestOnChange(GETACTIVE, 0);
+    netserver.requestOnChange(GETSCREEN, clientId);
+    return;
+  }
+  if (strcmp(val, "screensaver") == 0) {
     saveValue(&store.screensaverEnabled, (bool)SS_NOTPLAYING);
     saveValue(&store.screensaverBlank, (bool)SS_NOTPLAYING_BLANK);
     saveValue(&store.screensaverTimeout, (uint16_t)SS_NOTPLAYING_TIME);
@@ -414,12 +520,20 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.screensaverPlayingBlank, (bool)SS_PLAYING_BLANK);
     saveValue(&store.screensaverPlayingTimeout, (uint16_t)SS_PLAYING_TIME);
     saveValue(&store.screensaverFullDateTime, (bool)SS_FULL_DATETIME);
-    saveValue(&store.dimmingEnabled, (bool)DIMMING_ENABLED);
-    saveValue(&store.dimmingTimeout, (uint16_t)DIMMING_TIMEOUT);
-    saveValue(&store.dimmingBrightness, (uint8_t)DIMMING_BRIGHTNESS);
-    backlightControls.restart();
-    display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
-    netserver.requestOnChange(GETSCREEN, clientId);
+    saveValue(&store.screensaverText, (bool)SS_INFO_TEXT);
+    saveValue(&store.screensaverClockSmaller, (bool)SS_SMALLER_CLOCK);
+    saveValue(&store.screensaverVU, (bool)SS_VU);
+    saveValue(&store.screensaverVUStyle, (uint8_t)SS_VU_STYLE);
+    saveValue(&store.screensaverVUpeak, (bool)SS_VUPEAK);
+    saveValue(&store.sleeptimer, (bool)SS_SLEEPTIMER);
+    saveValue(&store.sleepSsTimeout, (uint16_t)SS_SLEEPTIME);
+    sleepTicks = 0;
+    if (isScreensaver) {
+      const bool blank = player.isRunning() ? store.screensaverPlayingBlank : store.screensaverBlank;
+      display.putRequest(SSREBUILD, blank ? SCREENBLANK : SCREENSAVER);
+    }
+    netserver.requestOnChange(GETACTIVE, 0);
+    netserver.requestOnChange(GETSCREENSAVER, clientId);
     return;
   }
   if (strcmp(val, "locale") == 0) {
@@ -455,7 +569,7 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(store.weatherapi, WEATHER_API);
     saveValue(&store.weatherelevation, (int16_t)0);
     //saveValue(store.weatherkey, ""); // don't reset API key
-    display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
+    display.putRequest(SHOWWEATHER);
     netserver.requestOnChange(GETWEATHER, clientId);
     return;
   }
@@ -464,14 +578,12 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
     saveValue(store.ehdpname, "");
-    saveValue(&store.softapdelay, (uint8_t)SOFTAP_REBOOT_DELAY);
     char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", getChipId()); saveValue(store.mdnsname, tmp);
-    display.putRequest(NEWMODE, CLEAR); display.putRequest(NEWMODE, PLAYER);
     netserver.requestOnChange(GETSYSTEM, clientId);
     return;
   }
   if (strcmp(val, "mqtt") == 0) {
-    saveValue(&store.mqttenable, false);
+    saveValue(&store.mqttenable, MQTT_ENABLE);
     saveValue(store.mqtthost, MQTT_HOST);
     saveValue(&store.mqttport, (uint16_t)MQTT_PORT);
     saveValue(store.mqttuser, MQTT_USER);
@@ -489,12 +601,13 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
   if (strcmp(val, "1") == 0 || strcmp(val, "") == 0) {
     setDefaults();
     defaultSettings("controls", clientId);
-    defaultSettings("screen", clientId);
     defaultSettings("locale", clientId);
     defaultSettings("weather", clientId);
     defaultSettings("system", clientId);
     defaultSettings("mqtt", clientId);
     defaultSettings("battery", clientId);
+    defaultSettings("screensaver", clientId);
+    defaultSettings("screen", clientId); // at the end to make sure screen doesn't break...
     return;
   }
 }
@@ -512,13 +625,157 @@ void Config::setDefaults() {
   prefs.end();
 }
 
+#if IR_PIN!=255
+/* ===== IR code storage =====
+   One NVS key per remote button in the dedicated "ehradioir" namespace, each holding that button's
+   3 codes. The behaviour id and the compile-time default travel in the same row as the field offset
+   and NVS key, so the table cannot fall out of sync and row order is irrelevant. */
+struct irKeyMapEntry {
+  size_t      fieldOffset;
+  const char* key;
+  size_t      size;
+  uint8_t     action;
+  uint64_t    def;  // IR_BUTTON_* value for slot 0, written into a reset store only; 0 = no default
+};
+
+#define IR_KEY_ENTRY(field, keyname, act, def) { offsetof(irstore_t, field), keyname, sizeof(((irstore_t*)0)->field), act, def }
+
+static const irKeyMapEntry irKeyMap[] = {
+  IR_KEY_ENTRY(power,  "power",  IRACT_POWER,  IR_BUTTON_POWER),
+  IR_KEY_ENTRY(mute,   "mute",   IRACT_MUTE,   IR_BUTTON_MUTE),
+  IR_KEY_ENTRY(up,     "up",     IRACT_UP,     IR_BUTTON_UP),
+  IR_KEY_ENTRY(down,   "down",   IRACT_DOWN,   IR_BUTTON_DOWN),
+  IR_KEY_ENTRY(prev,   "prev",   IRACT_PREV,   IR_BUTTON_PREV),
+  IR_KEY_ENTRY(next,   "next",   IRACT_NEXT,   IR_BUTTON_NEXT),
+  IR_KEY_ENTRY(play,   "play",   IRACT_PLAY,   IR_BUTTON_PLAY),
+  IR_KEY_ENTRY(mode,   "mode",   IRACT_MODE,   IR_BUTTON_MODE),
+  IR_KEY_ENTRY(hash,   "hash",   IRACT_HASH,   IR_BUTTON_HASH),
+  IR_KEY_ENTRY(n0,     "n0",     IRACT_DIGIT,  IR_BUTTON_N0),
+  IR_KEY_ENTRY(n1,     "n1",     IRACT_DIGIT,  IR_BUTTON_N1),
+  IR_KEY_ENTRY(n2,     "n2",     IRACT_DIGIT,  IR_BUTTON_N2),
+  IR_KEY_ENTRY(n3,     "n3",     IRACT_DIGIT,  IR_BUTTON_N3),
+  IR_KEY_ENTRY(n4,     "n4",     IRACT_DIGIT,  IR_BUTTON_N4),
+  IR_KEY_ENTRY(n5,     "n5",     IRACT_DIGIT,  IR_BUTTON_N5),
+  IR_KEY_ENTRY(n6,     "n6",     IRACT_DIGIT,  IR_BUTTON_N6),
+  IR_KEY_ENTRY(n7,     "n7",     IRACT_DIGIT,  IR_BUTTON_N7),
+  IR_KEY_ENTRY(n8,     "n8",     IRACT_DIGIT,  IR_BUTTON_N8),
+  IR_KEY_ENTRY(n9,     "n9",     IRACT_DIGIT,  IR_BUTTON_N9),
+  {0, nullptr, 0, 0, 0} // Yup, 5 fields - don't delete the last line!
+};
+static const size_t irKeyMapCount = sizeof(irKeyMap) / sizeof(irKeyMap[0]) - 1;
+
+static const char* const IR_NVS_NAMESPACE = "ehradioir";
+static const char* const IR_MAGIC_KEY = "irset";
+static const uint16_t IR_MAGIC = 1812;
+
+void Config::loadIR() {
+  memset(&irstore, 0, sizeof(irstore));  // getBytes() leaves the destination untouched for missing keys
+  prefs.begin(IR_NVS_NAMESPACE, false);
+  uint16_t magic = 0;
+  size_t read = prefs.getBytes(IR_MAGIC_KEY, &magic, sizeof(magic));
+  if (read != sizeof(magic) || magic != IR_MAGIC) {
+    FUNCTIONLOG("loadIR", "IR codes not initialized or corrupt, resetting...");
+    prefs.clear();
+    uint16_t m = IR_MAGIC;
+    prefs.putBytes(IR_MAGIC_KEY, &m, sizeof(m));
+    // Defaults land here and nowhere else: a store carrying the magic is the user's own set.  They are
+    // written through immediately, because the next boot finds the magic valid, reads no key for them
+    // and leaves the memset value standing.
+    uint8_t seeded = 0;
+    for (size_t i = 0; i < irKeyMapCount; ++i) {
+      if (irKeyMap[i].def == 0) continue;
+      uint8_t* field = (uint8_t*)&irstore + irKeyMap[i].fieldOffset;
+      ((uint64_t*)field)[0] = irKeyMap[i].def;
+      if (prefs.putBytes(irKeyMap[i].key, field, irKeyMap[i].size) == irKeyMap[i].size) ++seeded;
+    }
+    if (seeded) FUNCTIONLOG("loadIR", "Seeded %u default IR code(s)", (unsigned)seeded);
+  } else {
+    for (size_t i = 0; i < irKeyMapCount; ++i) {
+      uint8_t* field = (uint8_t*)&irstore + irKeyMap[i].fieldOffset;
+      prefs.getBytes(irKeyMap[i].key, field, irKeyMap[i].size);
+    }
+  }
+  prefs.end();
+}
+
 void Config::saveIR() {
-  #if IR_PIN!=255
-    ircodes.ir_set = 4224;
-    prefs.begin("ehradio", false);
-    size_t written = prefs.putBytes("ircodes", &ircodes, sizeof(ircodes));
-    prefs.end();
-  #endif
+  prefs.begin(IR_NVS_NAMESPACE, false);
+  uint16_t m = IR_MAGIC;
+  prefs.putBytes(IR_MAGIC_KEY, &m, sizeof(m));
+  for (size_t i = 0; i < irKeyMapCount; ++i) {
+    uint8_t* field = (uint8_t*)&irstore + irKeyMap[i].fieldOffset;
+    if (prefs.putBytes(irKeyMap[i].key, field, irKeyMap[i].size) != irKeyMap[i].size) {
+      FUNCTIONLOG("saveIR", "Failed to write IR key '%s' (NVS full?)", irKeyMap[i].key);
+    }
+  }
+  prefs.end();
+}
+
+void Config::saveIR(uint8_t button) {
+  if (button >= irKeyMapCount) return;
+  prefs.begin(IR_NVS_NAMESPACE, false);
+  uint16_t m = IR_MAGIC;
+  prefs.putBytes(IR_MAGIC_KEY, &m, sizeof(m));
+  uint8_t* field = (uint8_t*)&irstore + irKeyMap[button].fieldOffset;
+  if (prefs.putBytes(irKeyMap[button].key, field, irKeyMap[button].size) != irKeyMap[button].size) {
+    FUNCTIONLOG("saveIR", "Failed to write IR key '%s' (NVS full?)", irKeyMap[button].key);
+  }
+  prefs.end();
+}
+
+uint64_t* Config::irCodes(uint8_t button) {
+  if (button >= irKeyMapCount) return nullptr;
+  return (uint64_t*)((uint8_t*)&irstore + irKeyMap[button].fieldOffset);
+}
+
+void Config::clearIR(uint8_t button, uint8_t slot) {
+  if (button >= irKeyMapCount || slot > 2) return;
+  irCodes(button)[slot] = 0;
+}
+
+// After learning a code, drop that same code from every other slot so only the newest copy is kept.
+uint8_t Config::clearDuplicateIR(uint8_t button, uint8_t slot) {
+  if (button >= irKeyMapCount || slot > 2) return 0;
+  const uint64_t* keep = irCodes(button);
+  if (keep == nullptr) return 0;
+  const uint64_t code = keep[slot];
+  if (code == 0) return 0;  // never match empty slots - a 0 would wipe everything
+  uint8_t cleared = 0;
+  for (uint8_t b = 0; b < irKeyMapCount; ++b) {
+    uint64_t* codes = irCodes(b);
+    if (codes == nullptr) continue;
+    for (uint8_t s = 0; s < 3; ++s) {
+      if (b == button && s == slot) continue;  // keep the newest copy
+      if (codes[s] == code) { codes[s] = 0; ++cleared; }
+    }
+  }
+  return cleared;
+}
+
+int Config::irButtonByName(const char* name) {
+  if (name == nullptr || name[0] == '\0') return -1;
+  for (size_t i = 0; i < irKeyMapCount; ++i) {
+    if (strcmp(irKeyMap[i].key, name) == 0) return (int)i;
+  }
+  return -1;
+}
+
+uint8_t Config::irButtonCount() { return (uint8_t)irKeyMapCount; }
+
+const char* Config::irButtonKey(uint8_t button) {
+  return (button < irKeyMapCount) ? irKeyMap[button].key : "";
+}
+
+uint8_t Config::irAction(uint8_t button) {
+  return (button < irKeyMapCount) ? irKeyMap[button].action : 0xFF;  // 0xFF = unknown button
+}
+#endif // IR_PIN!=255
+
+// The screensaver and sleep countdowns always restart together
+void Config::resetScreensaverTimers(uint16_t value) {
+  screensaverTicks = value;
+  screensaverPlayingTicks = value;
+  sleepTicks = value;
 }
 
 void Config::processDeferredSaves() {
@@ -593,15 +850,14 @@ void Config::setBrightness(bool dosave) {
     if (!store.dspon) store.dspon = true;
     if (dosave) {
       saveValueButWait(&store.brightness, store.brightness, 4000);
-      saveValue(&store.dspon, store.dspon);
     }
   #endif
 }
 
-void Config::setDspOn(bool dspon, bool saveval) {
-  if (saveval) {
+void Config::setDspOn(bool dspon, bool updateState) {
+  if (updateState) {
+    // Runtime state only: intentionally NOT persisted, so a standby/blank 'false' is never restored on boot.
     store.dspon = dspon;
-    saveValue(&store.dspon, store.dspon);
   }
   if (!dspon) {
     #if BRIGHTNESS_PIN!=255
@@ -617,17 +873,37 @@ void Config::setDspOn(bool dspon, bool saveval) {
 }
 
 void Config::bootInfo() {
+  SERIALLOGLF();
+  SERIALLOGLF();
   BOOTLOG("************************************************");
   BOOTLOG("*               ehRadio %s             *", RADIOVERSION);
   BOOTLOG("************************************************");
-  BOOTLOG("------------------------------------------------");
   BOOTLOG("Arduino API:\t%d.%d.%d", ARDUINO / 10000, (ARDUINO / 100) % 100, ARDUINO % 100);
   BOOTLOG("Arduino Core:\t%d.%d.%d", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH);
   BOOTLOG("GCC Toolchain:\t%s", __VERSION__);
   BOOTLOG("%s:\trev: %d, Cores: %d, PSRAM: %dMB, ID: %d", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(), (ESP.getPsramSize() + 524288) / 1048576, ({uint64_t _m=ESP.getEfuseMac(); (((_m>>40)&0xFF)<<16)|(((_m>>32)&0xFF)<<8)|((_m>>24)&0xFF);}));
-  BOOTLOG("Core Processes:\tMain: 1, Audio: %d, Network: %d, Display: %d", AUDIO_CORE, NETWORK_CORE, DSP_TASK_CORE_ID);
+  #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+    BOOTLOG("Serial:\tUSB CDC (ARDUINO_USB_CDC_ON_BOOT=%d), TX timeout %u ms", ARDUINO_USB_CDC_ON_BOOT, BOOTLOG_TX_TIMEOUT_MS);
+  #else
+    BOOTLOG("Serial:\tUART0 at 115200 (ARDUINO_USB_CDC_ON_BOOT is not defined)");
+  #endif
+  BOOTLOG("Process: Core:\tMain: 1, Audio: %d, Network: %d, Display: %d", AUDIO_CORE, NETWORK_CORE, DSP_TASK_CORE_ID);
   BOOTLOG("Stack Sizes:\tLoop: %dKB, Display: %dKB, Netserver: %dKB, Network: %dKB", LOOP_TASK_STACK_SIZE, DSP_TASK_STACK_SIZE, NETSERVER_TASK_STACK_SIZE, NETWORK_TASK_STACK_SIZE);
   BOOTLOG("Task Priority:\tDisplay: %d, Netserver: %d, Playback: %d, Network: %d, Low: %d", DSP_TASK_PRIORITY, NETSERVER_TASK_PRIORITY, PLAYBACK_TASK_PRIORITY, NET_TASK_PRIORITY, LOW_TASK_PRIORITY);
+  { const esp_reset_reason_t rr = esp_reset_reason();
+    BOOTLOG("Reset Reason:\t%d (%s)", (int)rr,
+            rr == ESP_RST_POWERON    ? "power-on" :
+            rr == ESP_RST_EXT        ? "external pin" :
+            rr == ESP_RST_SW         ? "software restart" :
+            rr == ESP_RST_PANIC      ? "panic/exception" :
+            rr == ESP_RST_INT_WDT    ? "interrupt watchdog" :
+            rr == ESP_RST_TASK_WDT   ? "task watchdog" :
+            rr == ESP_RST_WDT        ? "other watchdog" :
+            rr == ESP_RST_DEEPSLEEP  ? "deep sleep wake" :
+            rr == ESP_RST_BROWNOUT   ? "brownout" :
+            rr == ESP_RST_SDIO       ? "SDIO" :
+                                       "unknown");
+  }
   #ifdef SPIA_SCK
     if (SPIA_SCK!=255) BOOTLOG("SPIA:\t\tSCK: %d, MISO: %d, MOSI: %d", SPIA_SCK, SPIA_MISO, SPIA_MOSI);
   #endif
@@ -637,9 +913,6 @@ void Config::bootInfo() {
   BOOTLOG("Display %d:\t%s (width: %d, height: %d)", DSP_MODEL, DISPLAY_MODEL_NAME, DSP_WIDTH, DSP_HEIGHT);
   #if I2C_SDA!=255
     BOOTLOG("\t\tI2C SDA: %d, SCL: %d, RST: %d", I2C_SDA, I2C_SCL, I2C_RST);
-  #endif
-  #if LCD_RS!=255
-    BOOTLOG("\t\tLCD RS: %d, E: %d, D4: %d, D5: %d, D6: %d, D7: %d,", LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
   #endif
   #if TFT_DC!=255
     BOOTLOG("\t\tTFT SPIA, CS: %d, RST: %d, DC: %d", TFT_CS, TFT_RST, TFT_DC);
@@ -661,14 +934,14 @@ void Config::bootInfo() {
     #ifdef ES8311_I2C_SCL
       SERIALLOG(" I2C SCL: %d SDA: %d", ES8311_I2C_SCL, ES8311_I2C_SDA);
     #else
-      SERIALLOG("");
+      SERIALLOGLF();
     #endif
   #endif
   BOOTLOGX("\t\tVolume Scale: %d, Force Mono: %s", VOLUME_SCALE, PLAYER_FORCE_MONO?"true":"false");
   #if MUTE_PIN!=255
     SERIALLOG(", Mute Pin: %d, Mute Val: %d, Mute Lock: %s", MUTE_PIN, MUTE_VAL, MUTE_LOCK?"true":"false");
   #else
-    SERIALLOG("");
+    SERIALLOGLF();
   #endif
   #if BTN_DOWN!=255
     BOOTLOG("Button Down:\tPin: %d, Pullup: %s%s", BTN_DOWN, BTN_DOWN_PULLUP?"true":"false", _WBTN_DOWN ? ", Wake" : "");
@@ -718,10 +991,17 @@ void Config::bootInfo() {
     BOOTLOG("IR:\t\tPin: %d", IR_PIN);
   #endif
   #if SD_CS!=255
-    #if SD_CARD_DETECT_PIN!=255
-      BOOTLOG("SD:\t\tSPI%c Pin: %d Detect Pin: %d Autoplay: %s", SD_SPI, SD_CS, SD_CARD_DETECT_PIN, SD_AUTOPLAY?"true":"false");
+    #if defined(SD_USE_MMC)
+      #if SDMMC_D1==255 || SDMMC_D2==255 || SDMMC_D3==255
+        BOOTLOG("SD:\t\tSDMMC 1-bit CLK: %d CMD: %d D0: %d", SDMMC_CLK, SDMMC_CMD, SDMMC_D0);
+      #else
+        BOOTLOG("SD:\t\tSDMMC 4-bit CLK: %d CMD: %d D0: %d D1: %d D2: %d D3: %d", SDMMC_CLK, SDMMC_CMD, SDMMC_D0, SDMMC_D1, SDMMC_D2, SDMMC_D3);
+      #endif
     #else
       BOOTLOG("SD:\t\tSPI%c Pin: %d", SD_SPI, SD_CS);
+    #endif
+    #if SD_CARD_DETECT_PIN!=255
+      BOOTLOG("SD Detect:\tPin: %d Autoplay: %s", SD_CARD_DETECT_PIN, SD_AUTOPLAY?"true":"false");
     #endif
   #endif
   #if (TS_MODEL!=TS_MODEL_UNDEFINED)
@@ -731,6 +1011,9 @@ void Config::bootInfo() {
       BOOTLOG("Touchscreen:\t Model: %d, SDA: %d, SCL: : %d, INT: %d, RST: %d", TS_MODEL, TS_SDA, TS_SCL, TS_INT, TS_RST);
     #endif
   #endif
+  #if (RTC_MODULE!=RTC_MODULE_UNDEFINED)
+    BOOTLOG("RTC:\t\tSDA: %d, SCL: %d", RTC_SDA, RTC_SCL);
+  #endif
   #ifdef FIRMWARE
     BOOTLOG("Firmware:\t%s", FIRMWARE);
   #endif
@@ -738,16 +1021,12 @@ void Config::bootInfo() {
     BOOTLOG("Update URL:\t%s", UPDATEURL);
     BOOTLOG("Auto Update:\t%s", store.autoupdate?"true":"false");
   #endif
-  #ifdef MQTT_ENABLE
-    BOOTLOG("MQTT Enabled:\t%s", store.mqttenable?"true":"false");
-  #endif
   BOOTLOGX("AP SSID:\t%s", AP_SSID);
   #ifdef AP_PASSWORD
     SERIALLOG(", Password: %s", AP_PASSWORD);
   #else
     SERIALLOG(" (no password)");
   #endif
-  BOOTLOG("Soft AP Delay:\t%d", store.softapdelay);
   #ifdef ALL_DEBUG_LOGS
     BOOTLOG("ALL_DEBUG_LOGS:\tenabled");
   #else
@@ -771,6 +1050,9 @@ void Config::bootInfo() {
   BOOTLOG("WebUI Locale:\t%s", store.locale_webui);
   BOOTLOG("Smartstart:\t%s", store.smartstart?"true":"false");
   BOOTLOG("Wifi Scan Best:\t%s", store.wifiscanbest?"true":"false");
+  BOOTLOG("ehDP Enabled:\t%s", store.ehdp?"true":"false");
+  BOOTLOG("mDNS Name:\t%s", store.mdnsname);
+  BOOTLOG("MQTT Enabled:\t%s", store.mqttenable?"true":"false");
   BOOTLOG("------------------------------------------------");
 }
 
@@ -803,14 +1085,24 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(inverttitle, "inverttitle"),
   CONFIG_KEY_ENTRY(layoutId, "layoutid"),
   CONFIG_KEY_ENTRY(themeId, "themeid"),
-  CONFIG_KEY_ENTRY(dspon, "dspon"),
   CONFIG_KEY_ENTRY(numplaylist, "numplaylist"),
   CONFIG_KEY_ENTRY(clock12, "clock12"),
+  CONFIG_KEY_ENTRY(volumepage, "volpage"),
   CONFIG_KEY_ENTRY(bufferbar, "audioinfo"),
   CONFIG_KEY_ENTRY(vumeter, "vumeter"),
-  CONFIG_KEY_ENTRY(volumepage, "volpage"),
+  CONFIG_KEY_ENTRY(vupeak, "vupeak"),
+  CONFIG_KEY_ENTRY(vustyle, "vustyle"),
+  CONFIG_KEY_ENTRY(systemFontId, "sysfont"),
+  CONFIG_KEY_ENTRY(clockFontId, "clockfont"),
+  CONFIG_KEY_ENTRY(clockglow, "clockglow"),
+  CONFIG_KEY_ENTRY(digitsglow, "digitsglow"),
+  CONFIG_KEY_ENTRY(playlistPages, "plpaged"),
+  CONFIG_KEY_ENTRY(pretextALLCAPS, "allcaps"),
   CONFIG_KEY_ENTRY(brightness, "bright"),
-  CONFIG_KEY_ENTRY(contrast, "contrast"),
+  CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
+  CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
+  CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
+  // Screensaver
   CONFIG_KEY_ENTRY(screensaverEnabled, "scrnsvren"),
   CONFIG_KEY_ENTRY(screensaverBlank, "scrnsvrbl"),
   CONFIG_KEY_ENTRY(screensaverTimeout, "scrnsvrto"),
@@ -818,9 +1110,13 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(screensaverPlayingBlank, "scrnsvrplbl"),
   CONFIG_KEY_ENTRY(screensaverPlayingTimeout, "scrnsvrplto"),
   CONFIG_KEY_ENTRY(screensaverFullDateTime, "scrnsvrfull"),
-  CONFIG_KEY_ENTRY(dimmingEnabled, "dimmingen"),
-  CONFIG_KEY_ENTRY(dimmingTimeout, "dimmingto"),
-  CONFIG_KEY_ENTRY(dimmingBrightness, "dimmingbr"),
+  CONFIG_KEY_ENTRY(screensaverText, "scrnsvrtext"),
+  CONFIG_KEY_ENTRY(screensaverClockSmaller, "sssmaller"),
+  CONFIG_KEY_ENTRY(screensaverVU, "scrnsvrvu"),
+  CONFIG_KEY_ENTRY(screensaverVUStyle, "scrnsvrvustyle"),
+  CONFIG_KEY_ENTRY(screensaverVUpeak, "scrnsvrvupeak"),
+  CONFIG_KEY_ENTRY(sleeptimer, "sleeptimer"),
+  CONFIG_KEY_ENTRY(sleepSsTimeout, "sleepsstimeout"),
   // Locale
   CONFIG_KEY_ENTRY(locale_webui, "localewebui"),
   CONFIG_KEY_ENTRY(locale_display, "localedsp"),
@@ -850,7 +1146,6 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
   CONFIG_KEY_ENTRY(ehdp, "ehdp"),
   CONFIG_KEY_ENTRY(ehdpname, "ehdpname"),
-  CONFIG_KEY_ENTRY(softapdelay, "softapdelay"),
   CONFIG_KEY_ENTRY(mdnsname, "mdnsname"),
   // MQTT
   CONFIG_KEY_ENTRY(mqttenable, "mqttenable"),
@@ -872,6 +1167,9 @@ void Config::deleteOldKeys() {
   prefs.remove("smartstartx"); // why the x...?
   prefs.remove("skipplupdn"); // replaced by oneclickswitch
   prefs.remove("showwthr"); // replaced by showweather
+  prefs.remove("ircodes"); // replaced by the named per-button keys in the "ehradioir" namespace
+  prefs.remove("softapdelay"); // SoftAP reboot delay removed: options.h SOFTAP_REBOOT_DELAY is the only control now
+  prefs.remove("dspon"); // should never have been / it's a runtime-only state
   // none yet
 }
 

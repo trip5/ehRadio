@@ -5,6 +5,7 @@
 #include "../icons.h"                 // icon bitmaps + ICON_TABLE
 #include "../dspfont.h"               // DSP_UNICODE_FONT definition
 #include "pretext.h"
+#include "dspstats.h"                 // Core Monitor counters
 
 // Define missing macros for SSD1306x32 if not already defined
 #ifndef CHARWIDTH
@@ -14,13 +15,6 @@
   #define TFT_FG 1
   #define TFT_BG 0
 #endif
-
-#define ADAFRUIT_CLIPPING !defined(DSP_LCD)
-
-// In-band pixel-spacer control character used by display and widget rendering
-// (ASCII Record Separator 0x1E). Inserting this byte into a display string
-// adds a 2-pixel gap without advancing a full character cell.
-#define DSP_PIXEL_SPACER '\x1E'
 
 typedef struct clipArea {
   uint16_t left; 
@@ -39,41 +33,20 @@ class DspCore: public yoDisplay {
     void printClock(){}
     #ifdef DSP_OLED
       inline void loop(bool force=false){
-        #if DSP_MODEL==DSP_NOKIA5110
-          if(digitalRead(TFT_CS)==LOW) return;
-          display();
-        #else
-          display();
-          //delay(DSP_MODEL==DSP_ST7920?20:5);
-          vTaskDelay(DSP_MODEL==DSP_ST7920?10:0);
-        #endif
+        cmCountPush();                // one panel push per display() call
+        display();
       }
       inline void drawLogo(uint16_t top) {
-        #if !(DSP_MODEL==DSP_SSD1306 && DSP_HEIGHT==32)
+        #if (DSP_HEIGHT>40)
           drawBitmap((width()  - LOGO_WIDTH ) / 2, top, logo, LOGO_WIDTH, LOGO_HEIGHT, 1);
         #else
-          setTextSize(1); setCursor((width() - 6*CHARWIDTH) / 2, 0); setTextColor(TFT_FG, TFT_BG); print(utf8To("ehRadio", false));
+          setTextSize(1); setCursor((width() - 6*CHARWIDTH) / 2, 0); setTextColor(TFT_FG, TFT_BG); print("ehRadio");
         #endif
         display();
       }
     #else
-      #ifndef DSP_LCD
       inline void loop(bool force=false){}
       inline void drawLogo(uint16_t top){ drawRGBBitmap((width() - LOGO_WIDTH) / 2, top, logo, LOGO_WIDTH, LOGO_HEIGHT); }
-      #endif
-    #endif
-    #ifdef DSP_LCD
-      uint16_t width();
-      uint16_t height();
-      void fillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
-      void drawRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color){}
-      void setTextSize(uint8_t s){}
-      void setTextSize(uint8_t sx, uint8_t sy){}
-      void setTextColor(uint16_t c, uint16_t bg){}
-      void setFont(){}
-      void apScreen();
-      void drawLogo(uint16_t top){}
-      void loop(bool force=false){}
     #endif
     void flip();
     void invert();
@@ -82,32 +55,36 @@ class DspCore: public yoDisplay {
     void setScrollId(void * scrollid) { _scrollid = scrollid; }
     void * getScrollId() { return _scrollid; }
     uint16_t textWidth(const char *txt);
-    #if ADAFRUIT_CLIPPING
-      inline void writePixel(int16_t x, int16_t y, uint16_t color) {
-        if(_clipping){
-          if ((x < _cliparea.left) || (x > _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y > _cliparea.top + _cliparea.height)) return;
-        }
-        yoDisplay::writePixel(x, y, color);
+    // The rectangle is half-open on its right and bottom edges: left .. left+width-1.  Both tests below used to
+    // admit one pixel past those, which is a glyph column escaping a scrolling line's clip and surviving the next
+    // erase on a monochrome panel.  writeFillRect is the correct reading, and writePixel now matches it.
+    inline void writePixel(int16_t x, int16_t y, uint16_t color) {
+      if(_clipping){
+        if ((x < _cliparea.left) || (x >= _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y >= _cliparea.top + _cliparea.height)) return;
       }
-      inline void writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
-        if(_clipping){
-          if ((x < _cliparea.left) || (x >= _cliparea.left+_cliparea.width) || (y < _cliparea.top) || (y > _cliparea.top + _cliparea.height))  return;
-        }
-        yoDisplay::writeFillRect(x, y, w, h, color);
+      yoDisplay::writePixel(x, y, color);
+    }
+    inline void writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
+      if(_clipping){
+        // Clamped, not merely tested at its origin: a fill that started inside the rectangle was drawn at its
+        // whole width and height, so it painted past the right and bottom edges too.
+        const int16_t right  = (int16_t)(_cliparea.left + _cliparea.width);
+        const int16_t bottom = (int16_t)(_cliparea.top  + _cliparea.height);
+        if (x < (int16_t)_cliparea.left) { w -= (int16_t)_cliparea.left - x; x = (int16_t)_cliparea.left; }
+        if (y < (int16_t)_cliparea.top)  { h -= (int16_t)_cliparea.top  - y; y = (int16_t)_cliparea.top;  }
+        if (x + w > right)  w = right  - x;
+        if (y + h > bottom) h = bottom - y;
+        if (w <= 0 || h <= 0) return;   // wholly outside
       }
-    #else
-      inline void writePixel(int16_t x, int16_t y, uint16_t color) { }
-      inline void writeFillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) { }
-    #endif
+      cmCountFill();                  // counted after the clip test: only real fills
+      yoDisplay::writeFillRect(x, y, w, h, color);
+    }
     inline void setClipping(clipArea ca){
       _cliparea = ca;
       _clipping = true;
     }
     inline void clearClipping(){
       _clipping = false;
-      #ifdef DSP_LCD
-        setClipping({0, 0, width(), height()});
-      #endif
     }
 
     // Draw a 5-pixel-wide icon from icons.h at the current cursor position.
@@ -149,39 +126,47 @@ class DspCore: public yoDisplay {
       return 1;
     }
 
-    /* Reset the UTF-8 decoder state so a partial sequence from a previous
-       print() call does not corrupt the first glyph of the next frame. */
+    // Reset the UTF-8 decoder state so a partial sequence from a previous print() call does not corrupt the first
+    // glyph of the next frame.
     void resetUTF8() { _utf8_remaining = 0; }
 
   private:
     // Render a 16-bit codepoint using DisplayFont.  All characters
     // (ASCII + non-ASCII) are rendered directly with background fill —
     // unlike the library's GFXfont drawChar which draws only foreground.
-    void _writeGlyph(uint16_t cp) {
-      const GFXfont *f = &DisplayFont;
+    // cp is 32-bit: the decoder can produce four-byte sequences and truncating
+    // them here would turn a supplementary codepoint into a different glyph.
+    void _writeGlyph(uint32_t cp) {
+      cmCountGlyph();
+      const GFXfont *f = displayFont();
       // Icon codepoints (0x01-0x1F) — render directly from ICON_TABLE.
       // Must precede \n / \r checks so that \015 (0x0D = CR)
       // reaches the icon handler instead of being swallowed as carriage return.
       if (cp >= 0x01 && cp <= 0x1F) {
-        const uint8_t* const *table = ICON_TABLE;
         if (cp < 32) {
-          const uint8_t* icon = (const uint8_t*)pgm_read_ptr(&table[cp]);
-          if (icon) {
+          // The cell is 6*textsize wide by 8*textsize tall whatever mark is picked:
+          // iconAt() only returns a scale that divides textsize, so ps is an integer.
+          const IconSel sel = (textsize_x == textsize_y) ? iconAt((uint8_t)cp, textsize_x)
+                                                        : IconSel{ iconBits((uint8_t)cp, 1), 1 };
+          if (sel.bits) {
+            const uint8_t k = sel.scale;
+            const uint8_t psx = textsize_x / k, psy = textsize_y / k;
+            const uint8_t w = 6 * k, h = 8 * k;
+            const uint8_t *bits = (const uint8_t *)sel.bits;
             startWrite();
             int16_t renderY = cursor_y + (int16_t)pgm_read_byte(&f->yAdvance) * textsize_y;
-            for (uint8_t row = 0; row < 8; row++) {
-              uint8_t line = pgm_read_byte(icon + row);
-              for (uint8_t col = 0; col < 6; col++) {
-                if (line & (0x20 >> col)) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    writePixel(cursor_x + col, renderY - 8 + row, textcolor);
-                  else
-                    writeFillRect(cursor_x + col * textsize_x, renderY + (int16_t)(row - 8) * textsize_y, textsize_x, textsize_y, textcolor);
+            for (uint8_t row = 0; row < h; row++) {
+              const uint32_t line = (k == 1) ? pgm_read_byte(bits + row)
+                                             : pgm_read_dword(bits + row * 4);
+              for (uint8_t col = 0; col < w; col++) {
+                const int16_t x = cursor_x + (int16_t)col * psx;
+                const int16_t y = renderY + (int16_t)((int16_t)row - h) * psy;
+                if (line & (1UL << (w - 1 - col))) {
+                  if (psx == 1 && psy == 1) writePixel(x, y, textcolor);
+                  else writeFillRect(x, y, psx, psy, textcolor);
                 } else if (textbgcolor != textcolor) {
-                  if (textsize_x == 1 && textsize_y == 1)
-                    writePixel(cursor_x + col, renderY - 8 + row, textbgcolor);
-                  else
-                    writeFillRect(cursor_x + col * textsize_x, renderY + (int16_t)(row - 8) * textsize_y, textsize_x, textsize_y, textbgcolor);
+                  if (psx == 1 && psy == 1) writePixel(x, y, textbgcolor);
+                  else writeFillRect(x, y, psx, psy, textbgcolor);
                 }
               }
             }
@@ -195,21 +180,31 @@ class DspCore: public yoDisplay {
       if (cp == '\n') { cursor_x = 0; cursor_y += (int16_t)textsize_y * (uint8_t)pgm_read_byte(&f->yAdvance); return; }
       if (cp == '\r') return;
       // Space (0x20) — advance cursor by one character cell.  Some fonts
-      // start at 0x21; without this, space falls to foldAccent and the
-      // cursor never advances, causing characters to run together.
+      // start at 0x21, so the space has no glyph of its own; resolving it
+      // through preText() would replace it with the substitute rather than a
+      // gap, and either way the cursor must advance or characters run together.
       if (cp == ' ') {
         uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
         cursor_x += (int16_t)spaceAdv * textsize_x;
         return;
       }
-      // Run optional pre-processing (allcaps, accent folding)
-      cp = preText(cp, f);
-
       // If a clock font is active (not ours, not NULL), let the library handle it.
+      // Dispatched BEFORE preText() so the resolver is never asked about a font
+      // other than the one that will draw the glyph - otherwise a codepoint the
+      // clock font carries could be folded or replaced against DisplayFont.
+      // Clock text is ASCII digits, and the stock write() is single-byte, which
+      // is why this path stays 1-byte.
       if (gfxFont != NULL && gfxFont != (GFXfont *)f) {
         Adafruit_GFX::write((uint8_t)(cp & 0xFF));
         return;
       }
+      // Resolve against the font actually used: keep the glyph when the font has
+      // it, fold to a base character when it does not, substitute otherwise.
+      // Returns a renderable codepoint, never 0.
+      // preText() narrows to a BMP codepoint, so the lookups below are 16-bit
+      // again - anything the font carries is inside its own (BMP) range.
+      uint16_t resolved = preText(cp, f);
+      cp = resolved;
       uint16_t first = pgm_read_word(&f->first);
       uint16_t last  = pgm_read_word(&f->last);
       if (cp >= first && cp <= last) {
@@ -252,23 +247,17 @@ class DspCore: public yoDisplay {
           }
           endWrite();
         } else {
-          // Empty glyph slot — try fallback mapping
-          uint16_t mapped = checkFallbackGlyph(cp, f);
-          if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
-          // No fallback available — advance cursor by one space width so
-          // the missing glyph appears as a visible gap instead of being
-          // silently deleted (xAdvance is 0 for empty slots).
+          // preText() promises a renderable codepoint, so an empty slot here can
+          // only mean the font changed underneath us (clock font swap mid-frame).
+          // Advance one space width rather than drawing a zero-width glyph.
           uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
           cursor_x += (int16_t)spaceAdv * textsize_x;
           return;
         }
         cursor_x += (int16_t)pgm_read_byte(&glyph->xAdvance) * textsize_x;
       } else {
-        uint16_t mapped = checkFallbackGlyph(cp, f);
-        if (mapped && mapped != cp) { _writeGlyph(mapped); return; }
-        // Unrenderable codepoint (not in font, no accent mapping).
-        // Advance cursor by one character cell so scroll width stays
-        // consistent and missing glyphs appear as blank space.
+        // Same defensive case as above: outside [first..last] after resolution
+        // means the font changed, not that preText() failed to find a glyph.
         uint8_t spaceAdv = pgm_read_byte(&((GFXglyph *)pgm_read_ptr(&f->glyph))->xAdvance);
         cursor_x += (int16_t)spaceAdv * textsize_x;
       }

@@ -147,11 +147,15 @@ All text rendering goes through `DspCore::write(uint8_t)` → `_writeGlyph(uint1
 1. **UTF-8 decode** — `write()` accumulates bytes into a full codepoint.
 2. **Icon check** — codepoints 0x01–0x1F render from `ICON_TABLE[]`.
 3. **Space** — advances cursor by the font's `xAdvance`.
-4. **Clock font dispatch** — if a special clock font is active (`gfxFont != NULL && gfxFont != &DisplayFont`), delegates to `Adafruit_GFX::write()`.
-5. **Preprocessing** — `preText(cp, f)` applies:
-   - `allCaps()` if the locale requires uppercase-only display
-   - `foldAccent()` for accent-stripping fallback
-6. **Glyph lookup** — searches `DisplayFont` for the codepoint. If found, renders the glyph bitmap (foreground + background fill). If not found, tries `foldAccent()` recursion; if still unmapped, advances cursor by `xAdvance` (blank space).
+4. **Clock font dispatch** — if a special clock font is active (`gfxFont != NULL && gfxFont != &DisplayFont`), delegates to `Adafruit_GFX::write()`. This happens before resolution so the resolver is only ever asked about the font that will draw the glyph.
+5. **Resolution** — `preText(cp, f)` answers "what can this font actually draw?" by walking a chain of ever-coarser representations and returning exactly one codepoint, never zero:
+   - `allCaps()` first, if `PRETEXT_ALLCAPS` is defined
+   - the codepoint unchanged, when the font has the glyph
+   - the first step from `preTextFoldStep()` that the font *does* have. Steps fold within the script before crossing to ASCII, so U+1F00 becomes alpha on a Greek font and `a` on a Latin one
+   - `_` as a substitute when the chain runs out, so a missing glyph is visibly a gap and never silently deleted
+6. **Glyph render** — renders the resolved codepoint's bitmap (foreground + background fill). Because step 5 guarantees a renderable codepoint, there is no second fallback path here; the cursor advance in the glyph branches is defensive only (font swapped mid-frame).
+
+Note that widget text is normally resolved **earlier**, once, by `preTextString()` when it is set (see `notes.md`); this per-glyph path is what covers one-off `dsp.print()` calls.
 
 ### Key rendering invariants
 
@@ -190,11 +194,9 @@ A `has_wmo` flag ensures code 0 ("Clear sky") is not confused with "no WMO data"
 
 ### Display locale
 
-1. **Create the display JSON:**
-   ```
-   py display_tool.py xx_XX --create
-   ```
-   This copies `en_US.json` to `src/locale/display/xx_XX.json` with empty translation values.
+1. **Add the display JSON** — copy `en_US.json` (or a locale you can read, if that helps) to
+   `src/locale/display/xx_XX.json` and set `locale_code`, `locale`, `locale_en` and the values in it. No command
+   creates a locale file: the tools only ever edit files that already exist.
 
 2. **Translate:**
    ```
@@ -210,11 +212,9 @@ A `has_wmo` flag ensures code 0 ("Clear sky") is not confused with "no WMO data"
 
 ### WebUI locale
 
-1. **Create the www JSON:**
-   ```
-   py www_tool.py xx_XX --create
-   ```
-   Copies `src/locale/www/en_US.json` with empty values.
+1. **Add the www JSON** — copy `src/locale/www/en_US.json` (or a locale you can read) to
+   `src/locale/www/xx_XX.json` and work in that. No command creates a locale file: the tools only ever edit files
+   that already exist.
 
 2. **Translate:**
    ```
@@ -229,6 +229,113 @@ A `has_wmo` flag ensures code 0 ("Clear sky") is not confused with "no WMO data"
 
 4. **Rebuild firmware** — both `dsplocale.h` and `wwwlocale.h` are compile-time includes.
 
+### Making the template to send out
+
+A translator works best from a list of just the keys their language is missing, with the current source text beside each
+one. `--newkeys` writes exactly that:
+
+```
+py display_tool.py * --newkeys --sort
+py www_tool.py * --newkeys --sort
+```
+
+- It writes `src/locale/display_newkeys.json` and `src/locale/www_newkeys.json` - **beside the tools, not in the locale
+  folders**, which both generators glob and validate as locale files. `-k FILE` puts the template somewhere else.
+- Beside each key sits the master text, so the translator can see what they are translating. Nothing is empty.
+- `*` is the useful form: the keys are unioned across every locale and the file is written once, because a key missing
+  from one language is almost always missing from all of them.
+- Run it again after adding keys to the source: keys already in the template are **left exactly as they are**, so a
+  translator's work in progress is never overwritten, and only genuinely new keys are added. `--clean` drops template
+  keys the master no longer has; `--sort` orders the file the way the locale files are ordered.
+- It is a **pre-pass, not an alternative to the normal run**: give it a mode and the collection happens first, while the
+  keys are still missing, and the pass then fills the locales - so one command gives both the filled files and the list
+  to send out:
+
+  ```
+  py display_tool.py * --translate --fast --clean --sort --newkeys
+  py www_tool.py * --translate --fast --clean --sort --newkeys
+  ```
+
+  On its own, with no mode, it collects and stops, because the normal pass would start prompting. `--merge` is the one
+  option it refuses, being the opposite direction.
+- The template is the record of what this release added. The machine translations are in the locale files already; the
+  English source in the template is what a native speaker should review.
+
+### Checking what a locale says — `--extract`
+
+The template is the list of new keys; this is what one language currently says for them. Send that to a native speaker
+or to a forum, to have the wording checked before a release:
+
+```
+py display_tool.py ru_RU --extract
+py www_tool.py ru_RU --extract
+```
+
+- The output is a **sheet, not a locale file**: a label (`New www keys: ru_RU`), a blank line, then the JSON block —
+  which is the shape a forum post takes.
+- With no filename it goes to the console. With one it is **appended** to that file, and that file is never read,
+  parsed or rewritten — so a display check and a www check can land in one document, one after the other, for a single
+  paste. A bare name resolves beside the tools, so a sheet is never a mystery path.
+- A key the template lists but the locale does not have yet is **skipped**, and the counts are reported: an empty
+  string would read as a translation of nothing.
+- Keys come out in the template's order, in the locale files' own formatting (real characters, two-space indent), so
+  the block can be edited in place and then clipped by hand into an input file for `--merge`.
+- One locale at a time; `*` is refused, and `--merge` is refused as the opposite direction. Every other option is
+  inert in this mode and is named on the console if it was typed, so a stray `--translate` cannot look like it did
+  something.
+- Both tools print in **UTF-8**, which is what makes Cyrillic, Greek, Thai and Arabic come out readable instead of
+  raising `UnicodeEncodeError` on a Windows console.
+
+### Merging a translator's partial file
+
+A contributor can send a small JSON holding only the keys they worked on. Merge it into the locale that already
+exists: the file is upserted, so the keys they sent are updated or added and everything else is left alone.
+
+```
+py display_tool.py ro_RO --merge changes.json
+py www_tool.py ro_RO --merge changes.json
+```
+
+- One locale at a time. `*` is refused, because a partial file is written for a single language.
+- `--clean` and `--sort` may follow. Without them nothing is removed and the key order is left as it is, and a merge
+  never asks a question, so it can be run unattended over a contributor's file.
+- A key the master does not know is skipped and named, and the rest of the file merges as usual — typically the
+  translator worked from an older copy and handed back a key that has since been retired, and their other work should
+  not be thrown away over it. Either the key name is wrong, the key is old, or it is new and has to go into the source
+  and the master first. Writing such a key is what must never happen: `make_dsplocale.py` treats an unknown key as a
+  build error.
+- Afterwards the tool reports how many keys are still missing and how many are present but empty — that list is what
+  to send back to the translator.
+- The target file must already exist: a merge edits a locale, it never makes one. Copy the master, or another locale,
+  to the name you want and translate it first.
+
+### Redoing one key
+
+When a source string changes, or a translation turns out to be wrong in every language, an ordinary run cannot help:
+the key is present everywhere, so nothing is missing and nothing is touched. `--key NAME` narrows a run to that one
+key and writes it even where it already exists.
+
+```
+py www_tool.py * --translate --fast --clean --sort --key msg_sd_manager_closed
+py display_tool.py * --translate --fast --clean --sort --key msg_open
+```
+
+- `--key` is the whole pass: every other key is ignored, so the run is one key per locale instead of a whole file. It
+  composes with the modes and with `--translate`, which is what makes re-translating a single key possible.
+- The argument is the key, not the text, and it needs no quotes, because key names contain no spaces. Change the
+  source text first (the page for www, `en_US.json` for the display), then run this, and every locale picks up the
+  new wording.
+- The key must exist in that tool's master: the `data/www` scan for `www_tool.py`, `en_US.json` for
+  `display_tool.py`. A name nothing uses cannot be redone, and the run stops with one clear error rather than one per
+  locale.
+- `--fast` overwrites without asking. In the interactive modes the key is prompted even though the locale already has
+  a value, and the current text is shown as `[JSON]`, so ESC keeps it instead of letting the source text replace it
+  unseen.
+- `--merge` and `--newkeys` are refused with it: one writes a whole partial file, the other collects the keys the
+  locales lack, and neither has anything to select.
+- One key per run. Sweeping for many is still `--ndiff`, which finds the places where a locale still holds the source
+  text.
+
 ---
 
 ## WebUI i18n
@@ -237,7 +344,9 @@ The WebUI has its own runtime translation layer, independent of the firmware dis
 
 ### How it works
 
-1. **Language detection** — `script2.js` fetches `/locale.json` from the device. If the locale matches the hardcoded `HARDCODED_WEBUI_LOCALE`, the server returns 404 and built-in English text is used.
+1. **Language detection** — [`locale.js`](locale.js) fetches `/locale.json?l=XX` from the device; the code comes from
+   the URL, otherwise the device answers with `config.store.locale_webui`. Every locale is served the same way, English
+   included. A failed fetch is the only fallback path: the page then keeps the English text hardcoded in the HTML.
 
 2. **`t(key, ...args)` helper** — looks up `key` in the loaded `i18n` object. Positional placeholders `{0}`, `{1}` are substituted with extra arguments.
 
@@ -261,7 +370,12 @@ All WebUI locale data is compiled into `wwwlocale.h` as gzip-compressed PROGMEM 
 | `/wwwlocale.json` | Locale index (native names) | `application/json` |
 | `/dsplocale.json` | Display locale index | `application/json` |
 
-No SPIFFS files are needed — everything is zero-RAM PROGMEM.
+No LittleFS files are needed — everything is zero-RAM PROGMEM, and the build neither stages nor cleans anything in
+`data/www` for a locale. It used to: the pre-build packaging step read a `WEBUI_LANGUAGE_xx_XX` or
+`DSP_LANGUAGE_xx_XX` flag out of `myoptions.h`, or the same name out of the build flags, and copied
+`src/locale/webui/{code}.json` into `data/www`; the post-build step then deleted that file again. Both halves are
+gone, so such a flag in a `myoptions.h` now does nothing at all - and it never did anything else, because the
+firmware selects its languages with `DSP_LOCALE` (display) and `WEBUI_LOCALE` (WebUI).
 
 ### JSON source files
 
@@ -271,6 +385,27 @@ WebUI locale JSONs live in `src/locale/www/`.
 |---|---|
 | `src/locale/www/en_US.json` | Master key reference |
 | `src/locale/www/ru_RU.json` | Russian translation example |
+
+### English is the source, not a setting
+
+The HTML and JS files are written in English and stay that way. Their text is both the fallback the page shows when
+the fetch fails and the source `www_tool.py` reads, and `src/locale/www/en_US.json` is generated from them:
+
+```
+py src/locale/www_tool.py en_US --fast      # add every key the pages have and the master lacks
+py src/locale/www_tool.py en_US --diff      # check the two still agree, key by key
+```
+
+Every other locale is checked against that file, which is why it is the one that must never be edited by hand.
+
+`www_tool.py` has no option for the source language either. Its master key set is the `data/www` scan, its source text
+is the text found in those files, and the one place a language is named at all is the `_translation_input_locale`
+constant it hands to the `--translate` pass, fixed at `"en_US"`.
+
+There is no option that makes the pages another language: no build flag, no runtime setting, and no
+`HARDCODED_WEBUI_LOCALE` (the define and the `hardcode_locale_to_webui.py` tool that prepared the HTML for it are both
+gone). `/locale.json` serves `en_US` from PROGMEM like any other locale, so an English device makes one successful
+request instead of a 404 the page has to treat as a failure.
 
 ### Key categories
 
@@ -292,16 +427,37 @@ WebUI locale JSONs live in `src/locale/www/`.
 |---|---|
 | `make_dsplocale.py` | Validates display JSONs, generates `dsplocale.h` PROGMEM header |
 | `make_wwwlocale.py` | Validates www JSONs, gzip-compresses into `wwwlocale.h` PROGMEM header |
-| `hardcode_locale_to_webui.py` | Replaces all text in `data/www` files using a locale `.json`; updates `#define HARDCODED_WEBUI_LOCALE` |
 
 ### Maintenance tools
 
 | Tool | Purpose |
 |---|---|
-| `www_tool.py` | Scan HTML/JS for i18n keys, check/add/translate/sort/clean www locale JSONs. Use `--create` to create new locale from `en_US`. |
-| `display_tool.py` | Manage display JSONs against master (`en_US.json`). Sort uses master key order. Clean never touches master. `--create` copies master with empty values. |
+| `www_tool.py` | Scan HTML/JS for i18n keys, check/add/translate/sort/clean www locale JSONs. `--merge <file.json>` upserts a partial file into one locale; `--newkeys` collects the keys the locales still lack into a template. |
+| `display_tool.py` | Manage display JSONs against master (`en_US.json`). Sort uses master key order. Clean never touches master. Same `--merge` and `--newkeys` options as `www_tool.py`. |
 | `trans_deepl.py` | Auto-translation via DeepL API |
 | `trans_deepl.md` | Setup instructions for DeepL (API key, installation, usage) |
+
+### When a translation comes back unchanged
+
+Some strings legitimately come back from a translation service unchanged - a symbols-only label such as
+`* SD MANAGER *` has nothing to translate - and a service that is down or rate-limited returns nothing at all. Both
+cases stop and ask, because writing the source text into a locale is a decision:
+
+| Answer | Automatic pass (`--fast`) | Interactive prompt |
+| --- | --- | --- |
+| `y` | use the source text for this key | the same, and the key then goes to the normal edit prompt |
+| `a` | **accept** the source text for this key for the rest of the run without asking again | not offered |
+| `n` | stop the run: the key's text is worth a look, or the service needs a moment. Locales already finished are saved; the one in progress is not | skip this key - in the review modes it keeps the JSON as it is |
+
+The automatic pass asks once per key per locale, so `a` is what stops a `* --translate` run from asking about the same
+symbols-only key 49 times. That answer holds for the run; the next run does not ask again either, because by then the
+key is no longer missing.
+
+**`a` suppresses the question, never the translation.** The service is asked for every key first, and the answer is
+only consulted when what came back was empty or identical to the source text. A key settled with `a` therefore still
+gets a proper translation in any locale where the service produces one; the source text is used only where it cannot.
+The answer is per key, not per run, so a service that is failing everywhere still asks once per key - which is exactly
+what `n` is for: stop, and run the command again once the service has recovered.
 
 ### Translation discovery
 
@@ -326,4 +482,4 @@ Prior versions used a 256-slot `glcdfont` system with codepage-based font swappi
 - `platformio_pre_replace_font.py` — swapped the `.c` file at build time based on `L10N_CP_LATIN` / `L10N_CP_CYRILLIC`
 - `utf8To()`, `shouldPreserveChar()`, `canRenderNative()` — filtered characters to what the active codepage could display
 
-This system has been replaced by the Unicode GFXfont pipeline described above. The old `glcdfont/` directory, `utf8To.*`, `utf8_common.*`, `utf8Latin.*`, and `utf8Cyrillic.*` files are retained for reference but are no longer compiled into builds.
+This system has been replaced by the Unicode GFXfont pipeline described above. The old `glcdfont/` directory and the `utf8To.*`, `utf8_common.*`, `utf8Latin.*` and `utf8Cyrillic.*` files are **gone from the tree**, not merely uncompiled — transliteration now happens at render time inside `preText()` (`src/displays/tools/pretext.cpp`), with the base-character table generated by `src/displays/tools/gen_fold_table.py`.

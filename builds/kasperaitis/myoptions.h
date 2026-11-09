@@ -47,9 +47,6 @@
 #define SPIA_SCK             12
 #define SPIA_MISO            255
 #define SPIA_MOSI            11
-#define SPIB_SCK             38
-#define SPIB_MISO            39
-#define SPIB_MOSI            40
 
 /* --- Display --- */
 #define DSP_MODEL            DSP_ILI9341
@@ -84,9 +81,14 @@
 
 /* --- Peripherals and Build Options --- */
 #define RGB_LED_PIN          42
-#define MQTT_ENABLE
-#define SD_CS                47
-#define SD_SPI               'B'       /* assign SD to SPI bus */
+#define SDMMC_CLK 38
+#define SDMMC_CMD 40
+#define SDMMC_D0 39
+#define SDMMC_D1 41
+#define SDMMC_D2 48
+#define SDMMC_D3 47
+#endif
+
 
 /* --- User Defaults --- */
 #define DSP_LOCALE           "lt_LT"

@@ -1,0 +1,10 @@
+This design was what prompted the new modes for the tool.
+
+First, the regular files were created (largest first).
+
+Next, the "glow" files were created, edits of the regular files.
+
+Then, "glow_char" files were built using the tool:
+  py .\makefont.py NixieTube --glow-out
+
+Finally, the "honeycomb" files were overlayed onto the "glow_char" files.

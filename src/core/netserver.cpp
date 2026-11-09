@@ -1,11 +1,13 @@
 #include "options.h"
+#include "coredump.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESPFileUpdater.h>
 #include <ESPmDNS.h>
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <Update.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
@@ -19,6 +21,8 @@
 #include "netserver.h"
 #include "network.h"
 #include "player.h"
+#include "playlistvalidator.h"
+#include "startup.h"
 #include "telnet.h"
 #include "utility.h"
 #include "../locale/wwwlocale.h"
@@ -27,6 +31,8 @@
 #include "../displays/dspcore.h"
 #include "../displays/dspfont.h"
 #include "../displays/widgets/widgetsconfig.h" //BitrateFormat
+#include "../displays/themeregistry.h"         // the theme editor's API below
+#include "../displays/layoutregistry.h"        // the layout editor's API below
 #if USE_OTA
   #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     #include <NetworkUdp.h>
@@ -35,8 +41,17 @@
   #endif
   #include <ArduinoOTA.h>
 #endif
+
+static constexpr uint32_t SEARCHRESULTS_BUFFER        = 32;   // KB; chunk size for chunked HTTP transfers (radio-browser.info)
+static constexpr uint32_t SEARCHRESULTS_YIELDINTERVAL  = 0;    // with a large buffer, 0 all but eliminates skipping
+// #define MAX_PL_READ_BYTES 1024*64                             // optional chunked transfers for playlist.csv/wifi.csv
+static constexpr size_t   WEBSOCKET_BUFFER             = 512;  // websocket / JSON payload buffer
+static constexpr uint32_t NETSERVER_TASK_DELAY         = 1;    // ms; yield between netserver.loop() iterations
+static constexpr uint32_t NSQ_SEND_DELAY               = 300;  // ms; xQueueSend timeout for nsQueue (requestOnChange)
+static constexpr uint32_t NS_QUEUE_DELAY               = 0;    // xQueueReceive timeout for nsQueue (processQueue)
 #ifdef USE_SD
   #include "sdmanager.h"
+  #include "filemanager.h"   // the /sdman page and the mode that gates the player
 #endif
 
 // Global list for Radio-Browser servers to persist across searches
@@ -47,10 +62,8 @@ volatile TaskHandle_t g_searchTaskHandle = NULL;
 volatile TaskHandle_t g_curatedTaskHandle = NULL;
 TaskHandle_t nsTaskHandle = NULL;
 portMUX_TYPE taskSpawnMux = portMUX_INITIALIZER_UNLOCKED;
-#define FS_REQUIRED_FREE_SPACE 150 // in KB - must be minimum x1.5 of the limit_per_page in search.js (100)
-#define SEARCHRESULTS_BUFFER_BYTES (SEARCHRESULTS_BUFFER * 1024)
 
-/* PSRAM-backed static file cache implementation */
+// PSRAM-backed static file cache implementation
 // Determine MIME type from filename extension
 static const char* mimeTypeForFile(const char* filename) {
     const char* ext = strrchr(filename, '.');
@@ -71,40 +84,43 @@ void StaticFileCache::loadOne(const char* filename, int idx) {
     snprintf(e.path, sizeof(e.path), "/%s", filename);
     e.contentType = mimeTypeForFile(filename);
 
+    // open() is the existence test here: a separate exists() call would add a second metadata
+    // lookup per file for no benefit, and those lookups are what dominate this loop (LittleFS
+    // measured ~9-25 ms per operation on the SH1106/VS1053 build). The two exists() probes that
+    // used to sit here cost more than the reads they guarded.
+    // The size test doubles as the "is it really there" check: startup.cpp's health check warns
+    // that open() can return a truthy File for a missing path on some cores, and a zero-length
+    // result would otherwise be cached and then served as an empty file.
     char fullPath[64];
 
-    // Try .gz variant first ??production builds use gzipped files on SPIFFS
+    // Try .gz variant first ??production builds use gzipped files on LittleFS
     snprintf(fullPath, sizeof(fullPath), "/www/%s.gz", filename);
-    if (SPIFFS.exists(fullPath)) {
-        File f = SPIFFS.open(fullPath, "r");
-        if (f) {
-            size_t sz = f.size();
-            char* buf = (char*)ps_malloc(sz);
-            if (buf) {
-                f.read((uint8_t*)buf, sz);
-                e.gzData = buf;
-                e.gzSize = sz;
-            }
-            f.close();
+    File gz = LittleFS.open(fullPath, "r");
+    if (gz) {
+        size_t sz = gz.size();
+        char* buf = (sz > 0) ? (char*)ps_malloc(sz) : nullptr;
+        if (buf) {
+            gz.read((uint8_t*)buf, sz);
+            e.gzData = buf;
+            e.gzSize = sz;
         }
+        gz.close();
     }
 
-    // Try plain file (if no .gz variant, or if gz read failed)
+    // Fall back to the plain file when there is no .gz twin (or the .gz read failed)
     if (!e.gzData) {
         snprintf(fullPath, sizeof(fullPath), "/www/%s", filename);
-        if (SPIFFS.exists(fullPath)) {
-            File f = SPIFFS.open(fullPath, "r");
-            if (f) {
-                size_t sz = f.size();
-                char* buf = (char*)ps_malloc(sz + 1);
-                if (buf) {
-                    f.read((uint8_t*)buf, sz);
-                    buf[sz] = '\0';
-                    e.data = buf;
-                    e.size = sz;
-                }
-                f.close();
+        File plain = LittleFS.open(fullPath, "r");
+        if (plain) {
+            size_t sz = plain.size();
+            char* buf = (sz > 0) ? (char*)ps_malloc(sz + 1) : nullptr;
+            if (buf) {
+                plain.read((uint8_t*)buf, sz);
+                buf[sz] = '\0';
+                e.data = buf;
+                e.size = sz;
             }
+            plain.close();
         }
     }
 }
@@ -116,7 +132,7 @@ void StaticFileCache::loadAll() {
         loadOne(Config::wwwFiles[i], count);
         if (entries[count].data || entries[count].gzData) count++;
     }
-    SERIALLOGX("Loaded %d files into PSRAM cache\t", count);
+    FUNCTIONLOG("Netserver", "Loaded %d files into PSRAM cache", count);
 }
 
 size_t StaticFileCache::totalBytes() const {
@@ -172,18 +188,6 @@ AsyncWebServer webserver(80);
 AsyncWebSocket websocket("/ws");
 
 bool  shouldReboot  = false;
-#ifdef MQTT_ENABLE
-  Ticker mqttplaylistticker;
-  volatile bool mqttplaylistblock = false;  // volatile: written from Ticker callback, read from AsyncWebServer task
-  void mqttplaylistSend() {
-    if (config.store.mqttenable) {
-      mqttplaylistblock = true;
-      mqttplaylistticker.detach();
-      mqtt.publishPlaylist();
-      mqttplaylistblock = false;
-    }
-  }
-#endif
 
 char* updateError() {
   static char ret[140] = {0};
@@ -194,11 +198,10 @@ char* updateError() {
 void handleDynamicLocale(AsyncWebServerRequest *request) {
   // Serve locale.json (gzip-compressed) from PROGMEM
   // Uses ?l=XX query param if present, otherwise config.store.locale_webui
+  // English is served like every other locale.  The HTML carries English text as its own fallback, so en_US used to
+  // be refused with a 404 to save the request - which only made the page log a failed load in devtools, while the
+  // file stayed the master the other locales are diffed against.  One path, nothing to get out of step.
   const char* localeCode = request->hasArg("l") ? request->arg("l").c_str() : config.store.locale_webui;
-  if (strcmp(localeCode, HARDCODED_WEBUI_LOCALE) == 0) {
-    request->send(404); // No locale needed ??hardcoded text matches target language
-    return;
-  }
   for (uint8_t i = 0; i < WWW_LOCALE_COUNT; i++) {
     if (strcmp_P(localeCode, ((const char*)pgm_read_ptr(&www_locales[i].code))) == 0) {
       uint16_t size = pgm_read_word(&www_locales[i].size);
@@ -314,7 +317,12 @@ void handleSearchPost(AsyncWebServerRequest *request) {
       player.sendCommand({PR_PLAY, (uint16_t)foundIdx});
       request->send(200, "text/plain", "DUPLICATE");
     } else { // add it and play it
-      File playlistfile = SPIFFS.open(PLAYLIST_PATH, "a");
+      if (cs >= MAX_PLAYLIST_ENTRIES) {
+        WARNINGLOG("playlist is full (%u stations): not adding \"%s\"", (unsigned)MAX_PLAYLIST_ENTRIES, sName.c_str());
+        request->send(400, "text/plain", "PLAYLIST FULL");
+        return;
+      }
+      File playlistfile = LittleFS.open(PLAYLIST_PATH, "a");
       if (playlistfile) {
         // can't use printf ??Arduino's Print::printf has a 64-byte stack buffer that overflows on long URLs
         playlistfile.print(sName);
@@ -363,9 +371,18 @@ void NetServer::restartMdns() {
 
 bool NetServer::begin(bool quiet) {
   if (network.status==SDOFFLINE) return true;
-  if (!quiet) BOOTLOGX("netserver.begin\t");
+  // One complete line at the end, with how long it took
+  const uint32_t beganMs = millis();
+  #ifdef NETSERVER_DEBUG
+    auto phase = [beganMs](const char* what) {
+      FUNCTIONLOG("Netserver", "  begin phase: %s at %lu ms", what, (unsigned long)(millis() - beganMs));
+    };
+  #else
+    auto phase = [](const char*) {};
+  #endif
   nsQueue = xQueueCreate(64, sizeof(nsRequestParams_t));
   if (nsQueue==NULL) { ERRORLOG("NETSERVER: nsQueue alloc failed? Rebooting."); delay(10); ESP.restart(); }
+  phase("queue");
 
   webserver.on("/", HTTP_ANY, handleIndex);
   webserver.on("/ready", HTTP_GET, handleReady);
@@ -381,6 +398,10 @@ bool NetServer::begin(bool quiet) {
   });
   webserver.on("/search", HTTP_GET, handleSearch);
   webserver.on("/search", HTTP_POST, handleSearchPost);
+  #ifdef USE_SD
+    // SD card file manager.  GET /sdman opens the mode and the API lives under the same prefix; the page itself is served by handleIndex, which hands the root over while the mode is up
+    filemanager.registerRoutes(webserver);
+  #endif
 
   // Captive portal detection ??redirect probes from iOS, Android, Windows to the web UI
   auto captiveRedirect = [](AsyncWebServerRequest *request) { request->redirect("/"); };
@@ -391,7 +412,9 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/ncsi.txt", HTTP_GET, captiveRedirect);                     // Windows
   webserver.on("/connecttest.txt", HTTP_GET, captiveRedirect);              // Windows
 
+  phase("routes");
   if (psramFound()) fileCache.loadAll();
+  phase("psram cache");
   webserver.onNotFound(handleNotFound);
   webserver.onFileUpload(handleUpload);
   #ifdef CORS_DEBUG
@@ -399,12 +422,14 @@ bool NetServer::begin(bool quiet) {
     DefaultHeaders::Instance().addHeader(F("Access-Control-Allow-Headers"), F("content-type"));
   #endif
   webserver.begin();
+  phase("webserver.begin");
   if (strlen(config.store.mdnsname)>0)
     MDNS.begin(config.store.mdnsname);
+  phase("mdns");
 
   websocket.onEvent(onWsEvent);
   webserver.addHandler(&websocket);
-  /* Ensure any connected web clients receive the current battery status immediately */
+  // Ensure any connected web clients receive the current battery status immediately
   requestOnChange(GETBATTERY, 0);
   #if USE_OTA
     if (strlen(config.store.mdnsname)>0) ArduinoOTA.setHostname(config.store.mdnsname);
@@ -441,7 +466,9 @@ bool NetServer::begin(bool quiet) {
     ArduinoOTA.begin();
   #endif //#if USE_OTA
 
-  if (!quiet) SERIALLOG("done");
+  listening = true;
+  phase("ota + websocket");
+  if (!quiet) BOOTLOG("netserver.begin %lu ms", (unsigned long)(millis() - beganMs));
   return true;
 }
 
@@ -451,7 +478,7 @@ size_t NetServer::chunkedHtmlPageCallback(uint8_t* buffer, size_t maxLen, size_t
   if (sdpl) {
     requiredfile = config.SDPLFS()->open(netserver.chunkedPathBuffer, "r");
   } else {
-    requiredfile = SPIFFS.open(netserver.chunkedPathBuffer, "r");
+    requiredfile = LittleFS.open(netserver.chunkedPathBuffer, "r");
   }
   if (!requiredfile) return 0;
   size_t filesize = requiredfile.size();
@@ -482,11 +509,6 @@ void NetServer::chunkedHtmlPage(const String& contentType, AsyncWebServerRequest
   request->send(response);
 }
 
-#ifndef DSP_NOT_FLIPPED
-  #define DSP_CAN_FLIPPED true
-#else
-  #define DSP_CAN_FLIPPED false
-#endif
 const char *getFormat(BitrateFormat _format) {
   switch (_format) {
     case BF_MP3:  return "MP3";
@@ -525,42 +547,53 @@ void NetServer::processQueue() {
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
             if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
-                                                              #if defined(MQTT_ENABLE) || DBGWUI
-                                                                act += F("\"group_mqtt\",");
-                                                              #endif
-            if (BRIGHTNESS_PIN != 255 || DSP_CAN_FLIPPED || DSP_MODEL == DSP_NOKIA5110 || DBGWUI)
-                                                                act += F("\"group_display\",");
-                                                              #if defined(LCD_I2C) || defined(DSP_OLED) || DBGWUI
-                                                                act += F("\"group_oled\",");
-                                                              #endif
-                                                              #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
-            if (vuConf_ptr->textsize > 0 || DBGWUI) act += F("\"group_vu\",");
-                                                              #endif
-            if (bufferbarConf_ptr->height > 0 || DBGWUI)        act += F("\"group_buffer\",");
+            if (DSP_MODEL != DSP_DUMMY || DBGWUI)               act += F("\"group_display\",");
+            #if defined(DSP_TFT) || DBGWUI
+                                                                act += F("\"group_tft\",");
+            #endif
+            #if (I2S_BCLK!=255 || (VS1053_CS != 255 && VS_PATCH_ENABLE == true) || DBGWUI)
+                                                                act += F("\"group_vu_ss\",");
+              if (presentOf(*vuConf_ptr) || DBGWUI)             act += F("\"group_vu\",");
+                                                           else act += F("\"hide_group_vu\",");
+              if (config.store.screensaverVU || DBGWUI)         act += F("\"group_vu_ss_style\",");
+                                                           else act += F("\"hide_group_vu_ss_style\",");
+            #endif
+            if (presentOf(*bufferbarConf_ptr) || DBGWUI)        act += F("\"group_buffer\",");
+                                                           else act += F("\"hide_group_buffer\",");
             if (BRIGHTNESS_PIN != 255 || DBGWUI)                act += F("\"group_brightness\",");
             if (DSP_DIMMING_ENABLED || DBGWUI)                  act += F("\"group_dimming\",");
-            if (DSP_CAN_FLIPPED || DBGWUI)                      act += F("\"group_tft\",");
-                                                              #if (!defined(DSP_LCD) && DSP_MODEL!=DSP_NOKIA5110) || DBGWUI
-                                                                act += F("\"group_inverttitle\",");
-                                                              #endif 
+            if ((config.theme.clockbg != config.theme.background && activeLayout.clockConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_clockglow\",");
+                                                           else act += F("\"hide_group_clockglow\",");
+            if ((config.theme.digitbg != config.theme.background && activeLayout.numConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_digitsglow\",");
+                                                           else act += F("\"hide_group_digitsglow\",");
+            if (activeLayout.clockConf.textsize != 0 || DBGWUI) act += F("\"group_smaller\",");
+                                                           else act += F("\"hide_group_smaller\",");
             if (display.getLayoutCount() > 1 || DBGWUI)         act += F("\"group_layout\",");
-                                                              #if defined(DSP_TFT) || DBGWUI
-            if (display.getThemeCount() > 1|| DBGWUI)           act += F("\"group_theme\",");
-                                                              #endif
-            if (TIME_SIZE !=35 || DBGWUI)                       act += F("\"group_full_time\",");
+            #if defined(DSP_TFT) || DBGWUI
+              if (display.getThemeCount() > 1 || DBGWUI)        act += F("\"group_theme\",\"group_display_theme\",");
+            #else
+                                                                act += F("\"group_theme\",\"group_webui_theme\",");
+            #endif
+            if (((activeLayout.fullClock || activeLayout.seconds) && activeLayout.clockConf.textsize != 0) || DBGWUI)
+                                                                act += F("\"group_full_time\",");
+                                                           else act += F("\"hide_group_full_time\",");
+            #if (!defined(DEEP_SLEEP_DISABLE) || DBGWUI)
+                                                                act += F("\"group_deepsleep\",");
+            #endif
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
-            if (DSP_MODEL == DSP_NOKIA5110 || DBGWUI)           act += F("\"group_nokia\",");
                                                                 act += F("\"group_locale\",");
-            if (weatherConf_ptr->buffsize > 0 || DBGWUI)        act += F("\"group_weather\",");
+            if (presentOf(*weatherConf_ptr) || DBGWUI)          act += F("\"group_weather\",");
+                                                           else act += F("\"hide_group_weather\",");
                                                                 act += F("\"group_controls\",");
-            if (BTN_UP != 255 || BTN_DOWN != 255 || DBGWUI)     act += F("\"group_volbuttons\",");
             if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)
                                                                 act += F("\"group_stnbuttons\",");
             if (ENC_DT != 255 || ENC2_DT != 255 || DBGWUI)      act += F("\"group_encoder\",");
             if (IR_PIN != 255 || DBGWUI)                        act += F("\"group_ir\",");
-                                                              #if defined(UPDATEURL) || DBGWUI
+            #if defined(UPDATEURL) || DBGWUI
                                                                 act += F("\"group_update\",");
-                                                              #endif
+            #endif
           }
                                                                 act = act.substring(0, act.length() - 1);
           snprintf(wsbuf, sizeof(wsbuf), "{\"act\":[%s]}", act.c_str());
@@ -576,6 +609,7 @@ void NetServer::processQueue() {
           requestOnChange(MODE, clientId); 
           requestOnChange(SDINIT, clientId);
           requestOnChange(GETPLAYERMODE, clientId);
+          requestOnChange(PLAYLISTREADY, clientId);
           requestOnChange(GETBATTERY, clientId); 
           if (config.getMode()==PM_SDCARD) { requestOnChange(SDPOS, clientId); requestOnChange(SDLEN, clientId); requestOnChange(SDSHUFFLE, clientId); } 
           return; 
@@ -590,22 +624,16 @@ void NetServer::processQueue() {
                                   config.store.irtlp,
                                   VOLUME_SCALE);
                                   break;
-      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"con\":%d,\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"bufbar\":%d,\"vu\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d}",
+      case GETSCREEN:     snprintf(wsbuf, sizeof(wsbuf), "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"dspon\":%d,\"br\":%d,\"bufbar\":%d,\"vu\":%d,\"vupeak\":%d,\"vustyle\":%d,\"dim\":%d,\"dimto\":%d,\"dimbr\":%d,\"volpg\":%d,\"clock12\":%d,\"invtitle\":%d,\"layoutId\":%d,\"themeId\":%d,\"systemFontId\":%d,\"clockFontId\":%d,\"clockglow\":%d,\"digitsglow\":%d,\"plpaged\":%d,\"allcaps\":%d}",
                                   config.store.flipscreen,
                                   config.store.invertdisplay,
                                   config.store.numplaylist,
                                   config.store.dspon,
                                   config.store.brightness,
-                                  config.store.contrast,
-                                  config.store.screensaverEnabled,
-                                  config.store.screensaverBlank,
-                                  config.store.screensaverTimeout,
-                                  config.store.screensaverPlayingEnabled,
-                                  config.store.screensaverPlayingBlank,
-                                  config.store.screensaverPlayingTimeout,
-                                  config.store.screensaverFullDateTime,
                                   config.store.bufferbar,
                                   config.store.vumeter,
+                                  config.store.vupeak,
+                                  config.store.vustyle,
                                   config.store.dimmingEnabled,
                                   config.store.dimmingTimeout,
                                   config.store.dimmingBrightness,
@@ -613,7 +641,29 @@ void NetServer::processQueue() {
                                   config.store.clock12,
                                   config.store.inverttitle,
                                   config.store.layoutId,
-                                  config.store.themeId);
+                                  config.store.themeId,
+                                  config.store.systemFontId,
+                                  config.store.clockFontId,
+                                  config.store.clockglow,
+                                  config.store.digitsglow,
+                                  config.store.playlistPages,
+                                  config.store.pretextALLCAPS);
+                                  break;
+      case GETSCREENSAVER: snprintf(wsbuf, sizeof(wsbuf), "{\"scre\":%d,\"scrb\":%d,\"scrt\":%d,\"scrpe\":%d,\"scrpb\":%d,\"scrpt\":%d,\"scrfull\":%d,\"scrtext\":%d,\"scrsmall\":%d,\"scrvu\":%d,\"scrstyle\":%d,\"scrpeak\":%d,\"scrtimer\":%d,\"scrtimeout\":%d}",
+                                  config.store.screensaverEnabled,
+                                  config.store.screensaverBlank,
+                                  config.store.screensaverTimeout,
+                                  config.store.screensaverPlayingEnabled,
+                                  config.store.screensaverPlayingBlank,
+                                  config.store.screensaverPlayingTimeout,
+                                  config.store.screensaverFullDateTime,
+                                  config.store.screensaverText,
+                                  config.store.screensaverClockSmaller,
+                                  config.store.screensaverVU,
+                                  config.store.screensaverVUStyle,
+                                  config.store.screensaverVUpeak,
+                                  config.store.sleeptimer,
+                                  config.store.sleepSsTimeout);
                                   break;
       case GETLOCALE:     snprintf(wsbuf, sizeof(wsbuf), "{\"locale_webui\":\"%s\",\"locale_disp\":\"%s\",\"tz_name\":\"%s\",\"tzposix\":\"%s\",\"sntp1\":\"%s\",\"sntp2\":\"%s\",\"timeinterval\":%d}",
                                   config.store.locale_webui,
@@ -641,12 +691,11 @@ void NetServer::processQueue() {
                                   config.store.weatherkey,
                                   config.store.weathersyncinterval);
                                   break;
-      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"softr\":%d,\"autoupdate\":%d}",
+      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"autoupdate\":%d}",
                                   config.store.wifiscanbest,
                                   config.store.ehdp,
                                   config.store.ehdpname,
                                   config.store.mdnsname,
-                                  config.store.softapdelay,
                                   config.store.autoupdate);
                                   break;
       case GETMQTT:       snprintf(wsbuf, sizeof(wsbuf), "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
@@ -663,7 +712,7 @@ void NetServer::processQueue() {
       case ITEM:          snprintf(wsbuf, sizeof(wsbuf), "{\"current\": %d}", config.lastStation()); break;
       case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); break;
       case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d, \"max\": %d}]}", config.store.volume, VOLUME_SCALE); break;
-      case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}]}", rssi); /*rssi = 255;*/ break;
+      case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}, {\"id\":\"rssibars\", \"value\": %d}]}", rssi, rssiLevel(rssi)); break;
       case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %d,\"sdend\": %d,\"sdtpos\": %d,\"sdtend\": %d}",
                                   player.getFilePos(),
                                   player.getFileSize(),
@@ -674,47 +723,83 @@ void NetServer::processQueue() {
       case SDSHUFFLE:     snprintf(wsbuf, sizeof(wsbuf), "{\"shuffle\": %d}", config.store.sdshuffle); break;
       case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
-        BatteryStatus bat = battery.getStatus();
-        if (!bat.present && !battery.isInitialized()) {
-          uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
+        uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
+        if (widgetsEditorForceOff) {
+          // The editor's force-off hides the battery on the panel, so the WebUI row agrees and reports none.
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
-        } else {
+        } else if (widgetsEditorForceOn) {
+          // The same fake the on-screen widget shows, so the WebUI battery row can be laid out with no battery fitted
+          uint32_t mvmin = (uint32_t)BATTERY_PRESENT_MIN_MV;
+          uint32_t mvmax = (uint32_t)BATTERY_PRESENT_MAX_MV;
+          if (mvmin < 2500) mvmin = 2500;
+          if (mvmax > 5000) mvmax = 5000;
+          if (mvmin >= mvmax) { mvmin = 3000; mvmax = 4200; }
           char valbuf[64];
-          snprintf(valbuf, sizeof(valbuf), "volt: %dmV, percentage: %d%%", bat.voltage_mv, bat.percentage);
-          uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
+          snprintf(valbuf, sizeof(valbuf), "volt: %umV, percentage: %d%%", (unsigned)(mvmin + 50u * (mvmax - mvmin) / 100), 50);
           snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
+        } else {
+          BatteryStatus bat = battery.getStatus();
+          if (!bat.present && !battery.isInitialized()) {
+            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
+          } else {
+            char valbuf[64];
+            snprintf(valbuf, sizeof(valbuf), "volt: %umV, percentage: %d%%", (unsigned)bat.voltage_mv, bat.percentage);
+            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
+          }
         }
         break;
       }
       case MODE:          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"playerwrap\", \"value\": \"%s\"}]}", player.status() == PLAYING ? "playing" : "stopped"); break;
+      case MUTESTATE:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"mutebutton\", \"value\": %d}]}", player.isMuted() ? 1 : 0); break;
       case EQUALIZER:     snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bass\", \"value\": %d}, {\"id\": \"middle\", \"value\": %d}, {\"id\": \"treble\", \"value\": %d}]}", config.store.bass, config.store.middle, config.store.treble); break;
       case BALANCE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\": \"balance\", \"value\": %d}]}", config.store.balance); break;
       case SDINIT:        snprintf(wsbuf, sizeof(wsbuf), "{\"sdinit\": %d}", SD_CS!=255); break;
       case GETPLAYERMODE: snprintf(wsbuf, sizeof(wsbuf), "{\"playermode\": \"%s\"}", config.getMode()==PM_SDCARD?"modesd":"modeweb"); break;
       case SEARCH_DONE:   snprintf(wsbuf, sizeof(wsbuf), "{\"search_done\":true}"); break;
       case SEARCH_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"search_failed\":true}"); break;
+      // One message, two meanings, so a page never has to guess: "false" is the card being walked (blank the
+      // list, spin, and refuse to load) and "true" is that walk being over (unlock and fetch).  The flag lives in
+      // the file manager, so a client that connects mid-walk is answered from the same source.
+      case PLAYLISTREADY:
+        #ifdef USE_SD
+          snprintf(wsbuf, sizeof(wsbuf), "{\"playlistready\":%s}", filemanager.rebuilding() ? "false" : "true");
+        #else
+          snprintf(wsbuf, sizeof(wsbuf), "{\"playlistready\":true}");
+        #endif
+        break;
+      // The manager page follows the device on this instead of polling it, which is why the state is the MANAGER's
+      // and not the play mode: the page is only valid while the manager is up, whatever the radio is playing.
+      // Broadcast on enter and leave, and sent to a client the moment it connects, so a page opened later still
+      // learns the state.  No manager in the build, no reason for a page to stay: 0.
+      case SDMANACTIVE:
+        #ifdef USE_SD
+          snprintf(wsbuf, sizeof(wsbuf), "{\"sdmanactive\":%d}", filemanager.active() ? 1 : 0);
+        #else
+          snprintf(wsbuf, sizeof(wsbuf), "{\"sdmanactive\":0}");
+        #endif
+        break;
       case CURATED_INDEX_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_index_done\":true}"); break;
       case CURATED_PLAYLIST_DONE: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_playlist_done\":true}"); break;
       case CURATED_FAILED: snprintf(wsbuf, sizeof(wsbuf), "{\"curated_failed\":true}"); break;
       case ARTWORK:       break;
+      // Playlist validator progress: start, one result per station, then done.  The fields are read live from
+      // the validator, which stages the newest message before queueing the event.
+      case PLVALIDATE: {
+        switch (playlistValidator.message()) {
+          case PLV_MSG_START: snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"start\":1,\"count\":%u}}", (unsigned)playlistValidator.total()); break;
+          case PLV_MSG_ITEM:  snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"i\":%u,\"r\":\"%s\"}}", (unsigned)playlistValidator.reportIndex(), playlistValidator.reportResult() == PLV_RESULT_PASS ? "pass" : "fail"); break;
+          case PLV_MSG_DONE:  snprintf(wsbuf, sizeof(wsbuf), "{\"plvalidate\":{\"done\":1}}"); break;
+          default: break;
+        }
+        break;
+      }
       #ifdef USE_SD
         case CHANGEMODE:    config.changeMode(config.newConfigMode); return; break;
       #endif
       default:          break;
     }
-    #ifdef MQTT_ENABLE
-      if (config.store.mqttenable && clientId == 0 && request.type == ARTWORK) {
-        mqtt.publishStatus();
-      }
-    #endif
     if (strlen(wsbuf) > 0) {
       if (clientId == 0) { websocket.textAll(wsbuf); } else { websocket.text(clientId, wsbuf); }
-      #ifdef MQTT_ENABLE
-        if (config.store.mqttenable) {
-          if (clientId == 0 && (request.type == STATION || request.type == ITEM || request.type == TITLE || request.type == MODE)) mqtt.publishStatus();
-          if (clientId == 0 && request.type == VOLUME) mqtt.publishVolume();
-        }
-      #endif
     }
   }
 }
@@ -722,7 +807,7 @@ void NetServer::processQueue() {
 void NetServer::loop() {
   if (network.status==SDOFFLINE) return;
   if (shouldReboot) {
-    FUNCTIONLOG("Netserver.reboot", "Rebooting...");
+    FUNCTIONLOG("Netserver", "Rebooting...");
     delay(100);
     ESP.restart();
   }
@@ -730,8 +815,13 @@ void NetServer::loop() {
   switch (importRequest) {
     case IMWIFI:  utility.importWifi(); importRequest = IMDONE; break;
     default:      break;
-  }
-  processQueue();
+    }
+    // One place sees every writer of Player::_muted: the toggle, a volume change, a manual station change, a mode
+    // change and an error stop.  A broadcast at each of them would be eight copies to keep in step.
+    const bool muted = player.isMuted();
+    if (muted != _muteSeen) { _muteSeen = muted; requestOnChange(MUTESTATE, 0); }
+    processQueue();
+  mqtt.loop(); // single owner of the MQTT client: applies requests, runs queued commands, publishes
   #ifdef RADIO_BROWSER_SEND_CLICKS
     processRadioBrowserClick();
   #endif
@@ -750,8 +840,10 @@ void NetServer::irToWs(const char* protocol, uint64_t irvalue) {
 void NetServer::irValsToWs() {
   #if IR_PIN!=255
     if (!irRecordEnable) return;
+    const uint64_t* irVals = config.irCodes(static_cast<uint8_t>(config.irindex));
+    if (irVals == nullptr) return;
     char buf[80] = { 0 };
-    snprintf(buf, sizeof(buf), "{\"irvals\": [%llu, %llu, %llu]}", config.ircodes.irVals[config.irindex][0], config.ircodes.irVals[config.irindex][1], config.ircodes.irVals[config.irindex][2]);
+    snprintf(buf, sizeof(buf), "{\"irvals\": [%llu, %llu, %llu]}", irVals[0], irVals[1], irVals[2]);
     websocket.textAll(buf);
   #endif
 }
@@ -807,18 +899,21 @@ void NetServer::resetQueue() {
   if (nsQueue!=NULL) xQueueReset(nsQueue);
 }
 
-void NetServer::triggerMqttPlaylistSync() {
-  #ifdef MQTT_ENABLE
-    if (config.store.mqttenable) mqttplaylistticker.attach(5, mqttplaylistSend);
-  #endif
-}
-
 int freeSpace;
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+  #ifdef CORE_MONITOR
+    if (final) {
+      // Read on the final chunk, not on a page load: the high-water mark is cumulative, so by now it includes
+      // every chunk written, and this path (/upload, /update, /webboard) is the heaviest thing the AsyncTCP task
+      // does.  This is the figure CONFIG_ASYNC_TCP_STACK_SIZE should be set against - a websocket connect is the
+      // lightest.
+      FUNCTIONLOG("Core.HWM", "[%s] stack HWM after upload: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+    }
+  #endif
   if (request->url()=="/upload") {
     if (!index) {
-      freeSpace = (float)SPIFFS.totalBytes()/100*68-SPIFFS.usedBytes();
-      request->_tempFile = SPIFFS.open(TMP_PATH , "w");
+      freeSpace = (float)LittleFS.totalBytes()/100*68-LittleFS.usedBytes();
+      request->_tempFile = LittleFS.open(TMP_PATH , "w");
     }
     if (len) {
       if (freeSpace>index+len) {
@@ -830,8 +925,12 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     }
   } else if (request->url()=="/update") {
     if (!index) {
-      int target = (request->getParam("updatetarget", true)->value() == "spiffs") ? U_SPIFFS : U_FLASH;
-      FUNCTIONLOG("Netserver.update", "Update Start: %s", filename.c_str());
+      // getParam returns nullptr when the parameter is absent, so it is tested before being
+      // dereferenced. An absent or unrecognised target means firmware, which is what the
+      // firmware-only emergency form relies on.
+      const AsyncWebParameter* targetParam = request->getParam("updatetarget", true);
+      int target = (targetParam && targetParam->value() == "littlefs") ? U_SPIFFS : U_FLASH;
+      FUNCTIONLOG("Netserver", "Update Start: %s", filename.c_str());
       player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, UPDATING);
       if (!Update.begin(UPDATE_SIZE_UNKNOWN, target)) {
@@ -847,7 +946,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     }
     if (final) {
       if (Update.end(true)) {
-        FUNCTIONLOG("Netserver.update", "Update Success: %uB", index + len);
+        FUNCTIONLOG("Netserver", "Update Success: %uB", index + len);
       } else {
         Update.printError(Serial);
         request->send(200, "text/html", updateError());
@@ -860,7 +959,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     if (!index) {
       String spath = "/www/";
       if (filename=="playlist.csv" || filename=="wifi.csv") spath = "/data/";
-      request->_tempFile = SPIFFS.open(spath + filename , "w");
+      request->_tempFile = LittleFS.open(spath + filename , "w");
     }
     if (len) {
       request->_tempFile.write(data, len);
@@ -869,8 +968,8 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
       request->_tempFile.close();
       if (filename=="playlist.csv") {
         // Remove index and SD index to force cleanPlaylist to run
-        if (SPIFFS.exists(INDEX_PATH)) SPIFFS.remove(INDEX_PATH);
-        if (SPIFFS.exists(INDEX_SD_PATH)) SPIFFS.remove(INDEX_SD_PATH);
+        if (LittleFS.exists(INDEX_PATH)) LittleFS.remove(INDEX_PATH);
+        if (LittleFS.exists(INDEX_SD_PATH)) LittleFS.remove(INDEX_SD_PATH);
         utility.cleanPlaylist();   // Rewrites with CRLF, removes blank lines; calls indexPlaylist() internally
         netserver.requestOnChange(PLAYLISTSAVED, 0);
       } else {
@@ -887,8 +986,21 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   switch (type) {
     case WS_EVT_CONNECT:
         FUNCTIONLOG("Websocket", "client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
-        /* Send current battery status to the newly connected client immediately */
+        #ifdef CORE_MONITOR
+          // This callback runs on the AsyncTCP event task, so this is THAT task's headroom - the number the
+          // CONFIG_ASYNC_TCP_STACK_SIZE decision needs (its default is 8192 * 2 = 16 KB, the largest single
+          // allocation the WebUI bring-up makes).  It lives here rather than in handleIndex() because that line
+          // never appeared in a boot where the page demonstrably loaded; a websocket connect is a path the log
+          // proves is reached.  The reading that matters most is still the one taken during an SD upload.
+          FUNCTIONLOG("Core.HWM", "[%s] stack HWM: %u bytes", pcTaskGetName(NULL), uxTaskGetStackHighWaterMark(NULL));
+        #endif
+        // Send current battery status to the newly connected client immediately
         netserver.requestOnChange(GETBATTERY, client->id());
+        // Mute state for a page that is already open; one still loading asks with getmute once the markup exists.
+        netserver.requestOnChange(MUTESTATE, client->id());
+        // And the file manager's state: a page that opened while the manager was already up is told so instead of
+        // waiting for a broadcast it missed.
+        netserver.requestOnChange(SDMANACTIVE, client->id());
         break;
     case WS_EVT_DISCONNECT: FUNCTIONLOG("Websocket", "client #%u disconnected", client->id()); break;
     case WS_EVT_DATA: netserver.onWsMessage(arg, data, len, client->id()); break;
@@ -902,7 +1014,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
 void selectRadioBrowserServer() {
   size_t arr_size = sizeof(rb_servers) / sizeof(rb_servers[0]);
   for (size_t i = 0; i < arr_size; ++i) rb_servers[i][0] = '\0';
-  File serversFile = SPIFFS.open("/www/rb_srvrs.json", "r");
+  File serversFile = LittleFS.open("/www/rb_srvrs.json", "r");
   if (!serversFile) {
     FUNCTIONLOG("Search", "[Error] Failed to open /www/rb_srvrs.json.");
     goto useHostname;
@@ -958,11 +1070,11 @@ useHostname:
 void vTaskSearchRadioBrowser(void *pvParameters) {
   char* search_str = (char*)pvParameters;
   FUNCTIONLOG("Search", "Starting Radio Browser search. Search: %s", search_str);
-  SPIFFS.remove("/www/searchresults.json");
-  // Check SPIFFS free space
-  size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
+  LittleFS.remove("/www/searchresults.json");
+  // Check LittleFS free space
+  size_t freeSpace = LittleFS.totalBytes() - LittleFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    FUNCTIONLOG("Search", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
+    FUNCTIONLOG("Search", "[Error] Not enough free LittleFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(SEARCH_FAILED, 0);
     delete[] search_str;
     g_searchTaskHandle = NULL;
@@ -994,9 +1106,9 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
     vTaskDelete(NULL);
     return;
   }
-  ESPFileUpdater searchResultsFetch(SPIFFS);
+  ESPFileUpdater searchResultsFetch(LittleFS);
   searchResultsFetch.setUserAgent(ESPFILEUPDATER_USERAGENT);
-  searchResultsFetch.setBuffer(SEARCHRESULTS_BUFFER_BYTES);
+  searchResultsFetch.setBuffer(SEARCHRESULTS_BUFFER * 1024);
   searchResultsFetch.setYieldInterval(SEARCHRESULTS_YIELDINTERVAL);
   const char* localPath = "/www/searchresults.json";
   bool success = false;
@@ -1012,7 +1124,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
     if (status == ESPFileUpdater::UPDATED) {
       FUNCTIONLOG("Search", "Successfully downloaded from %s", server);
       // Check if the downloaded file ends with ']' (an incomplete .json will not)
-      File jsonFile = SPIFFS.open(localPath, "r");
+      File jsonFile = LittleFS.open(localPath, "r");
       if (jsonFile) {
         int fileSize = jsonFile.size();
         char lastChar = 0;
@@ -1029,14 +1141,14 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
         jsonFile.close();
         if (lastChar != ']') {
           if (server_retried == true) {
-            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Not retrying.");
+            WARNINGLOG("Search: JSON validation failed. Not retrying.");
             server_retried = false;
-            SPIFFS.remove(localPath); // Clean up bad file
+            LittleFS.remove(localPath); // Clean up bad file
           } else {
-            FUNCTIONLOG("Search", "[Warning] JSON validation failed. Retrying same server.");
+            WARNINGLOG("Search: JSON validation failed. Retrying same server.");
             server_retried = true;
             --i;
-            SPIFFS.remove(localPath); // Clean up bad file
+            LittleFS.remove(localPath); // Clean up bad file
           }
           continue;
         } else {
@@ -1055,7 +1167,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
       }
       if (json_valid) {
         // Write /www/search.txt with the actual search string (single line)
-        File file = SPIFFS.open("/www/search.txt", "w");
+        File file = LittleFS.open("/www/search.txt", "w");
         if (file) {
           file.printf("%s\n", search_str);
           file.close();
@@ -1079,7 +1191,7 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
     netserver.requestOnChange(SEARCH_DONE, 0);
   } else {
     FUNCTIONLOG("Search", "[Error] Failed to download from all available servers.");
-    SPIFFS.remove(localPath); // Clean up any incomplete file
+    LittleFS.remove(localPath); // Clean up any incomplete file
     netserver.requestOnChange(SEARCH_FAILED, 0);
   }
   delete[] search_str;
@@ -1093,21 +1205,21 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
 
 void vTaskFetchCuratedIndex(void *pvParameters) {
   FUNCTIONLOG("Curated", "Starting curated index fetch");
-  SPIFFS.remove("/www/curated.json");
+  LittleFS.remove("/www/curated.json");
   
-  // Check SPIFFS free space
-  size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
+  // Check LittleFS free space
+  size_t freeSpace = LittleFS.totalBytes() - LittleFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    FUNCTIONLOG("Curated", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
+    FUNCTIONLOG("Curated", "[Error] Not enough free LittleFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(CURATED_FAILED, 0);
     g_curatedTaskHandle = NULL;
     vTaskDelete(NULL);
     return;
   }
   
-  ESPFileUpdater curatedFetch(SPIFFS);
+  ESPFileUpdater curatedFetch(LittleFS);
   curatedFetch.setUserAgent(ESPFILEUPDATER_USERAGENT);
-  curatedFetch.setBuffer(SEARCHRESULTS_BUFFER_BYTES);
+  curatedFetch.setBuffer(SEARCHRESULTS_BUFFER * 1024);
   curatedFetch.setYieldInterval(SEARCHRESULTS_YIELDINTERVAL);
   const char* localPath = "/www/curated.json";
   
@@ -1121,7 +1233,7 @@ void vTaskFetchCuratedIndex(void *pvParameters) {
       netserver.requestOnChange(CURATED_INDEX_DONE, 0);
     } else {
       FUNCTIONLOG("Curated", "[Error] Failed to download curated index");
-      SPIFFS.remove(localPath);
+      LittleFS.remove(localPath);
       netserver.requestOnChange(CURATED_FAILED, 0);
     }
   #else
@@ -1139,12 +1251,12 @@ void vTaskFetchCuratedIndex(void *pvParameters) {
 void vTaskFetchCuratedPlaylist(void *pvParameters) {
   char* filename = (char*)pvParameters;
   FUNCTIONLOG("Curated", "Starting playlist fetch: %s", filename);
-  SPIFFS.remove("/www/pl_import.json");
+  LittleFS.remove("/www/pl_import.json");
   
-  // Check SPIFFS free space
-  size_t freeSpace = SPIFFS.totalBytes() - SPIFFS.usedBytes();
+  // Check LittleFS free space
+  size_t freeSpace = LittleFS.totalBytes() - LittleFS.usedBytes();
   if (freeSpace < (FS_REQUIRED_FREE_SPACE * 1024)) {
-    FUNCTIONLOG("Curated", "[Error] Not enough free SPIFFS space: %u bytes. Aborting.", freeSpace);
+    FUNCTIONLOG("Curated", "[Error] Not enough free LittleFS space: %u bytes. Aborting.", freeSpace);
     netserver.requestOnChange(CURATED_FAILED, 0);
     delete[] filename;
     g_curatedTaskHandle = NULL;
@@ -1152,9 +1264,9 @@ void vTaskFetchCuratedPlaylist(void *pvParameters) {
     return;
   }
   
-  ESPFileUpdater playlistFetch(SPIFFS);
+  ESPFileUpdater playlistFetch(LittleFS);
   playlistFetch.setUserAgent(ESPFILEUPDATER_USERAGENT);
-  playlistFetch.setBuffer(SEARCHRESULTS_BUFFER_BYTES);
+  playlistFetch.setBuffer(SEARCHRESULTS_BUFFER * 1024);
   playlistFetch.setYieldInterval(SEARCHRESULTS_YIELDINTERVAL);
   const char* localPath = "/www/pl_import.json";
   
@@ -1168,7 +1280,7 @@ void vTaskFetchCuratedPlaylist(void *pvParameters) {
       netserver.requestOnChange(CURATED_PLAYLIST_DONE, 0);
     } else {
       FUNCTIONLOG("Curated", "[Error] Failed to download playlist: %s", filename);
-      SPIFFS.remove(localPath);
+      LittleFS.remove(localPath);
       netserver.requestOnChange(CURATED_FAILED, 0);
     }
   #else
@@ -1192,7 +1304,7 @@ void launchPlaybackTask(const String& url, const String& name) {
   }
   player.sendCommand({PR_STOP, 0}); // Stop any current playback first
   display.putRequest(NEWSTATION, 0);
-  FUNCTIONLOG("Netserver.playback", "Creating a dedicated task for playback.");
+  FUNCTIONLOG("Netserver", "Creating a dedicated task for playback.");
   if (ESP.getFreeHeap() <= MIN_MALLOC) {
     FUNCTIONLOG("Heap", "low heap (%u), refusing playback task spawn", ESP.getFreeHeap());
     return;
@@ -1222,10 +1334,10 @@ void launchPlaybackTask(const String& url, const String& name) {
         NETWORK_CORE
     ) != pdPASS) {
       delete url_copy;
-      FUNCTIONLOG("Netserver.playback", "[Error] xTaskCreate failed for playbackTask.");
+      FUNCTIONLOG("Netserver", "[Error] xTaskCreate failed for playbackTask.");
     }
   } else {
-    FUNCTIONLOG("Netserver.playback", "[Error] Failed to allocate memory for playback task URL.");
+    FUNCTIONLOG("Netserver", "[Error] Failed to allocate memory for playback task URL.");
   }
 }
 
@@ -1234,6 +1346,15 @@ void launchPlaybackTask(const String& url, const String& name) {
   static unsigned long clickDelayStart = 0;
   static bool clickDelayActive = false;
   static char pendingClickUrl[256] = {0};
+  // Longest a click may be held for the startup services, counted from the end of the click delay.  The cap is there
+  // in case they never finish, so a stuck state cannot wedge the feature - the same rule Mqtt::servicesWaitLimitMs has.
+  static constexpr uint32_t rbClickServicesWaitMs = 60000;
+  static bool rbClickHoldLogged = false;
+  // What a TLS lookup actually needs: one contiguous block for the handshake on top of this task's 8 KB stack -
+  // the same figure ESPFileUpdater's ESPFILEUPDATER_MIN_HEAP_FOR_SSL is built on.  This is the whole gate: there is
+  // no time window, because a wall-clock wait neither knew when a page load was coming nor let a device nobody visits
+  // report its click promptly.  Nothing here waits for a browser.
+  static constexpr uint32_t rbClickTlsMinBlock = 40960;
   // Helper: Make HTTPS request and extract a specific JSON key's value
   // Returns extracted value or empty string on failure
   String streamJsonExtract(const String& url, const char* key) {
@@ -1333,12 +1454,20 @@ void radioBrowserSendClick(const char* stationUrl) {
   #ifdef RADIO_BROWSER_SEND_CLICKS
     // If a new request comes in, cancel the pending one and start fresh
     if (clickDelayActive) FUNCTIONLOG("RB Click", "New station - canceling pending click");
+    rbClickHoldLogged = false;  // the held message belongs to one queued click
     // Store the URL and start the delay timer
     strlcpy(pendingClickUrl, stationUrl, sizeof(pendingClickUrl));
     clickDelayStart = millis();
     clickDelayActive = true;
     FUNCTIONLOG("RB Click", "Starting %ds delay for: %s", RADIO_BROWSER_SEND_CLICK_DELAY, stationUrl);
-  #endif //#ifdef RADIO_BROWSER_SEND_CLICKS
+  #endif
+}
+
+void radioBrowserCancelClick() {
+  #ifdef RADIO_BROWSER_SEND_CLICKS
+    if (clickDelayActive) FUNCTIONLOG("RB Click", "Canceled - the station never played");
+    clickDelayActive = false;
+  #endif
 }
 
 #ifdef RADIO_BROWSER_SEND_CLICKS
@@ -1378,15 +1507,38 @@ void processRadioBrowserClick() {
     if (millis() - clickDelayStart < (RADIO_BROWSER_SEND_CLICK_DELAY*1000)) {
       return; // Still waiting
     }
-    clickDelayActive = false;
-    // Abandon click if switched to SD mode during the delay —
-    // HTTPS would drain DRAM and starve SD SPI reads + MP3 decoding
-    if (config.getMode() == PM_SDCARD) {
+    // Abandon the click while the card is off limits - HTTPS would drain DRAM and starve SD SPI reads + MP3 decoding,
+    // and the SD File Manager is rewriting the card underneath itself.  Both are the user's own doing, so it is dropped.
+    bool cardOffLimits = (config.getMode() == PM_SDCARD);
+    #ifdef USE_SD
+      cardOffLimits = cardOffLimits || filemanager.active();
+    #endif
+    if (cardOffLimits) {
+      clickDelayActive = false;
       FUNCTIONLOG("RB Click", "Abandoning click");
       return;
     }
-    if (ESP.getFreeHeap() <= MIN_MALLOC) {
-      FUNCTIONLOG("Heap", "low heap (%u), refusing rb click task spawn", ESP.getFreeHeap());
+    // Hold the click while the services run, and let the delay timer run, so the click survives the wait
+    if (startup.servicesPending() &&
+        (millis() - clickDelayStart) < (RADIO_BROWSER_SEND_CLICK_DELAY*1000 + rbClickServicesWaitMs)) {
+      if (!rbClickHoldLogged) {
+        rbClickHoldLogged = true;
+        FUNCTIONLOG("RB Click", "Holding click while the startup services run");
+      }
+      return; // still held
+    }
+    clickDelayActive = false;
+    // A click is owed only to a station that actually played. Checked here rather than at scheduling time because a
+    // stream can connect, look healthy and then refuse (§16.2).
+    if (!player.isRunning() || !player.codecDecided() || player.inBufferFilled() == 0) {
+      FUNCTIONLOG("RB Click", "Canceled - the station never played");
+      return;
+    }
+    if (!heapCanAffordTls(rbClickTlsMinBlock)) {
+      // Dropped, not held: a statistic is not worth waiting on a fragmented heap
+      FUNCTIONLOG("RB Click", "dropping click - no %u-byte contiguous block (free %u, largest %u)",
+                  (unsigned)rbClickTlsMinBlock, (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
       return;
     }
     // Copy URL to pass to task (task will delete it)
@@ -1533,6 +1685,70 @@ void startOnlineUpdate() {
   #endif //#ifdef UPDATEURL
 }
 
+// The panel this build drives, as a file-name suffix: _TFT480x320 or _OLED128x64
+static String dspSuffix() {
+  #if CONF_HAS_CONF_MACROS
+    char buf[24];
+    #ifdef DSP_TFT
+      snprintf(buf, sizeof(buf), "_TFT%ux%u", (unsigned)CONF_DSP_WIDTH, (unsigned)CONF_DSP_HEIGHT);
+    #else
+      snprintf(buf, sizeof(buf), "_OLED%ux%u", (unsigned)CONF_DSP_WIDTH, (unsigned)CONF_DSP_HEIGHT);
+    #endif
+    return String(buf);
+  #else
+    return String();
+  #endif
+}
+
+// A suggested file name, so the browser's save dialog arrives pre-filled.  Anything a path cannot carry
+// becomes an underscore, but UTF-8 bytes are kept, because the RFC 5987 form carries them properly for the
+// browsers that read it alongside the plain one; a name with nothing usable left keeps the fallback.  The
+// filename* value must NOT be quoted - a closing quote there is part of the value, and browsers turn the
+// illegal character into an underscore, which is how a download once arrived as ".json_".
+static String attachmentName(const char* prefix, const char* name, const char* fallback) {
+  String stem;
+  for (const char* p = name; p != nullptr && *p != '\0'; p++) {
+    const char c = *p;
+    // A space is deliberately NOT plain here, so it becomes an underscore: an exported name can then be typed,
+    // quoted or pasted into a tool without escaping.  The layout's own stored name keeps its spaces.
+    const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                       c == '-' || c == '_' || c == '.';
+    stem += (plain || (uint8_t)c >= 0x80) ? c : '_';
+  }
+  stem.trim();
+
+  String out;
+  if (stem.length() == 0) {
+    String fb = fallback;                            // the panel suffix belongs on this one too
+    if (fb.endsWith(".json")) fb = fb.substring(0, fb.length() - 5);
+    out = "attachment; filename=\"";
+    out += fb;
+    out += dspSuffix();
+    out += ".json\"";
+    return out;
+  }
+  stem += dspSuffix();
+  out = "attachment; filename=\"";
+  out += prefix;
+  out += stem;
+  out += ".json\"; filename*=UTF-8''";
+  out += prefix;
+  for (size_t i = 0; i < stem.length(); i++) {
+    const uint8_t b = (uint8_t)stem[i];
+    const bool plain = (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+                       b == '-' || b == '_' || b == '.';
+    if (plain) {
+      out += (char)b;
+    } else {
+      char esc[5];
+      snprintf(esc, sizeof(esc), "%%%02X", b);
+      out += esc;
+    }
+  }
+  out += ".json";
+  return out;
+}
+
 void handleNotFound(AsyncWebServerRequest * request) {
   #if defined(HTTP_USER) && defined(HTTP_PASS)
     if (network.status == CONNECTED)
@@ -1544,8 +1760,13 @@ void handleNotFound(AsyncWebServerRequest * request) {
         return request->requestAuthentication();
       }
   #endif
-
-  // PSRAM cache check: serve static WebUI files from PSRAM (no SPIFFS reads)
+  if (request->method() == HTTP_GET && request->url() == "/coredump") {
+    String text;
+    if (coredump::buildAllText(text)) request->send(200, "text/plain", text);
+    else                            request->send(404, "text/plain", "no crash logs");
+    return;
+  }
+  // PSRAM cache check: serve static WebUI files from PSRAM (no LittleFS reads)
   if (request->method() == HTTP_GET) {
     String url = request->url();
     const CachedFile* cf = netserver.getFileCache().find(url.c_str());
@@ -1593,11 +1814,6 @@ void handleNotFound(AsyncWebServerRequest * request) {
         strcmp(request->url().c_str(), TMP_PATH) == 0 || 
         strcmp(request->url().c_str(), PLAYLIST_SD_PATH) == 0 || 
         strcmp(request->url().c_str(), INDEX_SD_PATH) == 0) {
-          #ifdef MQTT_ENABLE
-            if (config.store.mqttenable) {
-              if (strcmp(request->url().c_str(), PLAYLIST_PATH) == 0) while (mqttplaylistblock) vTaskDelay(5);
-            }
-          #endif
       if (strcmp(request->url().c_str(), PLAYLIST_PATH) == 0 && config.getMode()==PM_SDCARD) {
         netserver.chunkedHtmlPage("application/octet-stream", request, PLAYLIST_SD_PATH);
       } else {
@@ -1632,7 +1848,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
     return;
   }
   if (request->url() == "/variables.js") {
-    char varjsbuf[WEBSOCKET_BUFFER];
+    char varjsbuf[640];
     char escapedRadioVersion[32];
     utility.escapeQuotes(RADIOVERSION, escapedRadioVersion, sizeof(escapedRadioVersion));
     char escapedGithubUrl[128];
@@ -1645,7 +1861,8 @@ void handleNotFound(AsyncWebServerRequest * request) {
       "var newVerAvailable=%s;\n"
       "var updateUrl='%s';\n"
       "var currentLocale='%s';\n"
-      "var casetransform=%s;\n",
+      "var webuiThemeId=%u;\n"
+      "document.documentElement.setAttribute('data-theme',webuiThemeId);\n",
       escapedRadioVersion,
       (network.status == CONNECTED && config.wwwFilesExist) ? "webboard" : "",
       (network.status == CONNECTED) ? "player" : "ap",
@@ -1657,13 +1874,41 @@ void handleNotFound(AsyncWebServerRequest * request) {
       (netserver.newVersionAvailable) ? "true" : "false",
       escapedGithubUrl,
       config.store.locale_webui,
-      #ifdef WWW_CASETRANSFORM
-        "true"
-      #else
-        "false"
-      #endif
+      (unsigned)config.store.themeId
    );
     AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", varjsbuf);
+    response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    response->addHeader("Pragma", "no-cache");
+    response->addHeader("Expires", "0");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/visuals.json") {
+    // Which visualisers this build can actually draw, as an id -> label map for the WebUI select.
+    // The ids are vuStyle_e, the same numbers that travel in vustyle=<n> and come back in GETSCREEN,
+    // so the select is generated from the device rather than hard-coded in the page.  A style that needs
+    // PCM is omitted by a backend that has none - a VS1053 never sees samples - so needsPcm is the only
+    // capability test here.  The labels are the same on every backend: the spectrum a VS1053 synthesises
+    // is deliberately not called out any more.
+    static const struct { uint8_t id; const char *label; bool needsPcm; } vuStyleNames[] = {
+      { VU_STYLE_BARS,             "Bars",             false },
+      { VU_STYLE_DIGITAL_LED,      "Digital LED",      false },
+      { VU_STYLE_HISTORY,          "History",          false },
+      { VU_STYLE_SPECTRUM_REFLECT, "Spectrum Reflect", false },
+      { VU_STYLE_SPECTRUM_MIRROR,  "Spectrum Mirror",  false },
+      { VU_STYLE_WAVE,             "Waveform",         true  },
+      { VU_STYLE_LISSAJOUS,        "Lissajous",        true  },
+    };
+    char visualsbuf[320];
+    int n = snprintf(visualsbuf, sizeof(visualsbuf), "{");
+    for (uint8_t i = 0; i < sizeof(vuStyleNames) / sizeof(vuStyleNames[0]); i++) {
+      #if !defined(USE_AUDIO_I2S)
+        if (vuStyleNames[i].needsPcm) continue;
+      #endif
+      n += snprintf(visualsbuf + n, sizeof(visualsbuf) - n, "%s\"%u\":\"%s\"", (n > 1) ? "," : "", vuStyleNames[i].id, vuStyleNames[i].label);
+    }
+    snprintf(visualsbuf + n, sizeof(visualsbuf) - n, "}");
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", visualsbuf);
     response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     response->addHeader("Pragma", "no-cache");
     response->addHeader("Expires", "0");
@@ -1698,6 +1943,529 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(response);
     return;
   }
+  if (request->url() == "/conf.js") {
+    // The editor's build constants and feature flags, in the shape /variables.js already uses.  The page
+    // labels a number with the conf file's own macro from these and validates against the panel size, so
+    // nothing symbolic ever has to be stored in a layout file.  editorThemes follows the theme routes'
+    // guard exactly; editorLayouts is false in a build with no display, where there is no registry.
+    char confjsbuf[320];
+    snprintf(confjsbuf, sizeof(confjsbuf),
+      "var editorThemes=%s;\n"
+      "var editorLayouts=%s;\n"
+      "var dspFamily='%s';\n"
+      "var confDsp={width:%d,height:%d,framewdt:%d,maxWidth:%d,scrollPx:%d,bootLogoTap:%d,hasConfMacros:%d,vuMaxWidth:%d,vuMaxHeight:%d};\n",
+      #if defined(DSP_TFT)
+        "true",
+      #else
+        "false",
+      #endif
+      #ifndef DUMMYDISPLAY
+        "true",
+      #else
+        "false",
+      #endif
+      // The panel family, for the page's "Display type" line and for the exported file names.  An empty string in a
+      // build with no display, which is also the build where the layout half is hidden.
+      #ifdef DSP_TFT
+        "TFT",
+      #elif defined(DSP_OLED)
+        "OLED",
+      #else
+        "",
+      #endif
+      CONF_DSP_WIDTH, CONF_DSP_HEIGHT, CONF_FRAMEWDT, CONF_MAX_WIDTH,
+      CONF_SCROLLPX, CONF_BOOTLOGOTOP, CONF_HAS_CONF_MACROS,
+      CONF_VU_MAX_WIDTH, CONF_VU_MAX_HEIGHT);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/javascript", confjsbuf);
+    response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    request->send(response);
+    return;
+  }
+  // ---------------------------------------------------------------------------
+  // The theme editor.  Nothing but /editor.html uses these, and the page is not linked from anywhere,
+  // so they are deliberately outside the WebUI's own conventions: the theme travels as one JSON field
+  // and the shape is the same one the slot files use, which is what lets one parser serve the boot
+  // loader, Save and Apply alike.  TFT-only (the same test the theme group in the WebUI uses), because
+  // on a monochrome build a theme never reaches the panel at all.
+  // ---------------------------------------------------------------------------
+  #if defined(DSP_TFT)
+  if (request->url() == "/theme-elements.json") {
+    // One object per element, in table order which is also the field order: the key the page sends back
+    // with a value, and the label it shows in the grid instead.  Both come from the one table in
+    // themes.h, so the page cannot mispair them and nothing here has to explain what a key means.
+    // Neither string needs escaping - they are our own literals of dots, brackets, letters and dashes.
+    String json = "[";
+    for (size_t i = 0; i < themeElementCount(); i++) {
+      if (i > 0) json += ',';
+      json += "{\"key\":\"";
+      json += themeElementKey(i);
+      json += "\",\"label\":\"";
+      json += themeElementLabel(i);
+      json += "\"}";
+    }
+    json += ']';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themeall.json") {
+    // Every id, filled or not: the editor's first dropdown lists all of them so an empty slot is still
+    // somewhere the user can save into, and the label says which ones hold nothing.
+    String json = "{";
+    for (uint8_t i = 0; i < themeCount(); i++) {
+      if (i > 0) json += ',';
+      json += '"' + String(i) + "\":\"";
+      // An empty slot is an EMPTY STRING rather than a fabricated label: the editor decorates names
+      // itself (its two dropdowns label the same slot differently) and it reads "empty" from exactly
+      // this, so there is no marker string for the two sides to disagree about.
+      if (themeFilled(i)) json += themeName(i);
+      json += '"';
+    }
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themeactive.json") {
+    // One number: which theme the device is using.  The editor opens on this instead of on the first
+    // built-in, so a fresh page starts from what is on the panel and its Save cannot quietly commit
+    // something the user never chose.
+    String json = "{\"id\":";
+    json += config.store.themeId;
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/themedata.json") {
+    // One theme in the same shape the slot files use, so the page fills its grid with the identical
+    // code path whether the theme came from flash or from a file.
+    const int id = request->hasArg("id") ? request->arg("id").toInt() : -1;
+    if (id < 0 || id >= (int)themeCount() || !themeFilled((uint8_t)id)) {
+      request->send(404, "text/plain", "No such theme");
+      return;
+    }
+    String json;
+    themeJsonFor(themeAt((uint8_t)id), themeName((uint8_t)id), json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/xtheme.json") {
+    // Export one slot as a download.  It comes straight off the device, so the file is byte for byte what
+    // a save would have written, and it can go back the same way - Save IS the import, because it parses
+    // whatever this produced.  The reason it exists: the slot files are the only copy of a custom theme,
+    // so a filesystem reflash loses them unless they were taken out first.
+    const int slot = request->hasArg("slot") ? request->arg("slot").toInt() : -1;
+    if (slot < 0 || slot >= THEME_CUSTOM_MAX) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(THEME_BUILTIN_COUNT + slot);
+    if (!themeFilled(id)) {
+      request->send(404, "text/plain", "That slot is empty");
+      return;
+    }
+    String json;
+    themeJsonFor(themeAt(id), themeName(id), json);
+    // A suggested file name, so the browser's save dialog arrives pre-filled.  The theme's own name, made
+    // safe for a file system: anything a path cannot carry becomes an underscore, but UTF-8 bytes are kept
+    // because the RFC 5987 form of the header carries them properly for the browsers that read it alongside
+    // the plain one.  A name with nothing usable left in it keeps the slot's own file name instead, which is
+    // what the device stores the theme as anyway.
+    String stem;
+    for (const char* p = themeName(id); *p != '\0'; p++) {
+      const char c = *p;
+      const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                         c == ' ' || c == '-' || c == '_' || c == '.';
+      stem += (plain || (uint8_t)c >= 0x80) ? c : '_';
+    }
+    stem.trim();
+    String disposition;
+    if (stem.length() == 0) {
+      disposition = "attachment; filename=\"";
+      disposition += themeSlotFileName((uint8_t)slot);
+      disposition += '"';
+    } else {
+      // Two names in one header: the plain, quoted form for anything that does not read RFC 5987, and the
+      // quoted-string-free UTF-8 form for everything that does.  The filename* value must NOT be quoted -
+      // a closing quote there is not a delimiter, it is part of the value, and browsers turn the illegal
+      // character into an underscore when they pre-fill the save dialog (which is where ".json_" came from).
+      disposition = "attachment; filename=\"ehRadioTheme-";
+      disposition += stem;
+      disposition += ".json\"; filename*=UTF-8''ehRadioTheme-";
+      for (size_t i = 0; i < stem.length(); i++) {
+        const uint8_t b = (uint8_t)stem[i];
+        const bool plain = (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+                           b == '-' || b == '_' || b == '.';
+        if (plain) {
+          disposition += (char)b;
+        } else {
+          char esc[5];
+          snprintf(esc, sizeof(esc), "%%%02X", b);
+          disposition += esc;
+        }
+      }
+      disposition += ".json";
+    }
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", disposition);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/xthemeall.json") {
+    // Every filled slot in one download.  The shape follows the page's rule: one theme is that theme's own
+    // document, so a single-theme device gets the identical file from either Export button, and more than
+    // one is an array in slot order with null where a slot holds nothing.
+    String json;
+    themeJsonForAllSlots(json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", String("attachment; filename=\"ehRadioThemes-Backup") + dspSuffix() + ".json\"");
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/xtheme") {
+    const AsyncWebParameter *actionArg = request->getParam("action", true);
+    const AsyncWebParameter *slotArg = request->getParam("slot", true);
+    if (actionArg == nullptr || slotArg == nullptr) {
+      request->send(400, "text/plain", "action and slot are required");
+      return;
+    }
+    const int slot = slotArg->value().toInt();
+    if (slot < 0 || slot >= THEME_CUSTOM_MAX) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(THEME_BUILTIN_COUNT + slot);
+
+    if (actionArg->value() == "delete") {
+      themeDeleteSlot((uint8_t)slot);
+      if (config.store.themeId == id) {
+        // The theme the device is using has just stopped existing, so the choice falls back to the
+        // factory theme and is persisted.  This is the one place the editor writes NVS, and it is
+        // because a stored id with nothing behind it cannot be left behind.  applyTheme() repaints the
+        // panel through the ordinary theme path - a delete is a real change, not a preview.
+        config.store.themeId = 0;
+        config.saveValue(&config.store.themeId, (uint8_t)0);
+        display.applyTheme(0);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    if (actionArg->value() == "save") {
+      const AsyncWebParameter *dataArg = request->getParam("data", true);
+      if (dataArg == nullptr) {
+        request->send(400, "text/plain", "data is required");
+        return;
+      }
+      ThemeData parsed;
+      char name[33];
+      name[0] = '\0';
+      if (!themeParseTheme(dataArg->value().c_str(), &parsed, name, sizeof(name))) {
+        request->send(400, "text/plain", "Bad theme JSON");
+        return;
+      }
+      if (!themeSaveSlot((uint8_t)slot, name, &parsed)) {
+        request->send(500, "text/plain", "Write failed");
+        return;
+      }
+      // Save is the editor's one committing action, so it does both halves: the slot is written AND it
+      // becomes the device's theme.  That is what makes the panel show it and options.html agree about
+      // which theme is in use.  It is a real theme change rather than a preview, so it goes through the
+      // ordinary theme path — the same one the WebUI dropdown uses — which also means it resets the
+      // pre-sleep countdown exactly as any other theme change does.
+      //
+      // `use=0` is for the bulk import, which installs themes without the device leaving whatever it was
+      // already using: ten sequential saves would otherwise leave it sitting on the last one imported.
+      const bool useIt = request->hasParam("use", true)
+                           ? request->getParam("use", true)->value().toInt() != 0
+                           : true;
+      if (useIt) {
+        config.saveValue(&config.store.themeId, id);
+        display.applyTheme(id);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    request->send(400, "text/plain", "Bad action");
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/themeapply") {
+    const AsyncWebParameter *dataArg = request->getParam("data", true);
+    if (dataArg == nullptr) {
+      request->send(400, "text/plain", "data is required");
+      return;
+    }
+    // The body lands in the staging theme and the display task takes it from there; this task never
+    // touches the live theme, and nothing at all is written to a file or to NVS.  A key the body leaves
+    // out comes back black, the same rule the files follow - and the page always sends all 42 keys, so
+    // that only ever shows up for a hand-made request.
+    if (!themeParseTheme(dataArg->value().c_str(), themeStaging(), nullptr, 0)) {
+      request->send(400, "text/plain", "Bad theme JSON");
+      return;
+    }
+    display.putRequest(THEMEPREVIEW);
+    request->send(200, "text/plain", "OK");
+    return;
+  }
+  #endif
+
+  // ---------------------------------------------------------------------------
+  // The layout editor.  The same shape as the theme editor above and the same rules - one JSON field
+  // carries the document, the handler stages it and the display task applies it, and nothing here writes
+  // a file - but unlike the theme half it is offered on every panel that has a registry, because a layout
+  // is a set of pixel positions rather than a palette, so an OLED uses it too.
+  // ---------------------------------------------------------------------------
+  #ifndef DUMMYDISPLAY
+  if (request->url() == "/layout-elements.json") {
+    // The groups and the field table, straight off conf_index.h: each field's type, its flags and its own
+    // cells, so the page draws one card per field and cannot mispair a cell with its key.
+    String json = "{\"groups\":[";
+    for (uint8_t g = 0; g < CONF_GROUP_COUNT; g++) {
+      if (g > 0) json += ',';
+      json += '"';
+      json += _confGroups[g];
+      json += '"';
+    }
+    json += "],\"fields\":[";
+    for (uint8_t f = 0; f < CONF_FIELD_COUNT; f++) {
+      if (f > 0) json += ',';
+      json += "{\"key\":\"";
+      json += _confFields[f].key;
+      json += "\",\"label\":\"";
+      json += _confFields[f].label;
+      json += "\",\"type\":";
+      json += _confFields[f].type;
+      json += ",\"group\":";
+      json += _confFields[f].group;
+      json += ",\"flags\":";
+      json += _confFields[f].flags;
+      // A bit per cell index: the page labels those cells "unused" and greys them.  The conf still writes
+      // them, because the struct has them - see CONF_CELL_BIT in conf_index.h.
+      json += ",\"unused\":";
+      json += _confFields[f].unused;
+      json += ",\"cells\":[";
+      const uint8_t cells = _confCellCounts[_confFields[f].type];
+      for (uint8_t c = 0; c < cells; c++) {
+        if (c > 0) json += ',';
+        json += "{\"key\":\"";
+        json += _confCells[_confFields[f].type][c].key;
+        json += "\",\"label\":\"";
+        json += _confCells[_confFields[f].type][c].label;
+        json += "\",\"kind\":";
+        json += _confCells[_confFields[f].type][c].kind;
+        json += '}';
+      }
+      json += "]}";
+    }
+    json += "]}";
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/layoutall.json") {
+    // Every id, filled or not: the source list shows what each slot holds and the target list shows what a
+    // save would overwrite, so an empty slot is an empty string and the page decorates it.
+    String json = "{";
+    for (uint8_t i = 0; i < layoutCount(); i++) {
+      if (i > 0) json += ',';
+      json += '"' + String(i) + "\":\"";
+      if (layoutFilled(i)) json += layoutName(i);
+      json += '"';
+    }
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/layoutactive.json") {
+    // The layout the device is using, so the page opens on it rather than on the first built-in, plus the
+    // editor's two switches, which are runtime-only and have to come back with the layout or the boxes would lie.
+    String json = "{\"id\":";
+    json += config.store.layoutId;
+    json += ",\"widgetsOn\":";
+    json += widgetsEditorForceOn ? 1 : 0;
+    json += ",\"widgetsOff\":";
+    json += widgetsEditorForceOff ? 1 : 0;
+    json += '}';
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/layoutdata.json") {
+    const int id = request->hasArg("id") ? request->arg("id").toInt() : -1;
+    if (id < 0 || id >= (int)layoutCount() || !layoutFilled((uint8_t)id)) {
+      request->send(404, "text/plain", "No such layout");
+      return;
+    }
+    String json;
+    layoutDocFor(layoutSource((uint8_t)id), layoutName((uint8_t)id), json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/layoutapply") {
+    const AsyncWebParameter *dataArg = request->getParam("data", true);
+    if (dataArg == nullptr) {
+      request->send(400, "text/plain", "data is required");
+      return;
+    }
+    // The body lands in the staging layout and the display task takes it from there; this task never touches
+    // the live layout, and nothing is written to a file or to NVS.  A layout for a different panel and one
+    // that has lost its station or playlist line are refused here as well as on the page: the first would
+    // draw nonsense and the second is the one way this feature could break the device's own screens.
+    bool screenOk = false;
+    if (!layoutParseDoc(dataArg->value().c_str(), layoutStaging(), nullptr, 0, &screenOk)) {
+      request->send(400, "text/plain", "Bad layout JSON");
+      return;
+    }
+    if (!screenOk) {
+      request->send(400, "text/plain", "That layout is for another screen");
+      return;
+    }
+    if (!layoutRequiredOk(layoutStaging())) {
+      request->send(400, "text/plain", "A layout must keep its station and playlist lines");
+      return;
+    }
+    display.putRequest(LAYOUTPREVIEW);
+    request->send(200, "text/plain", "OK");
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/editorwidgets") {
+    // The two switches that let the editor lay out widgets whose hardware is absent, whose style is off, or which
+    // the user's own options would otherwise show.  They live in RAM on purpose - a reboot has to hand the device
+    // back as the user left it - and the display task has to re-init for a gate it cannot see to move, hence
+    // APPLYSTATE.  `mode` is on, off, or neither (both cleared), so the pair can never be set together here.
+    const String mode = request->hasArg("mode") ? request->arg("mode") : String();
+    widgetsEditorForceOn  = (mode == "on");
+    widgetsEditorForceOff = (mode == "off");
+    // The weather is the one thing force-on has to ASK for rather than merely reveal: a layout can only be
+    // positioned against a real line, so turning it on fetches now instead of waiting for the next sync
+    // interval, and turning it off rebuilds the string without the four fields the editor pretended were on.
+    if (widgetsEditorForceOn) network.forceWeather = true;
+    network.buildWeatherString();
+    display.putRequest(APPLYSTATE);
+    request->send(200, "text/plain", mode == "on" ? "on" : (mode == "off" ? "off" : "none"));
+    return;
+  }
+  if (request->url() == "/xlayout.json") {
+    // Export one slot as a download, taken from the device, so the file is exactly what a save would write and
+    // can go back the same way: Save IS the import, because it parses whatever this produced.  The slot files
+    // are the only copy of a custom layout, so a filesystem reflash loses them unless they came out first.
+    const int slot = request->hasArg("slot") ? request->arg("slot").toInt() : -1;
+    if (slot < 0 || slot >= LAYOUT_SLOT_COUNT) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(layoutCount() - LAYOUT_SLOT_COUNT + slot);
+    if (!layoutFilled(id)) {
+      request->send(404, "text/plain", "That slot is empty");
+      return;
+    }
+    String json;
+    layoutDocFor(layoutSource(id), layoutName(id), json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", attachmentName("ehRadioLayout-", layoutName(id), layoutSlotFileName((uint8_t)slot)));
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/xlayoutall.json") {
+    // Every filled slot in one download: one layout is that layout's own document, so a single-layout device
+    // gets the identical file from either export button, and more than one is an array in slot order.
+    String json;
+    layoutDocForAllSlots(json);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Content-Disposition", String("attachment; filename=\"ehRadioLayouts-Backup") + dspSuffix() + ".json\"");
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->method() == HTTP_POST && request->url() == "/xlayout") {
+    const AsyncWebParameter *actionArg = request->getParam("action", true);
+    const AsyncWebParameter *slotArg = request->getParam("slot", true);
+    if (actionArg == nullptr || slotArg == nullptr) {
+      request->send(400, "text/plain", "action and slot are required");
+      return;
+    }
+    const int slot = slotArg->value().toInt();
+    if (slot < 0 || slot >= LAYOUT_SLOT_COUNT) {
+      request->send(400, "text/plain", "Bad slot");
+      return;
+    }
+    const uint8_t id = (uint8_t)(layoutCount() - LAYOUT_SLOT_COUNT + slot);
+
+    if (actionArg->value() == "delete") {
+      layoutDeleteSlot((uint8_t)slot);
+      if (config.store.layoutId == id) {
+        // The layout the device is using has just stopped existing, so the choice falls back to the factory
+        // layout and is persisted: a stored id with nothing behind it cannot be left behind.  This is the one
+        // place the layout editor writes NVS, and applyLayout() repaints through the ordinary layout path
+        // because a delete is a real change rather than a preview.
+        config.store.layoutId = 0;
+        config.saveValue(&config.store.layoutId, (uint8_t)0);
+        display.applyLayout(0);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    if (actionArg->value() == "save") {
+      const AsyncWebParameter *dataArg = request->getParam("data", true);
+      if (dataArg == nullptr) {
+        request->send(400, "text/plain", "data is required");
+        return;
+      }
+      LayoutData parsed;
+      char name[33];
+      name[0] = '\0';
+      bool screenOk = false;
+      if (!layoutParseDoc(dataArg->value().c_str(), &parsed, name, sizeof(name), &screenOk)) {
+        request->send(400, "text/plain", "Bad layout JSON");
+        return;
+      }
+      // The same two refusals as the preview, and for the same reasons: one is a file made for another panel,
+      // and the other is the one way this feature could break the device's own screens.  A widget merely off
+      // the panel edge is NOT refused - only the page can judge whether that was deliberate, and it warns.
+      if (!screenOk) {
+        request->send(400, "text/plain", "That layout is for another screen");
+        return;
+      }
+      if (!layoutRequiredOk(&parsed)) {
+        request->send(400, "text/plain", "A layout must keep its station and playlist lines");
+        return;
+      }
+      if (!layoutSaveSlot((uint8_t)slot, name, &parsed)) {
+        request->send(500, "text/plain", "Write failed");
+        return;
+      }
+      // Save writes the slot AND makes it the layout in use, which is what makes the panel show it and
+      // options.html agree.  `use=0` is for a bulk restore, which installs layouts without the device leaving
+      // whatever it was already showing.
+      const bool useIt = request->hasParam("use", true)
+                           ? request->getParam("use", true)->value().toInt() != 0
+                           : true;
+      if (useIt) {
+        config.saveValue(&config.store.layoutId, id);
+        display.applyLayout(id);
+      }
+      request->send(200, "text/plain", "OK");
+      return;
+    }
+    request->send(400, "text/plain", "Bad action");
+    return;
+  }
+  #endif
+
   if (request->url() == "/themes.json") {
     String json = display.getThemeListJson();
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
@@ -1712,6 +2480,20 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(response);
     return;
   }
+  if (request->url() == "/fonts.json") {
+    String json = display.getSystemFontListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
+  if (request->url() == "/clockfonts.json") {
+    String json = display.getClockFontListJson();
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+    return;
+  }
   if (strcmp(request->url().c_str(), "/settings.html") == 0 || strcmp(request->url().c_str(), "/update.html") == 0 || strcmp(request->url().c_str(), "/ir.html") == 0) {
     request->send(200, "text/html", index_html);
     return;
@@ -1720,27 +2502,24 @@ void handleNotFound(AsyncWebServerRequest * request) {
     request->send(200, "text/html", emptyfs_html);
     return;
   }
-  // Fallback: try SPIFFS for files not in PSRAM cache ??check .gz variant first
+  // Fallback: try LittleFS for files not in PSRAM cache ??check .gz variant first
   if (request->method() == HTTP_GET) {
-    char spiffsPath[64];
-    snprintf(spiffsPath, sizeof(spiffsPath), "/www%s", request->url().c_str());
+    char fsPath[64];
+    snprintf(fsPath, sizeof(fsPath), "/www%s", request->url().c_str());
     char gzPath[64];
-    snprintf(gzPath, sizeof(gzPath), "%s.gz", spiffsPath);
-    if (SPIFFS.exists(gzPath)) {
-      AsyncWebServerResponse *response = request->beginResponse(SPIFFS, gzPath, mimeTypeForFile(request->url().c_str()));
+    snprintf(gzPath, sizeof(gzPath), "%s.gz", fsPath);
+    if (LittleFS.exists(gzPath)) {
+      AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, mimeTypeForFile(request->url().c_str()));
       response->addHeader("Content-Encoding", "gzip");
       request->send(response);
       return;
     }
-    if (SPIFFS.exists(spiffsPath)) {
-      request->send(SPIFFS, spiffsPath);
+    if (LittleFS.exists(fsPath)) {
+      request->send(LittleFS, fsPath);
       return;
     }
   }
-  #ifdef NETSERVER_DEBUG
-    FUNCTIONLOG("Netserver.debug", "[handleNotFound] 404: %s", request->url().c_str());
-  #endif
-  FUNCTIONLOG("Netserver.notfound", "Not Found: %s", request->url().c_str());
+  FUNCTIONLOG("Netserver", "Not Found (404 error): %s", request->url().c_str());
   request->send(404, "text/plain", "Not found");
 }
 
@@ -1767,7 +2546,7 @@ void handleIndex(AsyncWebServerRequest * request) {
       ESP.restart();
       return;
     }
-    FUNCTIONLOG("Netserver.notfound", "Not Found: %s", request->url().c_str());
+    FUNCTIONLOG("Netserver", "Not Found (404 error): %s", request->url().c_str());
     request->send(404, "text/plain", "Not found");
     return;
   } // end if (!config.wwwFilesExist)
@@ -1778,8 +2557,27 @@ void handleIndex(AsyncWebServerRequest * request) {
       }
     }
   #endif
+  #ifdef USE_SD
+    // While the SD File Manager is open the root belongs to it: a second tab, a bookmark, a captive-portal
+    // redirect or a Home Assistant link must not land on a player UI whose buttons are all refused.  A
+    // redirect, not the page body: the manager then keeps ONE address for the whole session, so its own
+    // reloads never depend on the device's state at that instant, and this response is a constant.
+    if (filemanager.active() && strcmp(request->url().c_str(), "/") == 0) {
+      request->redirect("/sdmanager.html");
+      return;
+    }
+  #endif
   if (strcmp(request->url().c_str(), "/") == 0 && request->params() == 0) {
-    if (network.status == CONNECTED) request->send(200, "text/html", index_html); else request->redirect("/settings.html");
+    if (network.status == CONNECTED) {
+      // The root is the one response whose body depends on the mode (player, or the redirect above), and the
+      // String overload of send() adds no cache headers at all - unlike the file responses, which the library
+      // marks no-cache itself.  Marked explicitly, like every other dynamic response here.
+      AsyncWebServerResponse *response = request->beginResponse(200, "text/html", index_html);
+      response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      request->send(response);
+    } else {
+      request->redirect("/settings.html");
+    }
     return;
   }
   if (network.status == CONNECTED) {
@@ -1789,25 +2587,35 @@ void handleIndex(AsyncWebServerRequest * request) {
     bool shouldRedirect = false;
     bool shouldRestart = false;
 
+    bool hasSleep = request->hasArg("sleep");
+    bool hasAfter = request->hasArg("after");
     String sleepValue;
-    if (request->hasArg("sleep")) {
+    if (hasSleep) {
       sleepValue = request->getParam("sleep")->value();
-      if (request->hasArg("after")) {
-        sleepValue += ",";
-        sleepValue += request->getParam("after")->value();
-      }
+    }
+    if (hasAfter) {
+      if (sleepValue.length() == 0) sleepValue = "0";
+      sleepValue += ",";
+      sleepValue += request->getParam("after")->value();
     }
 
+    bool dispatchedAfterSleep = false;
     for (int i = 0; i < paramsNr; ++i) {
       const AsyncWebParameter* p = request->getParam(i);
       String command = p->name();
-      if (command == "after") continue;
+      if (command == "after") {
+        if (!hasSleep && !dispatchedAfterSleep) {
+          dispatchedAfterSleep = true;
+          if (cmd.exec("sleep", sleepValue.c_str(), 0, CommandSource::HttpUrl)) handledAny = true;
+        }
+        continue;
+      }
 
       String value = (command == "sleep" && sleepValue.length() > 0) ? sleepValue : p->value();
       if (cmd.exec(command.c_str(), value.c_str(), 0, CommandSource::HttpUrl)) {
         handledAny = true;
-        if (command == "reset" || command == "clearspiffs") shouldRedirect = true;
-        if (command == "clearspiffs") shouldRestart = true;
+        if (command == "reset" || command == "clearfs") shouldRedirect = true;
+        if (command == "clearfs") shouldRestart = true;
       }
     }
 

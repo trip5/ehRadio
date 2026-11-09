@@ -26,7 +26,6 @@ public:
   void recalcNow();
   const BatteryStatus& getStatus();
   bool isInitialized();
-  void formatStatusLine(const BatteryStatus& status, char* buffer, size_t buffer_size, bool = false);
   bool calibrate(int meas_mv);
 private:
   bool     inited = false;
@@ -56,9 +55,6 @@ public:
     return empty;
   }
   bool isInitialized() { return false; }
-  void formatStatusLine(const BatteryStatus&, char* buffer, size_t buffer_size, bool = false) {
-    if (buffer && buffer_size > 0) buffer[0] = '\0';
-  }
   bool calibrate(int) { return false; }
 };
 

@@ -195,7 +195,9 @@ def stage_0():
         return None
 
     if not naming_check():
-        print("[X] FIRMWARE naming check failed (see above). Fix builds/*/myoptions.h, then re-run.")
+        print("[X] Contributor build check failed (see above).")
+        print("    Fix that contributor's myoptions.h naming, or its platformio.ini filesystem type,")
+        print("    then re-run. The patch_pio_ini_files.py hint in the message above is the shortcut.")
         return None
 
     if git("fetch", "origin", MAIN_BRANCH, check=False).returncode != 0:

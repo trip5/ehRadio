@@ -1,5 +1,5 @@
 [ { "title": "Inputs",
-    "info": "The most basic physical control is a rotary encoder.  All functions can be accomplished with just one encoder.\nButtons may also be used. Touch is swipe and tap motions only.\n\nRegarding Deep Sleep: Wake is only possible on RTC-capable pins.\nESP32 RTC GPIOs: 0, 2, 4, 12-15, 25-27, 32-39 / ESP32-S3/C3 RTC GPIOs: 0-21.\nInputs assigned to these pins will automatically be used for Wake.\nThis includes TS_INT, ENC_CLK, ENC_DT, ENC_SW, and all BTN_." },
+    "info": "The most basic physical control is a rotary encoder.  All functions can be accomplished with just one encoder.\nButtons may also be used. Touch is swipe and tap motions only.\n\nRegarding Deep Sleep: Wake is only possible on RTC-capable pins.\nESP32 RTC GPIOs: 0, 2, 4, 12-15, 25-27, 32-39 / ESP32-S3 RTC GPIOs: 0-21.\nInputs assigned to these pins will automatically be used for Wake.\nThis includes TS_INT, ENC_CLK, ENC_DT, ENC_SW, and all BTN_." },
   {
     "name": "Touch Screen: XPT2046 (SPI)",
     "define": "TS_MODEL TS_MODEL_XPT2046",
@@ -93,7 +93,7 @@
   },
   {
     "name": "SD Offline Mode Button",
-    "info": "SD Offline Mode is normally activated by holding any defined Button or Rotary Encoder Switch at boot.\nUse this if your build does not include these or if using all 3 interferes with boot.\nIf this is defined, only 1 button can be used to boot this mode.\nUse 255 to deactivate this boot method completely.\nIf no SD Card is defined, this mode is not available.",
+    "info": "SD Offline Mode is normally activated by holding any defined Button or Rotary Encoder Switch at boot.\nUse this if your build does not include these or if using all 3 interferes with boot.\nIf this is defined, only 1 button can be used to boot this mode.\nUse 255 to deactivate this boot method completely.\nIf no SD card is defined, this mode is not available.",
     "defines": [
       { "define": "SDOFFLINE_BTN", "type": "enum", "options": ["255", "BTN_MODE", "ENC_SW", "ENC2_SW", "BTN_PLAY", "BTN_PREV", "BTN_NEXT", "BTN_UP", "BTN_DOWN", "TS_INT"], "optional": false, "comment": "button used to activate SD Offline Mode" }
     ]

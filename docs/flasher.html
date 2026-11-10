@@ -945,10 +945,38 @@
                 } else if (typeof loader.hardReset === 'function') {
                     await loader.hardReset();
                 } else {
-                    log('No reset method on this esptool-js build; leaving the board as it is.');
+                    log('No reset method on this esptool-js build. Please manually power-cycle your device.');
                 }
             } catch (err) {
                 log(`Reset after flashing reported: ${err.message}`);
+            }
+        }
+
+        // esptool-js 0.7.1's hard reset never asserts RTS: its reset() waits, then merely sets RTS
+        // low, so EN never moves and the chip stays in download mode until a power cycle. This is
+        // the sequence esptool.py uses, which is the one that works from a local flash:
+        //   EN low, hold, EN high, with DTR never asserted - DTR low pulls IO0 low, which would
+        //   start the ROM loader instead of the application.
+        async function pulseReset(port) {
+            if (!port || typeof port.setSignals !== 'function') {
+                log('This browser cannot drive the reset lines (the port has no setSignals).', 'error');
+                return false;
+            }
+            if (port.readable === null && port.writable === null) {
+                log('Port already closed by the reset; skipping the extra pulse (normal on native USB).');
+                return false;
+            }
+            try {
+                await port.setSignals({ dataTerminalReady: false, requestToSend: false });  // idle: EN high, IO0 high
+                await sleep(100);
+                await port.setSignals({ dataTerminalReady: false, requestToSend: true });   // EN low: chip in reset
+                await sleep(200);                                                           // esptool holds 200ms for USB-OTG
+                await port.setSignals({ dataTerminalReady: false, requestToSend: false });  // EN high: application starts
+                log('Reset pulse sent: EN low for 200ms with IO0 left high.');
+                return true;
+            } catch (err) {
+                log(`Reset pulse failed: ${(err && err.message) || err}`);
+                return false;
             }
         }
 
@@ -969,7 +997,7 @@
             const chip = typeof loader.main === 'function' ? await loader.main() : await loader.main_fn();
             log(`Detected ${chip} at ${baud} baud.`);
 
-            setFlashStatus('wait', 'Writing firmware', 'This is the part to leave alone.');
+            setFlashStatus('wait', 'Writing firmware', 'Please be patient.');
             await writeFlashCompat(loader, {
                 fileArray: parts.map((part) => ({ data: part.data, address: part.address })),
                 flashSize: 'keep',
@@ -1063,16 +1091,17 @@
 
                 setProgress(1, 'Resetting the board...');
                 await resetAfterFlash(result.loader);
+                await pulseReset(port);
                 await disconnectTransport(transport);
                 transport = null;
 
                 setFlashStatus('ok', 'Firmware installed',
                     eraseAll
-                        ? 'The board restarts now with its WebUI files already in flash, so there is no format wait. ' +
+                        ? 'The device restarts now with its WebUI files already in flash, so there is no format wait. ' +
                           'Once it boots it sits in AP/Improv mode, ready for Step 2.'
-                        : 'The board restarts now. On a first install it formats its internal storage: about 3 to 5 ' +
-                          'minutes on a 16MB board, up to 8 minutes on 32MB. When it is done it sits in AP/Improv mode, ' +
-                          'ready for Step 2.');
+                        : 'The device restarts now.  If this is an upgrade, please wait for file updating to complete. ' +
+                          'On a first install it formats its internal storage: about 3 to 5 minutes on a 16MB board, up to 8 minutes on 32MB. ' +
+                          'When it is done it sits in AP/Improv mode, ready for Step 2.');
                 log('Flash finished.');
             } catch (err) {
                 log(err && err.stack ? err.stack : String(err), 'error');
@@ -1205,6 +1234,16 @@
             ssidList.appendChild(row);
         }
 
+        // The SDK's own sortSsids() sorts alphabetically, which is not what a person picking a
+        // network wants to see. Strongest first, name as the tie-break so equal signals do not
+        // shuffle between scans. An unreadable RSSI is treated as the weakest possible.
+        function bySignalStrength(a, b) {
+            const left = Number.isFinite(a.rssi) ? a.rssi : -999;
+            const right = Number.isFinite(b.rssi) ? b.rssi : -999;
+            if (right !== left) return right - left;
+            return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+        }
+
         function renderSsids(networks) {
             ssidList.innerHTML = '';
             if (!networks || networks.length === 0) {
@@ -1212,7 +1251,7 @@
                 ssidPlaceholder('The device reported no networks. Type the name below instead.');
                 return;
             }
-            for (const network of networks) {
+            for (const network of [...networks].sort(bySignalStrength)) {
                 const row = document.createElement('button');
                 row.type = 'button';
                 row.className = 'ssid-row';
@@ -1237,7 +1276,7 @@
             const originalLabel = scanButton.textContent;
             scanButton.textContent = 'Scanning...';
             ssidList.innerHTML = '';
-            ssidPlaceholder('Asking the radio to scan. This takes a few seconds and briefly keeps the device busy...');
+            ssidPlaceholder('Asking the radio to scan. This takes a few seconds...');
             try {
                 log('Requesting a Wi-Fi scan from the device...');
                 // The firmware blocks inside WiFi.scanNetworks() and then answers with one packet
@@ -1491,8 +1530,7 @@
         async function init() {
             if (!serialSupported) {
                 setFlashStatus('error', 'Web Serial is not available',
-                    'This browser cannot reach serial ports. Use Chrome, Edge or Brave on desktop, served over HTTPS ' +
-                    'or localhost. The classic installer has the same requirement.');
+                    'This browser cannot reach serial ports. Use Chrome, Edge or Brave on desktop.');
                 flashButton.disabled = true;
                 improvConnectButton.disabled = true;
                 logsStartButton.disabled = true;

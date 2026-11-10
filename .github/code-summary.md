@@ -53,14 +53,23 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 - `myoptions.h` selects hardware profile + defaults.
 - `src/core/options.h` resolves all defaults/fallbacks and feature flags.
 - `.github/workflows/build-release-firmware.yml` verifies generated contributor release artifacts by re-running
-  `builds/fix_releases.py` on CI and diff-checking `builds/releases/` (contains `firmware.txt`, `releases.md`, and
-  `web_assets/`) against what was committed.
+  `builds/prepare_releases.py --yes --no-build` on CI and failing if `git status` shows any change under
+  `builds/releases/` (`firmware.txt`, `releases.md`, `web_assets/`). `--no-build` because its next step compiles
+  every environment anyway; `git status` rather than `git diff` because manifests are deleted and rewritten, so an
+  orphaned one is untracked.
+- `builds/prepare_releases.py` is the local and PR gate. Four phases, and nothing is written until the build
+  passes: naming/littlefs validation, a preprocessor-balance pre-pass over every contributor `myoptions.h` (one
+  orphan `#endif` closes the include guard early and fails every translation unit), a build of every `[env:...]`
+  in every contributor folder (`pio run -e <env>` inside a scratch copy at `.build_all/`, which is deleted
+  afterwards so the live root `platformio.ini`/`myoptions.h` and `use_build.py`'s locks are never touched), then
+  the metadata generation. `pr-check.yml` runs it **without** `--no-build` on PRs into `main`; `--no-build` exists
+  only for the two release workflows, and `--check` stops after the two validation phases.
 - Both release workflows also produce one `<board_env>_filesystem.bin` per board: `pio run -e <env> -t buildfs`, then
   the image is copied out of `$BUILD_DIR/littlefs.bin` and deduplicated with an `fs_done` map, exactly like the
   bootloader and partitions. Content is identical across variants, so one image per partition layout is enough. If
   `buildfs` produces `spiffs.bin` instead, `board_build.filesystem` is wrong in that contributor's `platformio.ini`
   and the step warns rather than shipping an image LittleFS cannot mount.
-- `builds/fix_releases.py` resolves each board's partition CSV (env -> `extends` chain -> `board_build.partitions` ->
+- `builds/prepare_releases.py` resolves each board's partition CSV (env -> `extends` chain -> `board_build.partitions` ->
   the `littlefs` row) and writes a non-standard `filesystem` entry (`path`, `offset`, `size`) into every manifest.
   ESP Web Tools ignores it; `docs/flasher.html` uses it to write the WebUI filesystem when "Full reinstall" is ticked,
   which is why that path skips the first-boot format and the later download of the web files.

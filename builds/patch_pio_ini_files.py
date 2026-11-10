@@ -19,7 +19,7 @@ One run does two things, in order:
        - [platformio], [ehradio] and [library] are replaced wholesale from the master
        - board_build.filesystem is copied per board section, key by key. This one matters
          because the firmware mounts LittleFS: a contributor ini that asks for spiffs
-         produces an image that can never mount, and fix_releases.py refuses to run.
+         produces an image that can never mount, and prepare_releases.py refuses to run.
 
 Files must contain this comment to be eligible:
   ; patch_pio_ini_files can automatically patch this file
@@ -91,7 +91,7 @@ def version_tuple(value):
 
 def parse_lib_version(value):
     """
-    Split "bblanchon/ArduinoJson@^7.4.3 ; comment" into (name, prefix, version, trailing).
+    Split "bblanchon/ArduinoJson@7.4.3 ; comment" into (name, prefix, version, trailing).
 
     '@' is the version delimiter; a '#' git ref is accepted too, so ".git#v1.4" is read
     with prefix "#v". Returns None when there is no delimiter or no version digits.

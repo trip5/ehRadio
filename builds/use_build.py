@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-usebuild.py - Safely swap platformio.ini and myoptions.h for testing a contributor's config.
+use_build.py - Safely swap platformio.ini and myoptions.h for testing a contributor's config.
 
 Usage:
-  python usebuild.py <subfolder>   # Activate: install subfolder's config files
-  python usebuild.py               # Restore: put the originals back
+  python use_build.py <subfolder>   # Activate: install subfolder's config files
+  python use_build.py               # Restore: put the originals back
 
 How the .vscode/settings.json patch works:
   The filewatcher extension syncs root platformio.ini/myoptions.h → builds/<contributor>/.
   On activate both filewatcher destinations are redirected (e.g. trip5 → test) so any
   subsequent edits are automatically synced to the test folder instead.
   The original contributor name is read from settings.json at activate time and saved to
-  usebuild.lck in the workspace root so restore can always find it.
+  use_build.lck in the workspace root so restore can always find it.
   If this ever breaks, look for \\builds\\<name>\\platformio.ini in .vscode/settings.json.
 
-  A lock file (usebuild.lck) is created in builds/ to prevent double-swapping and store the build name.
-  A second lock file (usebuild.lck) is created in the workspace root to store the original contributor name.
+  A lock file (use_build.lck) is created in builds/ to prevent double-swapping and store the build name.
+  A second lock file (use_build.lck) is created in the workspace root to store the original contributor name.
 
   platformio.ini and myoptions.h are both mandatory in the builds subfolder.
 
@@ -38,8 +38,8 @@ PLATFORMIO_INI = ROOT / "platformio.ini"
 PLATFORMIO_BK  = ROOT / "platformio.ini._bk"
 MYOPTIONS_H    = ROOT / "myoptions.h"
 MYOPTIONS_BK   = ROOT / "myoptions.h._bk"
-LOCK_FILE      = SCRIPT_DIR / "usebuild.lck"   # contains the active subfolder name
-ORIGIN_FILE    = ROOT / "usebuild.lck"          # contains the original contributor name
+LOCK_FILE      = SCRIPT_DIR / "use_build.lck"   # contains the active subfolder name
+ORIGIN_FILE    = ROOT / "use_build.lck"          # contains the original contributor name
 SETTINGS_JSON  = ROOT / ".vscode" / "settings.json"
 
 
@@ -108,7 +108,7 @@ def activate(subfolder_name: str) -> int:
     shutil.copy2(src_opts, MYOPTIONS_H)
 
     print(f"Using '{subfolder_name}' builds for platformio.ini and myoptions.h")
-    print(f"   Run 'python usebuild.py' (no argument) when done testing to restore.")
+    print(f"   Run 'python use_build.py' (no argument) when done testing to restore.")
 
     # Nudge each installed file twice so VS Code notices the change and reloads the editor
     nudge_files = [PLATFORMIO_INI, MYOPTIONS_H]
@@ -123,7 +123,7 @@ def activate(subfolder_name: str) -> int:
 
 def restore() -> int:
     if not LOCK_FILE.exists():
-        print("⚠️  No lock file found (usebuild.lck does not exist), nothing to restore")
+        print("⚠️  No lock file found (use_build.lck does not exist), nothing to restore")
         return 0
 
     subfolder_name = LOCK_FILE.read_text(encoding="utf-8").strip()
@@ -202,8 +202,8 @@ def main() -> int:
     if len(sys.argv) == 2:
         return activate(sys.argv[1])
     print("Usage:")
-    print("  python usebuild.py <subfolder>   # activate test config")
-    print("  python usebuild.py               # restore original")
+    print("  python use_build.py <subfolder>   # activate test config")
+    print("  python use_build.py               # restore original")
     return 1
 
 

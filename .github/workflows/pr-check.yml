@@ -81,16 +81,22 @@ jobs:
               -fail-level=any
 
   # -------------------------------------------------------------------------
-  # Job 3: Validate contributor build naming
-  # The release workflows derive every asset as '<contributor folder>_<env>.bin'.
-  # A FIRMWARE define that does not follow that pattern still compiles, but the
-  # resulting binary is never copied into a release. Runs only for PRs to 'dev'.
+  # Job 3: Config check
+  # Runs the fast half of prepare_releases.py for PRs to 'dev' and 'main':
+  #   - FIRMWARE must be '<contributor folder>_<env>.bin' for an [env:...] declared in
+  #     that folder's platformio.ini, or the release pipeline never picks the binary up
+  #   - the contributor field must prefix the filename, or credit and asset name drift
+  #   - board_build.filesystem must be littlefs, or the image can never mount
+  #   - every contributor myoptions.h must be preprocessor-balanced: a stray #endif closes
+  #     the include guard early, and options_overrides.h includes that file in every
+  #     translation unit, so a single orphan line fails the entire build
+  # No compiler runs and nothing is written.
   # -------------------------------------------------------------------------
-  build-naming:
-    name: Build naming check
+  config-check:
+    name: Config check
     runs-on: ubuntu-latest
     needs: branch-guard
-    if: github.base_ref == 'dev'
+    if: github.base_ref == 'dev' || github.base_ref == 'main'
     steps:
       - uses: actions/checkout@v4
 
@@ -99,8 +105,8 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Validate FIRMWARE naming
-        run: python3 builds/fix_releases.py --check
+      - name: Validate contributor configs
+        run: python3 builds/prepare_releases.py --check
 
   # -------------------------------------------------------------------------
   # Job 4: Compile firmware (test builds)
@@ -128,7 +134,7 @@ jobs:
             pio-${{ runner.os }}-
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.2.0
 
       - name: Copy test config files
         run: |
@@ -137,3 +143,60 @@ jobs:
 
       - name: Build test environments
         run: pio run
+
+  # -------------------------------------------------------------------------
+  # Job 5: Build every contributor firmware
+  # Runs only for PRs targeting 'main', the owner's release sync. This is the full set the
+  # release workflow builds, produced by the same script used locally, so a folder that no
+  # longer compiles cannot reach main. The light 'compile' job above stays for contributor
+  # PRs against dev.
+  #
+  # This job covers the release metadata too: prepare_releases.py regenerates
+  # builds/releases/ only after every environment has built, so a non-empty git status here
+  # means the metadata is stale. git status rather than git diff, because a new
+  # contributor's manifest is untracked and untracked files never appear in a diff.
+  #
+  # NO PR JOB MAY PASS --no-build. That flag exists for the two release workflows, whose
+  # next step compiles the same environments. Here it would make the gate cosmetic.
+  # -------------------------------------------------------------------------
+  build-all:
+    name: Build all firmware
+    runs-on: ubuntu-latest
+    needs: branch-guard
+    if: github.base_ref == 'main'
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-all-${{ runner.os }}-${{ hashFiles('builds/trip5/platformio.ini', 'builds/prepare_releases.py') }}
+          restore-keys: |
+            pio-all-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install platformio==6.2.0
+
+      - name: Build every contributor firmware
+        run: python3 builds/prepare_releases.py --yes
+
+      - name: Check builds/releases is committed
+        run: |
+          if [ -n "$(git status --porcelain -- builds/releases/)" ]; then
+            echo "❌ builds/releases/ is out of date:"
+            git status --short -- builds/releases/
+            git --no-pager diff -- builds/releases/ | head -200
+            echo ""
+            echo "Regenerate locally and commit the result:"
+            echo "  python builds/prepare_releases.py"
+            echo "  git add builds/releases/"
+            exit 1
+          fi
+          echo "✅ builds/releases/ matches builds/*/myoptions.h"

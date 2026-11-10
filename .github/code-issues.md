@@ -188,11 +188,11 @@ If we do that, we should initiate cleanup on every boot (well, initiate cleanup 
 
 ## [X] 6. Build naming mismatch silently produces no release asset `[MEDIUM]` (FIXED)
 
-- **Files**: `.github/workflows/update-builds-in-release.yml`, `.github/workflows/build-release-firmware.yml`, `builds/fix_releases.py`, `builds/add-builds.py`
+- **Files**: `.github/workflows/update-builds-in-release.yml`, `.github/workflows/build-release-firmware.yml`, `builds/prepare_releases.py`, `builds/add_builds.py`
 - **Problem**: Both release workflows derived each asset name as `<contributor folder>_<pio_env>.bin`, while the real name comes from the `FIRMWARE` define in the contributor's `myoptions.h` (`fw_env` in `builds/releases/firmware.txt`). A contributor whose define was not folder-prefixed (e.g. `FIRMWARE "taipan_streamer_1.bin"` in `builds/Another-Taipan/`) compiled successfully, then failed the `grep -qF "|${fw_env}|"` filter, copied nothing, and uploaded nothing.
 - **Contributing bug**: the count was taken with `COUNT=$(ls -1 binaries/*.bin 2>/dev/null | wc -l)`. `ls` returns exit status 2 for an empty glob, and with `set -euo pipefail` the assignment terminated the step, so the log ended at `[SUCCESS] Took ... seconds` followed by `Error: Process completed with exit code 2.` with no explanation.
 - **Fix**:
-  - `fix_releases.py` gained `validate_build_naming()` plus a `--check` mode that rejects any `FIRMWARE` that is not `<folder>_<env>.bin` and any contributor field that does not prefix the filename (case and separators normalized so `No Display`/`Trip5` still pass). It runs before any output is written.
-  - `add-builds.py` STAGE 0 runs `fix_releases.py --check` before committing, and `pr-check.yml` runs it as a job for PRs to `dev`.
+  - `prepare_releases.py` (called `fix_releases.py` when this was recorded) gained `validate_build_naming()` plus a `--check` mode that rejects any `FIRMWARE` that is not `<folder>_<env>.bin` and any contributor field that does not prefix the filename (case and separators normalized so `No Display`/`Trip5` still pass). It runs before any output is written.
+  - `add_builds.py` STAGE 0 runs `prepare_releases.py --check` before committing, and `pr-check.yml` runs it as the `Config check` job for PRs to `dev` and `main`.
   - `update-builds-in-release.yml` collects results with `shopt -s nullglob` into an array, records why each build env was skipped, and on zero binaries prints the skipped envs plus every expected asset name from `firmware.txt` before exiting 1.
 - **Rule to remember**: `FIRMWARE` must be `"<contributor folder>_<env>.bin"`; `FIRMWARE_NAME` is only the free-form display label.

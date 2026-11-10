@@ -1,24 +1,67 @@
 #!/usr/bin/env python3
 """
-fix_releases.py
+prepare_releases.py
 
-Scans all builds/*/myoptions.h files, generates:
-  builds/releases/firmware.txt
-  builds/releases/releases.md (patched in-place)
-  builds/releases/web_assets/firmware-info.json
-  builds/releases/web_assets/manifests/*.json
+Prepares everything a release needs, and refuses to prepare a tree that does not build.
+Four phases, stopping at the first failure. Nothing under builds/releases/ is written until
+the build has passed.
 
-Run from the builds/ directory:
-  python fix_releases.py
+  1. naming     FIRMWARE must be "<contributor folder>_<env>.bin" for an [env:...] declared
+                in that folder's platformio.ini, the contributor field must prefix it, and
+                board_build.filesystem must be littlefs
+  2. configs    preprocessor balance in every contributor myoptions.h - a leftover #endif
+                closes the include guard early and then fails every translation unit
+  3. build      every contributor folder, every [env:...] it declares, in a scratch copy
+  4. generate   builds/releases/firmware.txt
+                builds/releases/releases.md (patched in-place)
+                builds/releases/web_assets/firmware-info.json
+                builds/releases/web_assets/manifests/*.json
 
-Validate contributor naming only (writes nothing, exits non-zero on problems):
-  python fix_releases.py --check
+Usage:
+  python builds/prepare_releases.py             # all four phases; asks before compiling
+  python builds/prepare_releases.py --yes       # same, without the prompt (CI)
+  python builds/prepare_releases.py --check     # phases 1-2: no build, no writes
+  python builds/prepare_releases.py --no-build  # phases 1, 2, 4 (release workflows only)
+
+WHY A SCRATCH COPY
+  Root platformio.ini / myoptions.h are the live files that use_build.py swaps and that the
+  VS Code File Watcher syncs into builds/<folder>/. Writing them here would fight both the
+  lock files and the watcher, so the tree is copied to .build_all/ and the copy is built
+  instead. The copy is deleted on the way out, pass or fail.
 """
 
 import argparse
-import re
 import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent          # builds/
+ROOT       = SCRIPT_DIR.parent              # workspace root
+SCRATCH    = ROOT / '.build_all'
+LOG_LINES_ON_FAIL = 12
+
+# Not needed to compile, and large: the build copies only what the compiler reads.
+COPY_IGNORE = {
+    '.git', '.pio', '.build_all', '.vscode', '__pycache__',
+    'images', 'docs', 'site', 'binaries', 'firmware', 'upload_pkg', 'www_release',
+}
+
+# A contributor swap left in place means builds/<folder> may hold swapped content.
+SWAP_MARKERS = (
+    SCRIPT_DIR / 'use_build.lck',
+    ROOT / 'use_build.lck',
+    ROOT / 'platformio.ini._bk',
+    ROOT / 'myoptions.h._bk',
+)
+
+COND_OPEN = {'if', 'ifdef', 'ifndef'}
+COND_MID  = {'else', 'elif'}
 
 
 def _strip_comments(content):
@@ -464,17 +507,202 @@ def generate_firmware_info_json(firmwares, output_path, version=''):
     print(f'[*] Generated {output_path} with {len(variants)} firmware variants')
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='Generate release metadata from builds/*/myoptions.h')
-    parser.add_argument(
-        '--check', action='store_true',
-        help='only validate contributor naming; write nothing')
-    args = parser.parse_args()
+def unbalanced_directives(path):
+    """Return [(line_no, reason)] for unbalanced #if/#else/#endif in one file."""
+    text = path.read_text(encoding='utf-8', errors='replace')
+    # Blank the block comments but keep their newlines: line numbers must not shift.
+    text = re.sub(r'/\*.*?\*/', lambda m: '\n' * m.group(0).count('\n'),
+                  text, flags=re.DOTALL)
 
-    script_dir   = Path(__file__).parent  # builds/
+    problems = []
+    open_lines = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.split('//', 1)[0].strip()
+        match = re.match(r'#\s*(\w+)', line)
+        if not match:
+            continue
+        directive = match.group(1)
+        if directive in COND_OPEN:
+            open_lines.append(number)
+        elif directive in COND_MID:
+            if not open_lines:
+                problems.append((number, f'#{directive} without #if'))
+        elif directive == 'endif':
+            if open_lines:
+                open_lines.pop()
+            else:
+                problems.append((number, '#endif without #if'))
+    for number in open_lines:
+        problems.append((number, '#if never closed'))
+    return problems
+
+
+def check_configs(folders):
+    """Pre-pass over every contributor config. Returns a list of error strings."""
+    errors = []
+    for folder in folders:
+        ini = folder / 'platformio.ini'
+        if not ini.is_file():
+            errors.append(f'{rel(ini)}: missing')
+        options = folder / 'myoptions.h'
+        for number, reason in unbalanced_directives(options):
+            errors.append(f'{rel(options)}:{number}  {reason}')
+    return errors
+
+
+def rel(path):
+    try:
+        return str(path.relative_to(ROOT)).replace('\\', '/')
+    except ValueError:
+        return str(path)
+
+
+def make_scratch():
+    """Copy the working tree - not git HEAD: root platformio.ini is gitignored."""
+    if SCRATCH.exists():
+        shutil.rmtree(SCRATCH)
+    shutil.copytree(
+        ROOT, SCRATCH,
+        ignore=lambda _directory, names: [n for n in names if n in COPY_IGNORE],
+        symlinks=False,
+    )
+
+
+def find_pio():
+    for candidate in ('pio', 'platformio'):
+        found = shutil.which(candidate)
+        if found:
+            return [found]
+    try:
+        subprocess.run([sys.executable, '-m', 'platformio', '--version'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        return [sys.executable, '-m', 'platformio']
+    except Exception:
+        return None
+
+
+def build_env(pio, folder, env, log_path, verbose):
+    """Run one environment in the scratch tree. Returns (ok, tail_lines)."""
+    shutil.copy2(folder / 'platformio.ini', SCRATCH / 'platformio.ini')
+    shutil.copy2(folder / 'myoptions.h', SCRATCH / 'myoptions.h')
+
+    command = pio + (['run', '-e', env] if env else ['run'])
+    tail = []
+    with open(log_path, 'w', encoding='utf-8', errors='replace') as log:
+        log.write(f'$ {" ".join(command)}   (cwd {SCRATCH})\n\n')
+        if verbose:
+            process = subprocess.Popen(command, cwd=SCRATCH, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                                       errors='replace')
+            for line in process.stdout:
+                print('    ' + line.rstrip())
+                log.write(line)
+                tail = (tail + [line.rstrip()])[-LOG_LINES_ON_FAIL:]
+            ok = process.wait() == 0
+        else:
+            done = subprocess.run(command, cwd=SCRATCH, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                                  errors='replace')
+            log.write(done.stdout)
+            tail = done.stdout.splitlines()[-LOG_LINES_ON_FAIL:]
+            ok = done.returncode == 0
+    return ok, tail
+
+
+def describe_envs(envs):
+    if not envs:
+        return 'every env'
+    if len(envs) <= 3:
+        return ', '.join(envs)
+    return f'{len(envs)} envs'
+
+
+def build_all(folders, verbose):
+    """Build every folder's every env in the scratch copy. 0 ok, 1 failed, 2 refused."""
+    pio = find_pio()
+    if not pio:
+        print('[X] Refusing to build: neither pio nor platformio is on PATH.')
+        return 2
+
+    log_dir = Path(tempfile.mkdtemp(prefix='ehradio-buildall-'))
+    results = []
+    try:
+        make_scratch()
+        for folder in folders:
+            envs = read_pio_envs(folder / 'platformio.ini')
+            started = time.time()
+            folder_ok = True
+            # One env at a time: that is what makes a failure attributable to an environment
+            # rather than to "somewhere in this folder".
+            for env in (envs or [None]):
+                log_path = log_dir / f'{folder.name}__{env or "all"}.log'
+                ok, tail = build_env(pio, folder, env, log_path, verbose)
+                if ok:
+                    continue
+                folder_ok = False
+                print(f'  [FAIL] {folder.name:<20} {env or "every env"}')
+                for line in tail:
+                    print(f'         | {line}')
+                print(f'         log: {log_path}')
+            if folder_ok:
+                elapsed = time.time() - started
+                print(f'  [OK]   {folder.name:<20} {describe_envs(envs)}  ({elapsed:.0f}s)')
+            results.append((folder.name, folder_ok))
+    finally:
+        shutil.rmtree(SCRATCH, ignore_errors=True)
+
+    print('')
+    failed = [name for name, ok in results if not ok]
+    if not failed:
+        shutil.rmtree(log_dir, ignore_errors=True)
+        print(f'  {len(results)} ok -> every contributor builds')
+        return 0
+    print(f'  {len(results) - len(failed)} ok, {len(failed)} failed ({", ".join(failed)})')
+    print(f'  Build logs kept in: {log_dir}')
+    print('  To dig into one folder:')
+    print(f'    set PYTHONIOENCODING=utf-8 && python builds/use_build.py {failed[0]}')
+    print('  Release files were NOT written.')
+    return 1
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Build every contributor firmware, then generate the release metadata.')
+    parser.add_argument('--yes', action='store_true',
+                        help='skip the confirmation prompt (needed in CI)')
+    parser.add_argument('--check', action='store_true',
+                        help='phases 1-2 only: validate configs, build nothing, write nothing')
+    parser.add_argument('--no-build', action='store_true',
+                        help='skip the build phase (release workflows only: they compile next)')
+    parser.add_argument('--verbose', action='store_true',
+                        help='stream compiler output instead of capturing it')
+    return parser.parse_args()
+
+
+def confirm_build():
+    """Ask before compiling. False means cancel - including when there is no terminal."""
+    if not sys.stdin.isatty():
+        print('[X] Refusing to build without confirmation (no terminal). Re-run with --yes.')
+        return False
+    try:
+        answer = input('Are you ready to compile all builds? [y/N] ')
+    except (EOFError, KeyboardInterrupt):
+        # A tty that gives no answer (closed, piped from nul, Ctrl-C) must cancel cleanly.
+        print('\nCancelled.')
+        return False
+    if answer.strip().lower() not in ('y', 'yes'):
+        print('Cancelled.')
+        return False
+    return True
+
+
+def main():
+    args = parse_args()
+
+    script_dir   = SCRIPT_DIR
     releases_dir = script_dir / 'releases'
 
+    # --- Phase 1: naming and filesystem ---
     naming_errors = validate_build_naming(script_dir)
     if naming_errors:
         print(f'[X] Contributor build check failed ({len(naming_errors)} problem(s)):')
@@ -488,8 +716,47 @@ def main():
         print('    mounts LittleFS and the flasher writes a littlefs image into that partition.')
         return 1
     print('[OK] Contributor build check passed')
+
+    folders = contributor_folders(script_dir)
+    if not folders:
+        print('[!] No contributor folders found in builds/ (need platformio.ini + myoptions.h).')
+        return 1
+
+    # --- Phase 2: preprocessor balance ---
+    config_errors = check_configs(folders)
+    if config_errors:
+        print(f'[X] Config pre-pass failed ({len(config_errors)} problem(s)):')
+        for error in config_errors:
+            print(f'  - {error}')
+        print('')
+        print('    An #endif with no open #if closes the include guard early, and')
+        print('    options_overrides.h includes myoptions.h in every translation unit, so every')
+        print('    file then fails to compile. Fix the config, do not work around the build.')
+        return 1
+    print('[OK] Config pre-pass passed')
+
     if args.check:
+        print(f'[OK] {len(folders)} contributor folder(s) validated - nothing built, nothing written')
         return 0
+
+    active = [marker.name for marker in SWAP_MARKERS if marker.exists()]
+    if active:
+        print(f'[X] Refusing to run: a contributor swap is still active ({", ".join(active)}).')
+        print('    Restore first:  python builds/use_build.py')
+        return 2
+
+    # --- Phase 3: build everything ---
+    if args.no_build:
+        if not os.environ.get('CI'):
+            print('[!] Skipping the compile. The dev-to-main PR check still builds every')
+            print('    environment, so a build failure will surface there instead of here.')
+    else:
+        print('Testing by building all firmwares in builds/')
+        if not args.yes and not confirm_build():
+            return 2
+        build_rc = build_all(folders, args.verbose)
+        if build_rc:
+            return build_rc
 
     all_firmwares = []
     all_url_map   = {}

@@ -8,11 +8,6 @@
       "description": "ehRadio - Another-Taipan_taipan_streamer_1"
     },
     {
-      "name": "Kasperaitis es3c28p",
-      "manifest": "manifests/kasperaitis_es3c28p-manifest.json",
-      "description": "ehRadio - kasperaitis_es3c28p"
-    },
-    {
       "name": "No Display No Display",
       "manifest": "manifests/no_display_test-manifest.json",
       "description": "ehRadio - no_display_test"

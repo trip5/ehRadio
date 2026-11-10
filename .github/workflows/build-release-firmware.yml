@@ -38,9 +38,9 @@ jobs:
           if [ -n "$MISSING_FILES" ]; then
             echo "❌ Missing required files:"
             echo -e "$MISSING_FILES"
-            echo "Run from the builds/ directory:"
-            echo "  python fix_releases.py"
-            echo "  git add releases/"
+            echo "Run from the repo root:"
+            echo "  python builds/prepare_releases.py"
+            echo "  git add builds/releases/"
             echo "  git commit -m 'Update release files'"
             exit 1
           fi
@@ -65,20 +65,23 @@ jobs:
           python-version: '3.x'
 
       - name: Verify builds/releases/ is up-to-date
+        # --no-build because the next step compiles every environment anyway: building here
+        # too would compile the same environments twice for no extra evidence. The build
+        # gate that matters runs on the PR into main, where prepare_releases.py is called
+        # without --no-build. git status rather than git diff, because manifests are deleted
+        # and rewritten and an orphaned one is untracked, which a diff never reports.
         run: |
           echo "🔍 Verifying builds/releases/ is up-to-date..."
-          cd builds
-          python3 fix_releases.py
-          cd ..
-          if ! git diff --quiet builds/releases/; then
+          python3 builds/prepare_releases.py --yes --no-build
+          if [ -n "$(git status --porcelain -- builds/releases/)" ]; then
             echo ""
-            echo "❌ builds/releases/ is out of date. Diff:"
-            git diff builds/releases/
+            echo "❌ builds/releases/ is out of date:"
+            git status --short -- builds/releases/
+            git --no-pager diff -- builds/releases/ | head -200
             echo ""
             echo "Run locally and commit:"
-            echo "  cd builds"
-            echo "  python fix_releases.py"
-            echo "  git add releases/"
+            echo "  python builds/prepare_releases.py"
+            echo "  git add builds/releases/"
             echo "  git commit -m 'Update release files'"
             exit 1
           fi
@@ -146,7 +149,7 @@ jobs:
           echo "✅ Version validation passed"
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.2.0
 
       - name: Make binaries folder
         run: mkdir -p binaries

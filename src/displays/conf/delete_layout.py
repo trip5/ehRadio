@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-deletelayout.py — List or delete layouts from a conf file.
+delete_layout.py — List or delete layouts from a conf file.
 
 USAGE:
-    py deletelayout.py                              # Pick a conf file, then a layout, then delete
-    py deletelayout.py <conf_file>                  # List layouts with indices
-    py deletelayout.py <conf_file> <index>          # Delete layout at index (0-based)
-    py deletelayout.py -h | --help                  # Show this help
+    py delete_layout.py                              # Pick a conf file, then a layout, then delete
+    py delete_layout.py <conf_file>                  # List layouts with indices
+    py delete_layout.py <conf_file> <index>          # Delete layout at index (0-based)
+    py delete_layout.py -h | --help                  # Show this help
 
 Deleting ALWAYS asks for confirmation — including when the index is passed on
 the command line.  There is no bypass flag.
 
 EXAMPLES:
-    py deletelayout.py
-    py deletelayout.py displayOLED128x64conf.h
-    py deletelayout.py displayOLED128x64conf.h 3
+    py delete_layout.py
+    py delete_layout.py displayOLED128x64conf.h
+    py delete_layout.py displayOLED128x64conf.h 3
 """
 
 import re, sys, os

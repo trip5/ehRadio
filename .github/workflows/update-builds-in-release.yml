@@ -65,26 +65,26 @@ jobs:
           echo "✅ Version validation passed"
 
       - name: Verify builds/releases/ is up-to-date
+        # --no-build: the next step compiles the firmware that is actually missing or
+        # changed, and this workflow deliberately does not rebuild everything. The full
+        # build gate runs on the PR into main.
         run: |
           echo "🔍 Verifying builds/releases/ is up-to-date..."
-          cd builds
-          python3 fix_releases.py
-          cd ..
-          if ! git diff --quiet builds/releases/; then
+          python3 builds/prepare_releases.py --yes --no-build
+          if [ -n "$(git status --porcelain -- builds/releases/)" ]; then
             echo ""
             echo "❌ builds/releases/ is out of date. Run locally and commit:"
-            echo "  cd builds"
-            echo "  python fix_releases.py"
-            echo "  git add releases/"
+            echo "  python builds/prepare_releases.py"
+            echo "  git add builds/releases/"
             echo "  git commit -m 'Update release files'"
             echo ""
-            git diff --stat builds/releases/
+            git status --short -- builds/releases/
             exit 1
           fi
           echo "✅ builds/releases/ is up-to-date"
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.2.0
 
       - name: Build missing or changed firmware
         id: build
@@ -235,7 +235,7 @@ jobs:
             echo "   Asset names come from the FIRMWARE define in each myoptions.h and must"
             echo "   look like '<contributor folder>_<env>.bin'. firmware.txt expects:"
             awk -F'|' 'NF >= 4 { print "     " $3 ".bin" }' "$FW_TXT"
-            echo "   Fix the define, then run: python builds/fix_releases.py --check"
+            echo "   Fix the define, then run: python builds/prepare_releases.py --check"
             exit 1
           fi
           printf '  %s\n' "${BINARIES[@]}"

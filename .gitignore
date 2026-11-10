@@ -3,3 +3,4 @@
 /platformio.ini
 /myoptions.h
 *.lck
+/.build_all/

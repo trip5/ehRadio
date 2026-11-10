@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-add-builds.py
+add_builds.py
 
 Add or refresh firmware builds in the latest GitHub release, then carry the
 same files over to the dev branch. Steps:
 
   STAGE 0  PRECHECK   validate FIRMWARE naming, confirm main branch, that
-                      fix_releases.py was run, and collect the changed
+                      prepare_releases.py was run, and collect the changed
                       contributor folders
   STAGE 1  COMMIT     commit builds/ on main
   STAGE 2  PUSH main  push main to origin
@@ -14,11 +14,11 @@ same files over to the dev branch. Steps:
   STAGE 4  MERGE      copy the commit's files into dev and push dev
   STAGE 5  FINALIZE   return to dev and remove the lock file
 
-Progress is stored in builds/add-builds.lck so a Ctrl-C can be resumed by
+Progress is stored in builds/add_builds.lck so a Ctrl-C can be resumed by
 re-running the script. Pass --reset to discard the saved state.
 
 Run from anywhere:
-  python builds/add-builds.py
+  python builds/add_builds.py
 """
 
 import argparse
@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LCK_PATH = REPO_ROOT / "builds" / "add-builds.lck"
+LCK_PATH = REPO_ROOT / "builds" / "add_builds.lck"
 FIRMWARE_INFO = "builds/releases/web_assets/firmware-info.json"
 WORKFLOW_NAME = "update-builds-in-release.yml"
 WORKFLOW_DISPLAY = "Update Builds in Release"
@@ -174,8 +174,8 @@ def gh_ready():
 def naming_check():
     # The release workflows build "<contributor folder>_<env>.bin", so a FIRMWARE
     # define that does not follow that pattern compiles fine and uploads nothing.
-    # fix_releases.py owns the rule; run it in check mode so both stay in sync.
-    script = REPO_ROOT / "builds" / "fix_releases.py"
+    # prepare_releases.py owns the rule; run it in check mode so both stay in sync.
+    script = REPO_ROOT / "builds" / "prepare_releases.py"
     result = run([sys.executable, str(script), "--check"], check=False)
     out = ((result.stdout or "") + (result.stderr or "")).strip()
     if out:
@@ -205,17 +205,17 @@ def stage_0():
 
     local_info = REPO_ROOT / FIRMWARE_INFO
     if not local_info.exists():
-        print("[X] %s not found. Run: cd builds && python fix_releases.py" % FIRMWARE_INFO)
+        print("[X] %s not found. Run: python builds/prepare_releases.py" % FIRMWARE_INFO)
         return None
     local_text = local_info.read_text(encoding="utf-8").replace("\r\n", "\n")
     remote = git("show", "origin/%s:%s" % (MAIN_BRANCH, FIRMWARE_INFO), check=False)
     if remote.returncode == 0 and remote.stdout.replace("\r\n", "\n") == local_text:
-        print("[X] You forgot to run fix_releases.py!")
+        print("[X] You forgot to run prepare_releases.py!")
         return None
 
     paths = changed_paths()
     if not paths:
-        print("[X] No changes detected. Add your build files, then run fix_releases.py.")
+        print("[X] No changes detected. Add your build files, then run prepare_releases.py.")
         return None
 
     folders = changed_build_folders(paths)

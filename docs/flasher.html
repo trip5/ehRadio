@@ -945,7 +945,7 @@
                 } else if (typeof loader.hardReset === 'function') {
                     await loader.hardReset();
                 } else {
-                    log('No reset method on this esptool-js build; leaving the device as it is.');
+                    log('No reset method on this esptool-js build. Please manually power-cycle your device.');
                 }
             } catch (err) {
                 log(`Reset after flashing reported: ${err.message}`);
@@ -1234,6 +1234,16 @@
             ssidList.appendChild(row);
         }
 
+        // The SDK's own sortSsids() sorts alphabetically, which is not what a person picking a
+        // network wants to see. Strongest first, name as the tie-break so equal signals do not
+        // shuffle between scans. An unreadable RSSI is treated as the weakest possible.
+        function bySignalStrength(a, b) {
+            const left = Number.isFinite(a.rssi) ? a.rssi : -999;
+            const right = Number.isFinite(b.rssi) ? b.rssi : -999;
+            if (right !== left) return right - left;
+            return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+        }
+
         function renderSsids(networks) {
             ssidList.innerHTML = '';
             if (!networks || networks.length === 0) {
@@ -1241,7 +1251,7 @@
                 ssidPlaceholder('The device reported no networks. Type the name below instead.');
                 return;
             }
-            for (const network of networks) {
+            for (const network of [...networks].sort(bySignalStrength)) {
                 const row = document.createElement('button');
                 row.type = 'button';
                 row.className = 'ssid-row';
@@ -1520,8 +1530,7 @@
         async function init() {
             if (!serialSupported) {
                 setFlashStatus('error', 'Web Serial is not available',
-                    'This browser cannot reach serial ports. Use Chrome, Edge or Brave on desktop, served over HTTPS ' +
-                    'or localhost. The classic installer has the same requirement.');
+                    'This browser cannot reach serial ports. Use Chrome, Edge or Brave on desktop.');
                 flashButton.disabled = true;
                 improvConnectButton.disabled = true;
                 logsStartButton.disabled = true;

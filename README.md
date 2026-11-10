@@ -35,72 +35,72 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
 
 ### Features For Users
 
-- Uses ёRadio input control architecture
-  - up to 2 rotaries and 6 buttons
-  - touchscreen control (basic swipes and taps)
-  - IR remote control
+  - Uses ёRadio input control architecture
+    - up to 2 rotaries and 6 buttons
+    - touchscreen control (basic swipes and taps)
+    - IR remote control
 
-- Display Options Changeable While Running
-  - 37 locales available
-    - Matrix fonts contain most Latin / Cyrillic characters
-    - other fonts will fallback to available characters
-  - system font
-  - clock font
-  - themes
-  - screen layout
-  - VU type
+  - Display Options Changeable While Running
+    - 37 locales available
+      - Matrix fonts contain most Latin / Cyrillic characters
+      - other fonts will fallback to available characters
+    - system font
+    - clock font
+    - themes
+    - screen layout
+    - VU type
 
-- Mobile-first WebUI design
-  - 50 locales available
-  - WebUI easily accessed using [ehDP](https://github.com/trip5/eh-Device-Scanner)
-  - radio station streams can be explored using [Radio-browser](https://www.radio-browser.info/) API search
-  - playlists can be edited, imported, exported to files
-  - playlists can be imported, merged, and shared via [webstations](https://github.com/trip5/webstations) curated lists
-  - upload files directly using the SD Card Manager
-  - WebUI themes match display themes
+  - Mobile-first WebUI design
+    - 50 locales available
+    - WebUI easily accessed using [ehDP](https://github.com/trip5/eh-Device-Scanner)
+    - radio station streams can be explored using [Radio-browser](https://www.radio-browser.info/) API search
+    - playlists can be edited, imported, exported to files
+    - playlists can be imported, merged, and shared via [webstations](https://github.com/trip5/webstations) curated lists
+    - upload files directly using the SD Card Manager
+    - WebUI themes match display themes
 
-- [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
-  - make getting a new version easy-peasy
-  - *caveat:* your build must be in the `builds` folder of this repository
+  - [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
+    - make getting a new version easy-peasy
+    - *caveat:* your build must be in the `builds` folder of this repository
 
 ### Features For Builders
 
-- Development is primarily focused on ESP32-S3
-  - 8MB flash recommended (4MB possible but will break features)
-  - PSRAM is required - a board without it will not build
-  - ESP-WROVER with PSRAM likely supported but untested
+  - Development is primarily focused on ESP32-S3
+    - 8MB flash recommended (4MB possible but will break features)
+    - PSRAM is required - a board without it will not build
+    - ESP-WROVER with PSRAM likely supported but untested
 
-- Multiple decoders supported
-  - I2S DAC Modules are recommended and well-supported
-    - PCM5102
-    - UDA1334
-    - MAX98357A
-    - ES8311 (mono)
-  - VS1053 updated and well-supported
+  - Multiple decoders supported
+    - I2S DAC Modules are recommended and well-supported
+      - PCM5102
+      - UDA1334
+      - MAX98357A
+      - ES8311 (mono)
+    - VS1053 updated and well-supported
 
-- Display architecture based on ёRadio
-  - simplified and expanded
-  - multiple themes and layouts compiled-in
-  - tools in codebase to edit/import themes and layouts
+  - Display architecture based on ёRadio
+    - simplified and expanded
+    - multiple themes and layouts compiled-in
+    - tools in codebase to edit/import themes and layouts
 
-- SPI architecture supports non-standard pins
-  - uses custom-named buses `SPIA` and `SPIB` defined in `myoptions.h`
-  - recommended to use default pins wherever possible
+  - SPI architecture supports non-standard pins
+    - uses custom-named buses `SPIA` and `SPIB` defined in `myoptions.h`
+    - recommended to use default pins wherever possible
 
-- System and user default settings can be set in `myoptions.h`
-  - still changeable in WebUI
+  - System and user default settings can be set in `myoptions.h`
+    - still changeable in WebUI
 
 ### Features For Tinkerers
 
-- Commands can be sent over MQTT, Telnet, and HTTP
-  - almost all WebUI [commands](Commands.md) are available
-  - with MQTT, Home Assistant integration is possible, too
+  - Commands can be sent over MQTT, Telnet, and HTTP
+    - almost all WebUI [commands](Commands.md) are available
+    - with MQTT, Home Assistant integration is possible, too
 
-- Many tools are included in the codebase to edit:
-  - layouts (on a live display)
-  - themes (both display and WebUI)
-  - fonts (both system and clock)
-  - translations
+  - Many tools are included in the codebase to edit:
+    - layouts (on a live display)
+    - themes (both display and WebUI)
+    - fonts (both system and clock)
+    - translations
 
 ---
 

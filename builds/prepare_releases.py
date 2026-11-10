@@ -560,6 +560,8 @@ def rel(path):
 def make_scratch():
     """Copy the working tree - not git HEAD: root platformio.ini is gitignored."""
     if SCRATCH.exists():
+        # Left behind by a run that was killed before its finally block.
+        say('Removing a stale .build_all/ from an interrupted run...')
         shutil.rmtree(SCRATCH)
     shutil.copytree(
         ROOT, SCRATCH,
@@ -617,51 +619,80 @@ def describe_envs(envs):
     return f'{len(envs)} envs'
 
 
+def say(message):
+    """Progress has to appear while it happens, so every line is flushed.
+
+    Python block-buffers stdout when it is a pipe, which is exactly how GitHub Actions runs
+    this script: without the flush a five-minute build shows nothing until the process exits.
+    """
+    print(message, flush=True)
+
+
+def elapsed_text(seconds):
+    return f'{int(seconds // 60)}m {int(seconds % 60)}s'
+
+
 def build_all(folders, verbose):
     """Build every folder's every env in the scratch copy. 0 ok, 1 failed, 2 refused."""
     pio = find_pio()
     if not pio:
-        print('[X] Refusing to build: neither pio nor platformio is on PATH.')
+        say('[X] Refusing to build: neither pio nor platformio is on PATH.')
         return 2
 
     log_dir = Path(tempfile.mkdtemp(prefix='ehradio-buildall-'))
     results = []
+    environments = 0
+    started_all = time.time()
+
     try:
         make_scratch()
-        for folder in folders:
+        for index, folder in enumerate(folders, start=1):
+            counter = f'{index}/{len(folders)}'
             envs = read_pio_envs(folder / 'platformio.ini')
+            build_list = envs or [None]
+            say(f'{counter}  {folder.name}: {describe_envs(envs)}...')
+
             started = time.time()
             folder_ok = True
+            failed_env = ''
             # One env at a time: that is what makes a failure attributable to an environment
             # rather than to "somewhere in this folder".
-            for env in (envs or [None]):
+            for position, env in enumerate(build_list, start=1):
+                if len(build_list) > 1:
+                    say(f'{counter}  ({position}/{len(build_list)}) {env}...')
                 log_path = log_dir / f'{folder.name}__{env or "all"}.log'
                 ok, tail = build_env(pio, folder, env, log_path, verbose)
+                environments += 1
                 if ok:
                     continue
                 folder_ok = False
-                print(f'  [FAIL] {folder.name:<20} {env or "every env"}')
+                failed_env = env or 'every env'
                 for line in tail:
-                    print(f'         | {line}')
-                print(f'         log: {log_path}')
+                    say(f'         | {line}')
+                say(f'         log: {log_path}')
+                break   # one failure is enough here; the next folder still runs
             if folder_ok:
-                elapsed = time.time() - started
-                print(f'  [OK]   {folder.name:<20} {describe_envs(envs)}  ({elapsed:.0f}s)')
+                say(f'{counter}        OK! ({time.time() - started:.0f}s)')
+            else:
+                say(f'{counter}        FAILED ({failed_env})')
             results.append((folder.name, folder_ok))
     finally:
         shutil.rmtree(SCRATCH, ignore_errors=True)
 
-    print('')
+    total = elapsed_text(time.time() - started_all)
     failed = [name for name, ok in results if not ok]
+    passed = len(results) - len(failed)
+    say('')
     if not failed:
         shutil.rmtree(log_dir, ignore_errors=True)
-        print(f'  {len(results)} ok -> every contributor builds')
+        say(f'{passed} folders, {environments} environments, {total} -> every contributor builds')
         return 0
-    print(f'  {len(results) - len(failed)} ok, {len(failed)} failed ({", ".join(failed)})')
-    print(f'  Build logs kept in: {log_dir}')
-    print('  To dig into one folder:')
-    print(f'    set PYTHONIOENCODING=utf-8 && python builds/use_build.py {failed[0]}')
-    print('  Release files were NOT written.')
+    say(f'{passed}/{len(results)} folders ok, {environments} environments tried, {total} '
+        f'-> NOT ready to push')
+    say(f'Build logs kept in: {log_dir}')
+    say('To dig into one folder:')
+    say(f'  set PYTHONIOENCODING=utf-8 && python builds/use_build.py {failed[0]}')
+    say('Release files were NOT written.')
     return 1
 
 
@@ -748,10 +779,10 @@ def main():
     # --- Phase 3: build everything ---
     if args.no_build:
         if not os.environ.get('CI'):
-            print('[!] Skipping the compile. The dev-to-main PR check still builds every')
-            print('    environment, so a build failure will surface there instead of here.')
+            say('[!] Skipping the compile. The dev-to-main PR check still builds every')
+            say('    environment, so a build failure will surface there instead of here.')
     else:
-        print('Testing by building all firmwares in builds/')
+        say('Testing by building all firmwares in builds/')
         if not args.yes and not confirm_build():
             return 2
         build_rc = build_all(folders, args.verbose)

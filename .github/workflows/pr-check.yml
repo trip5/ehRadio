@@ -14,6 +14,12 @@ permissions:
   pull-requests: write
   checks: write
 
+# A second push to the same PR cancels the first run: no point paying for a build of a
+# commit nobody will merge.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
 
   # -------------------------------------------------------------------------
@@ -39,15 +45,52 @@ jobs:
 
 
   # -------------------------------------------------------------------------
-  # Job 2: Static analysis via cppcheck + ReviewDog
-  # Runs only for PRs targeting 'dev'.
+  # Job 2: Detect changed areas
+  # A skipped job counts as a SATISFIED required check, so filtering the expensive jobs is
+  # safe: a README-only PR merges without waiting for a build. It has to be per job, never a
+  # workflow-level 'paths:' filter, which would also skip 'Branch check'.
+  # Anything the toolchain reads counts as code; docs, images, mkdocs and the Home Assistant
+  # integration do not. Add the 'force-build' label to a PR to run the compile jobs anyway.
+  # -------------------------------------------------------------------------
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git diff needs both ends of the PR present
+
+      - name: Classify the diff
+        id: classify
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "Changed files:"
+          echo "$CHANGED" | sed 's/^/  /'
+          CODE_PATTERN='^(src|builds|data)/|^\.github/workflows/|(^|/)platformio\.ini$|\.(c|cc|cpp|h|hpp|ino)$'
+          if [ -n "$(echo "$CHANGED" | grep -E "$CODE_PATTERN" || true)" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "-> code changed: compile jobs will run"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "-> docs only: compile jobs will be skipped"
+          fi
+
+  # -------------------------------------------------------------------------
+  # Job 3: Static analysis via cppcheck + ReviewDog
+  # Runs for PRs targeting 'dev' when code changed.
   # Posts inline review comments on changed lines only (filter_mode: added).
   # -------------------------------------------------------------------------
   cppcheck:
     name: Static analysis (cppcheck)
     runs-on: ubuntu-latest
-    needs: branch-guard
-    if: github.base_ref == 'dev'
+    needs: [branch-guard, changes]
+    if: github.base_ref == 'dev' && (needs.changes.outputs.code == 'true' || contains(github.event.pull_request.labels.*.name, 'force-build'))
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -81,7 +124,7 @@ jobs:
               -fail-level=any
 
   # -------------------------------------------------------------------------
-  # Job 3: Config check
+  # Job 4: Config check
   # Runs the fast half of prepare_releases.py for PRs to 'dev' and 'main':
   #   - FIRMWARE must be '<contributor folder>_<env>.bin' for an [env:...] declared in
   #     that folder's platformio.ini, or the release pipeline never picks the binary up
@@ -109,14 +152,15 @@ jobs:
         run: python3 builds/prepare_releases.py --check
 
   # -------------------------------------------------------------------------
-  # Job 4: Compile firmware (test builds)
-  # Runs only for PRs targeting 'dev'.
+  # Job 5: Compile firmware (test builds)
+  # Runs for PRs targeting 'dev' when code changed.
   # -------------------------------------------------------------------------
   compile:
     name: Compile firmware (test builds)
     runs-on: ubuntu-latest
-    needs: branch-guard
-    if: github.base_ref == 'dev'
+    needs: [branch-guard, changes]
+    if: github.base_ref == 'dev' && (needs.changes.outputs.code == 'true' || contains(github.event.pull_request.labels.*.name, 'force-build'))
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -145,8 +189,8 @@ jobs:
         run: pio run
 
   # -------------------------------------------------------------------------
-  # Job 5: Build every contributor firmware
-  # Runs only for PRs targeting 'main', the owner's release sync. This is the full set the
+  # Job 6: Build every contributor firmware
+  # Runs for PRs targeting 'main' when code changed. This is the full set the
   # release workflow builds, produced by the same script used locally, so a folder that no
   # longer compiles cannot reach main. The light 'compile' job above stays for contributor
   # PRs against dev.
@@ -162,8 +206,8 @@ jobs:
   build-all:
     name: Build all firmware
     runs-on: ubuntu-latest
-    needs: branch-guard
-    if: github.base_ref == 'main'
+    needs: [branch-guard, changes]
+    if: github.base_ref == 'main' && (needs.changes.outputs.code == 'true' || contains(github.event.pull_request.labels.*.name, 'force-build'))
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -185,7 +229,13 @@ jobs:
         run: pip install platformio==6.2.0
 
       - name: Build every contributor firmware
-        run: python3 builds/prepare_releases.py --yes
+        # -u plus PYTHONUNBUFFERED, because a piped stdout is block-buffered: without this the
+        # per-folder progress lines only appear when the process exits.
+        # The exit code of THIS step is the gate - any failed environment fails it. Never add
+        # continue-on-error or '|| true' here, which would disarm the build check.
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python3 -u builds/prepare_releases.py --yes
 
       - name: Check builds/releases is committed
         run: |

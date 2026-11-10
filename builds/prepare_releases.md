@@ -38,6 +38,23 @@ The script runs four phases, stopping at the first failure:
 3. **Build**: copy the working tree into `.build_all/`, install each contributor's `platformio.ini` + `myoptions.h` there, and run `pio run -e <env>` for every `[env:...]` it declares. The scratch copy is deleted afterwards, so the live root config, `use_build.py`'s lock files and the VS Code File Watcher are never touched. Build logs go to a temp directory, kept only when something fails
 4. **Generate**: parse each `myoptions.h` for firmware definitions (commented-out `#define` lines are ignored), skip duplicate `fw_env` names with a `Duplicate!` warning, then write `releases/firmware.txt` in the format `board_env|chip_family|fw_env|friendly_name`, generate the ESP Web Tools manifests in `releases/web_assets/manifests/`, generate `releases/web_assets/firmware-info.json` sorted alphabetically by name, and patch `releases/releases.md` with the per-contributor listings
 
+### Progress output
+
+Every line is flushed as it is written, so the build reports itself while it runs rather than at the end. CI runs it as `python3 -u` with `PYTHONUNBUFFERED: 1`, because a piped stdout is block-buffered:
+
+```
+1/4  Another-Taipan: taipan_streamer_1...
+1/4        OK! (39s)
+3/4  test: test_ci_pcm, test_ci_vs1053...
+3/4  (1/2) test_ci_pcm...
+3/4  (2/2) test_ci_vs1053...
+3/4        OK! (63s)
+4/4  trip5: 7 envs...
+4/4  (1/7) sh1106_pcm_remote...
+```
+
+The `(k/E)` line is printed only for a folder that declares more than one environment. On a failure the last 12 log lines and the log path are printed, the folder stops, and the next folder still runs; the run then exits 1 without writing any release file.
+
 The `releases/` subfolder itself is always skipped. Folders with no `myoptions.h`, incomplete firmware definitions, or names containing spaces/special characters are silently skipped.
 
 ### Requirements
@@ -92,3 +109,5 @@ Three CI touch points, all running this one script:
 - `pr-check.yml` **Config check** (`--check`) on PRs into `dev` and `main`: naming, filesystem and preprocessor balance. Seconds, no compiler.
 - `pr-check.yml` **Build all firmware** on PRs into `main`: the full run, every contributor's every environment, then a `git status` check on `builds/releases/`. A folder that no longer compiles, or metadata that was not regenerated, blocks the merge to `main`.
 - The two release workflows run it with `--no-build` in their verify step, because their next step compiles the same environments, and fail if `git status` shows any change under `builds/releases/`.
+
+The compile jobs are skipped when a PR changes nothing the toolchain reads: `src/**`, any `platformio.ini`, `builds/**`, `data/**`, `*.c/*.cc/*.cpp/*.h/*.hpp/*.ino`, or `.github/workflows/**`. A docs-only PR therefore runs only the branch and config checks. A skipped job still counts as a satisfied required check, so a README change merges without waiting for a build. Add the `force-build` label to a PR to run the compile jobs anyway.

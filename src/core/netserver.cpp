@@ -582,10 +582,10 @@ void NetServer::processQueue() {
             #if (!defined(DEEP_SLEEP_DISABLE) || DBGWUI)
                                                                 act += F("\"group_deepsleep\",");
             #endif
-            if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       act += F("\"group_touch\",");
+            if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       { act += F("\"group_touch\","); }
                                                                 act += F("\"group_locale\",");
-            if (presentOf(*weatherConf_ptr) || DBGWUI)          act += F("\"group_weather\",");
-                                                           else act += F("\"hide_group_weather\",");
+            if (presentOf(*weatherConf_ptr) || DBGWUI)          { act += F("\"group_weather\","); }
+                                                           else { act += F("\"hide_group_weather\","); }
                                                                 act += F("\"group_controls\",");
             if ((DSP_MODEL != DSP_DUMMY && (BTN_NEXT != 255 || BTN_PREV != 255)) || DBGWUI)
                                                                 act += F("\"group_stnbuttons\",");
@@ -713,20 +713,20 @@ void NetServer::processQueue() {
       case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); break;
       case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d, \"max\": %d}]}", config.store.volume, VOLUME_SCALE); break;
       case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}, {\"id\":\"rssibars\", \"value\": %d}]}", rssi, rssiLevel(rssi)); break;
-      case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %d,\"sdend\": %d,\"sdtpos\": %d,\"sdtend\": %d}",
-                                  player.getFilePos(),
-                                  player.getFileSize(),
-                                  player.getAudioCurrentTime(),
-                                  player.getAudioFileDuration()); 
+      case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %u,\"sdend\": %u,\"sdtpos\": %u,\"sdtend\": %u}",
+                                  (unsigned)player.getFilePos(),
+                                  (unsigned)player.getFileSize(),
+                                  (unsigned)player.getAudioCurrentTime(),
+                                  (unsigned)player.getAudioFileDuration());
                                   break;
-      case SDLEN:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdmin\": %d,\"sdmax\": %d}", player.sd_min, player.sd_max); break;
+      case SDLEN:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdmin\": %u,\"sdmax\": %u}", (unsigned)player.sd_min, (unsigned)player.sd_max); break;
       case SDSHUFFLE:     snprintf(wsbuf, sizeof(wsbuf), "{\"shuffle\": %d}", config.store.sdshuffle); break;
       case BITRATE:       snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"bitrate\", \"value\": %d}, {\"id\":\"fmt\", \"value\": \"%s\"}]}", config.station.bitrate, getFormat(config.configFmt)); break;
       case GETBATTERY: {
         uint32_t battref = config.store.battery_adc_ref_mv ? config.store.battery_adc_ref_mv : (uint32_t)BATTERY_ADC_REF_MV;
         if (widgetsEditorForceOff) {
           // The editor's force-off hides the battery on the panel, so the WebUI row agrees and reports none.
-          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
+          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", (unsigned)battref);
         } else if (widgetsEditorForceOn) {
           // The same fake the on-screen widget shows, so the WebUI battery row can be laid out with no battery fitted
           uint32_t mvmin = (uint32_t)BATTERY_PRESENT_MIN_MV;
@@ -736,15 +736,15 @@ void NetServer::processQueue() {
           if (mvmin >= mvmax) { mvmin = 3000; mvmax = 4200; }
           char valbuf[64];
           snprintf(valbuf, sizeof(valbuf), "volt: %umV, percentage: %d%%", (unsigned)(mvmin + 50u * (mvmax - mvmin) / 100), 50);
-          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
+          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, (unsigned)battref);
         } else {
           BatteryStatus bat = battery.getStatus();
           if (!bat.present && !battery.isInitialized()) {
-            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", battref);
+            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"\"}, {\"id\":\"battref\", \"value\": %u}]}", (unsigned)battref);
           } else {
             char valbuf[64];
             snprintf(valbuf, sizeof(valbuf), "volt: %umV, percentage: %d%%", (unsigned)bat.voltage_mv, bat.percentage);
-            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, battref);
+            snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"battery\", \"value\": \"%s\"}, {\"id\":\"battref\", \"value\": %u}]}", valbuf, (unsigned)battref);
           }
         }
         break;
@@ -985,7 +985,7 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
-        FUNCTIONLOG("Websocket", "client #%u connected from %s", client->id(), client->remoteIP().toString().c_str());
+        FUNCTIONLOG("Websocket", "client #%u connected from %s", (unsigned)client->id(), client->remoteIP().toString().c_str());
         #ifdef CORE_MONITOR
           // This callback runs on the AsyncTCP event task, so this is THAT task's headroom - the number the
           // CONFIG_ASYNC_TCP_STACK_SIZE decision needs (its default is 8192 * 2 = 16 KB, the largest single
@@ -1002,8 +1002,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
         // waiting for a broadcast it missed.
         netserver.requestOnChange(SDMANACTIVE, client->id());
         break;
-    case WS_EVT_DISCONNECT: FUNCTIONLOG("Websocket", "client #%u disconnected", client->id()); break;
+    case WS_EVT_DISCONNECT: FUNCTIONLOG("Websocket", "client #%u disconnected", (unsigned)client->id()); break;
     case WS_EVT_DATA: netserver.onWsMessage(arg, data, len, client->id()); break;
+    case WS_EVT_PING:
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
       break;
@@ -1306,7 +1307,7 @@ void launchPlaybackTask(const String& url, const String& name) {
   display.putRequest(NEWSTATION, 0);
   FUNCTIONLOG("Netserver", "Creating a dedicated task for playback.");
   if (ESP.getFreeHeap() <= MIN_MALLOC) {
-    FUNCTIONLOG("Heap", "low heap (%u), refusing playback task spawn", ESP.getFreeHeap());
+    FUNCTIONLOG("Heap", "low heap (%u), refusing playback task spawn", (unsigned)ESP.getFreeHeap());
     return;
   }
   // Use a lambda to capture the URL and pass it to the task
@@ -1318,7 +1319,7 @@ void launchPlaybackTask(const String& url, const String& name) {
         [](void* pvParameters) {
           String* urlToPlay = (String*)pvParameters;
           vTaskDelay(pdMS_TO_TICKS(100)); // A small delay can help the network stack release resources
-          FUNCTIONLOG("PlaybackTask", "Starting playback for URL: %s. Free heap: %u", urlToPlay->c_str(), ESP.getFreeHeap());
+          FUNCTIONLOG("PlaybackTask", "Starting playback for URL: %s. Free heap: %u", urlToPlay->c_str(), (unsigned)ESP.getFreeHeap());
           player.playUrl(urlToPlay->c_str());
           delete urlToPlay; // Free the string
           #ifdef CORE_MONITOR
@@ -1916,7 +1917,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
     return;
   }
   if (request->url() == "/curated_variables.js") {
-    char varjsbuf[128];
+    char varjsbuf[384];
     #ifdef CURATED_LISTS
       char escapedName[128];
       utility.escapeQuotes(CURATED_LISTS, escapedName, sizeof(escapedName));
@@ -2506,7 +2507,7 @@ void handleNotFound(AsyncWebServerRequest * request) {
   if (request->method() == HTTP_GET) {
     char fsPath[64];
     snprintf(fsPath, sizeof(fsPath), "/www%s", request->url().c_str());
-    char gzPath[64];
+    char gzPath[sizeof(fsPath) + 4];
     snprintf(gzPath, sizeof(gzPath), "%s.gz", fsPath);
     if (LittleFS.exists(gzPath)) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzPath, mimeTypeForFile(request->url().c_str()));

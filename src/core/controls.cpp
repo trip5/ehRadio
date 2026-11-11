@@ -645,8 +645,10 @@ void Controls::setIRTolerance(uint8_t tl) {
 }
 
 void Controls::setEncAcceleration(uint8_t userVal) {
-  uint16_t raw = (userVal <= 7) ? encAccelLUT[userVal] : 700;
   config.saveValue(&config.store.encacc, userVal);
+  #if (ENC_DT!=255) || (ENC2_DT!=255)
+    const uint16_t raw = (userVal <= 7) ? encAccelLUT[userVal] : 700;
+  #endif
   #if ENC_DT!=255
     encoder.setAcceleration(raw);
   #endif

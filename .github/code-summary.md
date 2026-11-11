@@ -235,7 +235,7 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 ## Build and Configuration Files
 
 ### `platformio.ini`
-- Core environment and dependency declaration.
+- Core environment and dependency declaration. Platform pin: `espressif32@8.0.0` (Arduino/IDF next major, GCC 14).
 - Important behavior:
   - `build_src_filter` excludes all by default then re-includes selected folders/files.
   - Board environments add display/audio library includes.
@@ -243,6 +243,10 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - `[ehradio] build_flags` carries `-include src/core/options_overrides.h`, so that file is placed at the top of
     **every** translation unit - our own sources, every managed library, and the framework's `.c` files. It exists
     because libraries never include `options.h` (see its subsection below).
+  - `[ehradio] build_flags` also carries `-fno-exceptions`: 8.0.0's Arduino/IDF is ~276 KB bigger than 7.1.3 and an
+    8 MB board's slots are 3.19 MB, so the ~82 KB it returns is the margin. `-flto` cannot be used - the IDF half ships
+    precompiled without fat LTO objects, so the link fails, and `-ffat-lto-objects` then disables it without saying so.
+    `plans/esp32-platform-8-upgrade.md` has the measurements.
 - Risk:
   - Wrong env can compile without required modules because files are source-filtered.
   - Editing `options_overrides.h` may not rebuild library objects: when the header was introduced, only `src/` TUs were

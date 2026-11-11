@@ -358,7 +358,6 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     // Import the downloaded playlist file (pl_import.json)
     // Value is "replace" or "merge"
     // This prepares the file for review but doesn't save permanently yet
-    bool isReplace = (strcmp(value, "replace") == 0);
     // Copy pl_import.json to tmp_pl for editing
     if (LittleFS.exists("/www/pl_import.json")) {
       LittleFS.remove(TMP_PATH);

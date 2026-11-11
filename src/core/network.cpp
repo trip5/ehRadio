@@ -289,7 +289,7 @@ void ticks() {
     config.resetScreensaverTimers(0);
   } else {
     if (config.store.screensaverEnabled && display.mode()==PLAYER && !player.isRunning()) {
-      config.screensaverTicks++;
+      config.screensaverTicks = config.screensaverTicks + 1;
       if (config.screensaverTicks > config.store.screensaverTimeout+SCREENSAVERSTARTUPDELAY) {
         if (config.store.screensaverBlank) {
           display.putRequest(NEWMODE, SCREENBLANK);
@@ -299,7 +299,7 @@ void ticks() {
       }
     }
     if (config.store.screensaverPlayingEnabled && display.mode()==PLAYER && player.isRunning()) {
-      config.screensaverPlayingTicks++;
+      config.screensaverPlayingTicks = config.screensaverPlayingTicks + 1;
       if (config.screensaverPlayingTicks > config.store.screensaverPlayingTimeout*60+SCREENSAVERSTARTUPDELAY) {
         if (config.store.screensaverPlayingBlank) {
           display.putRequest(NEWMODE, SCREENBLANK);
@@ -310,7 +310,7 @@ void ticks() {
     }
     #ifndef DEEP_SLEEP_DISABLE
       if (config.store.sleeptimer && (display.mode()==PLAYER || config.isScreensaver)) {
-        if (config.sleepTicks < 0xFFFF) config.sleepTicks++;
+        if (config.sleepTicks < 0xFFFF) config.sleepTicks = config.sleepTicks + 1;
         if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY) utility.requestSleep();
       }
     #endif
@@ -676,7 +676,7 @@ bool MyNetwork::wifiBegin(bool silent) {
                   i+1, config.ssids[matches[i].configIndex].ssid,
                   matches[i].bssid[0], matches[i].bssid[1], matches[i].bssid[2],
                   matches[i].bssid[3], matches[i].bssid[4], matches[i].bssid[5],
-                  matches[i].rssi, matches[i].channel);
+                  (int)matches[i].rssi, (int)matches[i].channel);
         }
       }
     }
@@ -688,7 +688,7 @@ bool MyNetwork::wifiBegin(bool silent) {
                 attempt + 1, config.ssids[configIdx].ssid,
                 matches[attempt].bssid[0], matches[attempt].bssid[1], matches[attempt].bssid[2],
                 matches[attempt].bssid[3], matches[attempt].bssid[4], matches[attempt].bssid[5],
-                matches[attempt].rssi);
+                (int)matches[attempt].rssi);
         BOOTLOGX("\t");
         display.putRequest(BOOTSTRING, configIdx);
       }
@@ -1534,7 +1534,6 @@ bool getWeather_OpenWeather30(char *wstr) {
     int humidity = current["humidity"];
     float wind_speed_ms = current["wind_speed"];  // m/s from metric API
     int wind_deg = current["wind_deg"];
-    int wind_dir_idx = (int)(wind_deg / 22.5) % 16;
     
     // Get or fetch elevation for barometric adjustment
     float elevation = 0.0;

@@ -180,7 +180,7 @@ bool archive() {
 
   // What the device was doing when it died, as persisted by that boot - the mode and the station survive the crash,
   // which is why they are worth recording here.  The build that crashed is named by the elf sha256 in the body below.
-  char header[288];
+  char header[400];
   snprintf(header, sizeof(header), "%s | next boot ran because of: %s (%d) | at crash: %s mode, station %u \"%s\"",
            stamp, resetReasonName(), (int)esp_reset_reason(),
            (config.getMode() == PM_SDCARD) ? "SD" : "web",

@@ -336,7 +336,7 @@ void Audio::write_register(uint8_t _reg, uint16_t _value)
 size_t Audio::sendBytes(uint8_t* data, size_t len){
     size_t chunk_length = 0;                                // Length of chunk 32 byte or shorter
     size_t bytesDecoded = 0;
-    const size_t asked = len;
+    [[maybe_unused]] const size_t asked = len;   // read by the AUDIO_DEBUG report below only
 
     data_mode_on();
     while(len){                                             // More to do?
@@ -356,7 +356,7 @@ size_t Audio::sendBytes(uint8_t* data, size_t len){
     // read happens only on a stall, so a healthy feed pays no extra transaction, and this is outside AUDIO_DEBUG
     // because it decides behaviour, not what the log says.
     if(bytesDecoded) { m_chipDeadStrikes = 0; }
-    else if(read_register_nowait(SCI_MODE) == 0 && m_chipDeadStrikes < 255) { ++m_chipDeadStrikes; }
+    else if(read_register_nowait(SCI_MODE) == 0 && m_chipDeadStrikes < 255) { m_chipDeadStrikes = m_chipDeadStrikes + 1; }
     #ifdef AUDIO_DEBUG
     /* The chip is refusing everything: read its own view of the world rather than guess why.  MODE bit SM_SDINEW says
        the chip is still in new SDI mode, SM_CANCEL that something asked it to end the stream.  read_register_nowait is
@@ -602,7 +602,7 @@ uint8_t Audio::getVolume(){                                 // Get the currenet 
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::stopSong(){
-    ++m_dbgStopCalls;                                       // silent-exit counter, see the VU flat report
+    m_dbgStopCalls = m_dbgStopCalls + 1;                    // silent-exit counter, see the VU flat report
     uint16_t modereg;                                       // Read from mode register
     int i;                                                  // Loop control
 
@@ -988,7 +988,7 @@ void Audio::endLocalFile(){
 void Audio::processLocalFile() {
 
     if(!(audiofile && m_f_running && getDatamode() == AUDIO_LOCALFILE)) return;
-    ++m_dbgReaderCalls;
+    m_dbgReaderCalls = m_dbgReaderCalls + 1;
     m_dbgReadPos = audiofile.position();
 
     int bytesDecoded = 0;
@@ -1133,7 +1133,7 @@ void Audio::processLocalFile() {
         // } //TEST loop
 
         f_stream = false;
-        ++m_dbgReaderEof;
+        m_dbgReaderEof = m_dbgReaderEof + 1;
         endLocalFile();
     }
 }
@@ -1590,16 +1590,7 @@ void Audio::processWebFile(){
     if(byteCounter == m_contentlength)                    {f_webFileDataComplete = true;}
     if(byteCounter - m_audioDataStart == m_audioDataSize) {f_webFileDataComplete = true;}
 
-    // play audio data - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    if(f_stream){
-        static uint8_t cnt = 0;
-        uint8_t compression;
-        if(m_codec == CODEC_WAV)  compression = 1;
-        if(m_codec == CODEC_FLAC) compression = 2;
-        else compression = 3;
-        cnt++;
-// [Maleksm graft] if(cnt == compression){playAudioData(); cnt = 0;} // task handles this
-    }
+    // playAudioData() is the audio task's call now, not this one's - see the VU/task graft notes
     return;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -1615,7 +1606,7 @@ bool Audio::pauseResume() {
 // [Maleksm graft] task-coordinated playAudioData — called ONLY from the FreeRTOS audio task
 void Audio::playAudioData() {
 
-    if(!m_f_stream_ready) { ++m_dbgPlayTakes; return; } // [Maleksm graft] adapted: PR226 uses m_f_stream_ready instead of m_f_stream
+    if(!m_f_stream_ready) { m_dbgPlayTakes = m_dbgPlayTakes + 1; return; } // [Maleksm graft] adapted: PR226 uses m_f_stream_ready instead of m_f_stream
 
     bool lastFrame = false;
     uint32_t bytesToDecode = 0;
@@ -1635,10 +1626,10 @@ void Audio::playAudioData() {
                         : (m_streamType == ST_WEBFILE)          ? true
                                                                 : false;
 
-    if(m_validSamples) { ++m_dbgPlayValid; return; }    // play samples first
-    if(m_f_eof) { ++m_dbgPlayEof; return; }
+    if(m_validSamples) { m_dbgPlayValid = m_dbgPlayValid + 1; return; }    // play samples first
+    if(m_f_eof) { m_dbgPlayEof = m_dbgPlayEof + 1; return; }
 
-    if(m_f_lockInBuffer) { ++m_dbgPlayLock; return; }
+    if(m_f_lockInBuffer) { m_dbgPlayLock = m_dbgPlayLock + 1; return; }
     m_f_audioTaskIsDecoding = true;
     uint8_t next = 0;
     int bytesDecoded = 0;
@@ -2922,7 +2913,7 @@ uint32_t Audio::stop_mp3client(){
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setDefaults(){
-    ++m_dbgDefaultsCalls;                                   // silent-exit counter, see the VU flat report
+    m_dbgDefaultsCalls = m_dbgDefaultsCalls + 1;            // silent-exit counter, see the VU flat report
     m_dbgTrackStartMs = millis() ? millis() : 1;            // arm the per-track report for the connection
     m_dbgTrackReported = false;
     // initializationsequence
@@ -4782,15 +4773,15 @@ void Audio::audioTask() {
 }
 //****************************************************************************************
 void Audio::performAudioTask() {
-    ++m_dbgTaskCalls;
-    if(!m_f_running) { ++m_dbgEarlyRun; return; }
-    if(!m_f_stream_ready) { ++m_dbgEarlyStream; return; } // [Maleksm graft] adapted for PR226
-    if(m_codec == CODEC_NONE) { ++m_dbgEarlyCodec; return; } // wait for codec is set
-    if(m_codec == CODEC_OGG)  { ++m_dbgEarlyCodec; return; } // wait for FLAC, VORBIS or OPUS (handled by inline parser)
+    m_dbgTaskCalls = m_dbgTaskCalls + 1;
+    if(!m_f_running) { m_dbgEarlyRun = m_dbgEarlyRun + 1; return; }
+    if(!m_f_stream_ready) { m_dbgEarlyStream = m_dbgEarlyStream + 1; return; } // [Maleksm graft] adapted for PR226
+    if(m_codec == CODEC_NONE) { m_dbgEarlyCodec = m_dbgEarlyCodec + 1; return; } // wait for codec is set
+    if(m_codec == CODEC_OGG)  { m_dbgEarlyCodec = m_dbgEarlyCodec + 1; return; } // wait for FLAC, VORBIS or OPUS (handled by inline parser)
     xSemaphoreTake(mutex_audioTask, 0.3 * configTICK_RATE_HZ);
 //    while(m_validSamples) { vTaskDelay(20 / portTICK_PERIOD_MS); playChunk();} // I2S buffer full
     while(m_validSamples) { vTaskDelay(20 / portTICK_PERIOD_MS); } // I2S buffer full
-    ++m_dbgPlayCalls;
+    m_dbgPlayCalls = m_dbgPlayCalls + 1;
     playAudioData();
     xSemaphoreGive(mutex_audioTask);
 }

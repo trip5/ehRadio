@@ -639,6 +639,8 @@ void Display::_apScreen() {
     TextWidget *appass2 = (TextWidget*) &_boot->addWidget(new TextWidget(_bootConfig.apPass2Conf, config.theme.clock, config.theme.background, 30));
     #ifdef AP_PASSWORD
       appass2->setText(AP_PASSWORD);
+    #else
+      (void)appass2;   // the second password line is blank when the AP is open
     #endif
     ScrollWidget *bootSett = (ScrollWidget*) &_boot->addWidget(new ScrollWidget(_bootConfig.apSettConf, config.theme.title2, config.theme.background));
     bootSett->setScrollRole(SCROLL_ROLE_BOOT);
@@ -1337,7 +1339,7 @@ void Display::loop() {
           _layoutPreviewPending = false;
           _applyState(APPLY_STAGED_LAYOUT);
           break;
-        case CLOSEPLAYLIST: player.sendCommand({PR_PLAY, request.payload});
+        case CLOSEPLAYLIST: player.sendCommand({PR_PLAY, request.payload}); break;
         case CLOCK:
           if ((_mode==PLAYER || _mode==SCREENSAVER) && !(network.status == SDOFFLINE && !config.isRTCFound()))
             _time(request.payload);
@@ -1434,13 +1436,13 @@ void Display::loop() {
           break;
         }
         #ifdef USE_SD
-        // The two ends of a re-index that is not the boot scan: the File Manager's close-time walk.  START is queued
-        // before that walk asks for SDCHANGE, so the hold is up before anything else can ask for the screen, and DONE
-        // releases it AND returns to the player in one display-task action.  That pairing is the whole reason the flag
-        // lives on this task: an out-of-task flag would still be set when this task processed the walk's own final
-        // PLAYER request, and the guard above would then refuse its own exit.
-        case SDINDEXSTART: _indexHold = true; break;
-        case SDINDEXDONE:  _indexHold = false; _switchMode(PLAYER); break;
+          // The two ends of a re-index that is not the boot scan: the File Manager's close-time walk.  START is queued
+          // before that walk asks for SDCHANGE, so the hold is up before anything else can ask for the screen, and DONE
+          // releases it AND returns to the player in one display-task action.  That pairing is the whole reason the flag
+          // lives on this task: an out-of-task flag would still be set when this task processed the walk's own final
+          // PLAYER request, and the guard above would then refuse its own exit.
+          case SDINDEXSTART: _indexHold = true; break;
+          case SDINDEXDONE:  _indexHold = false; _switchMode(PLAYER); break;
         #endif
         case SDFILEINDEX: {
           if (_mode == SDCHANGE) _nums->setText(request.payload, "%d");
@@ -1514,6 +1516,12 @@ void Display::_setRSSI(int rssi) {
   _rssi->setText(rssiGlyphs[rssiLevel(rssi)]);
 }
 
+// snprintf through a runtime format: a panel whose conf ships "" for a number (no digits on that line) still has the
+// empty literal checked by GCC from inside the guard that skips the call.
+static int fmtInt(char* dst, size_t room, const char* fmt, int val) {
+  return snprintf(dst, room, fmt, val);
+}
+
 void Display::_updateBattery() {
   if(!_battery) return;
 
@@ -1552,7 +1560,7 @@ void Display::_updateBattery() {
   if (batterytxtFmt[0] != '\0') {
     strlcat(buf, " ", sizeof(buf));  // space before number
     char numbuf[8];
-    snprintf(numbuf, sizeof(numbuf), batterytxtFmt, pct);
+    fmtInt(numbuf, sizeof(numbuf), batterytxtFmt, pct);
     strlcat(buf, numbuf, sizeof(buf));
   }
 
@@ -1870,8 +1878,8 @@ void Display::_updateVolume() {
     // the left, which keeps a two-digit value against the right edge.  A format with a suffix ("%d%%") adds its
     // own cells on top of the three, so its digits still get a gap.
     char numbuf[8], widest[8];
-    snprintf(widest, sizeof(widest), voltxtFmt, VOLUME_SCALE);
-    snprintf(numbuf, sizeof(numbuf), voltxtFmt, vol);
+    fmtInt(widest, sizeof(widest), voltxtFmt, VOLUME_SCALE);
+    fmtInt(numbuf, sizeof(numbuf), voltxtFmt, vol);
     const size_t digits = (VOLUME_SCALE >= 100) ? 3 : (VOLUME_SCALE >= 10) ? 2 : 1;
     const size_t field  = (digits < 3 ? 3 : digits) + (strlen(widest) - digits);
     const size_t pad    = (strlen(numbuf) < field) ? field - strlen(numbuf) : 0;

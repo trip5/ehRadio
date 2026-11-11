@@ -127,7 +127,7 @@ void Telnet::loop() {
           if (clients[i]) {
             clients[i].stop();
           }
-          clients[i] = server.available();
+          clients[i] = server.accept();
           if (!clients[i]) FUNCTIONLOG("Telnet", "Error: available broken");
           on_connect(clients[i].remoteIP().toString().c_str(), i);
           clients[i].setNoDelay(true);
@@ -138,7 +138,7 @@ void Telnet::loop() {
         }
       }
       if (i >= MAX_TLN_CLIENTS) {
-        server.available().stop();
+        server.accept().stop();
       }
     }
     for (i = 0; i < MAX_TLN_CLIENTS; i++) {

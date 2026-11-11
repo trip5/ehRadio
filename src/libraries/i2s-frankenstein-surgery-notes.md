@@ -222,8 +222,16 @@ With `-std=gnu++2a -fconcepts`, GCC 8.4 crashed with `internal compiler error: i
 
 Maleksm v0.9.512m+ was developed for ESP-IDF v5.4+ which bundles GCC 13+. The project's Arduino 3.0 framework bundles GCC 8.4. To use Maleksm's newer I2S libraries, the project would need to upgrade to Arduino 3.1+ or direct ESP-IDF v5.3+.
 
-#### Conclusion
+#### Conclusion (2026.11.11: no longer true - the toolchain was upgraded)
 The v0.9.434m I2S library is the **maximum compatible version** for the current toolchain. Both Stage 1 (v0.9.512m) and Stage 2 (v0.9.720m) are blocked until a toolchain upgrade. The active library was restored from its backup copy and builds successfully — that copy has since been removed (see the note under the library table), so the library that ships is `src/libraries/I2S_Audio/` and its git history is the record.
+
+**Correction, 2026.11.11.** The upgrade above happened: `platformio.ini` now pins `espressif32@8.0.0`, which builds with
+`toolchain-xtensa-esp-elf` **14.2.0** and `-std=gnu++2b`, so `<span>` exists, `requires`/`inline` variables are plain
+C++20 and Error 3's GCC 8.4 crash cannot recur. **Stage 1 and Stage 2 are unblocked** - nothing in this section was
+re-attempted, only the blocker is gone. The plan is now `plans/lwip-window-and-720m-graft.md`, which also records the
+finding that the graft does **not** raise the stream bitrate ceiling: lwIP in 8.0.0 still ships
+`CONFIG_LWIP_TCP_WND_DEFAULT=5760` with window scaling off, so the FLAC input-rate limit is a platform matter, separate
+from this graft.
 
 ---
 
@@ -656,3 +664,20 @@ normalise to the last few seconds too and brighten through a quiet passage - the
    now rejected, so the index in the table finally decides the profile. Order is now LC, v1, v2, xHE - xHE last here,
    while **v2 is last on the VS1053**, because that chip does no Parametric Stereo and renders v2 as mono. The two
    forks differ in exactly that one position, deliberately; the VS1053 notes carry the hardware proof.
+
+## Post-Graft Patch Fixes (2026.11.11)
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp`, `src/libraries/I2S_Audio/aac_decoder/libfaad/neaacdec.h`.
+**No behaviour change**: the warning sweep for `platform-espressif32` 8.0.0, whose GCC 14 is stricter than the GCC 8 of
+7.1.3.
+
+1. **`_capSeq` steps with `x = x + 1` in `_capturePublish()`.** It is `volatile` - the odd/even publish guard that the
+   audio task sets and every reader compares across its own copy - and `++` on a volatile is deprecated in C++20
+   (`-Wvolatile` in GCC 14). The compound assignment is the same read-modify-write, so the ordering the
+   `__sync_synchronize()` pair provides is untouched.
+2. **`parsePlaylist_M3U8()` lost three dead locals**: `xMedSeq` (a `static` that was only ever zeroed), `f_seqResync`
+   and `llasc`. The per-window comment above them stays, because it still explains why nothing in that function is
+   `static` any more.
+3. **`setVolume()` lost `if(vol < 0) vol = 0;`.** `vol` is `uint8_t`, so the test cannot be true (`-Wtype-limits`).
+4. **`ComplexMult()` in `neaacdec.h` is `static inline`.** It is a definition in a header and the floating-point build
+   does not call it, so a plain `static` warned "defined but not used" in every TU that includes the header.

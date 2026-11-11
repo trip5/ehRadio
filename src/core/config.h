@@ -351,7 +351,7 @@ class Config {
       if (getMode()==PM_WEB) store.lastStation = newstation;
       else saveValueButWait(&store.lastSdStation, newstation, 5000);
     }
-    uint8_t getMode() { return _sdOfflineSession ? PM_SDCARD : store.play_mode; }
+    uint8_t getMode() { return _sdOfflineSession ? (uint8_t)PM_SDCARD : store.play_mode; }
     bool vuSourceWanted() const {
       const bool ss = isScreensaver;
       return (store.vumeter && !ss) || (ss && store.screensaverVU);

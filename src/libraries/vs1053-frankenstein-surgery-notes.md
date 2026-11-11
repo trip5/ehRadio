@@ -920,3 +920,22 @@ decides how quickly quiet material empties.
    **Do not move v2 back above v1 for bandwidth or quality reasons without re-testing on the chip.** It is not a
    preference here, it is a lost channel. The I2S fork keeps xHE last and v2 above it, because there PS runs; the two
    tables differ in exactly that one position on purpose.
+
+## Post-Graft Patch Fixes (2026.11.11)
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp`. **No behaviour change**: this is the warning sweep
+for `platform-espressif32` 8.0.0, whose GCC 14 is stricter than the GCC 8 of 7.1.3. Every item is a warning about code
+that already did the right thing.
+
+1. **The `m_dbg*` / `m_chipDeadStrikes` counters step with `x = x + 1` now.** They are `volatile` - written by the audio
+   and reader tasks, read by the display task - and `++` on a volatile is deprecated in C++20, which GCC 14 now says
+   out loud (`-Wvolatile`). A compound assignment is not deprecated and is the same read-modify-write, so what the
+   tasks publish is unchanged. Thirteen sites: `sendBytes()`, `stopSong()`, `processLocalFile()`,
+   `processWebStream()`, `playAudioData()`, `setDefaults()`, `performAudioTask()`.
+2. **`processWebStream()` lost its dead `compression` block.** The `if(f_stream){ ... cnt++ ... }` stub existed only to
+   feed `if(cnt == compression){ playAudioData(); cnt = 0; }` - a call the Maleksm graft moved to the audio task - so
+   all it computed in the end was an unused `compression` (`-Wunused-but-set-variable`). The comment it carried is not
+   repeated: there is no code left to explain.
+3. **`asked` in `sendBytes()` is `[[maybe_unused]]`.** It is read only by the `AUDIO_DEBUG` report further down, so a
+   build without `AUDIO_DEBUG` - both of the ones we ship - warned it was unused. It cannot move into that block: it
+   has to be captured before the `while(len)` loop consumes `len`, and the report prints it as "wrote N of asked".

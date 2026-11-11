@@ -3075,17 +3075,13 @@ const char* Audio::parsePlaylist_M3U8() {
     // http://n3fa-e2.revma.ihrhls.com/zc7729/63_sdtszizjcjbz02/main/163374039.aac
 
     if(!m_lastHost) {log_e("m_lastHost is NULL"); return NULL;} // guard
-    static uint64_t xMedSeq = 0;
     // Per-window, NOT static.  As a static it was cleared only on a new stream, while m_m3u8EntryIdx is cleared at the
     // top of every parse - so any window arriving without #EXT-X-MEDIA-SEQUENCE would have paired a STALE base with a
     // fresh index and mis-numbered every segment in it, silently dropping some and skipping others.
     boolean         f_mediaSeq_found = false;
     boolean         f_EXTINF_found = false;
-    boolean         f_seqResync = false; 		// the window's live sequence is rebuilt once per parse, at most
-    char            llasc[21]; 			// uint64_t max = 18,446,744,073,709,551,615  thats 20 chars + \0
     if(m_f_firstM3U8call) {
         m_f_firstM3U8call = false;
-        xMedSeq = 0;
         // New station: forget the watermark so the first window is taken whole, and clear the loss tally so the figure
         // reported with the buffer occupancy always belongs to THIS stream.
         m_hlsLostSeq   = 0;
@@ -5890,7 +5886,7 @@ uint16_t Audio::get_VUlevel(uint16_t dimension){
 void Audio::_capturePublish() {
   const uint16_t tail = VU_CAPTURE_SAMPLES - _capPos;   // samples from _capPos to the end of the ring
   __sync_synchronize();
-  _capSeq++;                                            // odd: a publish is in progress
+  _capSeq = _capSeq + 1;                                // odd: a publish is in progress
   for (int ch = 0; ch < 2; ch++) {
     /* Two copies rather than a modulo per sample: the ring is linearised here, so readers get the
        window oldest-first and never have to rotate it themselves. */
@@ -5898,7 +5894,7 @@ void Audio::_capturePublish() {
     memcpy(&_capPub[ch][tail], &_capWin[ch][0],       (size_t)_capPos * sizeof(int16_t));
   }
   __sync_synchronize();
-  _capSeq++;                                            // even again: the copy above is complete
+  _capSeq = _capSeq + 1;                                // even again: the copy above is complete
 }
 
 /* Interleaved L/R, oldest first and newest last, which is the order both sample styles want. */
@@ -6161,7 +6157,6 @@ void Audio::setVolume(uint8_t vol) {
     if(v < 207) AUDIO_INFO("Do not use this ancient Adruino version V%d.%d.%d", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH);
 
     if(vol > VOLUME_SCALE) vol = VOLUME_SCALE;
-    if(vol < 0) vol = 0;
     m_vol = vol;
     computeLimit();
 }

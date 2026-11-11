@@ -48,14 +48,6 @@ uint8_t _activeLocale = 0; // default is whatever is first (likely be_BY), updat
 
 bool wasUpdated(ESPFileUpdater::UpdateStatus status) { return status == ESPFileUpdater::UPDATED; }
 
-namespace {
-
-bool isHttpUrl(const char* url) {
-  return url != nullptr && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
-}
-
-} // namespace
-
 void u8fix(char *src) {
   if (strlen(src) == 0) return;
   char last = src[strlen(src)-1]; 
@@ -120,7 +112,7 @@ void Config::loadPreferences() {
   for (size_t i = 0; keyMap[i].key != nullptr; ++i) {
     uint8_t* field = (uint8_t*)&store + keyMap[i].fieldOffset;
     size_t sz = keyMap[i].size;
-    size_t read = prefs.getBytes(keyMap[i].key, field, sz);
+    prefs.getBytes(keyMap[i].key, field, sz);
     keyCount++;
   }
   {
@@ -268,8 +260,8 @@ void Config::initSDPlaylist(bool force) {
         index.readBytes((char*)&magic, 4);
         index.readBytes((char*)&storedCount, 4);
         uint32_t currentCount = sdman.countAudioFiles();
-        FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
-                    storedCount, magic, currentCount);
+        FUNCTIONLOG("SD", "Index found:\tcount: %u magic: %04X\tcurrent count: %u",
+                    (unsigned)storedCount, (unsigned)magic, (unsigned)currentCount);
         // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's zero-fill
         // width is taken from, until the re-index below replaces it with the count the new index holds.
         store.countStation = (uint16_t)currentCount;
@@ -578,7 +570,7 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
     saveValue(store.ehdpname, "");
-    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", getChipId()); saveValue(store.mdnsname, tmp);
+    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", (unsigned)getChipId()); saveValue(store.mdnsname, tmp);
     netserver.requestOnChange(GETSYSTEM, clientId);
     return;
   }
@@ -617,7 +609,7 @@ void Config::setDefaults() {
   nvs_flash_erase();
   nvs_flash_init();
   // defaults set by struct, except one
-  snprintf(store.mdnsname, MDNS_LENGTH, "ehradio-%x", getChipId());
+  snprintf(store.mdnsname, MDNS_LENGTH, "ehradio-%x", (unsigned)getChipId());
   // Write the sentinel immediately after erase so the next boot finds a valid cfgset
   // and does not loop back into reset() again
   prefs.begin("ehradio", false);
@@ -881,7 +873,10 @@ void Config::bootInfo() {
   BOOTLOG("Arduino API:\t%d.%d.%d", ARDUINO / 10000, (ARDUINO / 100) % 100, ARDUINO % 100);
   BOOTLOG("Arduino Core:\t%d.%d.%d", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH);
   BOOTLOG("GCC Toolchain:\t%s", __VERSION__);
-  BOOTLOG("%s:\trev: %d, Cores: %d, PSRAM: %dMB, ID: %d", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(), (ESP.getPsramSize() + 524288) / 1048576, ({uint64_t _m=ESP.getEfuseMac(); (((_m>>40)&0xFF)<<16)|(((_m>>32)&0xFF)<<8)|((_m>>24)&0xFF);}));
+  const uint64_t mac = ESP.getEfuseMac();
+  BOOTLOG("%s:\trev: %d, Cores: %d, PSRAM: %uMB, ID: %u", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(),
+          (unsigned)((ESP.getPsramSize() + 524288) / 1048576),
+          (unsigned)((((mac >> 40) & 0xFF) << 16) | (((mac >> 32) & 0xFF) << 8) | ((mac >> 24) & 0xFF)));
   #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
     BOOTLOG("Serial:\tUSB CDC (ARDUINO_USB_CDC_ON_BOOT=%d), TX timeout %u ms", ARDUINO_USB_CDC_ON_BOOT, BOOTLOG_TX_TIMEOUT_MS);
   #else
@@ -930,7 +925,7 @@ void Config::bootInfo() {
     BOOTLOG("Audio (I2S):\tDOUT: %d, BCLK: %d, LRC: %d, DIN: %d, MCLK: %d", I2S_DOUT, I2S_BCLK, I2S_LRC, I2S_DIN, I2S_MCLK);
   #endif
   #ifdef USE_ES8311
-    BOOTLOGX("Audio (ES8311)\tMAX_I2S: %d");
+    BOOTLOGX("Audio (ES8311)\tMAX_I2S: %d", ES8311_MAX_I2S);
     #ifdef ES8311_I2C_SCL
       SERIALLOG(" I2C SCL: %d SDA: %d", ES8311_I2C_SCL, ES8311_I2C_SDA);
     #else

@@ -239,7 +239,8 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 - Important behavior:
   - `build_src_filter` excludes all by default then re-includes selected folders/files.
   - Board environments add display/audio library includes.
-  - `extra_scripts` are used for localization/font replacement and gzip workflow.
+  - `extra_scripts` are used for localization/font replacement and gzip workflow, plus two lwIP hooks that are inert
+    unless a rebuilt archive exists (see the `builds/patch/` subsection below).
   - `[ehradio] build_flags` carries `-include src/core/options_overrides.h`, so that file is placed at the top of
     **every** translation unit - our own sources, every managed library, and the framework's `.c` files. It exists
     because libraries never include `options.h` (see its subsection below).
@@ -252,6 +253,22 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - Editing `options_overrides.h` may not rebuild library objects: when the header was introduced, only `src/` TUs were
     recompiled and every `libXXX` object was left alone. A changed *value* can therefore stay inert until the affected
     env is cleaned (`pio run -t clean -e <env>`).
+
+### `builds/patch/` (a rebuilt ESP-IDF archive, and how it gets linked)
+- lwIP's TCP receive window is a compile-time constant (`CONFIG_LWIP_TCP_WND_DEFAULT`, 5760 in the shipped package), so
+  a larger window requires recompiling `liblwip.a`. `setsockopt(SO_RCVBUF)` cannot do it: lwIP documents `recv_bufsize`
+  as "not used for TCP: adjust TCP_WND instead!", and `TCP_WND_MAX(pcb)` *is* `TCP_WND` while window scaling is off.
+- `make_lwip_patch.py` does the one-off rebuild: reads the IDF version from the installed package's `versions.txt`,
+  clones ESP-IDF at that tag with submodules into `%TEMP%`, builds only `esp-idf/lwip/liblwip.a` with `ninja`, and
+  copies it to `builds/patch/<mcu>/liblwip.a` next to a generated `patch-info.txt`. It never writes to the packages tree.
+- `post_patch_lwip.py` shadows that archive with `env.Prepend(LIBPATH=[builds/patch/<mcu>])` — the builder resolves
+  `-llwip` by name through `LIBPATH`, so the prepended directory wins. `pre_patch_lwip.py` compares `patch-info.txt`
+  against the live package (IDF version, `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are
+  silent/no-ops when no archive exists.
+- Reverting is deleting a directory. Two measurement traps are recorded in `plans/lwip-rebuild-patch.md`: the firmware
+  **byte count does not change** when the window does (`ili9488` was 3158691 either way), so compare binary hashes or
+  count `firmware.map` references instead; and `TCP_RECVMBOX_SIZE` (6) caps in-flight data at ~8.6 KB, so a window-only
+  bump would appear to do nothing.
 
 ### `myoptions.h`
 - Board/profile selector and hardware wiring table.

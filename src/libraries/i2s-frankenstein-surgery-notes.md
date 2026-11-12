@@ -681,3 +681,15 @@ normalise to the last few seconds too and brighten through a quiet passage - the
 3. **`setVolume()` lost `if(vol < 0) vol = 0;`.** `vol` is `uint8_t`, so the test cannot be true (`-Wtype-limits`).
 4. **`ComplexMult()` in `neaacdec.h` is `static inline`.** It is a definition in a header and the floating-point build
    does not call it, so a plain `static` warned "defined but not used" in every TU that includes the header.
+
+## Failed Graft to Maleksm v0.9.720m
+
+Attempted 2026.11.11 and abandoned the same day. **Another graft to 720m will not be attempted.** `src/libraries/I2S_Audio/`
+is the 434m code again, and that is the point: this library is battle-tested on these boards, the graft was not, and it
+cost ~190 KB of flash and a day to learn that. The one thing the newer library had that this one wants is not in the
+library at all - the FLAC input rate is a lwIP constant (`plans/lwip-window-and-720m-graft.md`).
+
+**The rule worth keeping:** when any library is re-grafted, diff the *task creation call* - stack size, priority, core -
+separately from the API surface. 720m creates its audio task at priority 2, which this project had already measured as
+"let UI and log traffic preempt the decoder" (`plans/i2s-audio-headroom.md`), and the copy reintroduced it silently: a
+constant like that produces no compile error, and it was not in the additions table near the top of this file.

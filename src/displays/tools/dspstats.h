@@ -50,15 +50,16 @@
   extern volatile uint32_t cmMaxDspWorkUs;
 
   // The task passes its own core in, so the figure can never be mislabelled even if the task is pinned elsewhere.
-  static inline void cmCountDspLoop(uint8_t core) { cmDspLoopCount++; cmDspCore = core; }
+  static inline void cmCountDspLoop(uint8_t core) { cmDspLoopCount = cmDspLoopCount + 1; cmDspCore = core; }
   // How long one display.loop() call took.  A micros() wrap inside a call would read as a huge value, so anything
   // past the halfway point is rejected rather than recorded as a bogus maximum.
   static inline void cmNoteDspWork(uint32_t us) { if (us < 0x80000000UL && us > cmMaxDspWorkUs) cmMaxDspWorkUs = us; }
-  static inline void cmCountGlyph()       { cmGlyphCount++; }
-  static inline void cmCountPreTextCall() { cmPreTextCalls++; }
-  static inline void cmCountPreTextHit()  { cmPreTextHits++; }
-  static inline void cmCountFill()        { cmFillCount++; }
-  static inline void cmCountPush()        { cmPushCount++; }
+  // volatile counters, so `x = x + 1` rather than `++`: the latter is deprecated in C++20 and GCC 14 says so
+  static inline void cmCountGlyph()       { cmGlyphCount = cmGlyphCount + 1; }
+  static inline void cmCountPreTextCall() { cmPreTextCalls = cmPreTextCalls + 1; }
+  static inline void cmCountPreTextHit()  { cmPreTextHits = cmPreTextHits + 1; }
+  static inline void cmCountFill()        { cmFillCount = cmFillCount + 1; }
+  static inline void cmCountPush()        { cmPushCount = cmPushCount + 1; }
 #else
   static inline void cmCountDspLoop(uint8_t core) { }
   static inline void cmNoteDspWork(uint32_t us)   { }

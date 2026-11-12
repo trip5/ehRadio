@@ -45,7 +45,6 @@ size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
   static uint32_t cmMaxMainLoop   = 0;
   static uint32_t cmLoopStart     = 0;
   static unsigned long cmLastPrint = 0;
-  static uint8_t cmEtcCount      = 0;  // CORE_MONITOR_ETC_LOOPS counter
 #endif
 
 void setup() {
@@ -342,14 +341,16 @@ void loop() {
           const size_t psramTotal = psramTotalCached;
           const size_t psramUsed  = psramTotal - pFree;
           const size_t audioFill  = player.inBufferFilled();
+          // Every one of these is size_t or uint32_t, which is `long unsigned` here, so each is cast rather than
+          // changing the format: the reader wants KB, not the width of the type.
           FUNCTIONLOG("PSRAM", "Used: %uKB / %uKB: Framebuffer: %uKB, VU FFT: %uKB, WebUI Cache: %uKB, Audio buffered: %uKB, Contiguous Free: %uKB",
-              psramUsed / 1024,
-              psramTotal / 1024,
-              psramFrameBufferBytes / 1024,
-              vuPsramBytes / 1024,
-              netserver.getFileCache().totalBytes() / 1024,
-              audioFill / 1024,
-              pLargest / 1024);
+              (unsigned)(psramUsed / 1024),
+              (unsigned)(psramTotal / 1024),
+              (unsigned)(psramFrameBufferBytes / 1024),
+              (unsigned)(vuPsramBytes / 1024),
+              (unsigned)(netserver.getFileCache().totalBytes() / 1024),
+              (unsigned)(audioFill / 1024),
+              (unsigned)(pLargest / 1024));
         }
       }
       cmLastPrint = millis();

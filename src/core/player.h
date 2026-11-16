@@ -51,6 +51,7 @@ class Player: public Audio {
     void setError(const char *e);
     void setReady();
     void noteFatalStream();  // a permanent host error (404/410): stop and refuse to re-arm the retry ladder
+    void noteStreamStalled();// data stopped arriving: kick the retry ladder instead of waiting for the user
     void initHeaders(const char *file);
     void loop();
     bool queueResolvedUrl(const char* url);

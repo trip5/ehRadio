@@ -61,6 +61,8 @@ void Player::init() {
   if (MUTE_PIN!=255) pinMode(MUTE_PIN, OUTPUT);
   #if defined(USE_AUDIO_I2S)
     setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT, I2S_DIN, I2S_MCLK);
+    // Priority 3 of the PSRAM table: before the WebUI cache and the ring; getSpectrum() retries if it fails.
+    vuScratchReserve();
   #else
     // SPI.begin(); // started in config.init()
     if (VS_PATCH_ENABLE) display.putRequest(BOOTVSPATCH);
@@ -95,11 +97,10 @@ void Player::init() {
 }
 
 // Two classes, because losing one of them is much worse than losing the other.  The periodic ticks (PR_CHECKSD,
-// PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a queue that is even nearly full may refuse
-// them - the field logged exactly that ("playerQueue overflow, dropped cmd=7") on a whole-card delete, and the fix then
-// was to drain the queue more often.  Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP,
-// PR_PREV, PR_NEXT, PR_TOGGLE, PR_VOL, PR_BURL): losing one eats a user's Next, or leaves a queued PR_STOP behind a
-// later PR_PLAY, so those wait for room rather than being dropped.  See plans/big-text-title2-weather-overlap.md.
+// PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a nearly full queue may refuse them.
+// Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP, PR_PREV, PR_NEXT, PR_TOGGLE,
+// PR_VOL, PR_BURL): losing one eats a user's Next, or leaves a queued PR_STOP behind a later PR_PLAY, so those wait
+// for room rather than being dropped.
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
   const bool tick = (request.type == PR_CHECKSD || request.type == PR_VUTONUS);
@@ -174,6 +175,16 @@ void Player::noteFatalStream() {
   setError(errbuf);
 }
 
+// Data stopped arriving and the library declared the stall.  Nothing else in the tree kicks the ladder for that: the
+// 2026.11.03 change removed connecttohost() from streamDetection() and left reconnection to "the player", but the
+// player was never told.  A stalled stream therefore sat silent until the user pressed pause and play - measured
+// 2026.11.14, twice, once with the WebUI open and once during a display-heavy page.
+void Player::noteStreamStalled() {
+  if (network.lostPlaying) return;                 // the ladder is already climbing
+  network.lostPlaying = true;
+  spawnStreamRetry();
+}
+
 void Player::_stop(bool alreadyStopped) {
   log_i("%s called", __func__);
   if (config.getMode()==PM_SDCARD && !alreadyStopped) config.sdResumePos = player.getFilePos();
@@ -219,6 +230,25 @@ void Player::loop() {
   if (playerQueue==NULL) return;
   playerRequestParams_t requestP;
   if (xQueueReceive(playerQueue, &requestP, isRunning()?PL_QUEUE_TICKS:PL_QUEUE_TICKS_ST)) {
+    #ifdef AUDIO_DEBUG
+      // What the queue delivered and in what order: the only way to tell a stop we asked for from one that arrived late
+      // behind a play.  The idle ticks are skipped - PR_VUTONUS fires several times a second whenever a meter is drawn,
+      // and PR_CHECKSD is the card probe, neither carries an order.
+      if (requestP.type != PR_VUTONUS && requestP.type != PR_CHECKSD) {
+        const char* cmd = "?";
+        switch (requestP.type) {
+          case PR_PLAY:   cmd = "PLAY";   break;
+          case PR_STOP:   cmd = "STOP";   break;
+          case PR_PREV:   cmd = "PREV";   break;
+          case PR_NEXT:   cmd = "NEXT";   break;
+          case PR_VOL:    cmd = "VOL";    break;
+          case PR_BURL:   cmd = "BURL";   break;
+          case PR_TOGGLE: cmd = "TOGGLE"; break;
+          default: break;
+        }
+        FUNCTIONLOG("Player", "queue: %s %d", cmd, (int)requestP.payload);
+      }
+    #endif
     switch (requestP.type) {
       case PR_STOP: _clearMute(); _stop(); break;
       case PR_PLAY: {
@@ -357,6 +387,19 @@ void Player::loop() {
     else if (millis() - _playingSince >= STREAM_SETTLE_MS) _startAttempts = 0;
   } else {
     _playingSince = 0;
+    #ifdef AUDIO_DEBUG
+      // Once a second while PLAYING with the ring empty: the three conditions below are what authorise the deadline
+      // stopSong(), and a station stuck "playing" with no audio is exactly one of them being false.
+      if (_status == PLAYING) {
+        static uint32_t armTraceMs = 0;
+        if (millis() - armTraceMs >= 1000) {
+          armTraceMs = millis();
+          FUNCTIONLOG("Player", "arm gate: running %d mode %u validator %d connectMs %lu ring %u",
+                      (int)isRunning(), (unsigned)config.getMode(), (int)playlistValidator.active(),
+                      (unsigned long)(_connectMs ? millis() - _connectMs : 0), (unsigned)inBufferFilled());
+        }
+      }
+    #endif
     // The validator drives its own connects and owns the indicator, so the deadline stays out of its way.
     if (_status == PLAYING && isRunning() && config.getMode() == PM_WEB && !playlistValidator.active()) {
       if (_connectMs == 0) _connectMs = millis();
@@ -451,6 +494,9 @@ void Player::setOutputPins(bool isPlaying) {
 
 void Player::_play(uint16_t stationId) {
   log_i("%s called, stationId=%d", __func__, stationId);
+  // Every play starts with the honest identity.  The alternate user agent exists for exactly one retry after a 403
+  // (see src/core/config.h), so it must not survive into the next station or the next user action.
+  setAlternateUserAgent(false);
   #ifdef USE_SD
     // Nothing new starts while the SD File Manager is open
     if (filemanager.active()) {
@@ -477,7 +523,6 @@ void Player::_play(uint16_t stationId) {
   // and over the gap nothing is playing (player.isRunning() is the audio engine's flag, and it let go at EOF), so
   // the line would be repainted with the WEATHER.  The handler gates on config.isScreensaver, which also excludes a
   // manual skip: screenSaverExit() queues its mode change before this request, so the device is awake by then.
-  // See plans/screensaver-line-hold.md.
   display.putRequest(SSHOLD);
   setError("");
   _fatalStream = false;  // a new station clears a previous permanent-error stop
@@ -582,6 +627,9 @@ void Player::_play(uint16_t stationId) {
 
 void Player::browseUrl() {
   if (burl[0] == '\0') return;
+  #ifdef AUDIO_DEBUG
+    FUNCTIONLOG("Player", "browseUrl: %s", burl);
+  #endif
   playUrl(burl);
   memset(burl, 0, sizeof(burl));
 }
@@ -602,6 +650,11 @@ void Player::playUrl(const char* url) {
   uint32_t _t_ctu = millis();
   const bool _urlConnected = connecttohost(url);
   lastConnectMs = millis() - _t_ctu;
+  #ifdef AUDIO_DEBUG
+    // _play() logs its own connect; this path never did, so a play that connected and then died looked like nothing had
+    // happened at all.  Pairs with browseUrl() above.
+    FUNCTIONLOG("Player", "playUrl: connected %d in %lums for %s", (int)_urlConnected, (unsigned long)lastConnectMs, url);
+  #endif
   if (_urlConnected) {
     _status = PLAYING;
     _loadVol(config.store.volume);

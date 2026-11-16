@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-make_lwip_patch.py - rebuild ESP-IDF's liblwip.a with a larger TCP receive window.
+make_patch.py - rebuild ESP-IDF archives with a few sdkconfig values changed.
+
+Two changes live here: liblwip.a (the TCP window and friends) and the three mbedTLS archives (record
+buffers and context from PSRAM instead of internal DRAM).  Both are on by default, because both are what
+this codebase actually needs on espressif32 8.0.0; --no-mbedtls drops the second one.
 
 Usage:
-  python builds/patch/make_lwip_patch.py                          # esp32s3, defaults below
-  python builds/patch/make_lwip_patch.py --wnd 32768 --recvmbox 32
-  python builds/patch/make_lwip_patch.py --target esp32 --target esp32s3
-  python builds/patch/make_lwip_patch.py --idf-path D:/esp/esp-idf-v5.5.5 --keep-temp
+  python builds/patch/make_patch.py                             # every installed libs package, both changes
+  python builds/patch/make_patch.py --target esp32s3             # only that MCU
+  python builds/patch/make_patch.py --no-mbedtls                 # liblwip.a only
+  python builds/patch/make_patch.py --idf-path D:/esp/esp-idf-v5.5.5 --keep-temp
 
 WHY A REBUILD IS THE ONLY WAY
 
@@ -29,9 +33,8 @@ WHAT THIS DOES
   4. Copies the package's own sdkconfig as the base, applies ONLY the whitelist below,
      asserts the blacklist is untouched, configures a two-file project, then builds a single
      ninja output - esp-idf/lwip/liblwip.a - instead of a whole IDF tree.
-  5. Copies the archive to builds/patch/<target>/liblwip.a and writes patch-info.txt beside
-     it. post_patch_lwip.py picks it up from there; this script never touches the packages
-     tree.
+  5. Copies the archives to builds/patch/<target>/ and writes patch-info.txt beside them.
+     post_patch.py picks them up from there; this script never touches the packages tree.
 
 WHAT IT DOES NOT DO
 
@@ -56,8 +59,11 @@ from pathlib import Path
 
 # --- The only sdkconfig entries this script is allowed to change --------------------------
 WHITELIST = {
-    "CONFIG_LWIP_TCP_WND_DEFAULT": 16384,     # was 5760
-    "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 16,      # was 6 (~8.6 KB at MSS 1436 - the real cap)
+    # The window and the mailbox move together, and that pair is what was measured on hardware: 32 KB of
+    # window is 23 segments at MSS 1436, so a 16-message mailbox would only queue 23 KB of it.
+    # assert_parameters_sane() warns when the two disagree.
+    "CONFIG_LWIP_TCP_WND_DEFAULT": 32768,     # was 5760
+    "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 32,      # was 6 (~8.6 KB at MSS 1436 - the real cap)
     "CONFIG_LWIP_TCP_SND_BUF_DEFAULT": 8192,  # was 5744
     "CONFIG_LWIP_MAX_ACTIVE_TCP": 32,         # was 16
 }
@@ -71,7 +77,28 @@ BLACKLIST = (
     "CONFIG_LWIP_SO_REUSE",
 )
 
-DEFAULT_TARGETS = ("esp32s3",)
+# --- mbedTLS, applied only with --mbedtls ----------------------------------------------------------------
+# Two booleans: EXTERNAL moves mbedtls_calloc into PSRAM, INTERNAL is the opposite it replaces.  Only mbedTLS's own
+# allocator changes, so no type shared with the other precompiled archives moves.  Worth it because the internal heap
+# on 8.0.0 reaches steady state with a 30 KB largest block while mbedTLS needs ~40 KB contiguous for a TLS handshake
+# (measured).  None as a value means "emit as `# KEY is not set`".
+MBEDTLS_WHITELIST = {
+    "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC": "y",
+    "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC": None,
+}
+
+# Extra archives, by ninja output path relative to the build directory.
+EXTRA_ARCHIVES = {
+    "esp_netif": "esp-idf/esp_netif/libesp_netif.a",
+    "mbedcrypto": "esp-idf/mbedtls/mbedtls/library/libmbedcrypto.a",
+    "mbedx509": "esp-idf/mbedtls/mbedtls/library/libmbedx509.a",
+    "mbedtls": "esp-idf/mbedtls/mbedtls/library/libmbedtls.a",
+}
+
+# MCU names that can have a framework-arduinoespressif32-<mcu>-libs package installed.  With no --target the
+# script patches every one it finds, in this order, so a checkout with both esp32 and esp32s3 does both in one
+# run and shares one ESP-IDF clone between them.
+KNOWN_MCUS = ("esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6", "esp32h2", "esp32p4")
 IDF_REPO = "https://github.com/espressif/esp-idf.git"
 IDF_MSS = 1436
 
@@ -185,6 +212,32 @@ def libs_package_for(packages_dir, target):
     return package
 
 
+def detect_targets(packages_dir):
+    """Every MCU that has a usable libs package installed, in KNOWN_MCUS order.
+
+    A package only counts when it carries both versions.txt (the IDF it was built from) and sdkconfig (the
+    base this script patches).  Anything else would fail later with a worse message.
+    """
+    found = []
+    prefix, suffix = "framework-arduinoespressif32-", "-libs"
+    for package in packages_dir.glob(f"{prefix}*{suffix}"):
+        mcu = package.name[len(prefix):-len(suffix)]
+        if not mcu or mcu == "libs":
+            continue
+        if not (package / "versions.txt").is_file() or not (package / "sdkconfig").is_file():
+            continue
+        found.append(mcu)
+
+    ordered = [mcu for mcu in KNOWN_MCUS if mcu in found]
+    ordered += sorted(mcu for mcu in found if mcu not in KNOWN_MCUS)
+    if not ordered:
+        die(
+            f"no {prefix}<mcu>{suffix} package in {packages_dir}.\n"
+            "  Build once for the platform so PlatformIO installs it, or pass --target explicitly."
+        )
+    return ordered
+
+
 def read_idf_version(libs_package):
     versions = libs_package / "versions.txt"
     if not versions.is_file():
@@ -219,15 +272,33 @@ def patch_sdkconfig(text, wanted):
     changes = []
     for key, value in wanted.items():
         pattern = re.compile(r"^%s=.*$" % re.escape(key), re.MULTILINE)
-        if not pattern.search(text):
+        not_set = f"# {key} is not set"
+        current = version_value(text, key)
+
+        if value is None:                     # a boolean being switched off: write the "is not set" form
+            if current is None:
+                continue
+            if current == "<missing>":
+                text = text + ("" if text.endswith("\n") else "\n") + not_set + "\n"
+                changes.append((key, "absent", "not set"))
+            else:
+                text = pattern.sub(not_set, text, count=1)
+                changes.append((key, current, "not set"))
+            continue
+
+        if current == "<missing>":
             die(
                 f"{key} is not in the package sdkconfig.\n"
-                "  The package layout probably changed; re-read plans/lwip-rebuild-patch.md."
+                "  The package layout probably changed; re-read patch.md in this folder."
             )
-        old = version_value(text, key)
-        if old != str(value):
+        if current is None:                   # present as `# KEY is not set`: switching it on
+            text = re.sub(r"^# %s is not set$" % re.escape(key), f"{key}={value}", text,
+                          count=1, flags=re.MULTILINE)
+            changes.append((key, "not set", str(value)))
+            continue
+        if current != str(value):
             text = pattern.sub(f"{key}={value}", text, count=1)
-            changes.append((key, old, str(value)))
+            changes.append((key, current, str(value)))
     return text, changes
 
 
@@ -239,6 +310,8 @@ def assert_blacklist_untouched(before, after):
 
 
 def assert_parameters_sane(wanted):
+    if "CONFIG_LWIP_TCP_WND_DEFAULT" not in wanted:
+        return
     wnd = wanted["CONFIG_LWIP_TCP_WND_DEFAULT"]
     box = wanted["CONFIG_LWIP_TCP_RECVMBOX_SIZE"]
     if wnd > 65535:
@@ -365,7 +438,7 @@ def build_archive(python, idf_dir, project_dir, environment, jobs, extra_archive
     ], env=environment)
 
     outputs = [build_dir / "esp-idf" / "lwip" / "liblwip.a"]
-    outputs += [build_dir / "esp-idf" / name / f"lib{name}.a" for name in extra_archives]
+    outputs += [build_dir / EXTRA_ARCHIVES[name] for name in sorted(extra_archives)]
 
     say("ninja", "building only the archive(s) we need")
     for output in outputs:
@@ -383,19 +456,22 @@ def build_archive(python, idf_dir, project_dir, environment, jobs, extra_archive
 def read_generated_config(build_dir, wanted):
     """Read back what the compiler was actually given, not what we asked for.
 
-    The generated sdkconfig.h is the only honest source: a value that silently failed to
-    apply would otherwise be discovered on hardware, as a window that did not grow.
+    The sdkconfig the build generated is the only honest source: a value that silently failed to apply would
+    otherwise be discovered on hardware - as a window that did not grow, or a TLS allocator that did not move.
+    Booleans are compared in both written forms, so an option we deliberately switched off has to appear as
+    `# KEY is not set` rather than merely going missing.
     """
-    generated = build_dir / "config" / "sdkconfig.h"
+    generated = build_dir / "config" / "sdkconfig"
     if not generated.is_file():
         return {}
     text = generated.read_text(encoding="utf-8", errors="replace")
     actual = {}
     for key, expected in wanted.items():
-        match = re.search(r"^#define %s (\S+)$" % re.escape(key), text, re.MULTILINE)
-        actual[key] = match.group(1) if match else "<missing>"
-        if actual[key] != str(expected):
-            die(f"{generated} has {key} {actual[key]}, expected {expected}")
+        value = version_value(text, key)
+        actual[key] = "n" if value is None else value
+        want = "n" if expected is None else str(expected)
+        if actual[key] != want:
+            die(f"{generated} has {key} {actual[key]}, expected {want}")
         say("config", f"  verified in generated config: {key} {actual[key]}")
     return actual
 
@@ -418,8 +494,8 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
 
     main_archive = out_dir / "liblwip.a"
     info = [
-        "# generated by builds/patch/make_lwip_patch.py",
-        "# read back by builds/patch/pre_patch_lwip.py to detect a stale patch",
+        "# generated by builds/patch/make_patch.py",
+        "# read back by builds/patch/pre_patch.py to detect a stale patch",
         f"created = {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"target = {target}",
         f"idf_version = {idf_version} {commit}".strip(),
@@ -427,7 +503,7 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
         f"sdkconfig_sha256 = {sha256_of(libs_package / 'sdkconfig')}",
         f"lwip_sha256 = {sha256_of(main_archive)}",
         f"lwip_bytes = {main_archive.stat().st_size}",
-        "params = " + ", ".join(f"{key}={value}" for key, value in WHITELIST.items()),
+        "params = " + ", ".join(f"{key}={value}" for key, value in generated.items()),
         "changes = " + "; ".join(f"{key} {old} -> {new}" for key, old, new in changes),
         "generated = " + ", ".join(f"{key}={value}" for key, value in generated.items()),
         f"toolchain = {toolchain_bin.parent.name} {local_version}",
@@ -446,12 +522,15 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Rebuild ESP-IDF's liblwip.a with a larger TCP receive window.",
+        description="Rebuild ESP-IDF archives with a few sdkconfig values changed: liblwip.a always, and the three "
+                    "mbedTLS archives unless --no-mbedtls. Every installed libs package is patched unless --target "
+                    "narrows it.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("--target", action="append", dest="targets", metavar="MCU",
-                        help="esp32s3 (default) or esp32; repeatable")
+                        help="MCU to patch, e.g. esp32 or esp32s3; repeatable. "
+                             "Default: every libs package that is installed")
     parser.add_argument("--wnd", type=int, default=WHITELIST["CONFIG_LWIP_TCP_WND_DEFAULT"],
                         help="CONFIG_LWIP_TCP_WND_DEFAULT (default: %(default)s)")
     parser.add_argument("--recvmbox", type=int, default=WHITELIST["CONFIG_LWIP_TCP_RECVMBOX_SIZE"],
@@ -466,6 +545,13 @@ def parse_args():
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="ninja -j")
     parser.add_argument("--with-netif", action="store_true",
                         help="also rebuild libesp_netif.a (not needed for a window change)")
+    parser.add_argument("--mbedtls", action="store_true", default=True,
+                        help="also rebuild the three mbedTLS archives with MBEDTLS_EXTERNAL_MEM_ALLOC, so TLS "
+                             "buffers come from PSRAM instead of the internal heap (default: on, because that is "
+                             "what this codebase needs)")
+    parser.add_argument("--no-mbedtls", action="store_false", dest="mbedtls",
+                        help="build liblwip.a only.  Any mbedTLS archives already in the folder are left alone, "
+                             "but a patch-info.txt rewritten this way stops naming them")
     parser.add_argument("--keep-temp", action="store_true",
                         help="keep the ESP-IDF clone and build tree for inspection")
     return parser.parse_args()
@@ -473,16 +559,21 @@ def parse_args():
 
 def main():
     args = parse_args()
-    targets = args.targets or list(DEFAULT_TARGETS)
     wanted = {
         "CONFIG_LWIP_TCP_WND_DEFAULT": args.wnd,
         "CONFIG_LWIP_TCP_RECVMBOX_SIZE": args.recvmbox,
         "CONFIG_LWIP_TCP_SND_BUF_DEFAULT": args.sndbuf,
         "CONFIG_LWIP_MAX_ACTIVE_TCP": args.max_active,
     }
+    if args.mbedtls:
+        wanted.update(MBEDTLS_WHITELIST)
 
     packages_dir = find_packages_dir(args.packages_dir)
     say("find", f"packages in {packages_dir}")
+
+    # No --target means "everything installed", decided here because the packages dir has to be known first.
+    targets = args.targets or detect_targets(packages_dir)
+    say("find", f"targets: {', '.join(targets)}" + ("" if args.targets else " (auto-detected)"))
 
     resolved = []
     for target in targets:
@@ -533,6 +624,8 @@ def main():
             scaffold_project(project_dir, patched)
 
             extra = {"esp_netif"} if args.with_netif else set()
+            if args.mbedtls:
+                extra |= {"mbedcrypto", "mbedx509", "mbedtls"}
             outputs, build_dir = build_archive(
                 python, idf_dir, project_dir, environment, args.jobs, extra
             )

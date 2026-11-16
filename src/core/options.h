@@ -32,21 +32,32 @@ or examine the examples in builds/trip5 and make your own!
   #error PSRAM is required: add -DBOARD_HAS_PSRAM to build_flags in platformio.ini
 #endif
 
-// PSRAM Buffers (highest-case estimates, in allocation order: display.init() → player.init() → netserver.begin())
-//   Display framebuffer (480×320): ~74 KB  (TFT only, allocated first, display.init())
-//   VU canvas:                    ~154 KB  (TFT only, VU_MAX_WIDTH 280 * VU_MAX_HEIGHT 140 * 2 (there are 2)) 
-//   VS1053 audio buffer:          ~293 KB  (300000 bytes, player.init())
-//   I2S audio buffer:             ~640 KB  (UINT16_MAX * 10, player.init())
-//   VU/FFT Scratch                   8 KB  (vuScratchAlloc())
-//   SD File Manager                 68 KB  (allocated only when SD File Manager runs, asmBegin())
-//   WebUI files cache:            ~130 KB  (actually ~420 KB if using uncompressed files, allocated last, netserver.begin())
-// ---------------------------------------
-//   VS1053 & OLED total:          ~499 KB or ~789 KB (uncompressed WebUI files)
-//   I2S & OLED total:             ~846 KB or ~1136 KB
-//   VS1053 & TFT total:           ~727 KB or ~1017 KB
-//   I2S & TFT total:             ~1074 KB or ~1364 KB
-// Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
-
+// PSRAM buffers, in the order they are allocated - setup() (src/main.cpp) enforces that order.
+// Largest-case numbers (480x320); smaller TFT displays use less.
+//
+//   item                         bytes                 allocated by / when
+//   display framebuffer          ~60 KB     (TFT only) display.init() → _buildPager();
+//   VU canvas, player page       ~77 KB     (TFT only) display.init() → _buildPager()
+//   VU canvas, screensaver       ~77 KB     (TFT only) display.init() → _primeScreensaverCanvas(),
+//   VU/FFT scratch                 8 KB     (I2S only) player.init() → vuScratchReserve()
+//   WebUI files cache (gzipped) ~107 KB                setup() → netserver.primeFileCache(), right after LittleFS mounts
+//                (uncompressed) ~420 KB
+//   de-ogger scratch             ~33 KB     (I2S only) setup() → player.reservePsram() → initInBuff() (16,896 ring-side + 16,384 comment capture)
+//   SD File Manager               68 KB     (reserved) asmBegin() takes it when an upload opens
+//   decoder set (FLAC)          ~237 KB     (I2S only, reserved) setDefaults() frees them all - 192 KB of it is s_samplesBuffer (2 ch x 24,576 samples x int32), the rest the Ogg carry
+//   TLS session (https)          ~96 KB     (reserved) mbedTLS allocates externally since espressif32 8.0.0, so a live https stream holds 79-95 KB here; refused rather than failed when tight
+//   audio buffer ring    VS1053: 586 KB                setup() → player.reservePsram(), the last allocation / opportunistic
+//                          I2S: 1536 KB
+//   -----------------------------------
+//   I2S & TFT total:           ~2073 KB     ~2383 KB (uncompressed WebUI)
+//   I2S & OLED total:          ~1863 KB     ~2173 KB
+//   VS1053 & TFT total:         ~910 KB     ~1220 KB
+//   VS1053 & OLED total:        ~695 KB     ~1010 KB
+//
+// Note: While these numbers are comfortable with a board that exceeds 2MB of PSRAM, a 2 MB board also fits the I2S audio ring at
+//   (almost) full size with a gzipped WebUI. If exceeding available PSRAM, the audio ring steps down, which only affects the buffer
+//   for FLAC streams (MP3, AAC never fill the buffer). The de-ogger and the decoder are the only entries that live and die
+//   with a stream; everything else is taken once, at boot, and stays. PSRAM that is "reserved" is held inside the ring's floor.
 
 /* ============================== DISPLAY ============================== */
 
@@ -404,8 +415,8 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef PLAYER_FORCE_MONO
   #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono (also add for mono I2S decoders for the VU)
 #endif
-#ifndef SS_INFO_TEXT
-  #define SS_INFO_TEXT false
+#ifndef NORMALIZE_VOLUME
+  #define NORMALIZE_VOLUME true // this will also ignore 0vol...?
 #endif
 
 /* --- VOLUME SCALE --- */

@@ -1,5 +1,5 @@
 """
-pre_patch_lwip.py - complain early, and only when something is actually wrong.
+pre_patch.py - complain early, and only when something is actually wrong.
 
 Runs before the framework script. It writes nothing and changes nothing: its whole job is to
 notice that builds/patch/<mcu>/liblwip.a was built from a different ESP-IDF or a different
@@ -7,7 +7,7 @@ package sdkconfig than the one now installed, because that is the failure mode t
 without a single warning and then misbehaves on the device.
 
 Silent when no patch exists, so a fresh clone and every build of an unpatched tree log
-nothing at all. See plans/lwip-rebuild-patch.md.
+nothing at all. See patch.md in this folder.
 """
 Import("env")
 
@@ -15,7 +15,7 @@ import hashlib
 import re
 from pathlib import Path
 
-PREFIX = "LWIP patch"
+PREFIX = "Patch"
 PATCH_ROOT = Path(env.subst("$PROJECT_DIR")) / "builds" / "patch"
 
 
@@ -76,7 +76,7 @@ def main():
         _warn(
             f"{archive} exists but {info_path.name} does not, so it cannot be checked "
             f"against the installed ESP-IDF.\n"
-            f"  Re-run: python builds/patch/make_lwip_patch.py"
+            f"  Re-run: python builds/patch/make_patch.py"
         )
         return
 
@@ -122,7 +122,7 @@ def main():
         _warn(
             "the patched liblwip.a is stale:\n  - "
             + "\n  - ".join(problems)
-            + "\n  Re-run: python builds/patch/make_lwip_patch.py"
+            + "\n  Re-run: python builds/patch/make_patch.py"
         )
     else:
         print(f"{PREFIX}: {mcu} liblwip.a {actual_sha[:12]} ({info.get('changes', 'no changes')})")

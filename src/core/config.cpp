@@ -1,4 +1,5 @@
 #include "options.h"
+#include <esp32-hal-cpu.h>   // getCpuFrequencyMhz / getXtalFrequencyMhz / getApbFrequency, for the boot probe below
 #include <esp_system.h>
 #include <ctype.h>
 #include <cstddef>
@@ -864,6 +865,23 @@ void Config::setDspOn(bool dspon, bool updateState) {
   }
 }
 
+/* Work done per millisecond, measured rather than reported.  Volatile accumulators so the compiler cannot delete the
+   loop; the integer case is pure ALU and the float case exercises the FPU.  The source is identical on both
+   platforms, so the two figures compare directly even when both claim 240 MHz and 32-byte cache lines. */
+#define PERF_PROBE_MS 20
+static uint32_t perfKiloOps(uint32_t budgetMs, bool floating) {
+  volatile uint32_t iacc = 1;
+  volatile float    facc = 1.0f;
+  uint32_t start  = millis();
+  uint32_t rounds = 0;
+  while ((uint32_t)(millis() - start) < budgetMs) {
+    if (floating) { for (uint32_t i = 0; i < 1000; i++) facc = facc * 1.0000001f + 0.0000001f; }
+    else          { for (uint32_t i = 0; i < 1000; i++) iacc = (iacc * 3u + 7u) ^ (iacc >> 5); }
+    rounds++;
+  }
+  return (rounds * 1000U) / budgetMs / 1000U;   // kilo-ops per ms
+}
+
 void Config::bootInfo() {
   SERIALLOGLF();
   SERIALLOGLF();
@@ -882,6 +900,17 @@ void Config::bootInfo() {
   #else
     BOOTLOG("Serial:\tUART0 at 115200 (ARDUINO_USB_CDC_ON_BOOT is not defined)");
   #endif
+  /* Platform probe.  Both clocks are only *reported*: ESP.getCpuFreqMHz() is what Arduino was told and
+     getCpuFrequencyMhz() is what the HAL holds, and both can be right while the silicon does less work per second.
+     The two probe figures are measured, so they are the evidence; 7.1.3 and 8.0.0 built from this same source make
+     the pair directly comparable.  A soft-float build shows up as an enormous int-to-float gap; a clock, flash-fetch
+     or cache problem scales both together. */
+  BOOTLOG("Clock:\t\tCPU %u MHz, HAL %u MHz, XTAL %u MHz, APB %u MHz",
+          (unsigned)ESP.getCpuFreqMHz(), (unsigned)getCpuFrequencyMhz(),
+          (unsigned)getXtalFrequencyMhz(), (unsigned)getApbFrequency() / 1000000U);
+  BOOTLOG("Perf probe:\tint %u, float %u kilo-ops per ms (%u ms each)",
+          (unsigned)perfKiloOps(PERF_PROBE_MS, false), (unsigned)perfKiloOps(PERF_PROBE_MS, true),
+          (unsigned)PERF_PROBE_MS);
   BOOTLOG("Process: Core:\tMain: 1, Audio: %d, Network: %d, Display: %d", AUDIO_CORE, NETWORK_CORE, DSP_TASK_CORE_ID);
   BOOTLOG("Stack Sizes:\tLoop: %dKB, Display: %dKB, Netserver: %dKB, Network: %dKB", LOOP_TASK_STACK_SIZE, DSP_TASK_STACK_SIZE, NETSERVER_TASK_STACK_SIZE, NETWORK_TASK_STACK_SIZE);
   BOOTLOG("Task Priority:\tDisplay: %d, Netserver: %d, Playback: %d, Network: %d, Low: %d", DSP_TASK_PRIORITY, NETSERVER_TASK_PRIORITY, PLAYBACK_TASK_PRIORITY, NET_TASK_PRIORITY, LOW_TASK_PRIORITY);

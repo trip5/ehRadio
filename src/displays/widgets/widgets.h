@@ -11,7 +11,7 @@
 // ScrollWidget _buffsize - 2, so 172 is what lets a station name, title1 or title2 arrive whole - at 140 a long one
 // was silently cut.  The two widgets that are handed COMPOSED strings take their own size instead, the weather row
 // and the screensaver's info line, both COMPOSED_LINE_BUFF in display.cpp, because network.weatherBuf is built up to
-// 511 bytes.  See plans/widget-text-buffer-sizes.md.
+// 511 bytes.
 // Every conf used to carry this as ScrollConfig.buffsize and every one of them wrote 140; that value predates the
 // 170-byte fields and is where this one came from.
 #define WIDGET_BUFF_SIZE 172
@@ -26,7 +26,7 @@ class Widget{
     // The panel has ONE scroll slot (`dsp.setScrollId()`) and only a Page may hand it out - see Page::loop().  A line
     // that scrolls answers both of these; every other widget keeps these defaults, which is what lets the page's poll
     // be a plain virtual call on any widget it holds.  `scrollWanted()` must be free of side effects: it is asked on
-    // every pass, on every widget, before one of them is chosen.  See plans/scroll-turn-fairness.md.
+    // every pass, on every widget, before one of them is chosen.
     virtual bool scrollWanted() const { return false; }
     virtual void scrollTurn() {}
     virtual void init(WidgetConfig conf, uint16_t fgcolor, uint16_t bgcolor){
@@ -179,7 +179,7 @@ class FillWidget: public Widget {
 
 // The mark a looping scroll line prints between its tail and its head, spaces included: " * ", or the holiday icon
 // on the holiday dates.  It is also what the screensaver's info line joins its own parts with, so the character
-// lives in exactly one place.  See plans/holiday-icons.md.
+// lives in exactly one place.
 const char* scrollMark();
 
 // Which kind of line a scroll widget is.  It is the only thing a line says about its own pace now: the role selects
@@ -441,6 +441,13 @@ class ClockWidget: public Widget {
     uint16_t _top();
     void _begin();
 };
+
+/* Bitrate in kbit/s, rendered in THREE characters, which is what both the codec badge and the bitrate text widget
+   are placed for.  Up to 999 it is what it always was; from 1000 the decimal point IS the unit ("1.4" = 1.4 Mbit/s),
+   so a FLAC stream neither overruns the text widget nor pins at the badge's old 999 ceiling.  Rounded (1999 is "2.0",
+   not "1.9") and saturating at "9.9", because three characters cannot spell 10.0 and no stream here comes close.
+   0 renders as "0": callers that want a blank on zero test for zero themselves. */
+void formatBitrate3(uint16_t kbps, char* out, size_t room);
 
 class BitrateWidget: public Widget {
   public:

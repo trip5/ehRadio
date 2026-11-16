@@ -37,21 +37,21 @@
 #elif defined(TEST_CI_VS1053)
   #define USE_BUILTIN_LED    false
   #define LED_BUILTIN_S3     255
-  #define SPIA_DEFAULT       /* SCK 12, MISO 13, MOSI 11 */
+  #define SPIA_DEFAULT       /* SCK 18, MISO 19, MOSI 23 */
   #define DSP_MODEL          DSP_SH1106
-  #define I2C_SDA            42
-  #define I2C_SCL            41
+  #define I2C_SDA            21
+  #define I2C_SCL            22
   #define VS1053_SPI         'A'
   #define VS1053_CS          9
   #define VS1053_DCS         14
   #define VS1053_DREQ        10
   #define VS1053_RST         -1
   #define VS_PATCH_ENABLE    false
-  #define ENC_CLK            40
-  #define ENC_DT             39
-  #define ENC_SW             38
+  #define ENC_CLK            27
+  #define ENC_DT             14
+  #define ENC_SW             12
   #define SD_SPI             'B'
-  #define SD_CS              47
+  #define SD_CS              38
   #define ONE_CLICK_SWITCH   true
   #define BTN_NEXT           0
 #endif

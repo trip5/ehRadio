@@ -18,6 +18,11 @@ resets and the ID3v2 frame-size guard). Two practices follow:
   against them is what identified the loss. The reverse also happens - the tail-of-file fix recorded below, dated
   `2026.10.24`, ended with a prediction that a VS1053 unit stopping at a track end would be the first place to look, and
   that is exactly what subsequently happened.
+* **Some code is duplicated on purpose, and must be kept in step.** The FLAC tag parser exists twice - `dgLe32()`,
+  `dgKeyIs()` and `FLACOfferCommentPacket()` in `I2S_Audio/flac_decoder/flac_decoder.cpp`, and `v1053Le32()`,
+  `v1053KeyIs()`, `v1053VorbisComment()` and `v1053CommentTitle()` in `VS1053_Audio/audioVS1053Ex.cpp` - because that
+  fork has no de-ogger to hang it on. A fix in one belongs in the other; see item 16 of the 2026.11.13 to 2026.11.16
+  section.
 
 ## Purpose
 Graft ehRadio's adaptations from the current I2S library (based on Maleksm v0.9.434m / I2S 3.1.0) onto Maleksm's latest v0.9.720m (I2S 3.4.6w).
@@ -228,10 +233,9 @@ The v0.9.434m I2S library is the **maximum compatible version** for the current 
 **Correction, 2026.11.11.** The upgrade above happened: `platformio.ini` now pins `espressif32@8.0.0`, which builds with
 `toolchain-xtensa-esp-elf` **14.2.0** and `-std=gnu++2b`, so `<span>` exists, `requires`/`inline` variables are plain
 C++20 and Error 3's GCC 8.4 crash cannot recur. **Stage 1 and Stage 2 are unblocked** - nothing in this section was
-re-attempted, only the blocker is gone. The plan is now `plans/lwip-window-and-720m-graft.md`, which also records the
-finding that the graft does **not** raise the stream bitrate ceiling: lwIP in 8.0.0 still ships
-`CONFIG_LWIP_TCP_WND_DEFAULT=5760` with window scaling off, so the FLAC input-rate limit is a platform matter, separate
-from this graft.
+re-attempted, only the blocker is gone. **The graft would not have raised the stream bitrate ceiling either:** lwIP in
+8.0.0 still ships `CONFIG_LWIP_TCP_WND_DEFAULT=5760` with window scaling off, so the FLAC input-rate limit is a
+platform matter, separate from this graft.
 
 ---
 
@@ -571,8 +575,9 @@ never been compiled.
 
 ## Post-Graft Patch Fixes (2026.11.03)
 
-Streams that must not be played. Written from `plans/handle-unsupported-unrecognized.md`; the plan holds the evidence
-and the rejected options, this holds what the code now does.
+Streams that must not be played. What the code now does, with the reason each rule exists: bytes that are not audio,
+or a host that will not serve the URL, end in a one-shot verdict rather than in the retry ladder, because retrying a
+guaranteed failure only delays the message the listener needs.
 
 ### What the library now refuses
 
@@ -637,7 +642,9 @@ so core cannot compare the codec directly - hence the named predicate rather tha
 ## Post-Graft Patch Fixes (2026.11.04)
 
 **Files changed**: `src/libraries/I2S_Audio/Audio.cpp` - `computeVUlevel()`, `get_VUlevel()`, `m3u8redirection()`.
-Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
+The VU pair is two separate bounds: `get_VUlevel()` packs the length *cleared* from each bar, so `0` means a full bar
+rather than an empty one; and the display gain is `256 / vuThreshold` because `computeVUlevel()` stores
+`abs(sample >> 7)` and keeps the high-water mark as the reference.
 
 1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** The return packs the length *cleared* from the
    loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - i.e. a fully lit bar. The old
@@ -682,14 +689,183 @@ normalise to the last few seconds too and brighten through a quiet passage - the
 4. **`ComplexMult()` in `neaacdec.h` is `static inline`.** It is a definition in a header and the floating-point build
    does not call it, so a plain `static` warned "defined but not used" in every TU that includes the header.
 
-## Failed Graft to Maleksm v0.9.720m
+## Failed Graft to Maleksm v0.9.720m (2026.11.11)
 
 Attempted 2026.11.11 and abandoned the same day. **Another graft to 720m will not be attempted.** `src/libraries/I2S_Audio/`
 is the 434m code again, and that is the point: this library is battle-tested on these boards, the graft was not, and it
 cost ~190 KB of flash and a day to learn that. The one thing the newer library had that this one wants is not in the
-library at all - the FLAC input rate is a lwIP constant (`plans/lwip-window-and-720m-graft.md`).
+library at all - the FLAC input rate is a lwIP constant (`CONFIG_LWIP_TCP_WND_DEFAULT`, 5760 with window scaling off).
 
 **The rule worth keeping:** when any library is re-grafted, diff the *task creation call* - stack size, priority, core -
 separately from the API surface. 720m creates its audio task at priority 2, which this project had already measured as
-"let UI and log traffic preempt the decoder" (`plans/i2s-audio-headroom.md`), and the copy reintroduced it silently: a
-constant like that produces no compile error, and it was not in the additions table near the top of this file.
+"let UI and log traffic preempt the decoder" - a priority that starves the decoder rather than merely delaying it - and
+the copy reintroduced it silently: a constant like that produces no compile error, and it was not in the additions table
+near the top of this file.
+
+## Speed: what was considered, and why it was left alone (2026.11.13)
+
+So that the next round of optimisation starts from measurements rather than from a plausible theory. **The instrument
+that settles all of it is `decode` minus `write` on the `i2s:` line** - the decoder's own share, with the blocking
+`i2s_write()` removed. It has read 23-31% on every stream that plays.
+
+| idea | verdict |
+|---|---|
+| `-O3`, project-wide or as a decoder `#pragma` | **Measured, no.** 5,278 cycles per frame at `-O2`; 5,267-5,289 across three configurations, the project-wide one costing 128,724 bytes of flash. Revisit only with a measurement below 4,500. |
+| FLAC bit-reader rewrite: inline the three readers, 32-bit cache instead of 64, leading-zero table for the unary quotient | **Not the bottleneck.** Needs a decode-bound stream to justify it, and none of the four measured is one. |
+| Prediction-loop hoist | **Cheapest real win, deferred - and it is worth ~4% of the window.** Concretely: locals for the pointer, bit cursor and end in `decodeResiduals()` with the refill inlined so the unary loop stops calling `readUint()` per bit; and a `switch(order)` in `restoreLinearPrediction()` with straight-line cases for 0-4, 8 and 12 so the coefficient loads hoist. 13.2 ms of a 29 ms decoder frame, of which it might take a third. |
+| Measure the ~16 ms/frame that no instrument covers (header parse, subframe walk, decorrelation, output scaling) | **Deferred, and it is the larger target.** 31% of the window is all non-write audio work; residual+lpc is only 45% of that. Instrumenting the rest before optimising either is the right order. |
+| Higher-rate FLAC | **Out of scope by decision.** For a given source, decode cost scales with sample rate x bit depth, not bitrate: 44.1/16 is 31%, 96/24 would land near 68%, and 192/24 cannot work - the 6.1 Mbit stream proved that. 1441 kbit/s at 44.1/16 is CD-level and it decodes in a third of the window, which is the bar we chose to stop at. |
+| Bigger reader window, or higher TCP receive window | **Tried, no effect.** `DEOGG_READ_MAX` 4 KB -> 16 KB changed nothing; the de-ogger now reads the full ring room. The 1.2-1.5 Mbit feeds are limited by their own upstream. |
+| Audio task priority | **Already done.** Priority 6, above AsyncTCP (4): that change took the deficit from 7% to 2.7% and is still the reason the decoder keeps up. |
+| DMA depth | **Already done.** 64 descriptors of 256 frames (682 ms at 24 kHz) after a 341 ms network burst emptied 32. |
+| Smaller ring for MP3/AAC | **Pointless.** ~6 MB of PSRAM stays free, and only FLAC ever fills a ring. |
+| Prefetch cap | Not a speed matter - it bounds latency. See item 10. |
+| VU and spectrum work | On the display task, never on the audio task. |
+
+**Two streams on the same instrument, and what they disagree about.** Distorsion at 48 kHz spends 28% of the window
+(`9784 - 6913` of 10025) and Radio Paradise at 44.1 kHz spends 29-31%, although Distorsion carries 9% more samples per
+second: its residual is 0.55 ms per frame against RP's 8.5-11 ms, because it is a far less complex encode. So sample
+rate sets the floor and source complexity sets the cost on top of it - which is also why the 192/24 stream failed, where
+both applied at once. `lpc` moves with it (0.11 ms against 2.3-3.0 ms), so the two halves of a FLAC frame track the
+encoder rather than the bitrate the display shows.
+
+## Post-Graft Patch Fixes (2026.11.13 to 2026.11.16)
+
+One session, closed on the 16th. Everything here was built and measured on **espressif32 8.0.0** and needs the patched
+Arduino/IDF files that `builds/patch/` applies - the tree does not build without them.
+
+**Files changed**: `src/libraries/I2S_Audio/flac_decoder/flac_decoder.cpp`, `src/libraries/I2S_Audio/Audio.cpp`,
+`src/libraries/I2S_Audio/Audio.h`, `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` (+ `.h`), `src/core/netserver.cpp`
+(+ `.h`), `src/core/display.cpp` (+ `.h`), `src/displays/widgets/widget_vu.cpp` (+ `.h`), `src/core/player.cpp`,
+`src/main.cpp`, `src/core/options.h`.
+
+1. **The Ogg container is removed in the write path, so pages that split a frame play.** `FLACDeOgg()` forwards every
+   byte **as it is captured** - page header and lacing included, in stream order - so its output can never exceed its
+   input and the guard is `dstRoom < len`. That invariant is the point: the caller reads the full `room`, so no reserve
+   is subtracted from `AudioBuffer::writeSpace()`, which hands out only the **contiguous** space to the ring's end. A
+   reserve there is a latch, not a margin - once the write pointer came within it, no read could start and the space
+   could never grow back. `s_flacCarry` remains for the non-stripped path (a local `.ogg`, or a run where the strip
+   never armed); a zero-segment page is handled where the lacing table is parsed.
+
+2. **24-bit FLAC decodes.** The refusal is `> 24`, the subframe decode keeps `int32_t` samples, and the shift to 16-bit
+   happens once at write-out. `FLACGetBitsPerSample()` deliberately reports the **output** depth, so
+   `setBitsPerSample()` and `reconfigI2S()` stay on their existing 16-bit path.
+
+3. **A stalled stream recovers by itself, in both forks.** `streamDetection()` is given the bytes that **reached the
+   ring**, not the bytes the socket offered, so a filter that swallows the stream can no longer look alive; after five
+   seconds it stops the decoder, clears `m_dataMode` and raises `audio_eof_stream("stalled")`. `handleEofStream()` routes
+   that to `Player::noteStreamStalled()` - guarded on `network.lostPlaying` so a climbing retry is not duplicated - and
+   the ladder in `src/core/network.cpp` owns reconnection. The VS1053 fork takes the same route instead of calling
+   `connecttohost()` from inside playback, and its liveness is now the same signal: a file-scope `s_ringTotal` counts
+   every `InBuff.bytesWritten()`, because its `bytesAvail` argument is the offer measured *before* the read.
+
+4. **Metadata reaches the display, the WebUI and MQTT, at connect and at every track change.** After the strip is armed
+   the de-ogger walks its runs and treats a run as metadata only if it *looks* like metadata
+   (`dgLooksLikeMetadata()`: the mapping header `0x7F 'F' 'L' 'A' 'C'`, or a block header with type 0-6 and a non-zero
+   length). Everything else is AUDIO - a false AUDIO costs one resync, a false metadata silently deletes audio.
+   `FLACOfferCommentPacket()` parses the Vorbis comment, the capture is 16,384 bytes and tolerant of truncation, and the
+   pre-flip branch captures and forwards the packets that carry the title at connect. The parsed title lives in the
+   **de-ogger's own** `s_dgTitle`, read by `FLACDeOggTitle()`: `FLACDecoder_FreeBuffers()` frees `s_flacStreamTitle`
+   during `setDecoderItems`, so anything the de-ogger extracts has to survive outside the decoder's lifecycle.
+   The WebUI alone stayed empty because `netserver.cpp` built its frame with a raw `%s`: `jsonEscape()` and a 430-byte
+   buffer (512 minus the 41 bytes of frame around the value) fix that. The title is reported **once**: the poll no
+   longer logs it itself, because `handleShowStreamTitle()` already does under `METADATA_LOG`.
+
+5. **The PSRAM order is enforced by `setup()` instead of being a race.** In order: framebuffer windows and both VU
+   canvases in `display.init()`, the FFT scratch in `player.init()` (`Audio::vuScratchReserve()`), the WebUI cache
+   straight after LittleFS mounts (`netserver.primeFileCache()`, one-shot, so `begin()` still works if setup did not),
+   then `player.reservePsram()` for the de-ogger scratch and the ring. `options.h` carries the table and every `PSRAM@`
+   boot line reports it. The screensaver canvas is taken at boot whether `screensaverVU` is on or not, and
+   `VuWidget::init()` re-makes a canvas only when its **dimensions** change, because `initScreensaver()` runs on every
+   entry. The 1 MB floor in `AudioBuffer::init()` became named reserves for what cannot be allocated early - the SD File
+   Manager's 69,632-byte assembly buffer and the 64 KB decoder working set, one codec at a time - plus slack for
+   framebuffer churn, so a 2 MB board keeps a full ring with a gzipped WebUI and only FLAC pays when it steps down.
+
+6. **`slow stream` is gone.** The ring sitting below one max block is the steady state, not a symptom: the gate is
+   24,576 bytes and the decoder drains a whole block at a time, so the ring crosses it several times a second on a
+   healthy stream. The only honest starvation fact is five seconds with nothing arriving, reported once by
+   `Stream lost`, and a merely tight stream is described by `gap`, `buf` and frames/s on the `i2s:` line.
+
+7. **Diagnostics that stay.** `deogg:` reports the filter state with `read B/s` against `emitted B/s` (audio being
+   discarded is invisible to every counter that advances on the read) plus `meta`, `cm` (comment captures offered),
+   `rj` (reassemblies) and `c` (a capture pending across a page). The `i2s:` line carries `smp decoded/written` and
+   `nod`, and `smp` reads identical in every window - nothing is lost between decoder and DMA, so any shortfall is
+   producer-side. `FLACProfileReset()` keeps `flac cost` from printing stale numbers into an MP3 window. The `deogg:`
+   line is compiled only under `AUDIO_DEBUG`, and it can only print while the de-ogger is in the path - a line at
+   connect and one per track change, never for the life of a stream.
+
+8. **The decoder refuses reserved values** - `chanAsgn > 10`, `sampleSizeCode` 3 or 7 - so a garbage header cannot
+   reconfigure I2S to `96000 Hz, 1 ch, 8 bits` and produce the `-2/-4/-5/-11` burst that made a healthy stream sound
+   broken.
+
+9. **Not worth re-opening without a measurement: decoder speed.** `-O3` moved 5,278 cycles per frame to 5,267-5,289
+   across project-wide and `#pragma` variants and cost 128,724 bytes of flash, so the build stays `-O2`. With the
+   `decode`/`write` split now on the `i2s:` line, distorsion spends 23% of the window decoding and Radio Paradise 27-31%:
+   the `flac cost` total includes the blocking `i2s_write()`, so it must not be quoted as a decode cost. Measured per
+   FLAC frame on `mellow-flacm` (1441 kbit/s, block 4096, 44.1 kHz, 16-bit): 91,456 us total, of which `i2s_write()` is
+   ~61,000; residual 10,516 and lpc 2,677 are the whole of the Rice/LPC work - 13.2 ms of a ~29 ms decoder frame. The
+   other ~16 ms is header parse, the subframe walk, stereo decorrelation and output scaling, which **no instrument
+   covers yet, and it is the larger target**: measure it before any hot loop is touched.
+
+10. **A prefetch cap for live streams: considered, rejected.** The ring roams 595 KB to 1.33 MB (869 KB-1.03 MB through
+    the six-hour soak) because these servers send in bursts faster than real time. A cap would be a stop-reading
+    watermark, not a smaller ring, and its only effect would be to *shrink* the buffer: `nod 0`, `sil 0 runs` and `smp`
+    equal for six hours say the buffer is doing its job, and the servers that hand out only 150-250 KB stay safe
+    because of it. `BUFFERBAR_VISUAL_FULL_KB` stays at 250 for the same reason.
+
+11. **One crash to watch, not ours.** `assert failed: udp_new_ip_type ... (Required to lock TCPIP core functionality!)`
+    on `loopTask` at a `connecttohost` while the file updater, MQTT and the radio-browser click were all in flight -
+    IDF's lwIP thread-safety check, a UDP socket created while another task held the TCPIP core. The tree has **zero**
+    UDP call sites (no `WiFiUDP`, no `udp_new`, no `configTime`/SNTP), so the caller is IDF or a library. `builds/patch/`
+    does change lwIP's window, receive mailbox and `MAX_ACTIVE_TCP`, so if it returns, revert those two first.
+
+12. **The PSRAM budget reports its own steps, and the step is named.** The `[Heap]`/`[PSRAM]` walk is every minute (the
+    LittleFS query stays at ten), the PSRAM line names framebuffer+canvas, cache and `Ring+other`, and a move past
+    16 KB logs `PSRAM step:` or `Heap step:`. The 247 KB a 2.5-hour soak showed as unattributed is the **FLAC decoder
+    set**, taken at the first FLAC stream start by `FLACDecoder_AllocateBuffers()`: 192 KB of it is `s_samplesBuffer`
+    (2 x `MAX_BLOCKSIZE` 24,576 x int32), the rest the Ogg carry and the header/metadata structs.
+    `FLACDecoder_FreeBuffers()` frees all of it and two station changes returned `Ring+other` to the same 1894 KB, so it
+    is a floor, not a leak. The 93 KB on top of that on an `https` station is its live TLS session, which mbedTLS takes
+    from PSRAM by design and releases with the connection. `PSRAM_RESERVE_DECODER` was 64 KB and is now 256 KB: the old
+    figure would have failed FLAC outright on a 2 MB board, where the ring takes everything above the floor.
+
+13. **A Vorbis stream could crash the device, and no longer can.** `dgLooksLikeMetadata()` accepted "block header type
+    0-6 with a non-zero length" as FLAC metadata, which an Ogg Vorbis header (`0x01`/`0x03`/`0x05` + `vorbis`) also
+    satisfies - so the de-ogger captured Vorbis comment packets and parsed them as FLAC, visible as `strip 0` with `cm 5`
+    in its own line. `FLACOfferCommentPacket()` then read the vendor length out of Vorbis text, went negative as
+    `int32_t`, slipped past the `> end` test and became a pointer offset: `LoadProhibited` on `loopTask`, the same PC
+    and backtrace on every preview of that station. Vorbis and Opus headers are now refused by name, the vendor length
+    is checked against the block it has to fit inside, and the title is copied by length instead of `strncat` because a
+    comment field is length-prefixed and need not be NUL-terminated.
+
+14. **A station refused by both identities now ends with a message.** Two faults sat behind "the WebUI says it is
+    playing and pause shows [stopped]": the alternate-user-agent retry reconnected with the *same* identity (the UA flag
+    is reset by a successful header parse, so using it as the attempt counter made "retrying once" print four times), and
+    when the budget ran out the library logged one line and stopped - no `audio_showstreamtitle`, no verdict, so
+    `noteFatalStream()` never ran. The retry is now gated on a function static in each response-header case, untouched by
+    `setDefaults()` and by `lastToDo:`, so it happens at most once per chain; and at the cap both paths
+    `setRefuse(STREAM_REFUSE_UNSUPPORTED, "refused with both user agents")`, which the core already turns into a
+    permanent stop. Measured: ABC's HLS playlist answers 403 to both identities, and the device now shows
+    `Error connecting to <url>` in about four seconds instead of sitting in PLAYING for thirty. The player's own
+    `STREAM_START_DEADLINE_MS` (30 s) is the backstop, proven healthy by the `arm gate:` trace - it was never the
+    problem, only too slow to be the answer.
+
+15. **An HLS segment request must never travel on the playlist's connection.** `httpPrint()` reconnected only when
+    `!_client->connected()`, so as soon as the playlist was open every segment request was written down *that* socket -
+    `GET /<segment>.aac` sent to the playlist's host, which of course does not have it: the CDN answered 404, no connect
+    was logged, and `m_lastHost` (the playlist) is what the error message printed, which made a perfectly good station
+    look like a dead URL.  Real chains do this: scastream's media playlist lists segments on `lax-sa46…`/`syd-sa46…` at
+    `https:443` while the playlist itself was plain `http:80`, and curl fetched every one of those URLs with our own
+    agent and no cookie.  `httpPrint()` now derives the scheme and port from the URL, and reconnects whenever the
+    target's host/port/scheme differs from the socket in use, stopping the old one first.  The same guard was in the
+    VS1053 fork and is fixed there too.  Also on that path: the user agent was the literal `VLC/3.0.21 …`, so the core
+    did not control identity for HLS segments at all; it now sends `STREAM_USERAGENT` or `STREAM_USERAGENT_ALT`.
+
+16. **The FLAC tag parser now has a twin in the VS1053 fork, and the twin is deliberate.** The chip reports audio and no
+    text, and an Ogg FLAC stream carries no ICY metadata, so a FLAC station on the VS1053 board showed no title at all
+    while the same station had one here. That fork's `feedOggFlac()` already walks pages, so the VORBIS_COMMENT parse was
+    written there as `v1053CommentTitle()` / `v1053VorbisComment()` instead of hoisting `FLACOfferCommentPacket()` into a
+    shared header: this file's de-ogger is the most delicate code in the tree and it was left untouched. The consequence
+    is a standing obligation recorded in both notes - **`dgLe32` / `dgKeyIs` / `FLACOfferCommentPacket()` here and the
+    `v1053*` copies there are the same parser**, so a bound check changed in one belongs in the other. The vendor-length
+    test from item 13 is the one that matters: a length read from foreign data must never become an offset.

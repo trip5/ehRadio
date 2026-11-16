@@ -489,7 +489,6 @@ bool ScrollWidget::scrollWanted() const {
 // Take the turn: one step, and the slot stays ours until _calcX() ends the sweep.  Only Page::loop() calls this, and
 // only while the slot is free, which is what makes the ownership fair: the page serves the lines in turn instead of
 // letting whichever line happens to be due first in widget order take the slot again and again.
-// See plans/scroll-turn-fairness.md.
 void ScrollWidget::scrollTurn() {
   if (!_scrollReady() || dsp.getScrollId() != NULL) return;
   _scrolldelay = millis();
@@ -1542,6 +1541,15 @@ void ClockWidget::_clear(){
 /**************************
       BITRATE WIDGET
  **************************/
+/* Three characters, always - the width both this badge and the bitrate text widget are placed for.  The rule and the
+   rounding are documented where it is declared, in widgets.h. */
+void formatBitrate3(uint16_t kbps, char* out, size_t room){
+  if(kbps < 1000) { snprintf(out, room, "%u", (unsigned)kbps); return; }
+  unsigned tenths = ((unsigned)kbps + 50u) / 100u;   // round to one decimal of a Mbit
+  if(tenths > 99u) tenths = 99u;                     // 9.9 is the ceiling a three-character field can hold
+  snprintf(out, room, "%u.%u", tenths / 10u, tenths % 10u);
+}
+
 void BitrateWidget::init(BitrateConfig bconf, uint16_t fgcolor, uint16_t bgcolor){
   Widget::init(bconf.widget, fgcolor, bgcolor);
   _dimension = bconf.dimension;
@@ -1552,8 +1560,8 @@ void BitrateWidget::init(BitrateConfig bconf, uint16_t fgcolor, uint16_t bgcolor
 }
 
 void BitrateWidget::setBitrate(uint16_t bitrate){
-  _bitrate = bitrate;
-  if(_bitrate>999) _bitrate=999;
+  _bitrate = bitrate;   // the raw kbit/s value: the three-character rendering happens in _draw(), so a 1.4 Mbit FLAC
+                        // stream reads "1.4" instead of pinning at a 999 ceiling
   _draw();
 }
 
@@ -1582,7 +1590,7 @@ void BitrateWidget::_draw(){
   dsp.setTextSize(_config.textsize);
   dsp.setTextColor(_fgcolor, _bgcolor);
   if (_bitrate == 0) _buf[0] = '\0'; // work-around so we get blank space on badge instead of 0 (for VS1053)
-    else snprintf(_buf, 6, "%d", _bitrate);
+    else formatBitrate3(_bitrate, _buf, sizeof(_buf));
   dsp.setCursor(_config.offset + _dimension/2 - _charWidth*strlen(_buf)/2 + 1, _config.top + _dimension/4 - _textheight/2+1);
   dsp.print(_buf);
   dsp.setTextColor(_bgcolor, _fgcolor);
@@ -1701,8 +1709,14 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
   dsp.setCursor(TFT_BORDER, textY);
   if (name && name[0] != '\0') {
     if (config.store.numplaylist) {
+      // Clipping is deliberate - the number takes part of a narrow column - but it has to be spelled as a bounded
+      // append rather than left to snprintf, which GCC 14 at -O2 reports as -Wformat-truncation because it cannot know
+      // the truncation is intended.  Behaviour is the same: the tail is cut at sizeof(label).
+      char idbuf[8];
+      snprintf(idbuf, sizeof(idbuf), "%d ", stationId);
       char label[STATION_FIELD_LENGTH / 2 + 6];
-      snprintf(label, sizeof(label), "%d %s", stationId, name);
+      strlcpy(label, idbuf, sizeof(label));
+      strlcat(label, name, sizeof(label));
       dsp.print(label);
     } else {
       dsp.print(name);

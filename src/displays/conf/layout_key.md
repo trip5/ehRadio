@@ -101,7 +101,7 @@ left edge and a top. This cell was called `left`, which was true for the first r
 `ScrollConfig` — a line of text that can scroll. `{ { offset, top, fontsize, align }, width }`. The text buffer is
 not a conf field: it is `WIDGET_BUFF_SIZE` in [`widgets.h`](../widgets/widgets.h), one size for every conf, with two
 exceptions - the weather row and the screensaver's info line take `COMPOSED_LINE_BUFF` sizes of their own, because they
-are handed composed strings. See [`plans/widget-text-buffer-sizes.md`](../../../plans/widget-text-buffer-sizes.md).
+are handed composed strings.
 
 **A line has no pace of its own.** `scrolldelay`, `scrolldelta` and `scrolltime` used to sit in every one of these,
 the same numbers in nearly every layout, and they were the only control over how much of the display a scrolling line
@@ -111,12 +111,11 @@ took - which a layout author could neither see nor be trusted with. They are ret
 `myoptions.h`. The step size and the redraw pitch are derived from those, so there is no pitch to set. A line declares
 only which KIND it is (`setScrollRole()`: meta, titles, playlist, weather, boot) so it gets the right hold. An old conf
 or layout file that still carries the three values imports fine - they are ignored, not converted.
-See [`plans/scroll-global-speed-and-delay.md`](../../../plans/scroll-global-speed-and-delay.md).
 
 The hold is a wait, not a priority: it is how long the line parks before its first move and again after each wrap,
 and when several lines overflow they take the panel's single scroll slot in turn - round-robin, starting after the line
 served last. A hold of `0` (`SCROLLDELAY_WEATHER`, `SCROLLDELAY_BOOT`) makes the line ready at once; it does not make
-it win. See [`plans/scroll-turn-fairness.md`](../../../plans/scroll-turn-fairness.md).
+it win.
 
 `FillConfig` — a rectangle, solid or as a frame. `{ { offset, top, 0, 0 }, width, height, outlined }`: a fill
 reads neither `fontsize` nor `align`, so both of those cells are written `0`, and the header says so. With
@@ -177,7 +176,7 @@ title*, so a setup screen looks the same whatever layout is selected. It is the 
 The last five are **rectangles**: `width` and `height` can be anything — a `1` makes a line, a large
 pair makes a panel or a band — and `outlined` decides between a solid fill and just its frame (above).
 `false` is what every conf writes today, so an existing layout keeps the pixels it always had.
-| `bitrateConf` | Widget | Bitrate text (independent of the codec badge: a layout may have either, both or neither) |
+| `bitrateConf` | Widget | Bitrate text (independent of the codec badge: a layout may have either, both or neither). The number substituted into the conf's `bitrateFmt` is **always three characters** - `320` below 1000, `1.4` from 1000 up, where the decimal point is the unit (1.4 Mbit/s) - so `bitrateFmt` takes `%s`, not `%d` |
 | `voltxtConf` | Widget | Volume number |
 | `batteryConf` | Widget | Battery |
 | `iptxtConf` | Widget | IP address |
@@ -335,9 +334,8 @@ per-layout booleans now, and they are the first two entries of the TRANSFORMS gr
 | `fullClock` | the divider and the day/date column right of the time |
 | `seconds` | the seconds block right of the time |
 
-Which layouts want which, and why, is worked through in `plans/font-overhaul.md` §2.11. The one that
-catches people out is that **the same clock size can go either way**: the 35 px TFT family shows
-neither, while the ILI9225 — a 35 px panel too — shows both.
+Which layouts want which and why differs per panel. The one that catches people out is that **the same clock size
+can go either way**: the 35 px TFT family shows neither, while the ILI9225 — a 35 px panel too — shows both.
 
 **At the two smallest clock sizes `fullClock` gives you the date alone.** Size index 0 (no clock font — the
 built-in cell) and 1 (15 px) have no room for a divider column: the divider's gap is a pixel or two, and the

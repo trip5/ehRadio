@@ -37,10 +37,14 @@
 #endif
 
 // Feed the task watchdog from inside a long card operation.  Web handlers run in AsyncTCP's task, which is subscribed,
-// so a card that takes seconds would abort the device rather than merely be slow.  The tick also lets other tasks run,
-// and where the caller is not subscribed esp_task_wdt_reset() reports ESP_ERR_NOT_FOUND harmlessly.
+// so a card that takes seconds would abort the device rather than merely be slow.  The tick also lets other tasks run.
+//
+// The guard is load-bearing on IDF 5.x.  "where the caller is not subscribed esp_task_wdt_reset() reports
+// ESP_ERR_NOT_FOUND harmlessly" is false on IDF 5.5: it logs an ERROR on every call, which in this loop would be
+// hundreds of blocking UART writes during a card walk.
+// esp_task_wdt_status() answers the same question without logging, and exists on both platforms.
 static inline void sdFeedWatchdog() {
-  esp_task_wdt_reset();
+  if (esp_task_wdt_status(NULL) == ESP_OK) esp_task_wdt_reset();
   vTaskDelay(1);
 }
 

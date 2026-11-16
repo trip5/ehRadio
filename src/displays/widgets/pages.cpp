@@ -61,7 +61,7 @@ Page::~Page() {
 // wants one, the page's widget order no longer decides who scrolls, and a SCROLLDELAY_WEATHER of 0 (dspconf.h) stops
 // meaning "always".  The owner then keeps the slot for its whole sweep and steps in its
 // own loop() below.  A page with a single scrolling line is unaffected: it is the only candidate, so it is served at
-// every handover.  See plans/scroll-turn-fairness.md.
+// every handover.
 void Page::loop() {
   if (!_active) return;
   if (!_widgets.empty() && dsp.getScrollId() == NULL) {

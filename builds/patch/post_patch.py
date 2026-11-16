@@ -1,21 +1,22 @@
 """
-post_patch_lwip.py - let the build link our liblwip.a without editing the package.
+post_patch.py - let the build link our rebuilt archives without editing the package.
 
 The Arduino builder resolves ESP-IDF archives by name (-llwip) through $LIBPATH, whose first
 entry is normally <libs package>/lib. Prepending our own directory puts the patched archive
 ahead of it and nothing in the PlatformIO packages tree is ever read-write. If the archive is
 missing this script does nothing, so an unpatched checkout builds exactly as before.
 
-The post-link line exists so a build log always states which lwIP went into the firmware - the
-question "did the patch actually link?" should never need a guess. See
-plans/lwip-rebuild-patch.md.
+The post-link line exists so a build log always states which archives went into the firmware - the
+question "did the patch actually link?" should never need a guess.  It names the count as well, because
+the folder can hold more than liblwip.a (the three mbedTLS archives, when --mbedtls was used). See
+patch.md in this folder.
 """
 Import("env")
 
 import hashlib
 from pathlib import Path
 
-PREFIX = "LWIP patch"
+PREFIX = "Patch"
 PATCH_ROOT = Path(env.subst("$PROJECT_DIR")) / "builds" / "patch"
 
 
@@ -31,9 +32,10 @@ def _mcu():
     return env.BoardConfig().get("build.mcu", "esp32")
 
 
-def _announce_after_link(archive_sha):
+def _announce_after_link(archive_sha, mcu, archives):
     def _report(source, target, env):
-        print(f"{PREFIX} linked: liblwip.a {archive_sha}")
+        print(f"{PREFIX} linked: liblwip.a {archive_sha} "
+              f"({len(archives)} archive(s) from builds/patch/{mcu}: {', '.join(archives)})")
 
     try:
         # The display string matters: without it SCons echoes the whole function repr and the
@@ -46,7 +48,8 @@ def _announce_after_link(archive_sha):
         print(f"{PREFIX}: could not hook the link step ({exc})")
 
 
-archive = PATCH_ROOT / _mcu() / "liblwip.a"
+mcu = _mcu()
+archive = PATCH_ROOT / mcu / "liblwip.a"
 if archive.is_file():
     env.Prepend(LIBPATH=[str(archive.parent)])
-    _announce_after_link(_sha256(archive))
+    _announce_after_link(_sha256(archive), mcu, sorted(path.name for path in archive.parent.glob("*.a")))

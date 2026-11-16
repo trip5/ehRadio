@@ -73,17 +73,23 @@ void Utility::sleepCore() {
         esp_sleep_enable_gpio_wakeup();
       #else
         // ESP32 classic: ext1 wake on HIGH transition (button RELEASE)
-        // Wait for all wake pins to be released before sleeping
-        for (uint8_t retry = 0; retry < 300; retry++) {  // ~3s max
+        // Wait for all wake pins to be released before sleeping.  The bound is a millis deadline, not a counter: it
+        // used to be a uint8_t compared against 300, which eight bits can never reach, so the limit never fired and a
+        // held pin spun here for ever - the "3s max" was never true.  Give up and say so: sleeping with a pin still
+        // low only costs an immediate wake, while hanging in the main loop costs the whole device.
+        const uint32_t startMs = millis();
+        bool released = false;
+        while((uint32_t)(millis() - startMs) < 3000u) {
           bool allHigh = true;
           for (uint8_t i = 0; i < 40; i++) {
             if (mask & (1ULL << i)) {
               if (digitalRead(i) == LOW) { allHigh = false; break; }
             }
           }
-          if (allHigh) break;
+          if (allHigh) { released = true; break; }
           delay(10);
         }
+        if (!released) WARNINGLOG("sleep: a wake pin is still low after 3s, sleeping anyway");
         esp_sleep_enable_ext1_wakeup(WAKE_GPIO_MASK, ESP_EXT1_WAKEUP_ANY_HIGH);
       #endif
     }
@@ -105,7 +111,11 @@ void Utility::requestSleepWake() { sleepWanted = 2; }  // sleep, then wake after
 // does the teardown once the hold has expired.  Deliberately non-blocking: the display task needs those seconds to draw,
 // and the audio task keeps feeding through them.
 void Utility::serviceSleep() {
+  // sleepAtMs lives inside the same guard as its two uses: a build with DEEP_SLEEP_DISABLE (the CI environments) has
+  // no hold phase, and an always-declared variable then reads as unused.
+  #ifndef DEEP_SLEEP_DISABLE
   static uint32_t sleepAtMs = 0;
+  #endif
   static bool     holding   = false;
   const uint8_t what = sleepWanted;
   #ifndef DEEP_SLEEP_DISABLE

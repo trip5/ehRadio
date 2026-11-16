@@ -1480,13 +1480,18 @@ void FileManager::leave(bool resumeAudio, const char *why) {
   // SmartStart hands the audio back by station index, which stops meaning anything once the card has changed.
   const bool smartStart = resumeAudio && _wasPlaying && config.store.smartstart;
   const bool cardChanged = smartStart && _cardChanged;
-  if (smartStart && !cardChanged && sdman.ready) {
+  // The derived pair is asked for directly, not inferred from the flag: a station NUMBER means a different file once
+  // the list has changed, and the list is exactly what these two files hold.  A resume against a dropped pair is then
+  // impossible however the flag got lost - which it did, after an upload, and played the old offset into a new list.
+  const bool pairPresent = smartStart && sdman.ready &&
+                           sdman.exists(INDEX_SD_PATH) && sdman.exists(PLAYLIST_SD_PATH);
+  if (pairPresent && !cardChanged) {
     FUNCTIONLOG("SDFileManager", "Resuming card playback (offset %lu)", (unsigned long)config.sdResumePos);
     player.sendCommand({PR_PLAY, config.lastStation()});
   } else {
     // One line for the whole close, naming the reason; the numbers say why the player was not handed back.
-    FUNCTIONLOG("SDFileManager", "Closed the SD File Manager (%s) without resuming: was playing %d, smartstart %d, resume allowed %d, card changed %d",
-                why, (int)_wasPlaying, (int)config.store.smartstart, (int)resumeAudio, (int)cardChanged);
+    FUNCTIONLOG("SDFileManager", "Closed the SD File Manager (%s) without resuming: was playing %d, smartstart %d, resume allowed %d, card changed %d, pair present %d",
+                why, (int)_wasPlaying, (int)config.store.smartstart, (int)resumeAudio, (int)cardChanged, (int)pairPresent);
   }
 }
 
@@ -1494,8 +1499,10 @@ void FileManager::loop() {
   // A session's mutations owe ONE re-index, paid here after the mode has closed - never while it is open and never
   // from a handler, so no handler blocks AsyncTCP on the walk. The card must still be there, or the debt is dropped.
   if (!_active && _cardChanged && (int32_t)(millis() - _reindexNotBeforeMs) >= 0) {
-    _cardChanged = false;
+    // Cleared only where it is paid.  Clearing it up front and then failing the guard below is how an upload's re-index
+    // disappeared with nothing in the log, leaving a dropped playlist for the next resume to trust.
     if (sdman.ready && config.getMode() == PM_SDCARD) {
+      _cardChanged = false;
       // Before the first flash write, so the page can blank and spin for the whole walk; a flag read back by the case
       // in netserver, so a page connecting mid-walk is told the same thing.
       _rebuilding = true;
@@ -1551,6 +1558,16 @@ void FileManager::loop() {
       } else {
         _reindexTries = 0;
       }
+    } else if (config.getMode() == PM_SDCARD) {
+      // Still in card mode but the card is not mounted this pass: keep the debt and look again after the retry delay.
+      _reindexNotBeforeMs = millis() + SD_REINDEX_RETRY_MS;
+    } else {
+      // The mode has moved on.  Dropping the debt is safe because initSDPlaylist() at the next entry rebuilds whenever
+      // the index file is absent - which is what actually repaired the card after an upload that never re-indexed - but
+      // it is said out loud now instead of vanishing.
+      _cardChanged = false;
+      FUNCTIONLOG("SDFileManager", "Re-index dropped: mode %d is not the card, the next entry rebuilds it",
+                  (int)config.getMode());
     }
   }
 

@@ -89,7 +89,6 @@ class VuWidget: public Widget {
     // The screensaver's bar family has its segment count and its level axis computed by initScreensaver() rather
     // than by the layout.  Nothing else needs a flag any more: the axis is snapped so the boxes divide exactly and
     // the historical loop in _drawBars() draws them unchanged, which is what keeps the player page untouched.
-    // See plans/screensaver-vu-equal-segments.md.
     // The layout's verdict from vuResolveBox(): false means the box does not fit the panel, so this instance
     // takes no canvas and paints nothing.  The screensaver's own meter always fits, so it is true there.
     bool _drawable = true;

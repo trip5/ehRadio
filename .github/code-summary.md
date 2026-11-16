@@ -247,28 +247,64 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - `[ehradio] build_flags` also carries `-fno-exceptions`: 8.0.0's Arduino/IDF is ~276 KB bigger than 7.1.3 and an
     8 MB board's slots are 3.19 MB, so the ~82 KB it returns is the margin. `-flto` cannot be used - the IDF half ships
     precompiled without fat LTO objects, so the link fails, and `-ffat-lto-objects` then disables it without saying so.
-    `plans/esp32-platform-8-upgrade.md` has the measurements.
+  - `[ehradio] build_flags` carries **`-O2`** and `build_unflags = -Os`. The framework hands our sources `-Os`, and on
+    7.1.3 that reached GCC 8.4 while on 8.0.0 it reaches GCC 14.2 - the same flag, a different compiler, and the MP3
+    decoder went from ~3,300 to ~8,100 cycles per frame: 0.66x realtime, which is every stream stuttering with
+    `auto_clear` padding the gaps. At `-O2` it returns to 5,300 cycles/frame and 44,100 frames/s. The image got **19 KB
+    smaller** too, because `-Os` suppresses inlining rather than merely compressing. If a future platform bump makes
+    the same source run slower, check the optimisation level before anything else: the flag in the log looks unchanged.
+    The investigation ruled out the clock, the ALU/FPU, the flags list, cache geometry, Wi-Fi buffers, task
+    affinity and heap placement.
 - Risk:
   - Wrong env can compile without required modules because files are source-filtered.
   - Editing `options_overrides.h` may not rebuild library objects: when the header was introduced, only `src/` TUs were
     recompiled and every `libXXX` object was left alone. A changed *value* can therefore stay inert until the affected
     env is cleaned (`pio run -t clean -e <env>`).
 
-### `builds/patch/` (a rebuilt ESP-IDF archive, and how it gets linked)
+### `builds/patch/` (rebuilt ESP-IDF archives, and how they get linked)
 - lwIP's TCP receive window is a compile-time constant (`CONFIG_LWIP_TCP_WND_DEFAULT`, 5760 in the shipped package), so
   a larger window requires recompiling `liblwip.a`. `setsockopt(SO_RCVBUF)` cannot do it: lwIP documents `recv_bufsize`
   as "not used for TCP: adjust TCP_WND instead!", and `TCP_WND_MAX(pcb)` *is* `TCP_WND` while window scaling is off.
-- `make_lwip_patch.py` does the one-off rebuild: reads the IDF version from the installed package's `versions.txt`,
-  clones ESP-IDF at that tag with submodules into `%TEMP%`, builds only `esp-idf/lwip/liblwip.a` with `ninja`, and
-  copies it to `builds/patch/<mcu>/liblwip.a` next to a generated `patch-info.txt`. It never writes to the packages tree.
-- `post_patch_lwip.py` shadows that archive with `env.Prepend(LIBPATH=[builds/patch/<mcu>])` — the builder resolves
-  `-llwip` by name through `LIBPATH`, so the prepended directory wins. `pre_patch_lwip.py` compares `patch-info.txt`
-  against the live package (IDF version, `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are
-  silent/no-ops when no archive exists.
-- Reverting is deleting a directory. Two measurement traps are recorded in `plans/lwip-rebuild-patch.md`: the firmware
+- `make_patch.py` does the one-off rebuild: reads the IDF version from each installed package's `versions.txt`, clones
+  ESP-IDF at that tag with submodules into `%TEMP%`, builds only the archives needed with `ninja`, and copies them to
+  `builds/patch/<mcu>/` next to a generated `patch-info.txt`. It never writes to the packages tree. **With no
+  `--target` it patches every installed `framework-arduinoespressif32-<mcu>-libs` package in one run**; an explicit
+  `--target` narrows it. Defaults are `--wnd 32768 --recvmbox 32`, a pair measured on hardware to hold a stream buffer
+  that used to empty out.
+- `post_patch.py` shadows the folder with `env.Prepend(LIBPATH=[builds/patch/<mcu>])` — the builder resolves `-llwip`
+  by name through `LIBPATH`, so the prepended directory wins — and prints one `Patch linked: liblwip.a <sha> (N
+  archive(s) ...)` line after the link. `pre_patch.py` compares `patch-info.txt` against the live package (IDF version,
+  `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are silent/no-ops when no archive exists.
+- Reverting is deleting a directory. Two measurement traps: the firmware
   **byte count does not change** when the window does (`ili9488` was 3158691 either way), so compare binary hashes or
   count `firmware.map` references instead; and `TCP_RECVMBOX_SIZE` (6) caps in-flight data at ~8.6 KB, so a window-only
-  bump would appear to do nothing.
+  bump would appear to do nothing. The window and the mailbox are a pair for the same reason: 32 KB of window is 23
+  segments at MSS 1436.
+- `--mbedtls` also rebuilds `libmbedcrypto/libmbedx509/libmbedtls` with `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`, which
+  moves `mbedtls_calloc` to PSRAM. **Every** TLS user then allocates its handshake buffers from PSRAM - audio streams,
+  `HTTPClient`, `WiFiClientSecure`, `ESPFileUpdater` - and the ~40 KB contiguous *internal* figure that used to gate TLS
+  work is obsolete. Any gate asking "can a handshake be paid for" must therefore probe the allocator (`mbedtls_calloc`,
+  16 KB + 16 KB + context held at once) rather than name a pool: that is what `heapCanAffordTls()` in `network.cpp` and
+  `checkHeapForSSL()` in the local ESPFileUpdater now do. A version check cannot answer it, because Arduino core 3.3.12
+  ships `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y` and cannot see a rebuilt archive.
+
+### `src/libraries/I2S_utilities/` (diagnostic scripts, not firmware)
+- Python/PowerShell tools that read a captured stream off-device: `inspect_ogg_flac.py` walks an Ogg FLAC capture and
+  reports every packet and metadata block, `simulate_deogg.py` replays `FLACDeOgg()` over a capture, and
+  `test_hls_session.ps1` probes an HLS chain (entry, child playlist, segment) with and without a cookie jar.
+- The folder sits under `src/libraries/` but contains no C/C++ source, so the dependency finder ignores it. It is the
+  home for one-off diagnostics that turned out to be worth keeping; captures and `*.bin` artifacts do not belong in git.
+
+### `src/libraries/ESPFileUpdater/` (local copy of an external library)
+- Kept portable: it must work on cores and boards without PSRAM, and its default behaviour is what upstream would ship.
+- `checkHeapForSSL()` asks the allocator instead of `ESP.getFreeHeap()`: three `mbedtls_calloc` blocks held at once,
+  compiled unchanged where `MBEDTLS_PLATFORM_MEMORY` is undefined. No project switch, no version table.
+- `copyBodyToFile()` reads chunk data, the chunk CRLF and the size line through helpers with one overall deadline
+  (`setReadDeadline()`, default 15 s). **A short read is not the end of the body**: `Stream::readBytes()` returns early
+  whenever the socket timeout fires, and the old code called that "framing invalid or truncated" and discarded the
+  download - which is why the 103,587-byte radio-browser search JSON aborted at 36,858 bytes every time while curl read
+  it in under a second. `setReadDeadline()` is deliberately *not* `setTimeout()`: the latter bounds one socket read, the
+  former bounds total waiting within a chunk. Changes are recorded in `upstream-notes-2026.11.12.txt` for that repo.
 
 ### `myoptions.h`
 - Board/profile selector and hardware wiring table.
@@ -730,8 +766,7 @@ All modules in `src/core/` follow the **class + global instance** pattern:
     s of a 23.2 s boot** — 33 lookups each, run twice, because the second one re-answered a question
     `checkLittleFSandVer()` had already answered. `config.wwwFilesExist` is now computed once there and reused by
     `initPlaylistMode()`.
-  - **The filesystem is LittleFS, and four of its differences from SPIFFS are load-bearing** (migrated from SPIFFS; full
-    reasoning in `plans/spiffs-to-littlefs.md`):
+  - **The filesystem is LittleFS, and four of its differences from SPIFFS are load-bearing** (migrated from SPIFFS):
     - **The partition label is `littlefs` but the partition SubType stays `spiffs`.** LittleFS resolves its partition
       through `esp_vfs_littlefs_register()`'s `partition_label`, so `FS_PARTITION_LABEL` / `FS_MOUNT_POINT` in
       `config.h` are passed explicitly to `LittleFS.begin()` — the Arduino default is still the legacy label `spiffs`.
@@ -1100,7 +1135,7 @@ connect bound**:
 **The reload storm is the trigger, and the guard was withdrawn.** A reload opens a new websocket before the old
 closes (22 clients, 3 KB heap); the `MIN_MALLOC` guard in `onWsEvent()` went away because that websocket carries
 every setting to `script.js` (`setupElement`), so a refused client shows the page its defaults and the user
-thinks the radio forgot everything. The loader-side wait (`plans/network-recovery.md` §F11) was not built.
+thinks the radio forgot everything. The loader-side wait was not built.
 
 ## `src/core/player.h` / `player.cpp`
 - `player.h` declares player command queue, playback API, and status.
@@ -1150,7 +1185,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     is the smallest **even-bit** power of two `>= n`, so fewer than half of all counters are skipped and a step costs two
     checks on average. **A shuffle bag was considered and rejected** (4 bytes per track = 4 MB at a million tracks), and
     **seeding a PRNG once cannot do this**: reducing a large output space onto `n` values repeats by the birthday bound
-    whatever the period. See `plans/shuffle-without-repeats.md`.
+    whatever the period.
   - **`setReady()`: the text a mode shows before anything has started playing in it - the one place a mode entry decides
     the title lines.** Called from `Config::changeMode()` (both directions, beside the `NEWSTATION`/`NEWTITLE` requests
     it already sends), from `SDManager::trySdRemount()`, and from the SD manager's close. It clears the player error and
@@ -1193,8 +1228,8 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **`lastSdStation` is a deferred save.** Both write sites - the `lastStation()` setter in `config.h`, which
   `next()`/`prev()` reach from inside the audio EOF callback, and `_play()`'s own save - use
   `saveValueButWait(..., 5000)`. An immediate `saveValue` there put an NVS commit (and its page compaction) on the
-  main loop at every track change; `plans/sd-playback-silent-stop.md` has the measurements and the remaining hole
-  (NVS still runs on the main task when the deferred slot fires).
+  main loop at every track change. The remaining hole: NVS still runs on the main task when the deferred slot
+  fires.
 
 ## `src/core/audiohandlers.h` / `audiohandlers.cpp`
 - Callback bridge used by the audio libraries.
@@ -1275,8 +1310,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   (`DSP_WIDTH - 2*TFT_BORDER`), so `offset = 0` with the panel's full width would centre the text `TFT_BORDER` LEFT
   of the panel's centre. A line that fits is drawn once and sits still; only a line wider than the span scrolls, at
   the three-quarter speed above, and only then does its mark appear at the wrap. A former
-  `ScrollWidget::setTextLooped()` repeated short lines until they overflowed so that everything moved; it is gone,
-  and `plans/screensaver-line-loop.md` is superseded by `plans/screensaver-line-centre.md`. The composition above
+  `ScrollWidget::setTextLooped()` repeated short lines until they overflowed so that everything moved; it is gone and the line is now composed once and centred. The composition above
   it, `ssRowH()` and `_ssContentH()` are untouched, so the strip's height and the clock's walk floor do not move -
   it is the text's PARTS that size the strip. Every other row in the firmware still
   calls plain `setText()`. **A part the line would only repeat is left out:** an untagged SD file's "station name"
@@ -1286,15 +1320,13 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   they match, so `03 - Song Title.mp3` reads `03 * Song Title`. That skip is the SCREENSAVER's alone: the player
   page's meta line still shows it. The partial duplicate `handleId3Artist()` creates in SD mode - the name
   overwritten by the artist tag, i.e. `The Beatles * The Beatles * Something` - is deliberately not covered; the
-  same predicate against `t1` would close it. See `plans/screensaver-panel-ownership.md`,
-  `plans/screensaver-line-scroll.md`, `plans/screensaver-line-centre.md`,
-  `plans/screensaver-line-duplicate-name.md` and `plans/screensaver-line-weather-and-clock-snap.md`.
+  same predicate against `t1` would close it.
 - **The line's buffer is `COMPOSED_LINE_BUFF`** (`WEATHER_STRING_L + 2`, 514 bytes), passed to `_sstext` twice -
   at construction and again in the `init()` of the else branch, because `init()` re-mallocs both string buffers at
   the size it is given. The weather row takes the same size, for the same reason and in the same two places plus its
   own `_layoutChange()` re-init. This is what lets the composed line (name + title, or the forecast) arrive whole:
   the default widget buffer is `WIDGET_BUFF_SIZE` (172) and everything used to be 140, i.e. 138 bytes in a
-  `ScrollWidget`, which silently cut both. See `plans/widget-text-buffer-sizes.md`.
+  `ScrollWidget`, which silently cut both.
 - **A track change blanks the info line for one second** (`SS_LINE_HOLD_MS`, 1000 ms).  The trigger is the
   `SSHOLD` request, queued at the TOP of `Player::_play()` - after its guards, before `setDefaults()`,
   `loadStation()` and the title write - and handled in `Display::loop()` under `if (config.isScreensaver)`.  It has
@@ -1313,7 +1345,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   exactly the ones being refused.  `_switchMode()` clears the deadline in both screensaver branches - a fresh entry
   is not a track change and leaving takes the page away - while `_enterScreensaver()` deliberately does not, since
   `SSREBUILD` re-enters through it.  The strip keeps its height while blank, so `_ssContentH()` and the clock's
-  walk floor do not move.  See `plans/screensaver-line-hold.md`.
+  walk floor do not move.
 - **The screensaver owns the panel**: `_weatherHidden()` and `_clockHidden()` both answer for
   `config.isScreensaver` before anything else, because the WebUI is reachable while the device is asleep and
   both predicates are consulted from `_applyState()` (which runs its lock lines before its isScreensaver early
@@ -1334,7 +1366,6 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `_enterScreensaver()`'s and `_screensaverClockTarget()`'s business. `_moved` stays true, so the hand-back in
   `_switchMode(PLAYER)` still restores the conf position; the lock and `hideWeatherIfChanged()` in that function
   are untouched, because `_clockHidden()` already answers for `config.isScreensaver`.
-  See `plans/screensaver-line-weather-and-clock-snap.md`.
 - **A user action wakes the panel, and the wake is explicit.** The screensaver is only ever left by a
   `NEWMODE, PLAYER`, which is issued from two places: `Controls::screenSaverExit()` - which every panel handler
   (encoder, buttons, IR) runs first, clearing the display queue, restarting the countdown and queueing the mode -
@@ -1374,7 +1405,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   `APPLYSTATE`, `SHOWVUMETER`, `DRAWVOL`), so losing the older half of a pair is harmless. `SDINDEXSTART`/`SDINDEXDONE`
   still wait for room (`DSQ_CRITICAL_WAIT`) rather than queue behind an eviction. This replaced drop-the-newcomer, which
   lost a `NEWTITLE` outright on a saturated queue and left the previous track's title on the panel - the Big Text
-  "title 2 pixels around the weather" report. See `plans/big-text-title2-weather-overlap.md`.
+  "title 2 pixels around the weather" report.
 - **`playerQueue` is split by TYPE instead**, because its entries are commands with side effects and an order:
   `PR_CHECKSD`/`PR_VUTONUS` are skipped outright when the queue has one free slot or fewer (idempotent, re-issued two
   seconds later - the field's `dropped cmd=7` was one of these), while `PR_PLAY`/`PR_STOP`/`PR_PREV`/`PR_NEXT`/
@@ -1657,7 +1688,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   where it is emitted and "Layout Editor" alone on a mono build. The token is emitted inside the
   `network.status == CONNECTED` block like every other display group, so in SoftAP the editor link is not offered.
   **The name is a deliberate reuse:** `group_tft` was deleted in the font-overhaul round, where it meant "not the
-  dummy display" and could never be false on a real build - see [`plans/font-overhaul.md`](../plans/font-overhaul.md).
+  dummy display" and could never be false on a real build.
 
 ## `src/core/commandhandler.h` / `commandhandler.cpp`
 - `commandhandler.h` declares command execution API for command strings.
@@ -1727,8 +1758,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     blocks** - that promise is what makes an audit a walk down two lists. `isBlockedForSource()` is the only
     authority for its *Blocked in HTTP/MQTT/Telnet* column. Beware the names that are not commands:
     `config.cpp`'s `CONFIG_KEY_ENTRY` keys are what a setting is stored under, and `vumeter` / `vupeak` happen to
-    exist as both. Six commands had gone undocumented before the 2026-10-07 audit
-    (`plans/commands-md-audit.md`), which is why the procedure below ends with them.
+    exist as both. Six commands had gone undocumented before the 2026-10-07 audit, which is why the procedure below ends with them.
   - own shared command aliases across ingress channels (`playstation`/`play`, `boot`/`reboot`, `vol+`/`volup`,
     `dim`/`brightness`, `dspon`/`screenon`)
   - player-command parity helpers (including exact-match-first direct URL playback command routing for `playurl` /
@@ -1805,8 +1835,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   <--------- NEEDS EDITING!`.
 - Docs: [`conf_tool.md`](../src/displays/conf/conf_tool.md) covers all four modes, including *A name that already
   exists is updated, not duplicated*, [`layout_key.md`](../src/displays/conf/layout_key.md) documents every field and
-  states the write-every-field, keep-the-headers and index-is-persisted rules. Reasoning:
-  `plans/conf-tool-json-update.md`.
+  states the write-every-field, keep-the-headers and index-is-persisted rules. Reasoning.
 
 ## `src/displays/conf/conf_index.h`
 - **The conf file's own table, described for the layout JSON parser and the editor page.** `dspcore.h` includes it at
@@ -1835,8 +1864,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - **No notation is ever stored.** The constants exist so the page can state the panel's own numbers and validate a
   value against the panel. Round 8 removed the last two ways notation could leak back: the per-cell macro tooltip
   (the values are now one line under `Display type`) and `conf_tool.py`'s revival of a number into a macro name,
-  which is why a `bandsConf` cell meaning "how many bands" could come back as `TFT_FRAMEWDT`. `plans/layout-editor.md`
-  carries the reasoning and the alternatives.
+  which is why a `bandsConf` cell meaning "how many bands" could come back as `TFT_FRAMEWDT`.
 
 ## `src/displays/layoutregistry.h` / `layoutregistry.cpp`
 - **`widgetsEditorEnabled` is the editor's own switch, and it is runtime-only.** It is a file-scope `bool` in
@@ -2537,7 +2565,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     endpoint refuses the 65,536th station rather than computing `cs + 1 == 0`. The index footer already stores the count
     as 4 bytes, so the file format is not the limit; widening to `uint32_t` means `playlistLength()`,
     `config.countStation`, `config.lastStation`, the `PR_PLAY` payload and the web/display station ids. **Widening
-    deliberately deferred on 2026.10.25** - see `plans/shuffle-without-repeats.md`.
+    deliberately deferred on 2026.10.25**.
   - WiFi credential parse/save/import helpers
   - deep-sleep entrypoints (`doSleepW`, `sleepForAfter`); `doSleepW()` is also reached from `ticks()`'s
     deep-sleep timer (`sleeptimer` / `sleepSsTimeout`, 5..1080 minutes)
@@ -3835,8 +3863,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   one state apart.  The guard is `Widget::moveIsNoop(MoveConfig)` for a move being applied (consulted by
   `Display::applyMove()`, after its `moveZeroed()` test) and `Widget::atBackPosition()` for the way back, which
   retires `_moved` and returns without erasing or drawing.  `moveTo()` itself is deliberately unguarded: the
-  dialog's own `_updValue->moveTo(...)` must still be able to paint a widget that has never been drawn.  See
-  `plans/move-noop-flicker.md`.
+  dialog's own `_updValue->moveTo(...)` must still be able to paint a widget that has never been drawn.
 - **The buffer bar's `outlined` frame is visible now.** `SliderWidget`'s fifth argument is the frame colour and
   defaults to 0 (black); the volume bar passes `theme.volbarout` but the buffer bar passed nothing, so its frame was
   black on black. It now passes `theme.buffer`, at both the constructor and the `init()` sites.
@@ -4036,7 +4063,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
   parser-side clamp would leave crashing on every boot.  `editor.html` sets the font-size box's own `min` to 1
   wherever the field is not `CONF_FONT_INDEX` (and keeps `0`, `max` 4 and the "0 is the system font" title where
   it is), and `clampEdited()` now enforces that floor as well as the panel-derived ceiling - typed or pasted, not
-  only spun.  See `plans/layout-fontsize-clamp.md`.
+  only spun.
 - **A widget's box must be checked against the PANEL, not only against the budget.** The budget bounds an area, so
   a box inside it can still be placed past the edge: band width 220, gap 35, `offset` 10 gives a right edge of 485 on
   a 480 px panel. `VuWidget::_blit()` hands `setAddrWindow(offset, top, _cw, _ch)` to the driver with no edge test,
@@ -4370,8 +4397,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     place if the allocation fails. `_refreshMark()`, first thing in `loop()`, re-asks and rebuilds only when the mark
     actually differs, so a date that rolls over while the device runs lands on the next pass and nothing is
     reallocated in between. `scrollMark()` is declared in `widgets.h` because the screensaver's info line joins its
-    own parts with it too - the literal `" * "` that used to sit in `_screensaverLine()` is gone. See
-    `plans/holiday-icons.md`.
+    own parts with it too - the literal `" * "` that used to sit in `_screensaverLine()` is gone.
   - **A scrolling line owns its whole span, and now says so.** `ScrollWidget::_spanPainted()` records
     `_oldleft`/`_oldtextwidth` as the span and sets `_textPainted`, and is called at the end of the scrolling paints
     in `setText()` and in `_draw()`. Both erase sites - `TextWidget::_paint()` and `ScrollWidget::setText()`'s
@@ -4379,7 +4405,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     text erased only its own box and left a previously scrolling line's pixels standing around it. Invisible wherever
     a background bar covers the row (the TFT's `_metabackground`) and obvious where none does: the OLED's meta line
     showing `VOLUME` over a scrolling station name. `_clear()` reads the same two flags, so a hidden scrolling line
-    left its pixels behind the same way. See `plans/layout-widget-overlap.md`.
+    left its pixels behind the same way.
   - **Boot-line messages** (what the `_bootstring` line says while the boot is blocked): one request type per message in
     `displayRequestType_e` (`common.h`) plus a case in `Display::draw()` that does
     `_bootstring->setText(l10n(L10N_MSG_...))`. The three are `WAITFORSD`, `FORMATTING` and `SCANNINGWIFI` — the last
@@ -4444,7 +4470,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     deciding test is string-versus-window, NOT the panel family: any panel whose boot line or `apTitleConf` overflows
     its window can do it. Fixed in `~ScrollWidget()`, which releases the slot when it owns it, plus an explicit
     `dsp.setScrollId(NULL)` at each of the three page swaps so the idiom stays visible where `_showDialog()` and
-    `_switchMode()` already spell it. See `plans/boot-scroll-id-dangle.md`.
+    `_switchMode()` already spell it.
   - **The slot is handed out by the page in round-robin, not claimed by whichever line is due first.** `Page::loop()`
     polls every widget with `scrollWanted()` - side-effect free, so it does not refresh the stamp it tests - while the
     slot is free, takes the first one **after the widget served last**, and calls its `scrollTurn()`, which makes one
@@ -4456,7 +4482,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     "always". `_scrollReady()` folds the gates (`_present`, `_active`, `!_locked`, `_doscroll`, textsize) so the poll
     and the step cannot disagree; `_active` is in it because `_calcX()` claims the slot whether or not anything is
     drawn, so an inactive-but-unlocked line used to be able to own the slot invisibly. This is the "the weather line
-    scrolls constantly and title 2 never gets a turn" report. See `plans/scroll-turn-fairness.md`.
+    scrolls constantly and title 2 never gets a turn" report.
   - **The PACE is the panel's, not a layout's.** `ScrollConfig` is `{ WidgetConfig widget; uint16_t width; }` - the
     retired `scrolldelay`/`scrolldelta`/`scrolltime` were the same numbers in nearly every layout, could only be
     written as literals by the editor, and were the sole control over display bandwidth that an author could not see.
@@ -4528,8 +4554,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     the probe set that found it (`[SCROLL]`, `[PAINT]`, `columnInk()`, `left()`/`top()`) has been removed. The five scroll
     cells are also gone from `conf_index.h`, so the editor page draws no such boxes (it is generic over `f.cells`) and
     the device parser - which walks the CELL LIST, not the document's keys - ignores them in an old slot file;
-    `trim_scroll_conf()` in `conf_tool.py` drops them from a `.h` or a layout document on import. See
-    `plans/scroll-global-speed-and-delay.md`.
+    `trim_scroll_conf()` in `conf_tool.py` drops them from a `.h` or a layout document on import.
   - **A line erases only its OWN box; nothing clears it because another line moved onto it.** Three things remove a
     scroll line's pixels - its own `setText()` (the union of the old and new text rectangle, or the whole recorded span
     after it has scrolled - `_spanPainted()`), `lock()`/`_reset()` (`_clear()`, and `freeBuffer()` which erases the
@@ -4540,8 +4565,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
     `weatherConf` top 100 at textsize 3 (a 24 px row), so 19 px of the two rows overlap and five rows of title 2 sit
     above the weather's box. 128x128 and 160x128 overlap by 2 px, 320x240 by 1 px, every other conf is clear. The layout
     editor's collision check cannot flag it: it reports intersecting boxes and cannot tell a background band
-    (`metaBGConf`) from two text rows. Left as the layout's own business - see
-    `plans/big-text-title2-weather-overlap.md`.
+    (`metaBGConf`) from two text rows. Left as the layout's own business.
   - `ProgressWidget` is the boot screen's animated dots line, with exactly one instantiation (`Display::_bootScreen()`),
     so its behaviour is the boot screen's. The line is `speaker + runway + boot glyph`, hard against both glyphs, and
     `ProgressConfig` is `{ frame interval ms, line character width, blob elements }` — every conf carries that header
@@ -4620,7 +4644,7 @@ thinks the radio forgot everything. The loader-side wait (`plans/network-recover
 - `conf_index.h` beside them describes those same fields for other code — each field's type, its cells, its `offsetof`
   in `LayoutData`, the group it belongs to, and the conf file's own constants. It is included at the tail of
   `dspcore.h`, after the conf file, and it is the contract a layout JSON file will be read against. See its entry
-  above and `plans/layout-editor.md`.
+  above.
 
 ## Display tools
 - `src/displays/tools/pretext.h` / `pretext.cpp` — `preText()` font-aware text resolver (keep / fold / replace),
@@ -4646,8 +4670,7 @@ Purpose:
 ## Display fonts/assets
 
 **Both fonts are runtime choices now.  There is no `TIME_SIZE`, no `CLOCKFONT5x7`, no `Clock_GFXfont`
-and no `fontNN.h`: the whole compile-time font selection is gone.**  `plans/font-overhaul.md` is the
-design record; this is the shape of it.
+and no `fontNN.h`: the whole compile-time font selection is gone.**  This is the shape of it.
 
 - **System fonts** — one folder each, `src/displays/fonts/<Name>/`, holding the `.bdf` and the header
   `bdf2adafruit3.py` generates from it.  All of them are compiled in.  `dspfont.h` declares them
@@ -4773,8 +4796,7 @@ design record; this is the shape of it.
   text redraw relies on a `clear()` first.  The seconds are the one thing redrawn in place every second, which is
   why their built-in branch needed the same `fillRect(sx, sy, _secwidth, CHARHEIGHT * fs, bgColor)` the
   `secondsFont` branch already had - without it "35" left behind every pixel "36" did not cover and 0..9 smeared
-  into one another while the minutes, repainted after a clear, stayed crisp.  See
-  `plans/clock-small-size-date-only.md`.
+  into one another while the minutes, repainted after a clear, stayed crisp.
   **The NUMBER widget reads the same index** (`numConf.textsize`) and had refused 0 outright: `NumWidget::_draw()`
   returned early on `_cf.index == 0`, so a layout asking for the system font drew NOTHING there while `setText()`
   went on erasing the cells it would have used - and the three panels whose confs ask for 0 (the 128x32 OLED, the
@@ -4782,7 +4804,7 @@ design record; this is the shape of it.
   erase, the bounds (`_charWidth()` out of `textPx`, so 6 px per character) and the size (`_cf.textPx`) already
   resolved the system font, with the ink BELOW `_config.top` - the mirror of the clock's index 0, where the ink is
   above its cursor.  `NumWidget` draws to the panel directly rather than through a framebuffer, so it needs none
-  of the clock's window care.  See `plans/font-index-0-number.md`.
+  of the clock's window care.
 - **`clockglow` is a stored setting** (`config.store.clockglow`), not the `CLOCKFONT`-derived macro.  It is
   gated at draw time by the glow colour differing from the backdrop (`clockBgColor != bgColor`, and the
   seconds pair likewise), not by a panel macro: a one-bit palette makes `clockbg == background`, so the glow
@@ -4807,7 +4829,7 @@ design record; this is the shape of it.
   **The NUMBER widget glows too** (`NumWidget`, `numConf`), on its **own stored setting** `config.store.digitsglow`
   since 2026.10.28 - `NumWidget::_glowOn()` is the number's copy, needing a clock font, that setting and
   `digitbg != background`.  The digits keep `theme.digit` and the glow behind them is `.digitbg`, its own field
-  since 2026.10.27 (15% of `.digit`; `plans/digitbg-glow.md`), so the clock and the number can glow in different
+  since 2026.10.27 (15% of `.digit`), so the clock and the number can glow in different
   colours - which is what the eight themes that draw the number in blue needed, having glowed it in the clock's
   grey.  A number cannot reserve cells out of nothing, so the
   widget is told the WIDEST value its screen can show (`setFieldMax()`): `VOLUME_SCALE` for the volume,
@@ -4932,7 +4954,7 @@ behaviors:
     characters, count, names and column codepoints, reporting against the SHEET's line numbers and writing
     nothing on any problem. `--stats` reports the data cost in B and KB, the per-build copy projection, and
     what it does not count. The header is committed, like `pretext_fold.h`, and the pixel comments cost no
-    flash - the preprocessor strips them. See `plans/icon-size-variants.md`.
+    flash - the preprocessor strips them.
   - **These arrays are `static` in a header, so each TU that emits `_writeGlyph()` keeps its own copy** -
     measured in the linker map as two copies in a PSFBUFFER TFT env and three in an OLED env. That is
     pre-existing behaviour of the scale-1 bitmaps, accepted at ~64-370 B per array copy.
@@ -4969,8 +4991,7 @@ Important rendering invariants:
   column and one pixel row escape), and `writeFillRect()` clamps its rectangle to those bounds rather than testing
   only its origin. One pixel of escape is invisible on a framebuffer build — the PSRAM buffer clips by its own
   bounds — and visible on a monochrome panel, where it is the glyph column that a scrolling line's deliberately
-  oversized window (one glyph more than the span holds) prints past its span and no later erase covers. See
-  `plans/clip-rect-off-by-one.md`.
+  oversized window (one glyph more than the span holds) prints past its span and no later erase covers.
 - Never call `startWrite()`/`endWrite()` in `write()` or `writePixel`/`writeFillRect` overrides — SPI nesting causes
   hangs on Adafruit TFT drivers.
 - The `gfxFont == NULL` case (YO_MONO / display font) runs through `_writeGlyph` using DisplayFont, NOT the built-in
@@ -5013,7 +5034,7 @@ because a `ScrollWidget` keeps `_buffsize - 2` bytes), with the boot line passin
 weather row and the screensaver's info line passing `COMPOSED_LINE_BUFF` (`WEATHER_STRING_L` + 2) for the 511-byte
 forecast. A widget's size is repeated at every `init()`, not just at construction: `init()` re-mallocs.
 `uppercase` never did anything at all - `PRETEXT_ALLCAPS` is the switch that works. `conf_tool.py` strips the old
-pair out of a conf file (`trim_scroll_conf()`). See `plans/widget-text-buffer-sizes.md`.
+pair out of a conf file (`trim_scroll_conf()`).
 
 **The guard is one rule, in one place.** `presentOf()` in `widgetsconfig.h` - every cell zero means absent -
 replaced five per-type `present()` overloads and the `zeroed()` patch the clock and the digits needed while the
@@ -5072,8 +5093,7 @@ between the old and the new tip, with a dirty-rectangle blit — was removed (20
 on `_prev*` state that had to describe the canvas exactly, and it kept leaving leftovers in the vspace gaps and the
 inter-channel strip. `_draw()` now wipes the whole box for every style unconditionally, `_blit()` always sends the
 whole box, and the dirty rectangle, `_prevMeas*` / `_prevPk*` / `_prevStyle` / `_prevVupeak`, `_selfErasing()` and
-`Widget::_invalidate()` are gone. Do not reintroduce a partial blit without the wipe it depends on. See
-[`plans/vu-bars-full-repaint.md`](../plans/vu-bars-full-repaint.md).
+`Widget::_invalidate()` are gone. Do not reintroduce a partial blit without the wipe it depends on.
 
 **The bar family's shape is two macros** — `VU_BAR_PERCENT` (20) and `VU_BAR_GAP_PERCENT` (10), at the top of
 `resolveScreensaverBox()` in `widget_vu.cpp`, read as percentages of the content height. Each channel is one
@@ -5095,15 +5115,14 @@ budget engages, the placement is arithmetically the old one (`in + (w - box.w)/2
 `box.w`), so only what used to be flush to the glass moved: the bar family on every panel, and any style that is under
 budget. The HEIGHT is never inset — the content area already excludes the info line's strip, so insetting it again
 would only push the meter off the panel's centre. `vuResolveBox()` is untouched: the player page's box is the layout's
-own. See [`plans/screensaver-vu-inset.md`](../plans/screensaver-vu-inset.md).
+own.
 
 **The bar family has its own pixel ALLOWANCE.** `BARS_ALLOWANCE` (0.75 on the TFT build, 1 on the OLED one, declared
 beside `VU_BAR_PERCENT`/`VU_BAR_GAP_PERCENT`) scales the budget for these two styles alone before the height cap is
 taken (`hmax = barBudget / w`); `budget` itself is untouched, so Lissajous and the trace styles keep the whole
 rectangle. That is a FRAME-RATE control, not just a memory one: two full-width rows cost a full-canvas erase plus a
 full blit every frame, so the box *area* is the frame cost - on the 480x360 the 0.75 allowance takes the box from
-460x85 (39,100 px, ~41 ms, ~8 FPS) to 460x61 (28,060 px, ~30 ms, ~11 FPS). See
-[`plans/screensaver-vu-bars-allowance.md`](../plans/screensaver-vu-bars-allowance.md).
+460x85 (39,100 px, ~41 ms, ~8 FPS) to 460x61 (28,060 px, ~30 ms, ~11 FPS).
 
 **The screensaver's segment GAP and COUNT are its own, and they are PER STYLE** - decided in `initScreensaver()` on the
 copy of `bandsConf` it already makes; the shared `_drawBars()` loop then draws them unchanged, which is what keeps the
@@ -5118,7 +5137,7 @@ at the **hard cap of 16**, which a layout asking for more is clamped down to. On
 so a poor candidate can never be chosen (12 into 460 is 40 long against 25 tall for Bars and is stepped over to 16);
 and because the walk only ever makes blocks SHORTER, a panel whose layout already yields tall enough blocks keeps its
 count - the 320x240 stays at 10 for both styles. On the 480x360 with the 0.75 allowance: Bars = 16 blocks of ~22x25
-with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps. See `plans/screensaver-vu-two-bar-styles.md`.
+with 6 px gaps, Digital LED = 16 of ~16x25 with 12 px gaps.
 **Because the count rarely divides the span, the AXIS is snapped down to an exact multiple of it:** `axis = per *
 (box.w / per)` becomes `bands.height` and the box's left edge moves by `(box.w - axis) / 2`, so `step` is exactly the
 pitch `ssSegmentCount()` judged, every block is `len/per - gap` long, and `_drawBars()`'s trailing clamp cannot fire
@@ -5127,8 +5146,7 @@ centred - the 128x64 OLED shows 12 identical blocks of ~8x10 (Bars, 3 px each en
 replaced an exact tiling that shortened the two tip segments and drew the last one without its trailing gap; on a 5-9 px
 block those differences *are* the picture, which is why the OLED looked wrong. Snapping the axis also keeps
 `vuSnapLit()`'s LED grid and the peak markers on the gaps - a `lead` offset inside the painter would have cut the tip
-block instead - and it leaves the shared painter untouched. See
-[`plans/screensaver-vu-equal-segments.md`](../plans/screensaver-vu-equal-segments.md).
+block instead - and it leaves the shared painter untouched.
 **The PLAYER page's bars now use the same rule**, from the other end: `VuWidget::_draw()` snaps `_len` itself to
 `per * (_len / per)` for the bar family only, immediately after `_cw`/`_ch` are resolved and BEFORE `_levels()`, so one
 snapped axis serves the measurement, the erase strips, the LED snap and the markers. `_cw`/`_ch` are deliberately left at
@@ -5137,8 +5155,7 @@ the leftover columns are simply never painted; the shortfall is at the loud end 
 cannot be re-centred. Before this, `_drawBars()` drew `ceil(len/step)` blocks with the last one clamped: the 128x64 Default
 layout (53 px, 10 segments, gap 1) had **11 blocks with an 11 px stub at the end**, and the second 128x64 layout 11 with a
 6 px stub. The trace styles are excluded - their axis is a time or frequency span. Keep the two rules in step: the
-screensaver snaps a copy of `bandsConf`, the player page snaps `_len`, and both must agree. See
-`plans/vu-bars-full-segments-player.md`.
+screensaver snaps a copy of `bandsConf`, the player page snaps `_len`, and both must agree.
 
 **What the meter draws is `dimension * vuLeft / vuThreshold`** - the live reading as a fraction of the meter's
 REFERENCE - and `get_VUlevel()` returns the length CLEARED from each bar, 8 bits a channel, so **0 means "nothing
@@ -5157,7 +5174,7 @@ cleared", i.e. a FULL bar**, and `dimension` means empty. Three consequences, al
   the bar's own length (1.8 px a step on the 460 px screensaver bar). Passing `len` directly broke every bar longer
   than 255 px: the screensaver's rested about 55% lit at silence and went non-monotonic above it.
 - Both sample styles' display gain is `256 / vuThreshold`, so the waveform and the spectrum follow the same release and
-  brighten through a quiet passage; accepted. See `plans/vu-level-reference-and-255-ceiling.md`.
+  brighten through a quiet passage; accepted.
 
 **Two kinds of layout, one drawing rule.** The **bar family** (styles 0-1) draws two strips where `bandsConf` says they
 are, so the orientation (`vuConf.align`) and the boombox bit (`bb`, which is exactly `align == WA_CENTER`) both matter to

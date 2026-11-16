@@ -292,8 +292,7 @@ const FillConfig volbarConf PROGMEM = {{ 10, 302, 0, WA_LEFT }, 460, 6, false};
   `{{ 1, 1, 2, WA_LEFT }, 140, false, 126, 5000, 2, 35 }` both become `{{ 1, 1, 2, WA_LEFT }, 126 }`. The leading
   group is kept whole (it has braces of its own), `width` is the first cell after it in either shape, a comment or an
   expression anywhere in the tail stops the trim rather than rearranging a value a human wrote, and a line already in
-  the new shape is untouched - so the pass is idempotent. See
-  [`plans/scroll-global-speed-and-delay.md`](../../../plans/scroll-global-speed-and-delay.md).
+  the new shape is untouched - so the pass is idempotent.
 - **OLED targets** get `metaBGConf` / `metaBGConfInv` sorted by height, because ehRadio selects
   `metaBGConfInv` when *invert title* is on and OLEDs default to inverted: the hairline (height 3 or
   less) goes to `metaBGConf`, the rectangle to `metaBGConfInv`. Two hairlines or two rectangles are left

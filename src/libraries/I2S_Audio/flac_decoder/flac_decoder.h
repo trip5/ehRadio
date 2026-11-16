@@ -18,6 +18,44 @@
 
 #include <Arduino.h>
 #include <vector>
+
+/* ---- decode-cost profiling -----------------------------------------------------------------------------------
+   Splits the per-frame cost between residual bit-reading and the linear-prediction restore.  MICROSECONDS, not
+   cycles: a frame takes about 90 ms of CPU.  These figures are per FLAC frame, while "cyc/frame" on the i2s line is
+   per PCM sample-frame - 4096 of them make one. */
+#ifndef FLAC_PROFILE
+  #define FLAC_PROFILE 1
+#endif
+#if FLAC_PROFILE
+  void FLACProfileGet(uint32_t* residUs, uint32_t* lpcUs, uint32_t* frames);   // reads and resets
+  void FLACProfileReset(void);   // drop what a stream left behind, so no other codec's report can print it
+#endif
+
+/* ---- Ogg de-ogger --------------------------------------------------------------------------------------------
+   Sits in the web-stream write path, in front of the ring, for EVERY stream.  It reads the first 27 bytes of a
+   connection and decides once:
+
+     OggS with a 0x7F 'F' 'L' 'A' 'C' mapping header  -> Ogg FLAC: pass pages through verbatim until the first audio
+                                                        packet, then drop page headers and lacing tables, so the
+                                                        decoder sees unbroken native FLAC frames
+     anything else                                    -> passthrough for the rest of the connection
+
+   Passing pages through until the audio phase keeps parseFlacFirstPacket() and parseMetaDataBlockHeader() on their
+   path, so title, bitrate, rate and depth parse as before.  Output never exceeds input: returns the bytes written to
+   dst, or -1 when dstRoom < len. */
+int32_t FLACDeOgg(uint8_t* dst, int32_t dstRoom, const uint8_t* src, int32_t len);
+bool    FLACDeOggStripping(void);   // true once page headers are being dropped
+void    FLACDeOggReset(void);       // a new connection
+void    FLACDeOggReserve(void);     // allocate the metadata capture early, before the audio ring takes the big block
+/* The filter's state as one short line, for the once-a-second report while the ring is not growing.  The state is
+   file-static in flac_decoder.cpp, so it cannot be read from the reader; a filter that is eating the stream is
+   otherwise invisible, because the framing counters advance on what came off the socket. */
+void    FLACDeOggDebug(char* out, size_t room);
+/* Comment captures offered to the parser; the reader prints its `deogg:` line when this changes. */
+uint32_t FLACDeOggCommentCount(void);
+/* The title a captured comment packet produced, or NULL.  Reading it consumes it.  Owned here, not by the decoder,
+   whose own title buffer is freed during setDecoderItems. */
+const char* FLACDeOggTitle(void);
 using namespace std;
 
 #define MAX_CHANNELS 2
@@ -165,6 +203,7 @@ int8_t           FLACDecode(uint8_t* inbuf, int32_t* bytesLeft, int16_t* outbuf)
 int8_t           FLACDecodeNative(uint8_t* inbuf, int32_t* bytesLeft, int16_t* outbuf);
 int8_t           flacDecodeFrame(uint8_t* inbuf, int32_t* bytesLeft);
 uint32_t         FLACGetOutputSamps();
+uint16_t         FLACGetBlockSize();      // samples per channel in the frame just decoded: the geometry line reports it
 uint64_t         FLACGetTotoalSamplesInStream();
 uint8_t          FLACGetBitsPerSample();
 uint8_t          FLACGetChannels();

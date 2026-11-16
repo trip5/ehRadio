@@ -28,6 +28,8 @@ class StaticFileCache {
 public:
     StaticFileCache() : count(0) { memset(entries, 0, sizeof(entries)); }
     void loadAll();                 /* Read all wwwFiles[] from LittleFS into PSRAM */
+    /* Load the cache once, at boot, before the audio ring; begin() calls it too and a second call is a no-op. */
+    void prime();
     const CachedFile* find(const char* urlPath) const;  /* Lookup by URL path */
     bool invalidate(const char* urlPath);                /* Reload single file after update */
     void freeAll();                 /* Free all PSRAM allocations */
@@ -36,6 +38,7 @@ private:
     static constexpr int MAX_ENTRIES = 32;
     CachedFile entries[MAX_ENTRIES];
     int count;
+    bool _primed = false;           /* loadAll() has run against a mounted filesystem */
     void loadOne(const char* filename, int index);  /* Load single file into entries[index] */
 };
 enum import_e      : uint8_t  { IMDONE=0, IMWIFI=2 };
@@ -216,6 +219,9 @@ class NetServer {
     /* PSRAM static file cache access */
     void invalidateCache(const char* urlPath) { fileCache.invalidate(urlPath); }
     void reloadCache() { fileCache.loadAll(); }
+    /* Load the WebUI cache now if it has not been loaded yet: its size is unpredictable, so it must be spent before
+       the audio ring asks for its block.  begin() calls the same thing. */
+    void primeFileCache() { fileCache.prime(); }
     const StaticFileCache& getFileCache() const { return fileCache; }
     StaticFileCache& getFileCache() { return fileCache; } // non-const overload for free functions
 

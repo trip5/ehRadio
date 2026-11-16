@@ -59,7 +59,15 @@ static constexpr size_t STATION_FIELD_LENGTH = 170; // Max length for station na
 static constexpr size_t WEATHER_STRING_L = 512; // Weather string buffer
 static constexpr uint32_t NVS_SLOW_WRITE_MS = 50; // ms a single NVS commit may take before FUNCTIONLOG names the key
 
-#define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
+#define ESPFILEUPDATER_USERAGENT "ehRadio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
+// The stream identity.  Sent on the FIRST attempt by both audio libraries - the VS1053 fork used to send no
+// User-Agent header at all, and a missing one is a common cause of a bare 403 from a CDN front end.
+// The alternative is used once, and only for a 403: some fronts admit browser-like agents and nothing else.  It is
+// not sent first because it is not who we are, and an operator counting devices should see ehradio in the stats.
+// We can't use the same UA as ESPFileUpdater because some streams may reject the URL.
+#define STREAM_USERAGENT "ehRadio/" RADIOVERSION
+#define STREAM_USERAGENT_ALT "VLC/3.0.21 LibVLC/3.0.21 AppleWebKit/537.36 (KHTML, like Gecko)"
+//#define STREAM_USERAGENT_ALT "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   #define ESP_ARDUINO_3 1
@@ -362,7 +370,6 @@ class Config {
     // material bring it down far enough for the bar to empty.  Time-based deliberately: the old VS1053 decay counted
     // `computeVUlevel()` calls, which made it chase the signal and pin the bar at full.  ONE implementation, called by
     // both audio libraries' computeVUlevel(), so the rule cannot fork with them.
-    // See plans/vu-level-reference-and-255-ceiling.md.
     void vuRefTrack(uint16_t left, uint16_t right) {
       const uint16_t live = (left > right) ? left : right;
       if (live > vuThreshold) vuThreshold = live;            // attack: instant, unthrottled

@@ -38,6 +38,8 @@ class Display {
     uint16_t height();
     void _bootScreen();
     void _buildPager();
+    // Size the screensaver's VU canvas at boot, whether screensaverVU is on or not.
+    void _primeScreensaverCanvas();
     void _apScreen();
     void _start();
     void resetQueue();

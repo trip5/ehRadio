@@ -42,13 +42,35 @@
   #include <ArduinoOTA.h>
 #endif
 
-static constexpr uint32_t SEARCHRESULTS_BUFFER        = 32;   // KB; chunk size for chunked HTTP transfers (radio-browser.info)
-static constexpr uint32_t SEARCHRESULTS_YIELDINTERVAL  = 0;    // with a large buffer, 0 all but eliminates skipping
+// KB; the READ size for chunked HTTP transfers (radio-browser.info).  It is not a chunk-size limit: the download loop
+// takes min(remaining, buffer) until the chunk is done, so a 1 MB chunk becomes 128 reads at 8 KB.  It was 32 KB to
+// avoid tripping over ESPFileUpdater's short-read bug - a read that returned early was treated as end-of-body, and the
+// search aborted at exactly 36,858 of 103,587 bytes every time.  That is fixed with a read deadline, so the buffer now
+// only costs heap: 32 KB took the internal heap ~24 KB lower during every search, curated fetch and playlist import.
+static constexpr uint32_t SEARCHRESULTS_BUFFER        = 8;    // KB
+static constexpr uint32_t SEARCHRESULTS_YIELDINTERVAL  = 0;    // 0 yields after every read
 // #define MAX_PL_READ_BYTES 1024*64                             // optional chunked transfers for playlist.csv/wifi.csv
 static constexpr size_t   WEBSOCKET_BUFFER             = 512;  // websocket / JSON payload buffer
 static constexpr uint32_t NETSERVER_TASK_DELAY         = 1;    // ms; yield between netserver.loop() iterations
 static constexpr uint32_t NSQ_SEND_DELAY               = 300;  // ms; xQueueSend timeout for nsQueue (requestOnChange)
 static constexpr uint32_t NS_QUEUE_DELAY               = 0;    // xQueueReceive timeout for nsQueue (processQueue)
+
+/* JSON-escape a string into dst.  The title is the only payload built from arbitrary stream text, and it used to go
+   in with a raw %s: one quote, backslash or control byte coming off a stream made the whole frame invalid JSON and the
+   WebUI dropped it silently, while the display (no JSON) and MQTT (escapes properly) both looked fine.  That is the
+   "title shows on the radio and in MQTT but not in the browser" asymmetry measured on 2026.11.14.  Bytes of a UTF-8
+   sequence are passed through unchanged, which is valid JSON as long as the frame is UTF-8. */
+static void jsonEscape(char* dst, size_t room, const char* src){
+  if(!dst || !room) return;
+  size_t o = 0;
+  for(const unsigned char* p = (const unsigned char*)(src ? src : ""); *p && o + 7 < room; p++){
+    const unsigned char c = *p;
+    if(c == '"' || c == '\\'){ dst[o++] = '\\'; dst[o++] = (char)c; }
+    else if(c < 0x20){ o += (size_t)snprintf(dst + o, room - o, "\\u%04x", c); }
+    else dst[o++] = (char)c;
+  }
+  dst[o] = '\0';
+}
 #ifdef USE_SD
   #include "sdmanager.h"
   #include "filemanager.h"   // the /sdman page and the mode that gates the player
@@ -132,7 +154,16 @@ void StaticFileCache::loadAll() {
         loadOne(Config::wwwFiles[i], count);
         if (entries[count].data || entries[count].gzData) count++;
     }
+    _primed = true;
     FUNCTIONLOG("Netserver", "Loaded %d files into PSRAM cache", count);
+}
+
+/* Once only, and never before LittleFS is mounted: marking an unmounted filesystem primed would leave the cache
+   empty for the session. */
+void StaticFileCache::prime() {
+    if (_primed) return;
+    if (!LittleFS.totalBytes()) return;
+    loadAll();
 }
 
 size_t StaticFileCache::totalBytes() const {
@@ -305,10 +336,14 @@ void handleSearchPost(AsyncWebServerRequest *request) {
       config.setStation(sName.c_str());
       display.putRequest(NEWSTATION);
       netserver.requestOnChange(STATIONNAME, 0);
-      if (!player.queueResolvedUrl(sUrl.c_str())) {
+      if (!sUrl.startsWith("http://") && !sUrl.startsWith("https://")) {
         request->send(400, "text/plain", "Invalid url");
         return;
       }
+      // The same launcher the playlist and the radio-browser clicks use, so an https preview's TLS handshake does not
+      // run on the main loop task - there it blocked loop() for up to 3.4 s, and a stop queued meanwhile landed behind
+      // the play.  queueResolvedUrl() would queue a PR_BURL for loop() and reintroduce exactly that.
+      launchPlaybackTask(sUrl, sName);
       request->send(200, "text/plain", "PREVIEW");
     }
   } else { // This is add to playlist
@@ -413,7 +448,8 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/connecttest.txt", HTTP_GET, captiveRedirect);              // Windows
 
   phase("routes");
-  if (psramFound()) fileCache.loadAll();
+  // prime(), not loadAll(): setup() has normally loaded the cache before the ring, and a reload would only take it back.
+  if (psramFound()) fileCache.prime();
   phase("psram cache");
   webserver.onNotFound(handleNotFound);
   webserver.onFileUpload(handleUpload);
@@ -710,7 +746,12 @@ void NetServer::processQueue() {
       case STATION:       requestOnChange(STATIONNAME, clientId); requestOnChange(ITEM, clientId); break;
       case STATIONNAME:   snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"nameset\", \"value\": \"%s\"}]}", config.station.name); break;
       case ITEM:          snprintf(wsbuf, sizeof(wsbuf), "{\"current\": %d}", config.lastStation()); break;
-      case TITLE:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", config.station.title); break;
+      case TITLE: {
+          char titleEsc[430];   // wsbuf is 512 and the frame around the value costs 41: 41 + 430 stays inside
+          jsonEscape(titleEsc, sizeof(titleEsc), config.station.title);
+          snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"meta\", \"value\": \"%s\"}]}", titleEsc);
+          break;
+      }
       case VOLUME:        snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"volume\", \"value\": %d, \"max\": %d}]}", config.store.volume, VOLUME_SCALE); break;
       case NRSSI:         snprintf(wsbuf, sizeof(wsbuf), "{\"payload\":[{\"id\":\"rssi\", \"value\": %d}, {\"id\":\"rssibars\", \"value\": %d}]}", rssi, rssiLevel(rssi)); break;
       case SDPOS:         snprintf(wsbuf, sizeof(wsbuf), "{\"sdpos\": %u,\"sdend\": %u,\"sdtpos\": %u,\"sdtend\": %u}",
@@ -1183,7 +1224,11 @@ void vTaskSearchRadioBrowser(void *pvParameters) {
         server_retried = false;
       }
     } else {
-      FUNCTIONLOG("Search", "[Error] Failed to download from %s. Removing from persistent list.", server);
+      // The status names the side that refused, which the message alone could not: OUT_OF_MEMORY (6) means our own heap
+      // gate said no, CONNECTION_FAILED (5) the TLS/socket, SERVER_ERROR (3) the host, NOT_MODIFIED (2) the cache.
+      // Enum order is ESPFileUpdater.h's.
+      FUNCTIONLOG("Search", "[Error] Failed to download from %s (status %d). Removing from persistent list.",
+                  server, (int)status);
       rb_servers[i][0] = '\0';
       server_retried = false;
     }
@@ -1351,10 +1396,11 @@ void launchPlaybackTask(const String& url, const String& name) {
   // in case they never finish, so a stuck state cannot wedge the feature - the same rule Mqtt::servicesWaitLimitMs has.
   static constexpr uint32_t rbClickServicesWaitMs = 60000;
   static bool rbClickHoldLogged = false;
-  // What a TLS lookup actually needs: one contiguous block for the handshake on top of this task's 8 KB stack -
-  // the same figure ESPFileUpdater's ESPFILEUPDATER_MIN_HEAP_FOR_SSL is built on.  This is the whole gate: there is
-  // no time window, because a wall-clock wait neither knew when a page load was coming nor let a device nobody visits
-  // report its click promptly.  Nothing here waits for a browser.
+  // What a TLS lookup needs: two 16 KB record buffers plus the context, so this is the size handed to the allocator
+  // probe in heapCanAffordTls() rather than a block size compared against one pool.  mbedTLS in this build allocates
+  // from PSRAM, so which pool the handshake takes it from is not ours to know.
+  // This is the whole gate: there is no time window, because a wall-clock wait neither knew when a page load was coming
+  // nor let a device nobody visits report its click promptly.  Nothing here waits for a browser.
   static constexpr uint32_t rbClickTlsMinBlock = 40960;
   // Helper: Make HTTPS request and extract a specific JSON key's value
   // Returns extracted value or empty string on failure
@@ -1536,10 +1582,13 @@ void processRadioBrowserClick() {
       return;
     }
     if (!heapCanAffordTls(rbClickTlsMinBlock)) {
-      // Dropped, not held: a statistic is not worth waiting on a fragmented heap
-      FUNCTIONLOG("RB Click", "dropping click - no %u-byte contiguous block (free %u, largest %u)",
+      // Dropped, not held: a statistic is not worth waiting on a fragmented heap.  Both largest blocks are printed
+      // because the probe decides from the allocator mbedTLS actually uses, and knowing which one was short is the
+      // difference between "genuinely full" and "measuring the wrong pool" - the mistake this used to make.
+      FUNCTIONLOG("RB Click", "dropping click - a TLS handshake would not fit %u bytes (free %u, internal largest %u, psram largest %u)",
                   (unsigned)rbClickTlsMinBlock, (unsigned)ESP.getFreeHeap(),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
       return;
     }
     // Copy URL to pass to task (task will delete it)

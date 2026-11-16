@@ -19,8 +19,12 @@
 #include "audioVS1053Ex.h"
 #include "../../core/heapq.h"
 
+// Audio that has reached the ring, counted at every bytesWritten() in this file.  streamDetection() reads this instead
+// of the socket's offer, the same rule the I2S path uses: only audio proves the stream is alive.
+static uint32_t s_ringTotal = 0;
+
 /* The next three only affect VS1053 builds: the addon reports its level in dB through SCI_AICTRL3,
-   where every other source reports a linear amplitude.  See plans/vu-vs1053-attack.md */
+   where every other source reports a linear amplitude. */
 #ifndef VU_VS1053_READ_MS
   #define VU_VS1053_READ_MS 33   // ceiling on SCI_AICTRL3 reads, ms. Keeps the VU sample rate constant
                                  // (~30 Hz) and independent of VU_REFRESH_MS and of the panel
@@ -262,6 +266,11 @@ void Audio::initInBuff() {
     changeMaxBlockSize(4096);
 }
 //---------------------------------------------------------------------------------------------------------------------
+/* The ring, taken at a point setup() chooses rather than at the first connecttohost().  Idempotent. */
+void Audio::reservePsram() {
+    initInBuff();
+}
+//---------------------------------------------------------------------------------------------------------------------
 void Audio::control_mode_off()
 {
     CS_HIGH();                                     // End control mode
@@ -309,8 +318,8 @@ uint16_t Audio::read_register(uint8_t _reg)
    legal - DREQ gates writes, not reads - and the 16 bits are transferred before the wait would have
    happened, so the returned value cannot change.
 
-   Only the VU poll uses this: it runs ~20x/s from the display task, where 17.4 ms a call was 350 ms
-   of every second burned spinning on the display core (see plans/vu-vs1053-attack.md). */
+   Only the VU poll uses this: it runs ~20x/s from the display task, where 17.4 ms a call would burn
+   350 ms of every second spinning on the display core. */
 uint16_t Audio::read_register_nowait(uint8_t _reg)
 {
     uint16_t result=0;
@@ -362,17 +371,21 @@ size_t Audio::sendBytes(uint8_t* data, size_t len){
        the chip is still in new SDI mode, SM_CANCEL that something asked it to end the stream.  read_register_nowait is
        deliberate - when stalled DREQ is low by definition, so plain read_register would busy-wait 50 ms and stall the
        feeder it is measuring.  A healthy sample prints once a minute so the log carries its own baseline; the stalled
-       one only after ~50 empty passes, so ordinary backpressure never prints. */
+       one only when no byte has been accepted for over a second, so ordinary backpressure never prints. */
     {
         static uint32_t s_lastReport = 0;
         static uint32_t s_lastOk = 0;
-        static uint16_t s_emptyRuns = 0;
         const bool stalled = (bytesDecoded == 0);
-        if(stalled) { ++s_emptyRuns; } else { s_emptyRuns = 0; }
-        const bool wantStall = stalled && s_emptyRuns >= 50 && (uint32_t)(millis() - s_lastReport) > 5000;
+        /* A stall is a matter of TIME, not of how many calls came back empty.  A healthy FLAC block is 4096 samples -
+           93 ms - and the plugin drains the chip's FIFO in one burst per block, so "50 consecutive empty writes" is
+           crossed by every played block: this line accused FLAC of a fault roughly 700 times in an hour of perfect
+           playback.  m_feedLastMs is the honest clock instead - 0 ms on every played block, 11 s on the one genuine
+           stall ever measured.  The 5 s rate limit stays, so a real stall still prints without flooding. */
+        const uint32_t sinceLastByte = m_feedLastMs ? (uint32_t)(millis() - m_feedLastMs) : 0xFFFFFFFFu;
+        const bool wantStall = stalled && sinceLastByte > 1000u && (uint32_t)(millis() - s_lastReport) > 5000;
         const bool wantOk    = !stalled && (uint32_t)(millis() - s_lastOk) > 60000;
         if(wantStall || wantOk) {
-            if(wantStall) { s_emptyRuns = 0; s_lastReport = millis(); } else { s_lastOk = millis(); }
+            if(wantStall) { s_lastReport = millis(); } else { s_lastOk = millis(); }
             const bool dreqLow = (digitalRead(dreq_pin) == LOW);
             const uint16_t st = read_register_nowait(SCI_STATUS);
             const uint16_t md = read_register_nowait(SCI_MODE);
@@ -386,6 +399,187 @@ size_t Audio::sendBytes(uint8_t* data, size_t len){
     }
     #endif
     return bytesDecoded;
+}
+//---------------------------------------------------------------------------------------------------------------------
+// DELIBERATE DUPLICATE of FLACOfferCommentPacket() and its helpers in ../../I2S_Audio/flac_decoder/flac_decoder.cpp:
+// this fork has no de-ogger, so the tag parser exists twice. A fix in one belongs in the other, see the fork notes.
+static uint32_t v1053Le32(const uint8_t* p){
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+// "KEY=" case-insensitively, written out because xtensa's <string.h> has no strncasecmp.
+static bool v1053KeyIs(const char* s, uint32_t sl, const char* key){
+    const size_t kl = strlen(key);
+    if(sl < kl + 1) return false;
+    for(size_t k = 0; k < kl; k++){
+        char c = s[k];
+        if(c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if(c != key[k]) return false;
+    }
+    return s[kl] == '=';
+}
+// A page payload that is a metadata block rather than the start of an audio frame.  The mapping header and the native
+// signature count, because the first page carries both; a frame starts 0xFF, whose type field is 127.
+static bool v1053LooksMetadata(const uint8_t* p, uint32_t n){
+    if(n < 4) return false;
+    if(p[0] == 0x7F) return true;
+    if(!memcmp(p, "fLaC", 4)) return true;
+    if((p[0] & 0x7F) > 6) return false;
+    return (((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]) != 0;
+}
+// A VORBIS_COMMENT body: vendor length, entry count, then length-prefixed entries.  Every read is bounded by `len` -
+// a length taken from foreign data must never become an offset, which is the crash the I2S copy had.
+static bool v1053VorbisComment(const uint8_t* p, uint32_t len, char* out, size_t room){
+    if(room < 2 || len < 8) return false;
+    uint32_t pos = 0;
+    const uint32_t vlen = v1053Le32(p + pos);
+    if(vlen > len - pos - 4) return false;
+    pos += 4 + vlen;
+    if(pos + 4 > len) return false;
+    const uint32_t count = v1053Le32(p + pos);
+    pos += 4;
+    const char* t = NULL; uint32_t tlen = 0;
+    const char* a = NULL; uint32_t alen = 0;
+    for(uint32_t k = 0; k < count && pos + 4 <= len; k++){
+        const uint32_t sl = v1053Le32(p + pos);
+        pos += 4;
+        if(sl > len - pos) break;
+        const char* s = (const char*)(p + pos);
+        pos += sl;
+        if(v1053KeyIs(s, sl, "TITLE"))       { t = s + 6; tlen = sl - 6; }
+        else if(v1053KeyIs(s, sl, "ARTIST")) { a = s + 7; alen = sl - 7; }
+    }
+    if(!t && !a) return false;
+    size_t w = 0; out[0] = 0;
+    if(a){
+        size_t n = alen < 120 ? alen : 120;
+        if(n > room - 1) n = room - 1;
+        memcpy(out, a, n); w = n; out[w] = 0;
+    }
+    if(a && t && w + 3 < room){ memcpy(out + w, " - ", 3); w += 3; out[w] = 0; }
+    if(t){
+        size_t n = tlen < 120 ? tlen : 120;
+        if(w + n > room - 1) n = room - 1 - w;
+        memcpy(out + w, t, n); w += n; out[w] = 0;
+    }
+    return w > 0;
+}
+// Walk the metadata blocks of one page payload and report a title. A block that runs past the page ends the walk:
+// the comment is its own page on every encoder measured, and a split one is simply not capturable here.
+static bool v1053CommentTitle(const uint8_t* p, uint32_t len, char* out, size_t room){
+    if(!p || len < 4) return false;
+    uint32_t pos = 0;
+    if(p[0] == 0x7F){
+        const uint32_t window = len < 64 ? len : 64;
+        uint32_t idx = 0;
+        for(; idx + 4 <= window; idx++) if(!memcmp(p + idx, "fLaC", 4)) break;
+        if(idx + 4 > window) return false;
+        pos = idx + 4;
+    }
+    else if(!memcmp(p, "fLaC", 4)) pos = 4;
+    while(pos + 4 <= len){
+        const uint8_t  type = p[pos] & 0x7F;
+        const uint32_t blen = ((uint32_t)p[pos + 1] << 16) | ((uint32_t)p[pos + 2] << 8) | p[pos + 3];
+        pos += 4;
+        if(type > 6) return false;                       // a frame header: the metadata run is over
+        if(blen > len - pos) return false;
+        if(type == 4 && v1053VorbisComment(p + pos, blen, out, room)) return true;
+        pos += blen;
+    }
+    return false;
+}
+// The only place this fork can see a FLAC tag: the chip reports audio only, so the page payload is read on its way
+// past.  Emitted through the ICY callback, so the display, WebUI and MQTT all take their normal path.
+static char s_oggLastTitle[192];
+// AUDIO_INFO cannot be used here: it formats into a member of Audio, and this is a free function.
+static void v1053OggFlacTapTag(const uint8_t* q, uint32_t payload, uint32_t have){
+    char line[128];
+    if(have < payload){
+        #ifdef AUDIO_DEBUG
+        static bool warned = false;
+        if(!warned){
+            warned = true;
+            sprintf(line, "flac tag page %u bytes, %u buffered - not parsed", (unsigned)payload, (unsigned)have);
+            if(audio_info) audio_info(line);
+        }
+        #endif
+        return;
+    }
+    char title[192];
+    if(!v1053CommentTitle(q, payload, title, sizeof(title))) return;
+    if(strcmp(title, s_oggLastTitle) == 0) return;       // the encoder repeats it; the UI does not need it twice
+    strlcpy(s_oggLastTitle, title, sizeof(s_oggLastTitle));
+    #ifdef AUDIO_DEBUG
+    sprintf(line, "flac tag: \"%s\"", title);
+    if(audio_info) audio_info(line);
+    #endif
+    if(audio_showstreamtitle) audio_showstreamtitle(title);
+}
+//---------------------------------------------------------------------------------------------------------------------
+/* Ogg FLAC -> native FLAC.  A FLAC radio stream is an Ogg-encapsulated FLAC stream (the log's "format is ogg" followed
+   by codec 5), and the VS1053 FLAC plugin wants the bare bitstream the pages wrap: it plays a native .flac file and
+   produces silence with the pages still in place.  Removing the layer needs no FLAC knowledge at all - each page is a
+   27-byte header, a segment table of p[26] bytes, then that many payload bytes, and page payloads concatenated in
+   order (with the Ogg FLAC mapping header of the first packet dropped) ARE the original stream.
+
+   Zero copy on purpose: a page payload can reach 65 KB while InBuff's block size is 1600-4096, so nothing here waits
+   for a whole page.  It forwards slices straight out of the ring and keeps one number - how much of the current page is
+   left - plus whether the native signature has gone yet.  A zero return is ordinary backpressure from the chip's FIFO,
+   and the state is deliberately left alone so the next call resumes at the same byte. */
+size_t Audio::feedOggFlac() {
+    while(InBuff.bufferFilled() >= 27) {
+        if(m_oggPageLeft == 0) {                                                        // at a page boundary
+            uint8_t* p = InBuff.getReadPtr();
+            if(p[0] != 'O' || p[1] != 'g' || p[2] != 'g' || p[3] != 'S') {
+                InBuff.bytesWasRead(1);                                                 // lost framing: resync one byte
+                continue;
+            }
+            const size_t segs = p[26];
+            if(InBuff.bufferFilled() < 27 + segs) return 0;                              // segment table straddles: wait
+            uint32_t payload = 0;
+            for(size_t i = 0; i < segs; i++) payload += p[27 + i];                       // lacing values sum to the payload
+            const size_t header = 27 + segs;
+            /* TAG TAP: read the payload before it is forwarded, since the chip will not report a FLAC tag.  Only a
+               page that is wholly in the ring is parsed - a PICTURE block can be tens of KB and waiting stalls. */
+            if(payload >= 4 && InBuff.bufferFilled() >= header + 4 && v1053LooksMetadata(p + header, payload)){
+                const size_t have = InBuff.bufferFilled() - header;
+                v1053OggFlacTapTag(p + header, payload, have > payload ? payload : (uint32_t)have);
+            }
+            if(!m_f_oggSigFwd) {
+                /* First packet: 0x7F 'F' 'L' 'A' 'C', two version bytes, the header-packet count (2 bytes), then the
+                   native stream starting at "fLaC".  Searching for the signature rather than assuming the 9-byte offset
+                   is what the I2S library does, and it tolerates an encoder that pads the mapping header. */
+                const int window = payload < 64 ? (int)payload : 64;
+                const int idx = specialIndexOf(p + header, "fLaC", window);
+                if(idx >= 0) {
+                    /* Drop the mapping header and keep everything after it IN THIS PAGE.  Setting m_oggPageLeft is
+                       what makes the rest of the page - "fLaC" plus the STREAMINFO block, 42 bytes on the stream this
+                       was measured against - reach the chip on the next pass.  Leaving it at 0 sends the loop back to
+                       "expect a page header" at a byte that says "fLaC", which resyncs one byte at a time straight
+                       past the STREAMINFO and the comment block. */
+                    m_f_oggSigFwd = true;
+                    InBuff.bytesWasRead(header + idx);
+                    m_oggPageLeft = payload - idx;
+                }
+                else { InBuff.bytesWasRead(header + payload); }   // a header-only page: drop it whole
+                continue;
+            }
+            InBuff.bytesWasRead(header);
+            m_oggPageLeft = payload;
+            if(m_oggPageLeft == 0) continue;                                             // empty page: nothing to forward
+        }
+        size_t n = InBuff.bufferFilled();
+        if(n > m_oggPageLeft) n = m_oggPageLeft;
+        // Cap at one block, exactly as the MP3 path does: a page payload can be tens of KB, and pushing that in one
+        // call would hold the audio task inside sendBytes() for the whole SPI burst instead of returning between blocks.
+        if(n > InBuff.getMaxBlockSize()) n = InBuff.getMaxBlockSize();
+        const size_t wrote = sendBytes(InBuff.getReadPtr(), n);
+        if(wrote == 0) return 0;                                                         // chip FIFO full, try again later
+        InBuff.bytesWasRead(wrote);
+        m_oggPageLeft -= wrote;
+        m_sumBytesDecoded += wrote;
+        return wrote;
+    }
+    return 0;
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::sdi_send_buffer(uint8_t* data, size_t len)
@@ -1039,6 +1233,7 @@ void Audio::processLocalFile() {
     bytesAddedToBuffer = audiofile.read(InBuff.getWritePtr(), bytesCanBeWritten);
     if(bytesAddedToBuffer > 0) {
         InBuff.bytesWritten(bytesAddedToBuffer);
+        s_ringTotal += (uint32_t)bytesAddedToBuffer;
     }
 
     if(bytesAddedToBuffer == -1) bytesAddedToBuffer = 0; // read error? eof?
@@ -1182,6 +1377,7 @@ void Audio::processWebStream() {
             if(m_f_metadata)            m_metacount  -= bytesAddedToBuffer;
             if(m_f_chunked)             chunkSize    -= bytesAddedToBuffer;
             InBuff.bytesWritten(bytesAddedToBuffer);
+            s_ringTotal += (uint32_t)bytesAddedToBuffer;
         }
 
         // The head is inspected only until the stream starts. Same helper and same verdict as the I2S fork:
@@ -1199,7 +1395,11 @@ void Audio::processWebStream() {
         if(!f_stream) return;
         if(m_codec == CODEC_OGG){ // log_i("determine correct codec here");
             uint8_t codec = determineOggCodec(InBuff.getReadPtr(), maxFrameSize);
-            if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   return;}
+            if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   m_f_oggFlac = true;
+                                       /* Worded "format is flac" and NOT "format is ogg": the core matches these lines
+                                          with strstr, in order, so naming the container here would badge a FLAC stream
+                                          as OGG. */
+                                       AUDIO_INFO("format is flac (ogg container), page layer removed"); return;}
             if(codec == CODEC_OPUS)   {m_codec = CODEC_OPUS; AUDIO_INFO("can't play OPUS"); stopSong(); return;}
             if(codec == CODEC_VORBIS) {m_codec = CODEC_VORBIS; return;}
             stopSong();
@@ -1429,6 +1629,7 @@ void Audio::processWebStreamHLS() {
             bytesWasWritten = _client->read(InBuff.getWritePtr(), InBuff.writeSpace());
         }
         InBuff.bytesWritten(bytesWasWritten);
+        s_ringTotal += (uint32_t)bytesWasWritten;
 
         byteCounter += bytesWasWritten;
 
@@ -1518,6 +1719,7 @@ void Audio::processWebFile(){
         if(m_f_chunked)             m_chunkcount   -= bytesAddedToBuffer;
         if(m_controlCounter == 100) audioDataCount += bytesAddedToBuffer;
         InBuff.bytesWritten(bytesAddedToBuffer);
+        s_ringTotal += (uint32_t)bytesAddedToBuffer;
     }
 
     if(InBuff.bufferFilled() > maxFrameSize && !f_stream) {  // waiting for buffer filled
@@ -1531,7 +1733,8 @@ void Audio::processWebFile(){
 
     if(m_codec == CODEC_OGG){ // log_i("determine correct codec here");
         uint8_t codec = determineOggCodec(InBuff.getReadPtr(), maxFrameSize);
-        if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   return;}
+        if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   m_f_oggFlac = true;
+                                   AUDIO_INFO("format is flac (ogg container), page layer removed"); return;}
         if(codec == CODEC_OPUS)   {m_codec = CODEC_OPUS; AUDIO_INFO("can't play OPUS"); stopSong(); return;}
         if(codec == CODEC_VORBIS) {m_codec = CODEC_VORBIS; return;}
         stopSong();
@@ -1638,6 +1841,10 @@ void Audio::playAudioData() {
         if(bytesToDecode < InBuff.getMaxBlockSize()) {lastFrame = true;}
         if(m_sumBytesDecoded >= m_audioDataSize && m_sumBytesDecoded != 0) { m_f_eof = true; goto exit; }
     }
+    /* Ogg FLAC is a container path, so the frame-sized gate below does not apply: a page header needs 27 bytes and a
+       payload slice needs whatever is left of the page, both of which are routinely less than a block.  The stripper
+       owns InBuff and m_sumBytesDecoded for this stream, so playAudioData() must not touch either. */
+    if(m_f_oggFlac) { (void)feedOggFlac(); goto exit; }
     if(!lastFrame) if(InBuff.bufferFilled() < InBuff.getMaxBlockSize()) goto exit;
 
     bytesDecoded = sendBytes(InBuff.getReadPtr(), InBuff.getMaxBlockSize());
@@ -2562,6 +2769,18 @@ bool Audio::parseHttpResponseHeader() { // this is the response to a GET / reque
             statusCode[2] = rhl[11];
             statusCode[3] = '\0';
             int sc = atoi(statusCode);
+            // One retry with the other identity, then the refusal is real.  m_f_timeout is this fork's own
+            // "reconnect" signal (see the read timeout above), so the retry reuses the existing path rather than
+            // seizing the connection from inside the header parse.
+            // 502 and 503 belong here too: a UA gate does not have to be polite, and streamingpulse answers a
+            // bare 502 Bad Gateway for an agent it does not serve.
+            if((sc == 403 || sc == 502 || sc == 503) && !m_f_altUaTried){
+                m_f_altUserAgent = true;
+                m_f_altUaTried   = true;   // survives the reconnect; the UA flag alone is reset by a good header parse
+                AUDIO_INFO("%d refused - retrying once with the alternate user agent", sc);
+                m_f_timeout = true;
+                goto exit;
+            }
             if(sc > 310){ // e.g. HTTP/1.1 301 Moved Permanently
                 if(audio_showstreamtitle) audio_showstreamtitle(rhl);
                 goto exit;
@@ -2924,6 +3143,12 @@ void Audio::setDefaults(){
     m_f_paused = false;
     m_sumBytesDecoded = 0;     // per-track counter: the ancestor reset it here and the graft lost the line
     m_f_ID3v1TagFound = false;
+    /* A new connection is not Ogg FLAC until determineOggCodec() says so.  Without these flags a track that
+       follows a FLAC radio stream would be stripped of page headers that are not there. */
+    m_f_oggFlac   = false;
+    m_oggPageLeft = 0;
+    m_f_oggSigFwd = false;
+    s_oggLastTitle[0] = 0;     // drop the dedup so the next stream's comment is emitted even if it repeats
     stopSong();
     initInBuff();                                           // initialize InputBuffer if not already done
     InBuff.resetBuffer();
@@ -2990,8 +3215,7 @@ void Audio::setVUmeter() {
 }
 
 // VU meter — VS1053 path.  The addon reports a level in dB per channel via SCI_AICTRL3; everything
-// else here is ours.  History and measurements: plans/vu-vs1053-attack.md, plus the "Post-Graft
-// Patch Fixes" section of vs1053-frankenstein-surgery-notes.md.
+// else here is ours.  Measurements are recorded in vs1053-frankenstein-surgery-notes.md.
 //
 // Two deliberate differences from the I2S path, both to make the two read alike:
 //   1. The dB reading is converted to a LINEAR AMPLITUDE before use.  The bar shows
@@ -3069,9 +3293,7 @@ void Audio::computeVUlevel() {
   vuRight = vuDbToAmp(dbR);
 
   /* The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the I2S path:
-     Config::vuRefTrack().  Rising-only was the old rule, and it is what pinned the bar on compressed material: the
-     reference never let go of the track's peak, so a quiet bar was never a large fraction of it.  See
-     plans/vu-level-reference-and-255-ceiling.md. */
+     Config::vuRefTrack().  A rising-only reference never releases the track's peak, which pins the bar. */
   config.vuRefTrack(vuLeft, vuRight);
 
 #if VU_VS1053_LOG
@@ -3170,8 +3392,8 @@ void Audio::computeVUlevel() {
 
 uint16_t Audio::get_VUlevel(uint16_t dimension){
   if(!VS_PATCH_ENABLE || !_vuInitalized) return 0;
-  /* 0 means "nothing cleared", i.e. a FULL bar in this convention, so "nothing to show" answers EMPTY instead - the
-     same repair the I2S path needed, see plans/vu-level-reference-and-255-ceiling.md. */
+  /* 0 means "nothing cleared", i.e. a FULL bar in this convention, so "nothing to show" answers EMPTY instead -
+     the same rule the I2S path uses. */
   if(!config.vuSourceWanted()) return (uint16_t)(((uint16_t)dimension << 8) | dimension);
   /* This read asserts the chip's SCI select, and the audio task may be holding SDI low mid-chunk; both asserted at
      once is undefined on this chip and leaves the decoder refusing data for the rest of the boot.  So the read takes
@@ -3312,7 +3534,8 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
 
     //  AUDIO_INFO("Connect to \"%s\" on port %d, extension \"%s\"", hostwoext, port, extension);
 
-    char rqh[strlen(h_host) + strlen(authorization) + 220]; // http request header
+    // 460, not 220: the user agent is now a real header line and the alternate is the longest of the two
+    char rqh[strlen(h_host) + strlen(authorization) + 460]; // http request header
     rqh[0] = '\0';
 
     strcat(rqh, "GET ");
@@ -3329,7 +3552,11 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
       strcat(rqh, "\r\n");
     }
     strcat(rqh, "Accept-Encoding: identity;q=1,*;q=0\r\n");
-    //    strcat(rqh, "User-Agent: Mozilla/5.0\r\n"); #363
+    // This fork sent NO User-Agent at all, which is a common cause of a bare 403 from a CDN front end.
+    // STREAM_USERAGENT on the first attempt, STREAM_USERAGENT_ALT once after a 403 (see src/core/config.h).
+    strcat(rqh, "User-Agent: ");
+    strcat(rqh, m_f_altUserAgent ? STREAM_USERAGENT_ALT : STREAM_USERAGENT);
+    strcat(rqh, "\r\n");
     strcat(rqh, "Connection: keep-alive\r\n\r\n");
 
     //    if(ESP_ARDUINO_VERSION_MAJOR == 2 && ESP_ARDUINO_VERSION_MINOR == 0 && ESP_ARDUINO_VERSION_PATCH >= 3){
@@ -3447,7 +3674,8 @@ bool Audio::httpPrint(const char* host) {
 
     AUDIO_INFO("new request: \"%s\"", host);
 
-    char rqh[strlen(h_host) + 200]; // http request header
+    // 440, not 200: this request carries the user agent too, and the alternate is the longest of the two
+    char rqh[strlen(h_host) + 440]; // http request header
     rqh[0] = '\0';
 
     strcat(rqh, "GET ");
@@ -3457,7 +3685,11 @@ bool Audio::httpPrint(const char* host) {
     strcat(rqh, hostwoext);
     strcat(rqh, "\r\n");
     strcat(rqh, "Accept-Encoding: identity;q=1,*;q=0\r\n");
-    //    strcat(rqh, "User-Agent: Mozilla/5.0\r\n"); #363
+    // Every request this fork makes identifies itself: a missing User-Agent is a common cause of a bare 403, and
+    // some fronts answer 502 instead.  STREAM_USERAGENT first, STREAM_USERAGENT_ALT once after a refusal.
+    strcat(rqh, "User-Agent: ");
+    strcat(rqh, m_f_altUserAgent ? STREAM_USERAGENT_ALT : STREAM_USERAGENT);
+    strcat(rqh, "\r\n");
     strcat(rqh, "Connection: keep-alive\r\n\r\n");
 
     if(m_f_ssl) {
@@ -3466,13 +3698,26 @@ bool Audio::httpPrint(const char* host) {
 	}
     else       { _client = static_cast<WiFiClient*>(&client);}
 
-    if(!_client->connected()){
-        AUDIO_INFO("The host has disconnected, reconnecting");
+    /* A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
+       The old guard only reconnected when the socket was CLOSED, so a segment request went down the playlist's
+       connection and the far end answered 404 for a path that does not exist there.  Measured on the I2S fork
+       (scastream, 2026.11.16) and mirrored here before it bites. */
+    static char     connHost[160] = {0};
+    static uint16_t connPort      = 0;
+    static bool     connSsl       = false;
+    const bool sameTarget = (strcmp(connHost, hostwoext) == 0) && (connPort == port) && (connSsl == m_f_ssl);
+    if(!_client->connected() || !sameTarget){
+        _client->stop();
+        AUDIO_INFO("connecting to \"%s\" port %u (ssl %u)", hostwoext, (unsigned)port, (unsigned)m_f_ssl);
         if(!_client->connect(hostwoext, port)){
             log_e("connection lost");
+            connHost[0] = 0; connPort = 0;
             stopSong();
             return false;
         }
+        strlcpy(connHost, hostwoext, sizeof(connHost));
+        connPort = port;
+        connSsl  = m_f_ssl;
     }
     _client->print(rqh);
 
@@ -4656,7 +4901,7 @@ bool Audio::readID3V1Tag(){
     // [1] https://en.wikipedia.org/wiki/List_of_ID3v1_Genres
     // [2] https://en.wikipedia.org/wiki/ID3#ID3v1_and_ID3v1.1[5]
 }
-//----------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------
 boolean Audio::streamDetection(uint32_t bytesAvail){
     static uint32_t tmr_slow = millis();
     static uint32_t tmr_lost = millis();
@@ -4675,17 +4920,25 @@ boolean Audio::streamDetection(uint32_t bytesAvail){
         cnt_slow = 0;
     }
     if(InBuff.bufferFilled() < InBuff.getMaxBlockSize()) cnt_slow++;
-    if(bytesAvail) {tmr_lost = millis() + 1000; cnt_lost = 0;}
+    // Liveness is audio reaching the ring.  `bytesAvail` is the socket's offer, measured before the read, so a socket
+    // that keeps talking into a ring that never grows would look alive for ever.
+    static uint32_t lastRingTotal = 0;
+    const bool ringGrew = (s_ringTotal != lastRingTotal);
+    lastRingTotal = s_ringTotal;
+    if(bytesAvail && ringGrew) {tmr_lost = millis() + 1000; cnt_lost = 0;}
     if(InBuff.bufferFilled() > InBuff.getMaxBlockSize() * 2) return false; // enough data available to play
 
-    // if no audio data is received within three seconds, a new connection attempt is started.
+    // No data for five seconds: declare the stall and let the player's ladder own the retry - connecttohost() here
+    // blocked the audio task and retried blind, whatever the reason.
     if(tmr_lost < millis()){
         cnt_lost++;
         tmr_lost = millis() + 1000;
-        if(cnt_lost == 5){ // 5s no data?
+        if(cnt_lost == 5){ // 5s no data
             cnt_lost = 0;
-            AUDIO_INFO("Stream lost -> try new connection");
-            connecttohost(m_lastHost);
+            AUDIO_INFO("Stream lost -> hand the stall to the retry ladder");
+            m_f_running = false;
+            setDatamode(AUDIO_NONE);
+            if(audio_eof_stream) audio_eof_stream("stalled");
             return true;
         }
     }

@@ -142,7 +142,7 @@ struct LayoutData {
     bool         seconds; // the seconds block right of the time
     // There used to be `boomboxVU` and `rotateVU` here.  Both are the VU's ORIENTATION, which is
     // `vuConf.align`: WA_LEFT is the default, WA_CENTER is side-by-side middle-out (boombox) and
-    // WA_RIGHT is rotated 90 degrees.  See plans/layout-editor-round4.md.
+    // WA_RIGHT is rotated 90 degrees.
     bool         shareWeatherIP; // IP and weather share the same row
     bool         shareBattRSSI; // RSSI and battery share the same row
     bool         rssiDigit; // signal drawn as a number, not bars

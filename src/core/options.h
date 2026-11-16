@@ -416,7 +416,7 @@ or examine the examples in builds/trip5 and make your own!
   #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono (also add for mono I2S decoders for the VU)
 #endif
 #ifndef NORMALIZE_VOLUME
-  #define NORMALIZE_VOLUME true // this will also ignore 0vol...?
+  #define NORMALIZE_VOLUME true // this will also ignore ovol...?
 #endif
 
 /* --- VOLUME SCALE --- */

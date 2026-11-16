@@ -31,17 +31,22 @@ WHAT THIS DOES
      reuses the already installed PlatformIO xtensa toolchain rather than downloading a
      second copy of the same compiler.
   4. Copies the package's own sdkconfig as the base, applies ONLY the whitelist below,
-     asserts the blacklist is untouched, configures a two-file project, then builds a single
-     ninja output - esp-idf/lwip/liblwip.a - instead of a whole IDF tree.
+     asserts the blacklist is untouched, configures a two-file project, builds a single ninja
+     output - esp-idf/lwip/liblwip.a - instead of a whole IDF tree, then reads the generated
+     sdkconfig.h back to confirm that is what the compiler was given.
   5. Copies the archives to builds/patch/<target>/ and writes patch-info.txt beside them.
      post_patch.py picks them up from there; this script never touches the packages tree.
+  6. Deletes every archive and the note in that folder which this run did not itself produce,
+     so the folder always explains itself. It asks first - see --yes - and it asks before the
+     clone, but deletes only after the build has succeeded.
 
 WHAT IT DOES NOT DO
 
   It does not modify, move or back up anything under the PlatformIO packages directory, and
   it does not build the rest of ESP-IDF. ABI safety rests on the whitelist: every entry in it
   changes a value that lwIP keeps in its own heap objects or in a u16_t that is unchanged
-  while CONFIG_LWIP_WND_SCALE is off.
+  while CONFIG_LWIP_WND_SCALE is off. Inside builds/patch/<target>/ it touches `*.a` and
+  patch-info.txt and nothing else, so any other file kept there survives a run.
 """
 
 import argparse
@@ -86,6 +91,14 @@ MBEDTLS_WHITELIST = {
     "CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC": "y",
     "CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC": None,
 }
+
+# The archives that whitelist implies.  Used to decide what to build, and to know when pruning has removed the
+# mbedTLS archives from a folder - which puts the build back on the package's allocator.
+MBEDTLS_ARCHIVES = {"mbedcrypto", "mbedx509", "mbedtls"}
+
+# Set by a check that could not verify its own result, so the throwaway tree survives for a look instead of being
+# deleted along with the evidence.  Read by the finally block in main().
+KEEP_TEMP_ON_FAILURE = False
 
 # Extra archives, by ninja output path relative to the build directory.
 EXTRA_ARCHIVES = {
@@ -175,6 +188,23 @@ def version_value(text, key):
     if re.search(r"^# %s is not set$" % re.escape(key), text, re.MULTILINE):
         return None
     return "<missing>"
+
+
+def config_word(value):
+    """y / n / not set / absent written as a word, so patch-info.txt does not need Kconfig knowledge to read."""
+    return {
+        "y": "on",
+        "n": "off",
+        "yes": "on",
+        "no": "off",
+        "not set": "off",
+        "absent": "absent",
+    }.get(value, value)
+
+
+def render_change(key, old, new):
+    """One `changes` entry: both sides kept, because 'off -> on' and 'absent -> on' are different events."""
+    return f"{key} {config_word(old)} -> {config_word(new)}"
 
 
 # -----------------------------------------------------------------------------
@@ -456,24 +486,101 @@ def build_archive(python, idf_dir, project_dir, environment, jobs, extra_archive
 def read_generated_config(build_dir, wanted):
     """Read back what the compiler was actually given, not what we asked for.
 
-    The sdkconfig the build generated is the only honest source: a value that silently failed to apply would
-    otherwise be discovered on hardware - as a window that did not grow, or a TLS allocator that did not move.
-    Booleans are compared in both written forms, so an option we deliberately switched off has to appear as
-    `# KEY is not set` rather than merely going missing.
+    A value that silently failed to apply would otherwise be discovered on hardware - as a window that did not
+    grow, or a TLS allocator that did not move.  The header every component includes is the closest artefact to
+    what the compiler saw; the plain `sdkconfig` forms are kept as fallbacks for other IDF layouts.
+
+    Every candidate is scored against every expected value and the first one that matches all of them wins, so a
+    wrong guess about one file's layout cannot block a run.  When none matches, the best attempt is reported
+    together with the lines that file holds for those keys, so a failure explains itself instead of ending in one
+    unexplained line and a deleted tree.
     """
-    generated = build_dir / "config" / "sdkconfig"
-    if not generated.is_file():
-        return {}
-    text = generated.read_text(encoding="utf-8", errors="replace")
-    actual = {}
+    candidates = (
+        (build_dir / "config" / "sdkconfig.h", "header"),
+        (build_dir / "config" / "sdkconfig", "text"),
+        (build_dir.parent / "sdkconfig", "text"),
+    )
+    present = [(path, kind) for path, kind in candidates if path.is_file()]
+    if not present:
+        keep_temp_for_post_mortem(
+            "the build left no config file to verify the applied values against.\n"
+            "  Looked for: " + ", ".join(str(path) for path, _ in candidates) + "\n"
+            "  Refusing to harvest an archive whose values were never read back."
+        )
+
+    best = None
+    for path, kind in present:
+        values = _header_config_values(path, wanted) if kind == "header" else _text_config_values(path, wanted)
+        mismatches = [
+            (key, values.get(key, "n"), want_value(expected))
+            for key, expected in wanted.items()
+            if values.get(key, "n") != want_value(expected)
+        ]
+        if not mismatches:
+            say("config", f"  verified against {_shown(path, build_dir)}: {len(wanted)} value(s) as asked")
+            return values
+        if best is None or len(mismatches) < len(best[0]):
+            best = (mismatches, path)
+
+    mismatches, path = best
+    report = [f"the applied sdkconfig could not be verified; {_shown(path, build_dir)} disagrees"]
+    for key, got, want in mismatches:
+        report.append(f"  - {key}: found {got}, expected {want}")
+        lines = _lines_mentioning(path, key)
+        report.append("      file says: " + (" ; ".join(lines) if lines else "nothing about this key"))
+    report.append("  The archives were built but not harvested, so the folder still holds the previous patch.")
+    keep_temp_for_post_mortem("\n".join(report))
+
+
+def _header_config_values(path, wanted):
+    """Out of sdkconfig.h, where an enabled symbol is `#define KEY value` and a disabled one is simply absent.
+
+    A bool is `1` there, so it only becomes `y` when `y` is what was asked for; an int that happens to be 1 has to
+    stay an int.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    values = {}
     for key, expected in wanted.items():
+        match = re.search(r"^#define\s+%s(?:\s+(.*?))?\s*$" % re.escape(key), text, re.MULTILINE)
+        if match is None:
+            values[key] = "n"
+            continue
+        raw = (match.group(1) or "1").strip().strip('"')
+        values[key] = "y" if (raw == "1" and str(expected) == "y") else raw
+    return values
+
+
+def _text_config_values(path, wanted):
+    """Out of a plain sdkconfig, where a disabled bool is present as `# KEY is not set`."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    values = {}
+    for key in wanted:
         value = version_value(text, key)
-        actual[key] = "n" if value is None else value
-        want = "n" if expected is None else str(expected)
-        if actual[key] != want:
-            die(f"{generated} has {key} {actual[key]}, expected {want}")
-        say("config", f"  verified in generated config: {key} {actual[key]}")
-    return actual
+        values[key] = "n" if value is None else value
+    return values
+
+
+def want_value(expected):
+    return "n" if expected is None else str(expected)
+
+
+def _shown(path, build_dir):
+    try:
+        return path.relative_to(build_dir)
+    except ValueError:
+        return path
+
+
+def _lines_mentioning(path, key):
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return [line.strip() for line in text.splitlines() if key in line][:3]
+
+
+def keep_temp_for_post_mortem(message):
+    """Die, but leave the throwaway tree behind: a config that cannot be read is what needs looking at."""
+    global KEEP_TEMP_ON_FAILURE
+    KEEP_TEMP_ON_FAILURE = True
+    die(message + "\n  The tree was kept rather than deleted; remove it when you are done looking.")
 
 
 # -----------------------------------------------------------------------------
@@ -496,6 +603,7 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
     info = [
         "# generated by builds/patch/make_patch.py",
         "# read back by builds/patch/pre_patch.py to detect a stale patch",
+        "# booleans are written off / on; absent means the key was not in the package sdkconfig at all",
         f"created = {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"target = {target}",
         f"idf_version = {idf_version} {commit}".strip(),
@@ -503,9 +611,8 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
         f"sdkconfig_sha256 = {sha256_of(libs_package / 'sdkconfig')}",
         f"lwip_sha256 = {sha256_of(main_archive)}",
         f"lwip_bytes = {main_archive.stat().st_size}",
-        "params = " + ", ".join(f"{key}={value}" for key, value in generated.items()),
-        "changes = " + "; ".join(f"{key} {old} -> {new}" for key, old, new in changes),
-        "generated = " + ", ".join(f"{key}={value}" for key, value in generated.items()),
+        "changes = " + "; ".join(render_change(*change) for change in changes),
+        "generated = " + ", ".join(f"{key}={config_word(value)}" for key, value in generated.items()),
         f"toolchain = {toolchain_bin.parent.name} {local_version}",
         f"host = {os.name}",
     ]
@@ -513,7 +620,72 @@ def harvest(outputs, target, libs_package, idf_version, commit, changes, toolcha
         info.append("extra_archives = " + ", ".join(sorted(extra_archives)))
     (out_dir / "patch-info.txt").write_text("\n".join(info) + "\n", encoding="utf-8")
     say("harvest", f"wrote {(out_dir / 'patch-info.txt').relative_to(REPO_ROOT)}")
+
+    # patch-info.txt counts as ours: it was written a few lines up, and harvesting without it makes
+    # pre_patch.py warn that the archive cannot be checked against anything.
+    keep = {destination.name for destination in written} | {"patch-info.txt"}
+    removed = prune_target_folder(out_dir, keep)
+    if removed:
+        say("clean", f"{target}: removed {', '.join(removed)} (not produced by this run)")
+        if not (extra_archives & MBEDTLS_ARCHIVES) and any(name.startswith("libmbed") for name in removed):
+            print(
+                "    WARNING: the mbedTLS archives are gone, so this build links the package's own copies again.\n"
+                "    On espressif32 8.0.0 a TLS handshake needs ~40 KB contiguous in the internal heap and that\n"
+                "    pool's largest block sits at 17-30 KB, so HTTPS will probably fail.  Re-run without\n"
+                "    --no-mbedtls if you did not mean this."
+            )
     return written
+
+
+def prune_target_folder(out_dir, keep):
+    """Delete what a previous run left behind, so the folder always matches its own patch-info.txt.
+
+    post_patch.py prepends this folder to LIBPATH and the linker takes every *.a in it, so an archive a later run
+    did not rebuild is still linked - while the note rewritten beside it no longer mentions it.  That mismatch is
+    what this closes.  Only the two things this script writes are considered; anything else kept in the folder is
+    left alone, so a note or a capture can live there safely.
+    """
+    removed = []
+    for entry in sorted(out_dir.iterdir()):
+        if not entry.is_file() or entry.name in keep:
+            continue
+        if entry.suffix == ".a" or entry.name == "patch-info.txt":
+            entry.unlink()
+            removed.append(entry.name)
+    return removed
+
+
+def confirm_replacement(targets, assume_yes):
+    """Say what the run will replace, and stop before the expensive part unless that is confirmed.
+
+    The deleting itself happens in harvest(), not here.  Clearing the folders up front would mean that a failed
+    clone or a failed ninja leaves no patch at all, having destroyed a working one; asking up front and pruning
+    at the end gets the same end state with nothing to lose in between.
+    """
+    stale = []
+    for target in targets:
+        out_dir = SCRIPT_DIR / target
+        if not out_dir.is_dir():
+            continue
+        names = sorted(entry.name for entry in out_dir.iterdir()
+                       if entry.is_file() and entry.suffix == ".a")
+        if names:
+            stale.append((target, names))
+    if not stale:
+        return
+
+    for target, names in stale:
+        say("clean", f"{target}: {len(names)} archive(s) will be replaced: {', '.join(names)}")
+    if assume_yes:
+        say("clean", "--yes given, not asking")
+        return
+    try:
+        answer = input("Existing patches will be removed. Confirm? [y/N]: ")
+    except EOFError:
+        die("no answer available and no --yes given; nothing was changed")
+    if answer.strip().lower() not in ("y", "yes"):
+        print("Nothing was changed.")
+        raise SystemExit(0)
 
 
 # -----------------------------------------------------------------------------
@@ -550,8 +722,10 @@ def parse_args():
                              "buffers come from PSRAM instead of the internal heap (default: on, because that is "
                              "what this codebase needs)")
     parser.add_argument("--no-mbedtls", action="store_false", dest="mbedtls",
-                        help="build liblwip.a only.  Any mbedTLS archives already in the folder are left alone, "
-                             "but a patch-info.txt rewritten this way stops naming them")
+                        help="build liblwip.a only.  The mbedTLS archives already in the folder are then deleted, "
+                             "with a warning, so the build links the package's own copies again")
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="do not ask before the existing archives in builds/patch/<mcu>/ are replaced")
     parser.add_argument("--keep-temp", action="store_true",
                         help="keep the ESP-IDF clone and build tree for inspection")
     return parser.parse_args()
@@ -589,6 +763,7 @@ def main():
 
     tag, commit = resolved[0][2], resolved[0][3]
     assert_parameters_sane(wanted)
+    confirm_replacement([target for target, *_ in resolved], args.yes)
 
     toolchain_bin = find_toolchain(packages_dir)
     toolchain_version = run(
@@ -625,7 +800,7 @@ def main():
 
             extra = {"esp_netif"} if args.with_netif else set()
             if args.mbedtls:
-                extra |= {"mbedcrypto", "mbedx509", "mbedtls"}
+                extra |= MBEDTLS_ARCHIVES
             outputs, build_dir = build_archive(
                 python, idf_dir, project_dir, environment, args.jobs, extra
             )
@@ -640,7 +815,7 @@ def main():
             "  pio run -e ili9488_pcm_1button_full\n"
         )
     finally:
-        if args.keep_temp:
+        if args.keep_temp or KEEP_TEMP_ON_FAILURE:
             say("temp", f"kept {temp_root}")
         else:
             rmtree(temp_root)

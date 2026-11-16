@@ -73,8 +73,9 @@ python builds/patch/make_patch.py --target esp32 --target esp32s3
 | `--recvmbox` | **32** | `CONFIG_LWIP_TCP_RECVMBOX_SIZE`, received segments queued per socket |
 | `--sndbuf` | 8192 | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT`, send buffer (uploads, HTTP responses) |
 | `--max-active` | 32 | `CONFIG_LWIP_MAX_ACTIVE_TCP`, how many sockets may exist |
-| `--mbedtls` / `--no-mbedtls` | **on** | rebuild the three mbedTLS archives with `MBEDTLS_EXTERNAL_MEM_ALLOC=y`. `--no-mbedtls` builds `liblwip.a` only |
+| `--mbedtls` / `--no-mbedtls` | **on** | rebuild the three mbedTLS archives with `MBEDTLS_EXTERNAL_MEM_ALLOC=y`. `--no-mbedtls` builds `liblwip.a` only, and deletes the mbedTLS archives already in the folder, so the build links the package's own again |
 | `--with-netif` | off | also rebuild `libesp_netif.a`. Not needed for the numbers we change - see §0 |
+| `--yes`, `-y` | off | do not ask before the existing archives in `<mcu>/` are replaced |
 | `--idf-path` | none | reuse an existing ESP-IDF checkout instead of cloning |
 | `--temp-dir` | system temp | where the clone and build tree live |
 | `--jobs` | core count | `ninja -j` |
@@ -87,6 +88,22 @@ together.
 
 Two targets must be on the same ESP-IDF version; if the installed packages disagree the script refuses rather
 than building two different patches in one go.
+
+**Replacing what is already there.** The folder's contents *are* the patch - `post_patch.py` prepends `<mcu>/` to
+`LIBPATH` and the linker takes every `*.a` in it - so a run that rebuilt only some of the archives would leave
+the rest shadowing the package copies while its own note had stopped mentioning them. Every run therefore:
+
+- before the clone, lists what is about to be replaced and asks `Existing patches will be removed. Confirm?
+  [y/N]:`. Answering no exits without touching anything; `--yes` skips the question;
+- after the build has produced its archives, deletes the `*.a` files and the note it did not just write.
+
+The order is deliberate: asking first means a long build is not started for nothing, and deleting only at the end
+means a failed clone or a failed ninja leaves the previous patch exactly as it was. Nothing but `*.a` and
+`patch-info.txt` is ever removed, so anything else kept in the folder survives.
+
+One consequence worth knowing: `--no-mbedtls` now really does un-patch mbedTLS. Those three archives are deleted,
+the build links the package's own allocator, and the internal heap is back to the 17-30 KB largest block that
+fails a ~40 KB TLS handshake - so the script prints a warning when it removes them.
 
 ## 3. Reading the output
 
@@ -115,12 +132,26 @@ sdkconfig  sha256 3f2a...    (the package's own file, before patching)
 lwip       sha256 31f1...
 changes    CONFIG_LWIP_TCP_WND_DEFAULT 5760 -> 32768
            CONFIG_LWIP_TCP_RECVMBOX_SIZE 6 -> 32
+           CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC off -> on
 extra_archives = mbedcrypto, mbedtls, mbedx509
 ```
 
-`--no-mbedtls` leaves any mbedTLS archives already in the folder alone - `harvest()` only writes what it built -
-so the build still links them while the rewritten `patch-info.txt` stops naming them. That is the one way to end
-up with a folder whose note does not explain its own contents.
+Booleans are written `off -> on`, because `y` and `# KEY is not set` are sdkconfig spellings rather than English;
+`absent` means the key was not in the package's sdkconfig at all. Both sides are kept deliberately, since
+`off -> on` and `absent -> on` are different events. The same `changes` string is what `pre_patch.py` prints on
+every build, so each `pio run` log states the mbedTLS move in plain words.
+
+The note and the folder cannot disagree: `harvest()` writes what it built and then deletes every other archive
+in the folder, so after a run the note explains exactly what is in there. A `libesp_netif.a` left over from an
+earlier `--with-netif` run, or the mbedTLS archives after a `--no-mbedtls` run, are removed rather than silently
+linked.
+
+`[config] verified against config\sdkconfig.h: 6 value(s) as asked` is a read-back of the header the compiler
+actually included, not of what was asked for: an enabled symbol is `#define KEY value` there and a disabled one
+is simply absent. It runs after ninja, and when it disagrees the archive is **not** harvested - the folder keeps
+the previous patch - and the report lists every mismatch with the line the file holds for that key. The throwaway
+tree is kept in that case rather than deleted along with the evidence. `generated` in the note is the same
+read-back, so a stale archive can be spotted from the record alone.
 
 ## 4. What you may and may not change
 

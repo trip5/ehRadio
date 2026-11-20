@@ -41,6 +41,7 @@ Order and sections match that file.
 | `getindex` | Request index payload to clients. Blocked in HTTP/MQTT/Telnet. |
 | `getactive` | Request active-state payload to clients. Blocked in HTTP/MQTT/Telnet. |
 | `clearfs` | Run allowlist-based LittleFS cleanup and force play mode to web. |
+| `dBcut` | Live preview of a station cut: `<index>,<0..24 dB>`. Applies to the loaded station only and is never persisted - Save/Undo own the file. Blocked in HTTP/MQTT/Telnet. |
 
 ## Options: Load Settings
 
@@ -159,6 +160,8 @@ different pictures, so nothing keeps them in step.
 | --- | --- |
 | `wifiscan` | Enable/disable best-RSSI WiFi scan behavior. |
 | `autoupdate` | Enable/disable auto update checks. |
+| `dbcutauto` | Enable/disable automatic per-station dBcut measurement (Settings > System > dBcut Auto). |
+| `dbcutautoalways` | Re-measure stations that already carry a dBcut, correcting them if they drifted (Settings > System > dBcut Auto Always). Only means anything while `dbcutauto` is on. |
 | `ehdp` | Enable/disable eHDP service. |
 | `ehdpname` | Set eHDP name and reinitialize eHDP. |
 | `mdnsname` | Set mDNS host name. |

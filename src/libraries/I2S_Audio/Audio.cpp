@@ -2753,6 +2753,7 @@ void Audio::playChunk() {
             (*sample)[LEFTCHANNEL]  = (int16_t)xy;
         }
         computeVUlevel(*sample);
+        loudnessAccum((*sample)[LEFTCHANNEL], (*sample)[RIGHTCHANNEL]);   // pre-fader: knob and cut agnostic
 
         // ---- silence-run detector -------------------------------------------------------------------------
         // Real audio contains individual zero samples but never a long unbroken run of them.  480 frames at 24000 Hz
@@ -6537,8 +6538,8 @@ void Audio::computeLimit() {    	// is calculated when the volume or balance cha
         float dB = -112.0f * t * t * t + 172.0f * t * t - 60.0f;
         volOut = powf(10.0f, dB / 20.0f);
     }
-    m_limit_left = volOut * l;
-    m_limit_right = volOut * r;
+    m_limit_left = volOut * l * m_cutLin;
+    m_limit_right = volOut * r * m_cutLin;
 
 /* Below: Maleksm edits? */
 
@@ -6555,6 +6556,38 @@ void Audio::Gain(int16_t* sample) {
     /* important: these multiplications must all be signed ints, or the result will be invalid */
     sample[LEFTCHANNEL]  *= m_limit_left ;
     sample[RIGHTCHANNEL] *= m_limit_right;
+}
+//****************************************************************************************
+// Station cut, after the volume curve: the knob's feel and VOLUME_SCALE are untouched.
+void Audio::setCutDb(float db) {
+    if (db < 0.0f) db = 0.0f;           // this column only ever cuts
+    if (db > 48.0f) db = 48.0f;
+    m_cutLin = powf(10.0f, -db / 20.0f);
+    computeLimit();                     // m_limit_* are private: this is the way in
+}
+//****************************************************************************************
+void Audio::loudnessReset() {
+    m_loudSum = 0; m_loudN = 0; m_loudAvg = -120.0f; m_loudHave = false;
+}
+//****************************************************************************************
+float Audio::loudnessDb() { return m_loudHave ? m_loudAvg : -120.0f; }
+//****************************************************************************************
+// This path measures what it decodes, so there is no register to report; the VS1053 build returns its raw one.
+int Audio::loudnessRaw() { return -1; }
+//****************************************************************************************
+// Mean level before Gain(), so it is independent of the knob and the cut.  ~50 ms blocks, gated at -50 dBFS.
+void Audio::loudnessAccum(int16_t l, int16_t r) {
+    m_loudSum += (double)l * l + (double)r * r;
+    m_loudN   += 2;
+    const uint32_t blockSamples = (m_sampleRate ? (m_sampleRate / 20) : 800);
+    if (m_loudN < blockSamples) return;
+    const double ms = m_loudSum / m_loudN / (32768.0 * 32768.0);
+    const float  db = (ms > 0.0) ? 10.0f * log10f((float)ms) : -120.0f;
+    if (db > -50.0f) {
+        m_loudAvg  = m_loudHave ? (m_loudAvg + (db - m_loudAvg) * (1.0f / 200.0f)) : db;
+        m_loudHave = true;
+    }
+    m_loudSum = 0; m_loudN = 0;
 }
 //****************************************************************************************
 uint32_t Audio::inBufferFilled() {

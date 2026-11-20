@@ -36,12 +36,12 @@ bool clockTrustworthy() {
 
 namespace {
 
-bool readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& ovol) {
+bool readStationEntry(File& playlist, File& index, uint16_t idx, char* name, char* url, int& dBcut) {
   index.seek((idx - 1) * 4, SeekSet);
   uint32_t pos = 0;
   index.readBytes((char*)&pos, 4);
   playlist.seek(pos, SeekSet);
-  return utility.parseCSV(playlist.readStringUntil('\n').c_str(), name, url, ovol);
+  return utility.parseCSV(playlist.readStringUntil('\n').c_str(), name, url, dBcut);
 }
 
 } // namespace
@@ -209,30 +209,124 @@ void Utility::escapeQuotes(const char* input, char* output, size_t maxLen) {
   output[j] = '\0';
 }
 
-bool Utility::parseCSV(const char* line, char* name, char* url, int& ovol) {
-  char* tab = nullptr;
-  const char* cursor = line;
-  char volumeBuffer[5] = {0};
+namespace {
+// THE playlist grammar, in one place.  Two shapes are read, one is written:
+//   NEW:  <name, spaces allowed> <url> <value>     "SomaFM - Groove Salad https://x dB3"
+//   OLD:  <name> TAB <url> TAB <value>             what yoRadio and every flashed file carry
+// The new shape is parsed from the right (only the name has spaces, only the value cannot).  Fields point into the
+// caller's line - nothing is copied - and script.js mirrors this, so the two change together.
+struct PlaylistFields {
+  const char* nameBegin; const char* nameEnd;
+  const char* urlBegin;  const char* urlEnd;
+  const char* valBegin;  const char* valEnd;
+  bool tabShape;
+};
 
-  if (!cursor || !name || !url) return false;
+bool splitPlaylistLine(const char* line, PlaylistFields& f) {
+  if (!line) return false;
+  const char* s = line;
+  while (*s && isspace((unsigned char)*s)) s++;
+  const char* e = s + strlen(s);
+  while (e > s && isspace((unsigned char)e[-1])) e--;
+  if (e == s) return false;
 
-  tab = strstr(cursor, "\t");
-  if (tab == nullptr) return false;
-  strlcpy(name, cursor, static_cast<size_t>(tab - cursor) + 1);
-  if (strlen(name) == 0) return false;
+  f.tabShape = false;
+  f.nameBegin = s; f.nameEnd = e;
+  f.urlBegin  = s; f.urlEnd  = s;
+  f.valBegin  = s; f.valEnd  = s;
 
-  cursor = tab + 1;
-  tab = strstr(cursor, "\t");
-  if (tab == nullptr) return false;
-  strlcpy(url, cursor, static_cast<size_t>(tab - cursor) + 1);
-  if (strlen(url) == 0) return false;
+  const char* tab1 = (const char*)memchr(s, '\t', (size_t)(e - s));
+  if (tab1) {                                   // old shape: exactly three tab-separated fields
+    const char* tab2 = (const char*)memchr(tab1 + 1, '\t', (size_t)(e - (tab1 + 1)));
+    if (!tab2) return false;
+    if (memchr(tab2 + 1, '\t', (size_t)(e - (tab2 + 1)))) return false;
+    f.nameBegin = s;        f.nameEnd = tab1;
+    f.urlBegin  = tab1 + 1; f.urlEnd  = tab2;
+    f.valBegin  = tab2 + 1; f.valEnd  = e;
+    f.tabShape = true;
+    return true;
+  }
 
-  cursor = tab + 1;
-  if (strlen(cursor) == 0) return false;
+  const char* valBegin = e;                     // last token: the value
+  while (valBegin > s && !isspace((unsigned char)valBegin[-1])) valBegin--;
+  if (valBegin == s) return false;
+  const char* urlEnd = valBegin;                // second from last: the URL
+  while (urlEnd > s && isspace((unsigned char)urlEnd[-1])) urlEnd--;
+  const char* urlBegin = urlEnd;
+  while (urlBegin > s && !isspace((unsigned char)urlBegin[-1])) urlBegin--;
+  if (urlBegin == s) return false;
+  const char* nameEnd = urlBegin;               // everything before it: the name
+  while (nameEnd > s && isspace((unsigned char)nameEnd[-1])) nameEnd--;
+  if (nameEnd == s) return false;
 
-  strlcpy(volumeBuffer, cursor, sizeof(volumeBuffer));
-  ovol = atoi(volumeBuffer);
+  f.nameBegin = s;        f.nameEnd = nameEnd;
+  f.urlBegin  = urlBegin; f.urlEnd  = urlEnd;
+  f.valBegin  = valBegin; f.valEnd  = e;
   return true;
+}
+
+// "dB12" is a measurement; anything else is NOT MEASURED (-1).  The prefix matters: atoi("dB12") is 0, so a yoRadio
+// build ignores our values instead of applying them in its own units, while atoi("12dB") would read as their ovol 12.
+int cutFromToken(const PlaylistFields& f) {
+  const size_t n = (size_t)(f.valEnd - f.valBegin);
+  if (n < 3) return -1;
+  if ((f.valBegin[0] | 0x20) != 'd' || (f.valBegin[1] | 0x20) != 'b') return -1;
+  int v = 0;
+  bool digits = false;
+  for (const char* p = f.valBegin + 2; p < f.valEnd; p++) {
+    if (!isdigit((unsigned char)*p)) return -1;
+    if (v <= 1000) v = v * 10 + (*p - '0');
+    digits = true;
+  }
+  if (!digits) return -1;
+  if (v > DBCUT_MAX) v = DBCUT_MAX;
+  return v;
+}
+}  // namespace
+
+bool Utility::parsePlaylistLine(const char* line, char* name, char* url, int& dBcut) {
+  if (!name || !url) return false;
+  name[0] = '\0';
+  url[0]  = '\0';
+  dBcut   = -1;
+  PlaylistFields f;
+  if (!splitPlaylistLine(line, f)) return false;
+  if (f.nameEnd == f.nameBegin || f.urlEnd == f.urlBegin) return false;
+  strlcpy(name, f.nameBegin, (size_t)(f.nameEnd - f.nameBegin) + 1);
+  strlcpy(url,  f.urlBegin,  (size_t)(f.urlEnd  - f.urlBegin)  + 1);
+  if (name[0] == '\0' || url[0] == '\0') return false;
+  dBcut = cutFromToken(f);
+  return true;
+}
+
+// The one writer, so the shape cannot fork again.  A cut of -1 is written as a bare 0 (not measured).
+String Utility::formatPlaylistLine(const char* name, const char* url, int dBcut) {
+  String out(name);
+  out += ' ';
+  out += url;
+  out += ' ';
+  if (dBcut < 0) out += '0';
+  else { out += "dB"; out += dBcut; }
+  return out;
+}
+
+// True when a line is legal but not canonical (TAB shape, foreign or untagged value, out of range): cleanPlaylist()
+// rewrites only then, so a canonical file is never written twice.
+bool Utility::playlistLineNeedsRewrite(const char* line) {
+  PlaylistFields f;
+  if (!splitPlaylistLine(line, f)) return true;
+  if (f.tabShape) return true;
+  if (f.nameEnd == f.nameBegin || f.urlEnd == f.urlBegin) return true;
+  const size_t n = (size_t)(f.valEnd - f.valBegin);
+  const int cut = cutFromToken(f);
+  if (cut < 0) return !(n == 1 && f.valBegin[0] == '0');   // only a bare 0 means "not measured"
+  char want[8];
+  snprintf(want, sizeof(want), "dB%d", cut);
+  return (strlen(want) != n) || memcmp(want, f.valBegin, n) != 0;
+}
+
+bool Utility::parseCSV(const char* line, char* name, char* url, int& dBcut) {
+  return parsePlaylistLine(line, name, url, dBcut);
 }
 
 void Utility::normalizeToCRLF(const char* input, char* output, size_t outputSize) {
@@ -446,12 +540,12 @@ void Utility::indexPlaylist() {
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
-  int stationOvol = 0;
+  int stationdBcut = 0;
   File index = LittleFS.open(INDEX_PATH, "w");
   uint32_t entries = 0;
   while (playlist.available()) {
     uint32_t pos = playlist.position();
-    if (parseCSV(playlist.readStringUntil('\n').c_str(), stationName, stationUrl, stationOvol)) {
+    if (parseCSV(playlist.readStringUntil('\n').c_str(), stationName, stationUrl, stationdBcut)) {
       // Stop READING at the ceiling: a row past MAX_PLAYLIST_ENTRIES can never be given an id. Breaking here
       // rather than skipping keeps the index contiguous and stops the parse of a hopeless file.
       if (entries >= MAX_PLAYLIST_ENTRIES) {
@@ -502,7 +596,8 @@ void Utility::initPlaylist() {
 }
 
 bool Utility::cleanPlaylist() {
-  // Phase 1: Scan for blank lines, bare LF, or invalid CSV format
+  // Pass 1: does anything need the canonical rewrite - not CRLF, blank, unparseable, still TAB, or a value that is not
+  // our token?  A canonical file is left alone, which matters because the rewrite is a flash write.
   File playlist = LittleFS.open(PLAYLIST_PATH, "r");
   if (!playlist) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: playlist.csv not found, nothing to clean");
@@ -512,37 +607,24 @@ bool Utility::cleanPlaylist() {
   bool needsClean = false;
   while (playlist.available()) {
     String line = playlist.readStringUntil('\n');
-    // Check for bare LF (no preceding CR) — should be CRLF
-    if (line.length() == 0 || line[line.length()-1] != '\r') {
-      needsClean = true;
-      break;
-    }
-    // Check for blank/whitespace-only lines (just "\r")
+    if (line.length() == 0 || line[line.length()-1] != '\r') { needsClean = true; break; }  // bare LF
     const char* p = line.c_str();
     while (*p && isspace((unsigned char)*p)) p++;
-    if (*p == '\0') {
-      needsClean = true;
-      break;
-    }
-    // Check for invalid CSV format (must be tab-delimited: NAME\tURL\tOVOL)
-    {
-      char _name[STATION_FIELD_LENGTH] = {0};
-      char _url[STATION_FIELD_LENGTH] = {0};
-      int _ovol = 0;
-      if (!parseCSV(line.c_str(), _name, _url, _ovol)) {
-        needsClean = true;
-        break;
-      }
-    }
+    if (*p == '\0') { needsClean = true; break; }                                            // blank row
+    char _name[STATION_FIELD_LENGTH] = {0};
+    char _url[STATION_FIELD_LENGTH] = {0};
+    int _dBcut = -1;
+    if (!parsePlaylistLine(p, _name, _url, _dBcut)) { needsClean = true; break; }             // unusable row
+    if (playlistLineNeedsRewrite(p)) { needsClean = true; break; }                            // old or foreign
   }
   playlist.close();
 
   if (!needsClean) {
     FUNCTIONLOG("Playlist", "cleanPlaylist: verified, no cleaning needed");
-    return false;  // File is already clean
+    return false;  // File is already canonical
   }
 
-  // Phase 2: Rewrite clean version with CRLF line endings
+  // Phase 2: Rewrite in the canonical shape, CRLF line endings
   FUNCTIONLOG("Playlist", "cleanPlaylist: issues found, rewriting...");
   playlist = LittleFS.open(PLAYLIST_PATH, "r");
   File tmpFile = LittleFS.open(TMP_PATH, "w");
@@ -555,7 +637,8 @@ bool Utility::cleanPlaylist() {
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
-  int stationOvol = 0;
+  int stationDbcut = -1;
+  uint16_t kept = 0, dropped = 0;
 
   while (playlist.available()) {
     String line = playlist.readStringUntil('\n');
@@ -567,11 +650,12 @@ bool Utility::cleanPlaylist() {
     const char* p = line.c_str();
     while (*p && isspace((unsigned char)*p)) p++;
     if (*p == '\0') continue;
-    // Write only valid CSV lines with CRLF ending
-    if (parseCSV(line.c_str(), stationName, stationUrl, stationOvol)) {
-      tmpFile.print(line);
-      tmpFile.write((const uint8_t*)"\r\n", 2);
-    }
+    // Rebuilt from the parsed fields, never echoed: that is what converts the TAB shape, clears a
+    // foreign value to "not measured" and clamps a value that is out of range.
+    if (!parsePlaylistLine(p, stationName, stationUrl, stationDbcut)) { dropped++; continue; }
+    tmpFile.print(formatPlaylistLine(stationName, stationUrl, stationDbcut));
+    tmpFile.write((const uint8_t*)"\r\n", 2);
+    kept++;
   }
 
   playlist.close();
@@ -589,7 +673,67 @@ bool Utility::cleanPlaylist() {
   LittleFS.remove(INDEX_PATH);
   indexPlaylist();
 
-  FUNCTIONLOG("Playlist", "cleanPlaylist: rewrite complete, index rebuilt");
+  FUNCTIONLOG("Playlist", "cleanPlaylist: rewrite complete, %u row(s) kept, %u dropped, index rebuilt",
+              (unsigned)kept, (unsigned)dropped);
+  return true;
+}
+
+// Replace one row's third field and rebuild the index - the learned-cut write-back.  Never from the audio task: the
+// erase and rename block for tens of ms and starve the I2S DMA.  True only when the file actually changed.
+bool Utility::writeStationCut(uint16_t stationId, uint8_t dBcut) {
+  if (config.getMode() != PM_WEB) return false;
+  if (stationId == 0) return false;
+  if (dBcut > DBCUT_MAX) dBcut = DBCUT_MAX;
+
+  File playlist = LittleFS.open(PLAYLIST_PATH, "r");
+  if (!playlist) return false;
+  File tmpFile = LittleFS.open(TMP_PATH, "w");
+  if (!tmpFile) { playlist.close(); return false; }
+
+  char stationName[STATION_FIELD_LENGTH] = {0};
+  char stationUrl[STATION_FIELD_LENGTH] = {0};
+  int  stationDbcut = -1;
+  uint16_t row = 0;
+  bool changed = false;
+  bool matched = false;
+
+  while (playlist.available()) {
+    String line = playlist.readStringUntil('\n');
+    if (line.length() > 0 && line[line.length()-1] == '\r') line = line.substring(0, line.length()-1);
+    const char* p = line.c_str();
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '\0') continue;
+    if (!parseCSV(line.c_str(), stationName, stationUrl, stationDbcut)) continue;
+    row++;
+    int value = stationDbcut;
+    // The index may have moved since the tune began - the playlist can be edited while it plays - so
+    // the row's URL has to still match before it is overwritten.
+    if (row == stationId && strcmp(stationUrl, config.station.url) == 0) {
+      matched = true;
+      value = (int)dBcut;
+      changed = (value != stationDbcut);
+    }
+    tmpFile.print(formatPlaylistLine(stationName, stationUrl, value));
+    tmpFile.write((const uint8_t*)"\r\n", 2);
+  }
+
+  playlist.close();
+  tmpFile.close();
+
+  if (!matched || !changed) {
+    LittleFS.remove(TMP_PATH);
+    return false;
+  }
+
+  LittleFS.remove(PLAYLIST_PATH);            // rename() does not overwrite an existing target
+  if (!LittleFS.rename(TMP_PATH, PLAYLIST_PATH)) {
+    FUNCTIONLOG("Playlist", "writeStationCut: rename failed");
+    LittleFS.remove(TMP_PATH);
+    return false;
+  }
+  LittleFS.remove(INDEX_PATH);
+  indexPlaylist();
+  FUNCTIONLOG("Playlist", "writeStationCut: station %u written as dB%u", (unsigned)stationId, (unsigned)dBcut);
   return true;
 }
 
@@ -623,7 +767,7 @@ bool Utility::loadStation(uint16_t stationId) {
     memset(config.station.url, 0, STATION_FIELD_LENGTH);
     memset(config.station.name, 0, STATION_FIELD_LENGTH);
     strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
-    config.station.ovol = 0;
+    config.station.dBcut = 0;
     return false;
   }
 
@@ -631,16 +775,16 @@ bool Utility::loadStation(uint16_t stationId) {
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
-  int stationOvol = 0;
+  int stationDbcut = 0;
   File playlist = config.SDPLFS()->open(REAL_PLAYL, "r");
   File index = config.SDPLFS()->open(REAL_INDEX, "r");
-  const bool ok = readStationEntry(playlist, index, stationId, stationName, stationUrl, stationOvol);
+  const bool ok = readStationEntry(playlist, index, stationId, stationName, stationUrl, stationDbcut);
   if (ok) {
     memset(config.station.url, 0, STATION_FIELD_LENGTH);
     memset(config.station.name, 0, STATION_FIELD_LENGTH);
     strncpy(config.station.name, stationName, STATION_FIELD_LENGTH);
     strncpy(config.station.url, stationUrl, STATION_FIELD_LENGTH);
-    config.station.ovol = stationOvol;
+    config.station.dBcut = stationDbcut;
     config.setLastStation(stationId);
   }
   playlist.close();
@@ -654,7 +798,7 @@ uint16_t Utility::findStationByUrl(const char* url) {
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
-  int stationOvol = 0;
+  int stationdBcut = 0;
   File playlist = config.SDPLFS()->open(REAL_PLAYL, "r");
   File index = config.SDPLFS()->open(REAL_INDEX, "r");
   if (!playlist || !index) {
@@ -664,7 +808,7 @@ uint16_t Utility::findStationByUrl(const char* url) {
   }
 
   for (uint16_t i = 1; i <= count; i++) {
-    if (readStationEntry(playlist, index, i, stationName, stationUrl, stationOvol) && strcmp(stationUrl, url) == 0) {
+    if (readStationEntry(playlist, index, i, stationName, stationUrl, stationdBcut) && strcmp(stationUrl, url) == 0) {
       playlist.close();
       index.close();
       return i;
@@ -692,12 +836,12 @@ uint16_t Utility::fillPlaylistRange(int from, uint8_t count, char names[][STATIO
 
   char nameBuf[STATION_FIELD_LENGTH] = {0};
   char urlBuf[STATION_FIELD_LENGTH] = {0};
-  int ovolBuf = 0;
+  int dBcutBuf = 0;
   for (uint8_t c = 0; c < count; c++) {
     int stationId = from + c;
     if (stationId < 1 || stationId > (int)total) continue;
     memset(nameBuf, 0, sizeof(nameBuf));
-    if (readStationEntry(playlist, index, (uint16_t)stationId, nameBuf, urlBuf, ovolBuf)) {
+    if (readStationEntry(playlist, index, (uint16_t)stationId, nameBuf, urlBuf, dBcutBuf)) {
       strlcpy(names[c], nameBuf, STATION_FIELD_LENGTH / 2);
     }
   }
@@ -713,7 +857,7 @@ char* Utility::stationByNum(uint16_t num) {
 
   char stationName[STATION_FIELD_LENGTH] = {0};
   char stationUrl[STATION_FIELD_LENGTH] = {0};
-  int stationOvol = 0;
+  int stationdBcut = 0;
   File playlist = config.SDPLFS()->open(REAL_PLAYL, "r");
   File index = config.SDPLFS()->open(REAL_INDEX, "r");
   if (!playlist || !index) {
@@ -722,7 +866,7 @@ char* Utility::stationByNum(uint16_t num) {
     return stationBuf;
   }
 
-  if (readStationEntry(playlist, index, num, stationName, stationUrl, stationOvol)) {
+  if (readStationEntry(playlist, index, num, stationName, stationUrl, stationdBcut)) {
     strlcpy(stationBuf, stationName, sizeof(stationBuf));
   }
   playlist.close();

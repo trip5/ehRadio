@@ -86,7 +86,7 @@ void Player::init() {
   #endif
   _loadVol(config.store.volume);
   #ifdef USE_ES8311
-    uint8_t i2sVol_init = volToI2S(config.store.volume); /* Also apply stored volume to codec (respecting station ovol via volToI2S) */
+    uint8_t i2sVol_init = volToI2S(config.store.volume); /* Also apply stored volume to codec (knob only; the station cut is a separate gain) */
     es.setVolume((uint8_t)map(i2sVol_init, 0, VOLUME_SCALE, 0, 100)); /* Map I2S volume (0..VOLUME_SCALE) to codec volume 0..100 */
   #endif
   #ifdef CONNECT_HTTP_HTTPS_TIMEOUT // macro must be two numbers separated by a comma, ie: 1700, 3700
@@ -244,6 +244,7 @@ void Player::loop() {
           case PR_VOL:    cmd = "VOL";    break;
           case PR_BURL:   cmd = "BURL";   break;
           case PR_TOGGLE: cmd = "TOGGLE"; break;
+          case PR_DBCUT:  cmd = "DBCUT";  break;
           default: break;
         }
         FUNCTIONLOG("Player", "queue: %s %d", cmd, (int)requestP.payload);
@@ -272,11 +273,18 @@ void Player::loop() {
         _clearMute();   // explicit volume change is a user action: clear mute
         config.setVolume(requestP.payload);
         config.saveValueButWait(&config.store.volume, (uint8_t)requestP.payload, 3000);
-        uint8_t i2sVol = volToI2S(requestP.payload);
-        Audio::setVolume(i2sVol);
-        #ifdef USE_ES8311
-          es.setVolume((uint8_t)map(i2sVol, 0, VOLUME_SCALE, 0, 100)); /* Map I2S volume (already adjusted for station ovol) 0..VOLUME_SCALE -> codec 0..100 */
-        #endif
+        _loadVol(requestP.payload);   // knob + station cut, in the one place that applies both
+        break;
+      }
+      case PR_DBCUT: {
+        const uint16_t idx = (uint16_t)((uint32_t)requestP.payload >> 16);
+        const int16_t  dB  = (int16_t)(requestP.payload & 0xFFFF);
+        if (idx == config.lastStation()) {
+          config.station.dBcut = dB;
+          _applyCut((float)dB);     // a slider is a person asking for that number now: no glide, no analysis
+          _dbGlideTo = _dbApplied;  // ...and nothing left over from a decision may drag it back
+          _dbPhase = DB_DONE;   // a human has spoken: the loop must not overwrite it
+        }
         break;
       }
       #ifdef USE_SD
@@ -315,6 +323,7 @@ void Player::loop() {
       default: break;
     }
   }
+  _dbcutTick();     // the learned cut: ramp, settle, freeze and write back
   Audio::loop();
   audioHandlers.tick();  // publishes the title line once a half has settled, or its partner has arrived
 
@@ -494,6 +503,15 @@ void Player::setOutputPins(bool isPlaying) {
 
 void Player::_play(uint16_t stationId) {
   log_i("%s called, stationId=%d", __func__, stationId);
+  _dbPhase = DB_IDLE;      // a new tune re-arms the learn; a stored cut skips it in _dbcutTick()
+  _dbTickMs = 0;
+  _dbLogMs = 0;
+  _dbGlideTo = 0.0f;       // a glide belongs to the tune that decided it
+  _dbWindow = 0;
+  _dbRepeat = 0;
+  _dbSum = 0.0;
+  _dbN = 0;
+  _dbFadeIn = false;
   // Every play starts with the honest identity.  The alternate user agent exists for exactly one retry after a 403
   // (see src/core/config.h), so it must not survive into the next station or the next user action.
   setAlternateUserAgent(false);
@@ -820,10 +838,11 @@ void Player::stepVol(bool up) {
 }
 
 uint8_t Player::volToI2S(uint8_t volume) {
+  // Knob in, knob out.  The station's cut is NOT part of this any more: it is a gain at the output
+  // stage (_applyCut), so nothing here depends on which station is playing.
   #ifdef USE_ES8311
     // Apply gamma curve for ES3C28P to make low volumes more audible
-    int maxIn = VOLUME_SCALE - config.station.ovol * 3;
-    if (maxIn < 1) maxIn = 1; // avoid division by zero; treat invalid ovol as no reduction
+    const int maxIn = VOLUME_SCALE;
     if (volume > (uint8_t)maxIn) volume = (uint8_t)maxIn;
     float vnorm = (float)volume / (float)maxIn; // 0..1
     if (vnorm < 0.0f) vnorm = 0.0f;
@@ -836,7 +855,7 @@ uint8_t Player::volToI2S(uint8_t volume) {
     if (vol < 0) vol = 0;
     return (uint8_t)vol;
   #else
-    int vol = map(volume, 0, VOLUME_SCALE - config.station.ovol * 3 , 0, VOLUME_SCALE);
+    int vol = map(volume, 0, VOLUME_SCALE, 0, VOLUME_SCALE);
     if (vol > VOLUME_SCALE) vol = VOLUME_SCALE;
     if (vol < 0) vol = 0;
     return vol;
@@ -844,8 +863,11 @@ uint8_t Player::volToI2S(uint8_t volume) {
 }
 
 void Player::_loadVol(uint8_t volume) {
-  uint8_t v = _muted ? 0 : volToI2S(volume);
-  setVolume(v);
+  const uint8_t v = _muted ? 0 : volToI2S(volume);
+  setVolume(v);                              // the knob
+  // -1 means "not measured": start at the fade-in value so a loud station is never blasted while it is learned.
+  const int cut = config.station.dBcut;
+  _applyCut((float)((cut < 0) ? (config.store.dbcutauto ? AUTO_DBCUT_START_DB : 0) : cut));
   #ifdef USE_ES8311
     es.setVolume((uint8_t)map(v, 0, VOLUME_SCALE, 0, 100));
   #endif
@@ -853,6 +875,196 @@ void Player::_loadVol(uint8_t volume) {
 
 void Player::setVol(uint8_t volume) {
   player.sendCommand({PR_VOL, volume});
+}
+
+void Player::setStationCut(uint16_t index, int value) {
+  if (config.getMode() != PM_WEB) return;        // card rows carry no cut
+  if (index != config.lastStation()) return;     // only the station that is loaded
+  if (value < 0) value = 0;              // 0 is a measurement, not a lack of one
+  if (value > DBCUT_MAX) value = DBCUT_MAX;
+  sendCommand({PR_DBCUT, (int)(((uint32_t)index << 16) | (uint16_t)value)});
+}
+
+// The cut only attenuates: clamp it behind the grammar and setStationCut().  Audio task only.
+void Player::_applyCut(float db) {
+  if (db < 0.0f) db = 0.0f;              // -1 (not measured) and a fresh ramp both mean "no cut yet"
+  if (db > (float)DBCUT_MAX) db = (float)DBCUT_MAX;
+  _dbApplied = db;
+  setCutDb(db);
+}
+
+void Player::_writeCut(int dBcut) {
+  static volatile bool s_busy = false;           // only one write in flight, cleared by the task
+  if (s_busy) return;
+  s_busy = true;
+  const uint32_t pack = ((uint32_t)config.lastStation() << 8) | (uint8_t)dBcut;
+  if (xTaskCreatePinnedToCore([](void* p) {
+        const uint32_t v = (uint32_t)(uintptr_t)p;
+        utility.writeStationCut((uint16_t)(v >> 8), (uint8_t)(v & 0xFF));
+        s_busy = false;
+        vTaskDelete(NULL);
+      }, "dbcutWrite", 4096, (void*)(uintptr_t)pack, LOW_TASK_PRIORITY, nullptr, NETWORK_CORE) != pdPASS) {
+    s_busy = false;
+    FUNCTIONLOG("Player", "dbcut: write task did not start");
+  }
+}
+
+// One step of the glide, every 200 ms: a correction is a drift, never a lurch.
+void Player::_dbGlideTick() {
+  const float togo = _dbGlideTo - _dbApplied;
+  if (togo > (float)AUTO_DBCUT_STEP_DB)        _applyCut(_dbApplied + (float)AUTO_DBCUT_STEP_DB);
+  else if (togo < -(float)AUTO_DBCUT_STEP_DB)  _applyCut(_dbApplied - (float)AUTO_DBCUT_STEP_DB);
+  else if (togo != 0.0f)                       _applyCut(_dbGlideTo);   // the last fraction of a step
+}
+
+// Close this window, open the next.  Estimate windows restart the accumulator; the calculation stage restarts once.
+void Player::_dbAdvanceWindow() {
+  _dbT0 = millis() ? millis() : 1;
+  _dbFadeIn = false;
+  if (_dbPhase == DB_ESTIMATE) {
+    _dbSum = 0.0;
+    _dbN = 0;
+    loudnessReset();
+    if (++_dbWindow < AUTO_DBCUT_ESTIMATE_WINDOWS) return;
+    _dbPhase = DB_CALCULATE;
+    _dbRepeat = 0;
+    FUNCTIONLOG("Player", "dbcut: station %u estimated %d dB after %u s, now calculating",
+                (unsigned)config.lastStation(), (int)(_dbApplied + 0.5f),
+                (unsigned)(AUTO_DBCUT_ESTIMATE_WINDOWS * (AUTO_DBCUT_ESTIMATE_MS / 1000)));
+    return;
+  }
+  if (++_dbRepeat < 2) return;                      // two calculations: 5 minutes, then 10 more
+  _dbPhase = DB_DONE;
+  FUNCTIONLOG("Player", "dbcut: station %u done at %d dB (file holds %d dB)",
+              (unsigned)config.lastStation(), (int)(_dbApplied + 0.5f), _dbWritten);
+}
+
+// Learn in two stages and write only from the second.  ESTIMATE is three short windows, each measured on its own so a
+// preroll advert cannot poison the number; CALCULATE is two long ones whose mean keeps the whole stage.  The cut is HELD
+// inside a window and moves only at a boundary, by half the remaining gap.  -1 means "not measured": that tune fades in
+// from AUTO_DBCUT_START_DB, a calibrated one starts at the file's number.
+void Player::_dbcutTick() {
+  if (!config.store.dbcutauto) return;            // the WebUI switch; the analysis stays compiled either way
+  if (config.getMode() != PM_WEB) return;
+  if (_status != PLAYING) return;
+  const uint32_t now = millis();
+  if (_dbTickMs && (uint32_t)(now - _dbTickMs) < 200) return;   // 5 Hz is plenty
+  _dbTickMs = now ? now : 1;
+
+  if (_dbPhase == DB_IDLE) {
+    const int stored = config.station.dBcut;
+    // Read ONCE, on the first tick: a run that starts finishes both calculations, so calc 1 writing a value cannot make
+    // calc 2 think the station was calibrated.  The master switch above is checked every tick.
+    if (stored >= 0 && !config.store.dbcutautoalways) {
+      _dbPhase = DB_DONE;                           // calibrated, and told to leave it alone
+      _applyCut((float)stored);
+      _dbGlideTo = _dbApplied;
+      return;
+    }
+    if (stored < 0 && loudnessDb() <= -50.0f) return;      // nothing to measure yet
+    _dbPhase = DB_ESTIMATE;
+    _dbWindow = 0;
+    _dbRepeat = 0;
+    _dbT0 = now ? now : 1;
+    _dbSum = 0.0;
+    _dbN = 0;
+    _dbWritten = stored;                            // -1: the file holds no measurement for this station
+    _dbFadeIn = (stored < 0);
+    loudnessReset();
+    _applyCut((float)(_dbFadeIn ? AUTO_DBCUT_START_DB : stored));
+    _dbGlideTo = _dbApplied;
+    return;
+  }
+  if (_dbPhase == DB_DONE) { _dbGlideTick(); return; }
+
+  const uint32_t elapsed = now - _dbT0;
+
+  // Only the first window moves the cut while open - there is nothing to hold yet: a line from START_DB to 3 dB past
+  // the live estimate, then 1 dB a tick for the last few.
+  if (_dbFadeIn && _dbN) {
+    float aim = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
+    if (aim < 0.0f) aim = 0.0f;
+    if (aim > (float)DBCUT_MAX) aim = (float)DBCUT_MAX;
+    if (elapsed < AUTO_DBCUT_RAMP_MS) {
+      float to = aim + 3.0f;
+      if (to > (float)DBCUT_MAX) to = (float)DBCUT_MAX;
+      const float k = (float)elapsed / (float)AUTO_DBCUT_RAMP_MS;
+      _applyCut((float)AUTO_DBCUT_START_DB + (to - (float)AUTO_DBCUT_START_DB) * k);
+    } else if (_dbApplied > aim + 1.0f) {
+      _applyCut(_dbApplied - 1.0f);
+    } else if (_dbApplied < aim - 1.0f) {
+      _applyCut(_dbApplied + 1.0f);
+    }
+    _dbGlideTo = _dbApplied;
+  }
+
+  const float measured = loudnessDb();
+  if (measured > -50.0f) {                          // the firmware's gate, sample by sample
+    _dbSum += measured;
+    _dbN++;
+  }
+
+#if DBCUT_LEVEL_LOG
+  // Two builds on one stream give ~60 aligned pairs per station: this is how the VS1053 meter was calibrated.
+  if (_dbLogMs == 0 || (uint32_t)(now - _dbLogMs) >= 10000) {
+    _dbLogMs = now ? now : 1;
+    const int raw = loudnessRaw();
+    if (raw >= 0)
+      FUNCTIONLOG("Player", "dbcut: %us meter %d level %.1f dBFS cut %.1f dB",
+                  (unsigned)(elapsed / 1000), raw, measured, _dbApplied);
+    else
+      FUNCTIONLOG("Player", "dbcut: %us level %.1f dBFS cut %.1f dB",
+                  (unsigned)(elapsed / 1000), measured, _dbApplied);
+  }
+#endif
+
+  const uint32_t windowMs = (_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_MS
+                            : ((_dbRepeat == 0) ? AUTO_DBCUT_CALCULATE1_MS : AUTO_DBCUT_CALCULATE2_MS);
+  if (elapsed < windowMs) { _dbGlideTick(); return; }   // window still open: the cut holds where it is
+
+  // The window closed: one estimate, one blend, and a write only where writes are allowed.
+  if (_dbN == 0) {                                  // silence for the whole window: change nothing, move on
+    _dbAdvanceWindow();
+    _dbGlideTick();
+    return;
+  }
+
+  float target = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
+  if (target < 0.0f) target = 0.0f;
+  if (target > (float)DBCUT_MAX) target = (float)DBCUT_MAX;
+  const int measuredCut = (int)(target + 0.5f);
+
+  // A row that carries a cut is held through the estimate stage, so its number steps from the file's value - twice -
+  // rather than jumping to the first estimate.  A fresh row has nothing to hold, so its estimates move it.
+  const int inForce = (int)(_dbApplied + 0.5f);
+  if (!(_dbPhase == DB_ESTIMATE && _dbWritten >= 0)) {
+    // Half the gap, rounded up in its direction (7 -> 4, 1 -> 1), anchored on the file when it holds a value.
+    const int anchor = (_dbWritten >= 0) ? _dbWritten : inForce;
+    const int gap = measuredCut - anchor;
+    int blended = anchor + (gap + (gap > 0 ? 1 : -1)) / 2;
+    if (blended < 0) blended = 0;
+    if (blended > DBCUT_MAX) blended = DBCUT_MAX;
+
+    if (blended != inForce) {
+      config.station.dBcut = blended;               // what is in force, which is not always what the file says
+      _dbGlideTo = (float)blended;
+      FUNCTIONLOG("Player", "dbcut: station %u %s %u/%u measured %d dB, %d -> %d dB",
+                  (unsigned)config.lastStation(),
+                  (_dbPhase == DB_ESTIMATE) ? "estimate" : "calculate",
+                  (unsigned)((_dbPhase == DB_ESTIMATE) ? _dbWindow + 1 : _dbRepeat + 1),
+                  (unsigned)((_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_WINDOWS : 2),
+                  measuredCut, inForce, blended);
+    }
+
+    // No tolerance: a 1 dB step is audible.  Two calculations, so at most two writes; a settled row writes nothing.
+    if (_dbPhase == DB_CALCULATE && blended != _dbWritten) {
+      _dbWritten = blended;
+      FUNCTIONLOG("Player", "dbcut: station %u written as %d dB", (unsigned)config.lastStation(), blended);
+      _writeCut(blended);
+    }
+  }
+  _dbAdvanceWindow();
+  _dbGlideTick();
 }
 
 void Player::_clearMute() {

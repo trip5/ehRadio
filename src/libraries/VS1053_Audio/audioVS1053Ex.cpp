@@ -728,8 +728,17 @@ void Audio::setVolume(uint8_t vol){
     if(lgvolR==VS1053VOLM) lgvolR=0;
     valueL=map(lgvolL, 0, 254, 0xF8, 0x00);
     valueR=map(lgvolR, 0, 254, 0xF8, 0x00);
-    value=(valueL << 8) | valueR;
+    // Station cut, after the curve: SCI_VOL counts DOWN from 0x00 and one LSB is 0.5 dB, so 2 steps per dB.
+    // Capped at 0xF8 - this path cannot amplify.
+    const int16_t cutReg = (int16_t)(m_cutDb * 2.0f + 0.5f);
+    int16_t rL = (int16_t)valueL + cutReg;
+    int16_t rR = (int16_t)valueR + cutReg;
+    if (rL > 0xF8) rL = 0xF8;
+    if (rR > 0xF8) rR = 0xF8;
+    value = ((uint16_t)rL << 8) | (uint16_t)rR;
     write_register(SCI_VOL, value);
+    // The least-attenuated channel: what serviceLoudness() needs to undo this write if the meter reads after SCI_VOL.
+    m_lastVolReg = (uint8_t)((rL < rR) ? rL : rR);
 /*    uint16_t value;                                         // Value to send to SCI_VOL
 
     if(vol > 21) vol=21;
@@ -741,6 +750,52 @@ void Audio::setVolume(uint8_t vol){
         value=(value << 8) | value;
         write_register(SCI_VOL, value);                     // Volume left and right
     }*/
+}
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::setCutDb(float db) {
+    if (db < 0.0f) db = 0.0f;                 // this column only ever cuts
+    if (db > 48.0f) db = 48.0f;
+    m_cutDb = db;
+    setVolume(curvol);                        // the cut lives in the register write, so re-send it
+}
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::loudnessReset() { m_loudAvg = -120.0f; m_loudHave = false; m_loudRaw = 0; }
+//---------------------------------------------------------------------------------------------------------------------
+float Audio::loudnessDb() { return m_loudHave ? m_loudAvg : -120.0f; }
+//---------------------------------------------------------------------------------------------------------------------
+// The register value the level came from, unconverted: the other build logs its dBFS beside it for calibration.
+int Audio::loudnessRaw() { return m_loudHave ? (int)m_loudRaw : -1; }
+//---------------------------------------------------------------------------------------------------------------------
+// The chip measures its own output, so this path never sees a sample.  SCI_AICTRL3 is 0..95 dB per channel at 1 dB and
+// VS1053_METER_FULL_DB is the reading that means 0 dBFS - the level is meter MINUS it, so a pad that reads high is
+// corrected by RAISING it.  95 was the datasheet's word and measured 5.65 dB low over four paired streams, hence 100;
+// the meter also compresses near 95, so this is a flat trim and not a slope.  VS1053_METER_PRE_VOL 1 is measured too:
+// a cut swinging 1.3 -> 14.0 dB left the reading unmoved.
+void Audio::serviceLoudness() {
+#ifndef VS1053_METER_FULL_DB
+  #define VS1053_METER_FULL_DB 100
+#endif
+#ifndef VS1053_METER_PRE_VOL
+  #define VS1053_METER_PRE_VOL 1
+#endif
+    static uint32_t lastMs = 0;
+    const uint32_t now = millis();
+    if (lastMs && (uint32_t)(now - lastMs) < 100) return;
+    lastMs = now ? now : 1;
+    if (!_vuInitalized) return;
+    const int16_t reg = read_register_nowait(SCI_AICTRL3);
+    const uint8_t dbL = (uint8_t)(reg & 0x00FF);
+    const uint8_t dbR = (uint8_t)(reg >> 8);
+    m_loudRaw = (dbL > dbR) ? dbL : dbR;      // kept raw: the converted level is derived, this is what the chip said
+    float level = (float)m_loudRaw - (float)VS1053_METER_FULL_DB;
+#if !VS1053_METER_PRE_VOL
+    // The meter reads after SCI_VOL, so it carries knob and cut: one term undoes both.
+    level += (float)m_lastVolReg * 0.5f;
+#endif
+    if (level > -50.0f) {
+        m_loudAvg = m_loudHave ? (m_loudAvg + (level - m_loudAvg) * (1.0f / 100.0f)) : level;
+        m_loudHave = true;
+    }
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setTone(int8_t *rtone){                       // Set bass/treble (4 nibbles)
@@ -1040,6 +1095,8 @@ static const uint32_t M3U8_NO_SEGMENT_WAIT_MS = 2000;
 void Audio::loop(){
 
     if(!m_f_running) return;
+
+    serviceLoudness();      // ~10 Hz, so the learned cut has a level to work from on this path too
 
     /* Bitrate for streams that never send an icy-br header.  The decoder already holds the value in HDAT0, and
        getAudioCurrentTime() is the routine that reads it through the same l3id3/l3id012 tables SD playback has always

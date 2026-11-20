@@ -1145,7 +1145,32 @@ thinks the radio forgot everything. The loader-side wait was not built.
   - queue command handling (`PR_PLAY`, `PR_STOP`, `PR_VOL`, etc.)
   - station play/stop/toggle/next/prev flow
   - exact-match-first URL playback routing for `playurl` / preview resume (`queueResolvedUrl`, `resumeLastWebSource`)
-  - volume conversion (`volToI2S`) including ES8311 path
+  - volume conversion (`volToI2S`) **for the knob only** - it no longer knows which station is playing, so both its
+    branches are a plain `0..VOLUME_SCALE` curve (the ES8311 one keeps its gamma). The per-station `dBcut` is a separate
+    attenuation applied at the output stage by the audio library, which is why `_loadVol()` calls `setVolume()` and then
+    `_applyCut()`, and why `PR_VOL` can simply delegate to `_loadVol()`.
+  - station cut (`dBcut`, 0 = not measured, 1..24 dB of attenuation): `PR_DBCUT` carries `(index << 16) | dB` and is
+    accepted only for the loaded station; `setStationCut()` clamps and queues for the `dBcut` websocket command.
+    The clamped value reaches the output through the library setters `Audio::setCutDb()` (I2S) and
+    `Audio::setCutDb()` (VS1053, a `SCI_VOL` offset), never through the volume curve.
+  - the learn loop (`_dbcutTick()`, gated by `AUTO_DBCUT` - the behaviour only, the analysis stays compiled): a station
+    whose stored cut is `< 0` is measured from the pre-fader level and its cut is ramped from `AUTO_DBCUT_START_DB`
+    (12) down to 3 dB short of the running estimate over `AUTO_DBCUT_RAMP_MS`, settled in 1 dB steps to
+    `AUTO_DBCUT_SETTLE_MS`, held to `AUTO_DBCUT_FINAL_MS` (quieter at once, louder no faster than 0.5 dB/s), then
+    frozen into `config.station.dBcut` and written back by a one-shot task - never on the audio task, because a
+    LittleFS rewrite would starve the DMA. At `AUTO_DBCUT_FINAL_MS - AUTO_DBCUT_WINDOW_MS` the loudness accumulator is
+    reset, so only the **last 10 s** decides the value: a preroll advert is often 3-20 s of something far louder than
+    the stream. The target is `measured - AUTO_DBCUT_REF` (a stream LOUDER than the reference is the one that gets
+    cut). A station with a stored cut skips the whole thing and applies it at t = 0 - unless `AUTO_DBCUT_OVERWRITE` is
+    on, in which case it is applied and then watched from t = 0 with no fade-in.
+  - after the first write the loop does not stop: `DB_WATCH` keeps a **running mean of every tick since that write**
+    (`_dbWatchSum`/`_dbWatchN`) and uses it for both the live adjustment and the final write, so the ten minutes are
+    averaged over the ten minutes instead of being sampled again. A second 10 s reading at the ten-minute mark is luck,
+    and it moved one station from 2 dB to 7 dB on the first real run. The adjustment rule stays "quieter at once,
+    louder no faster than 0.5 dB/s" until `AUTO_DBCUT_REALLY_FINAL_MS` (ten minutes). The second write is skipped when
+    the value is unchanged, because a full playlist rewrite is a flash write and a ten-minute session would otherwise
+    pay for one per station. Changing station abandons the watch (`_play()` resets the phase), so the first written
+    value is what survives.
   - SD/web mode specific playback behavior
   - error reporting and display/net updates
   - command queue depth: `xQueueCreate(10, ...)` — increased from 5 to prevent queue overflow during rapid mode-switch
@@ -3763,6 +3788,15 @@ thinks the radio forgot everything. The loader-side wait was not built.
   cell's `flex: 0 0 46px` treatment so it cannot shrink away. `clearValidationStatus()` is deliberately scoped to
   `#pleditorcontent .plestatus`: the header cell carries `.plestatus` too, and a document-wide selector emptied its
   "Status" label (the reserved space with no text).
+- **Share is described by the URL it sends, so that is what `sharePlaylist()` measures.** The playlist travels
+  percent-encoded in the GitHub issue `body`, and GitHub refuses a request line past 8192 characters - that is
+  `MAX_SHARE_URL_LENGTH` in `script.js`, a page constant and not a build option, because the limit is GitHub's and
+  identical on every build. The guard tests the finished `url.length`; a raw-body test cannot fire before GitHub has
+  already refused. Over the cap the issue opens with `SHARE_BODY_FALLBACK_HEADER` asking for the downloaded CSV as an
+  attachment, and `downloadCSV(csvData)` runs **after** that open so the download cannot consume the click. Both paths
+  share `shareIssueUrl()` and `openShareUrl()`, the latter clicking an anchor because a blocked `window.open` would
+  leave Share doing nothing. The inline body uses `\n` where the downloaded file keeps `\r\n`: 3 characters of URL per
+  station.
 - **`editor.html` holds two sections, and each hides itself.** `conf.js` carries `editorThemes` (false on an OLED,
   where there is no palette to edit) and `editorLayouts` (false in a build with no display, where there is no
   registry behind the routes). The page added no locale keys, like the half it grew from.
@@ -5151,8 +5185,12 @@ block instead - and it leaves the shared painter untouched.
 `per * (_len / per)` for the bar family only, immediately after `_cw`/`_ch` are resolved and BEFORE `_levels()`, so one
 snapped axis serves the measurement, the erase strips, the LED snap and the markers. `_cw`/`_ch` are deliberately left at
 the band's full size - in rotate mode `_cw = _len` was already taken - so the box, the canvas and the blit do not move and
-the leftover columns are simply never painted; the shortfall is at the loud end rather than split, because a layout's box
-cannot be re-centred. Before this, `_drawBars()` drew `ceil(len/step)` blocks with the last one clamped: the 128x64 Default
+the leftover columns are simply never painted; the shortfall is at the loud end on the vertical and rotated forms. The
+**boombox** splits it instead: its two strips read middle-out FROM the box's two ends and its clears and markers are
+anchored there, so `_draw()` also resolves `_b0`/`_b1`, the strip origins, as `_cw - 2*_len - space` halved into an equal
+MARGIN at each outer edge (a lone leftover pixel would widen the gap, and cannot arise while both strips are equal). Both
+origins come out as the layout's own offsets when nothing was snapped away. Before this, `_drawBars()` drew `ceil(len/step)`
+blocks with the last one clamped: the 128x64 Default
 layout (53 px, 10 segments, gap 1) had **11 blocks with an 11 px stub at the end**, and the second 128x64 layout 11 with a
 6 px stub. The trace styles are excluded - their axis is a time or frequency span. Keep the two rules in step: the
 screensaver snaps a copy of `bandsConf`, the player page snaps `_len`, and both must agree.
@@ -5988,6 +6026,37 @@ Implication:
 - `netserver` triggers `PLAYLISTSAVED`
 - `config.indexPlaylist()/initPlaylist()` refresh index
 - `player` and display refresh via request queue events
+
+The third column is `dBcut`, attenuation only, never a gain (`DBCUT_MAX` in `config.h`). It is a **tagged token**:
+
+| stored | meaning |
+|--------|---------|
+| `dB0`..`dB24` | measured; 0 means no cut is needed |
+| bare `0` | **not measured** - the device learns it on the next play |
+| any other bare number | foreign (a yoRadio or ka-radio `ovol`), cleared to `0` |
+
+The `dB` **prefix** is load-bearing: yoRadio parses the field with `atoi()`, so `atoi("dB12")` is 0 and our whole file
+is inert there, while a suffix (`"12dB"`) would read as their `ovol 12`. Internally `config.station.dBcut == -1`
+carries "not measured"; `_applyCut()` maps it to 0 dB and `_loadVol()` maps it to `AUTO_DBCUT_START_DB` so an
+unmeasured station is quiet rather than blasting while it learns.
+
+**One grammar, two implementations** - `Utility::parsePlaylistLine()` in `utility.cpp` and `parsePlaylistLine()` in
+`script.js`, which must be changed together:
+
+- the on-device shape is `<name, spaces allowed> <url> <value>`, read from the right (last token is the value,
+  second-to-last the URL, the rest is the name). URLs never contain spaces, so nothing needs quoting and the file is
+  hand-editable.
+- the old TAB shape is still **read** (a flashed or uploaded yoRadio file), and `cleanPlaylist()` converts it on boot -
+  that is the "sanitise into our format on our filesystem" step, and it is idempotent: a canonical file is never
+  rewritten twice.
+- `formatPlaylistLine()` is the only writer, so the shape cannot fork again. `cleanPlaylist()`,
+  `writeStationCut()` and the WebUI's Save/export all go through it.
+- `Utility::writeStationCut(index, value)` persists one learned value with the TMP/rename/`indexPlaylist()` idiom,
+  `PM_WEB` only, and only if that row's URL still matches `config.station.url`.
+
+The WebUI's Save and Undo both end in an HTTP re-fetch of the file, so `syncDbcutToDevice()` in `handlePlaylistData()`
+re-pushes the playing row's file value after either - which is what makes the live `dBcut` websocket command safely
+temporary, and why nothing else has to persist it.
 
 ---
 

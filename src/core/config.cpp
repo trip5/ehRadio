@@ -244,7 +244,7 @@ static void setNoStationState() {
   memset(config.station.url, 0, STATION_FIELD_LENGTH);
   memset(config.station.name, 0, STATION_FIELD_LENGTH);
   strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
-  config.station.ovol = 0;
+  config.station.dBcut = 0;
   config.setTitle("");
 }
 
@@ -567,6 +567,8 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     return;
   }
   if (strcmp(val, "system") == 0) {
+    saveValue(&store.dbcutauto, (bool)AUTO_DBCUT);
+    saveValue(&store.dbcutautoalways, (bool)AUTO_DBCUT_OVERWRITE);
     saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
     saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
@@ -1166,6 +1168,8 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(weatherpressure, "weatherpress"),
   CONFIG_KEY_ENTRY(weatherwind, "weatherwind"),
   // System
+  CONFIG_KEY_ENTRY(dbcutauto, "dbcutauto"),
+  CONFIG_KEY_ENTRY(dbcutautoalways, "dbcutautoalways"),
   CONFIG_KEY_ENTRY(wifiscanbest, "wifiscan"),
   CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
   CONFIG_KEY_ENTRY(ehdp, "ehdp"),

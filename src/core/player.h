@@ -22,7 +22,7 @@
   #define VS_CHIP_DEAD_STRIKES 3  // stalled feeds against a chip answering 0x0000 before the decoder is declared dead
 #endif
 
-enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9 };
+enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9, PR_DBCUT = 10 };
 struct playerRequestParams_t
 {
   playerRequestType_e type;
@@ -65,6 +65,7 @@ class Player: public Audio {
     void stepVol(bool up);
     uint8_t volToI2S(uint8_t volume);
     void setVol(uint8_t volume);
+    void setStationCut(uint16_t index, int value);   // live edit / learned value, clamped
     void mute();
     bool isMuted() const { return _muted; }
     void clearMute() { _clearMute(); }
@@ -109,6 +110,24 @@ class Player: public Audio {
     void _stop(bool alreadyStopped = false);
     void _play(uint16_t stationId);
     void _loadVol(uint8_t volume);
+    void _applyCut(float db);
+    void _dbcutTick();
+    void _writeCut(int dBcut);
+    void _dbGlideTick();         // one 200 ms step toward _dbGlideTo: the only way a decided cut moves
+    void _dbAdvanceWindow();     // close this window and open the next, or finish
+    enum dbcutPhase_e : uint8_t { DB_IDLE, DB_ESTIMATE, DB_CALCULATE, DB_DONE };
+    dbcutPhase_e _dbPhase = DB_IDLE;
+    uint8_t  _dbWindow = 0;      // estimate window in progress, 0-based
+    uint8_t  _dbRepeat = 0;      // calculation window in progress, 0-based
+    uint32_t _dbT0 = 0;          // millis() the current window started
+    uint32_t _dbTickMs = 0;      // last learn tick, for the 200 ms cadence
+    uint32_t _dbLogMs = 0;       // last level log line, 10 s cadence (DBCUT_LEVEL_LOG only)
+    float    _dbApplied = 0.0f;  // the cut in force, dB
+    float    _dbGlideTo = 0.0f;  // the cut is settling on this, one small step per tick
+    int      _dbWritten = -1;    // the value believed to be in playlist.csv for this station
+    double   _dbSum = 0.0;       // levels in this window (estimate) or in the whole stage (calculate)
+    uint32_t _dbN = 0;           // samples in _dbSum
+    bool     _dbFadeIn = false;  // this tune faded in from AUTO_DBCUT_START_DB and is still finding its level
     void _clearMute();   // one place a mute ends, so the footer glyph is repainted wherever it happens
 };
 

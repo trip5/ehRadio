@@ -347,7 +347,7 @@ void handleSearchPost(AsyncWebServerRequest *request) {
       request->send(200, "text/plain", "PREVIEW");
     }
   } else { // This is add to playlist
-    int sOvol = 0;
+    int sdBcut = 0;
     if (found) { // play the slot if it already exists
       player.sendCommand({PR_PLAY, (uint16_t)foundIdx});
       request->send(200, "text/plain", "DUPLICATE");
@@ -364,7 +364,7 @@ void handleSearchPost(AsyncWebServerRequest *request) {
         playlistfile.print('\t');
         playlistfile.print(sUrl);
         playlistfile.print('\t');
-        playlistfile.print(sOvol);
+        playlistfile.print(sdBcut);
         playlistfile.write((const uint8_t*)"\r\n", 2);
         playlistfile.close();
         esp_task_wdt_reset(); // Reset watchdog before heavy operations
@@ -582,6 +582,8 @@ void NetServer::processQueue() {
           String act = F("\"group_wifi\",");
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
+            if (config.store.dbcutauto || DBGWUI)               act += F("\"group_autodbcut\",");
+                                                           else act += F("\"hide_group_autodbcut\",");
             if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
             if (DSP_MODEL != DSP_DUMMY || DBGWUI)               act += F("\"group_display\",");
             #if defined(DSP_TFT) || DBGWUI
@@ -619,7 +621,7 @@ void NetServer::processQueue() {
                                                                 act += F("\"group_deepsleep\",");
             #endif
             if (TS_MODEL != TS_MODEL_UNDEFINED || DBGWUI)       { act += F("\"group_touch\","); }
-                                                                act += F("\"group_locale\",");
+                                                                  act += F("\"group_locale\",");
             if (presentOf(*weatherConf_ptr) || DBGWUI)          { act += F("\"group_weather\","); }
                                                            else { act += F("\"hide_group_weather\","); }
                                                                 act += F("\"group_controls\",");
@@ -727,12 +729,14 @@ void NetServer::processQueue() {
                                   config.store.weatherkey,
                                   config.store.weathersyncinterval);
                                   break;
-      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"autoupdate\":%d}",
+      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"autoupdate\":%d,\"dbcutauto\":%d,\"dbcutautoalways\":%d}",
                                   config.store.wifiscanbest,
                                   config.store.ehdp,
                                   config.store.ehdpname,
                                   config.store.mdnsname,
-                                  config.store.autoupdate);
+                                  config.store.autoupdate,
+                                  config.store.dbcutauto,
+                                  config.store.dbcutautoalways);
                                   break;
       case GETMQTT:       snprintf(wsbuf, sizeof(wsbuf), "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
                                   config.store.mqttenable,
@@ -1011,7 +1015,8 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
         // Remove index and SD index to force cleanPlaylist to run
         if (LittleFS.exists(INDEX_PATH)) LittleFS.remove(INDEX_PATH);
         if (LittleFS.exists(INDEX_SD_PATH)) LittleFS.remove(INDEX_SD_PATH);
-        utility.cleanPlaylist();   // Rewrites with CRLF, removes blank lines; calls indexPlaylist() internally
+        // Converts whatever arrived - TAB or space, foreign cut values - into our canonical shape.
+        utility.cleanPlaylist();   // Rewrites with CRLF, canonicalises the cut column; calls indexPlaylist()
         netserver.requestOnChange(PLAYLISTSAVED, 0);
       } else {
         // Invalidate PSRAM cache for uploaded www files

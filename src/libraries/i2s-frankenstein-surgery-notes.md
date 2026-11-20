@@ -24,26 +24,38 @@ resets and the ID3v2 frame-size guard). Two practices follow:
   fork has no de-ogger to hang it on. A fix in one belongs in the other; see item 16 of the 2026.11.13 to 2026.11.16
   section.
 
-## Purpose
-Graft ehRadio's adaptations from the current I2S library (based on Maleksm v0.9.434m / I2S 3.1.0) onto Maleksm's latest v0.9.720m (I2S 3.4.6w).
+## Purpose (historical)
+Graft ehRadio's adaptations from the I2S library as it was (Maleksm v0.9.434m / I2S 3.1.0) onto Maleksm's v0.9.720m
+(I2S 3.4.6w) - and, from here on, record what the grafted library does and why.
+
+The v0.9.720m copy this refers to no longer exists: it was removed on 2026.11.20, so this is the record of the graft
+rather than a procedure that still has a source tree. If the graft is ever picked up again, recover the target with
+`git checkout bfe571afa7ef758d7f6340041eeca70a1a73d7af -- "src/libraries/I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))"`
+- commit "2026.11.16" is the last tree that held it.
 
 ## Libraries
 
 | Name | Folder | Version | Notes |
 |------|--------|---------|-------|
-| **Active** | `src/libraries/I2S_Audio/` | 3.1.0n + Maleksm v0.9.434m | Current ehRadio library — **the only copy of our own code** |
-| **Maleksm v0.9.434m** | `I2S_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` | 3.1.0n | Base of Active library |
-| **Maleksm v0.9.720m** | `I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))` | 3.4.6w | **GRAFT TARGET** — latest Maleksm |
+| **Active** | `src/libraries/I2S_Audio/` | 3.1.0n + Maleksm v0.9.434m | The current ehRadio library - **the only copy, of our code and of anything else** |
 
-Two folders were removed on 2026-09-27. `I2S_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` was labelled
-"Active backup" but was a snapshot of `I2S_Audio/` that stopped being accurate as soon as the library was
-patched, and `I2S_Audio (yoRadio Maleksm v0.9.512m(13.07.25))` was an intermediate superseded by
-v0.9.720m. **Git history is the backup for our own code**; folder copies of it are a trap, because
-restoring one silently drops every fix made since it was taken. The upstream folders stay: they are the
-only local copies of code that is not ours, and the graft plan in this file refers to v0.9.720m by name.
+Every other copy is gone, and that is now the intended state:
+
+- `I2S_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` was labelled "Active backup" but stopped being accurate the moment
+  the library was patched, and `I2S_Audio (yoRadio Maleksm v0.9.512m(13.07.25))` was an intermediate superseded by
+  v0.9.720m. Both were removed on 2026-09-27.
+- The upstream copies the graft worked from - `I2S_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` and
+  `I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))`, the graft target - were removed on 2026.11.20, once they had been
+  mined for everything they could teach. Recover one with
+  `git checkout bfe571afa7ef758d7f6340041eeca70a1a73d7af -- "src/libraries/I2S_Audio (yoRadio Maleksm v0.9.720m(23.06.26))"`:
+  that commit, subject "2026.11.16", is the last tree that contained them. They are not expected back.
+
+The rule that follows: **never add a folder copy of a library.** A snapshot stops being accurate the moment either side
+is patched, and restoring one silently drops every fix made since it was taken. Git history is the backup, and a diff
+against a named commit is the comparison.
 
 ## Trust Order
-Active > Maleksm v0.9.720m (latest)
+Active. There is nothing local left to compare it against; a future graft diffs against a commit, not a folder.
 
 ---
 
@@ -869,3 +881,35 @@ Arduino/IDF files that `builds/patch/` applies - the tree does not build without
     is a standing obligation recorded in both notes - **`dgLe32` / `dgKeyIs` / `FLACOfferCommentPacket()` here and the
     `v1053*` copies there are the same parser**, so a bound check changed in one belongs in the other. The vendor-length
     test from item 13 is the one that matters: a length read from foreign data must never become an offset.
+
+## Post-Graft Patch Fixes (2026.11.17)
+
+**Files changed**: `Audio.cpp`, `Audio.h`. Built on **espressif32 8.0.0** with the patched files that `builds/patch/`
+applies.
+
+1. **`setCutDb(float)` is the output-stage gain the normalization work needed.** `m_cutLin` is `powf(10, -dB/20)` and is
+   multiplied into `m_limit_left/right` at the end of `computeLimit()`: after the cubic, so the knob's curve and its feel
+   are untouched. `m_limit_*` are private, so the setter has to call `computeLimit()` itself - which is also why the four
+   new methods live in the `public:` block near `setAudioTaskCore()` rather than beside `computeLimit()`, where they
+   would have been private to the library.
+
+2. **`loudnessAccum()` measures the stream before the fader.** It is called from `playChunk()` right beside
+   `computeVUlevel()` - deliberately *not* from inside it, because that function returns early when the VU bar is not
+   wanted - and it runs before `Gain()`, so its value is independent of the knob and of the cut. Blocks are
+   `m_sampleRate / 20` (~50 ms), the statistic is a mean of **power** rather than the VU's peak-ish high-water mark, and
+   anything under -50 dBFS is dropped so pauses cannot drag the mean down. The exponential mean uses a 1/200 step, i.e. a
+   10 s time constant.
+
+3. **Two multiplies and two adds per sample pair.** `m_loudSum` accumulates `l*l + r*r` in a double; the divide and the
+   log happen once per block, never per sample, so the added cost sits well under the three IIR chains already running.
+
+## Post-Graft Patch Fixes (2026.11.18)
+
+**Files changed**: `Audio.cpp`, `Audio.h`. Built on **espressif32 8.0.0** with the patched files that `builds/patch/`
+applies.
+
+1. **`loudnessRaw()` is the only addition, and it is a diagnostic accessor.** It returns `-1` on this path, because the
+   codec measures the samples it decodes instead of reporting a register. The VS1053 build returns its raw
+   `SCI_AICTRL3` reading under the same name, so `player.cpp` can log one line every 10 s while a station is learning on
+   *either* build, and the two logs can be paired to calibrate that meter against this path - which is how its
+   `VS1053_METER_FULL_DB` was set to 100. Nothing about the measurement, the gate or the time constant changed.

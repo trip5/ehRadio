@@ -329,6 +329,12 @@ private:
 public:
   void            setAudioTaskCore(uint8_t coreID);
   uint32_t        getHighWatermark();
+  // Station cut and the level meter the learned cut reads.  Public because Player applies both.
+  void            setCutDb(float db);                 // dB of attenuation; 0 = none
+  void            loudnessAccum(int16_t l, int16_t r);
+  void            loudnessReset();
+  float           loudnessDb();
+  int             loudnessRaw();   // -1 here: this path has no chip meter.  The VS1053 build returns SCI_AICTRL3
 private:
   void            startAudioTask(); // starts a task for decode and play
   void            stopAudioTask();  // stops task for audio
@@ -809,6 +815,11 @@ private:
 //    uint16_t        m_vol_steps = 254;               // default
     float            m_limit_left = 1;               // limiter for Gain, left channel
     float            m_limit_right = 1;             // limiter for Gain, right channel
+    float            m_cutLin = 1.0f;                // station cut as a factor, folded into computeLimit
+    double           m_loudSum = 0;                  // sum of squares for the current ~50 ms block
+    uint32_t         m_loudN = 0;                    // samples in m_loudSum
+    float            m_loudAvg = -120.0f;            // exponential mean of block level, dBFS
+    bool             m_loudHave = false;
 //    uint8_t         m_timeoutCounter = 0;           // timeout counter
 //    uint8_t         m_curve = 0;                    // volume characteristic
     uint8_t         m_bitsPerSample = 16;           // bitsPerSample

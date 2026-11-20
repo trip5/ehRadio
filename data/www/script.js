@@ -439,6 +439,59 @@ function setupElement(id,value){
   }
 }
 /***--- playlist ---***/
+
+/* THE playlist grammar - the mirror of Utility::parsePlaylistLine() in utility.cpp.  Change one, change both.
+   NEW:  "<name with spaces> <url> <value>"     OLD: "<name>\t<url>\t<value>"
+   The new shape is read from the right, because the name is the only field that can contain spaces and
+   the value is the only one that cannot.  "dB12" is a measurement; a bare 0 or any other number means the
+   station has not been measured, which is what every value from a ka-radio or yoRadio file becomes. */
+function cutFromToken(tok){
+  const m = /^[dD][bB](\d{1,2})$/.exec((tok || '').trim());
+  if(!m) return -1;
+  return Math.max(0, Math.min(24, parseInt(m[1], 10)));
+}
+/* Read a cut out of anything a JSON key may hold, and answer "unknown" rather than 0 when it cannot.  JSON has a
+   key to carry the meaning, so 2, "2" and "dB2" are all the same measurement; "" and null are not measured. */
+function readCut(v){
+  if(v === null || v === undefined) return -1;
+  const s = String(v).trim();
+  if(s === '') return -1;
+  const tagged = cutFromToken(s);
+  if(tagged >= 0) return tagged;
+  const n = parseInt(s, 10);
+  if(isNaN(n)) return -1;
+  return Math.max(0, Math.min(24, n));
+}
+function parsePlaylistLine(line){
+  if(!line) return null;
+  const s = line.replace(/^\s+|\s+$/g, '');
+  if(!s) return null;
+  let name, url, value;
+  if(s.indexOf('\t') >= 0){
+    const f = s.split('\t');
+    if(f.length !== 3) return null;
+    name = f[0]; url = f[1]; value = f[2];
+  } else {
+    const m = s.match(/^(.*)\s+(\S+)\s+(\S+)$/);
+    if(!m) return null;
+    name = m[1].replace(/\s+$/, ''); url = m[2]; value = m[3];
+  }
+  name = (name || '').replace(/^\s+|\s+$/g, '');
+  url  = (url  || '').replace(/^\s+|\s+$/g, '');
+  if(!name || !url) return null;
+  return { name: name, url: url, dBcut: cutFromToken(value) };
+}
+function formatPlaylistLine(name, url, dBcut){
+  return name + ' ' + url + ' ' + ((dBcut < 0) ? '0' : ('dB' + dBcut));
+}
+/* The number in a row's own input: '' when the station has not been measured. */
+function editorCutValue(inputs){
+  const raw = (inputs[3].value || '').replace(/^\s+|\s+$/g, '');
+  if(raw === '') return -1;
+  const v = parseInt(raw, 10);
+  if(isNaN(v)) return -1;
+  return Math.max(0, Math.min(24, v));
+}
 function setCurrentItem(item){
   currentItem=item;
   const playlist = getId("playlist");
@@ -458,10 +511,29 @@ function initPLEditor(){
       <input class="pleinput plename" type="text" value="${quoteattr(item.dataset.name)}" maxlength="140" />
       <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="140" />
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>
-      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${item.dataset.ovol}" />
+      <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="${item.dataset.dbcut}" />
       <span class="pleinput plestatus"></span>
       </li>`;
   });
+  /* One delegated listener on the container, which survives every innerHTML rebuild. Only the playing
+     row is audible, so only that row talks to the device; the 250 ms debounce keeps a typed number
+     from sending one command per keystroke. */
+  if(!ple._dbcutBound){
+    ple._dbcutBound = true;
+    ple.addEventListener('input', (ev)=>{
+      const el = ev.target;
+      if(!el.classList || !el.classList.contains('pledbcut')) return;
+      const li = el.closest('.pleitem');
+      if(!li) return;
+      const row = parseInt(li.id.replace('plitem','')) + 1;
+      if(row !== currentItem) return;
+      if((el.value || '').trim() === '') return;         // empty means "not measured": nothing to preview
+      const v = Math.max(0, Math.min(24, parseInt(el.value) || 0));
+      if(String(v) !== el.value) el.value = v;
+      window.clearTimeout(ple._dbcutTimer);
+      ple._dbcutTimer = window.setTimeout(()=>sendDbcut(row, v), 250);
+    });
+  }
   ple.innerHTML=html;
 }
 function handlePlaylistData(fileData) {
@@ -469,19 +541,36 @@ function handlePlaylistData(fileData) {
   ul.innerHTML='';
   if (!fileData) { alignPlaylistStripes(); return; }
   const lines = fileData.split(/\r?\n/);
-  let li='', html='';
+  let li='', html='', row=0;
   for(var i = 0;i < lines.length;i++){
-    let line = lines[i].split('\t');
-    if(line.length==3){
-      const active=(i+1==currentItem)?' class="active"':'';
-      li=`<li${active} attr-id="${i+1}" class="play" data-name="${line[0].trim()}" data-url="${line[1].trim()}" data-ovol="${line[2].trim()}"><span class="text">${line[0].trim()}</span><span class="count">${i+1}</span></li>`;
-      html += li;
-    }
+    const rec = parsePlaylistLine(lines[i]);
+    if(!rec) continue;
+    row++;
+    const active=(row==currentItem)?' class="active"':'';
+    const cut=(rec.dBcut>=0)?rec.dBcut:'';
+    li=`<li${active} attr-id="${row}" class="play" data-name="${rec.name}" data-url="${rec.url}" data-dbcut="${cut}"><span class="text">${rec.name}</span><span class="count">${row}</span></li>`;
+    html += li;
   }
   ul.innerHTML=html;
   alignPlaylistStripes();
   setCurrentItem(currentItem);
-  if(!modesd) initPLEditor();
+  if(!modesd){ initPLEditor(); syncDbcutToDevice(); }
+}
+
+/* The cut is live on the device but only TEMPORARY.  Save uploads the file and Undo re-fetches it, and
+   both land here, so re-pushing the file's value for the playing row covers Save, Undo and a reload. */
+function sendDbcut(row, dBcut){
+  if(modesd || !websocket || websocket.readyState !== 1) return;
+  websocket.send(`dBcut=${row},${dBcut}`);
+}
+function syncDbcutToDevice(){
+  if(modesd || !currentItem) return;
+  const item = getId('plitem'+(currentItem-1));
+  if(!item) return;
+  const el = item.querySelector('.pledbcut');
+  if(!el) return;
+  if((el.value || '').trim() === '') return;            // not measured: the device keeps learning it
+  sendDbcut(currentItem, Math.max(0, Math.min(24, parseInt(el.value) || 0)));
 }
 
 /* The playlist's stripes are a background pattern on the scroll box whose bands are 39px - one single-line
@@ -560,7 +649,7 @@ function plAdd(){
       <input class="pleinput plename" type="text" value="" maxlength="140" />\
       <input class="pleinput pleurl" type="text" value="" maxlength="140" />\
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>\
-      <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="0" />\
+      <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="0" />\
       <span class="pleinput plestatus"></span>';
   ple.appendChild(plitem);
   ple.scrollTo({
@@ -660,10 +749,7 @@ function submitPlaylist(){
   for (var i = 0; i <= items.length - 1; i++) {
     inputs=items[i].getElementsByTagName("input");
     if(inputs[1].value == "" || inputs[2].value == "") continue;
-    let ovol = inputs[3].value;
-    if(ovol < -30) ovol = -30;
-    if(ovol > 30) ovol = 30;
-    output+=inputs[1].value+"\t"+inputs[2].value+"\t"+ovol+"\r\n";
+    output += formatPlaylistLine(inputs[1].value, inputs[2].value, editorCutValue(inputs)) + "\r\n";
   }
   let file = new File([output], "playlist.csv",{type:"text/plain;charset=utf-8", lastModified:new Date().getTime()});
   let container = new DataTransfer();
@@ -795,8 +881,9 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
           }
         }
       }
-      // Extract and clamp ovol
-      const ovol = Math.max(-30, Math.min(30, parseInt(item.ovol || 0)));
+      // Only a dBcut key is ours.  A ka-radio or yoRadio `dbcut` is foreign, so the station is left
+      // unmeasured (-1) and the device decides for itself.
+      const dbcut = (item.dBcut === undefined) ? -1 : Math.max(0, Math.min(24, parseInt(item.dBcut, 10) || 0));
       // If no name, generate from URL
       const finalName = name || (url ? urlToName(url) : '');
       // Check for duplicates
@@ -804,7 +891,7 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
         if (existingURLs.has(url)) {
           duplicateCount++;
         } else {
-          targetCallback(finalName, url, ovol);
+          targetCallback(finalName, url, dbcut);
           existingURLs.add(url);
           addedCount++;
         }
@@ -840,7 +927,9 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
   lines.forEach(line => {
     line = line.trim();
     if (!line) return;
-    let name = '', url = '', ovol = 0;
+    // dbcut holds the cut this import produced: -1 means the source carried no measurement we trust,
+    // which is the default for every row of a ka-radio or yoRadio file.
+    let name = '', url = '', dbcut = -1;
     
     // Try tab-delimited first
     if (line.includes('\t')) {
@@ -851,7 +940,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (parts[0].includes('.') && (parts[0].includes('/') || parts[0].includes('://'))) {
           url = parts[0];
           name = ''; // Will be generated from URL later
-          ovol = 0;
+          dbcut = -1;
         }
       } else if (parts.length === 2) {
         // 2 fields: one is URL, one is name (order does not matter)
@@ -866,10 +955,10 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx !== -1 && nameIdx !== -1) {
           url = parts[urlIdx];
           name = parts[nameIdx];
-          ovol = 0;
+          dbcut = -1;
         }
       } else if (parts.length >= 3) {
-        // 3+ fields: Find URL (required), ovol (optional), and name from remaining fields
+        // 3+ fields: Find URL (required), dbcut (optional), and name from remaining fields
         let urlIdx = -1;
         for (let i = 0; i < parts.length; i++) {
           if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
@@ -881,27 +970,30 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx !== -1) {
           url = parts[urlIdx];
           
-          // Find ovol (optional) - numeric value between -64 and 64
-          let ovolIdx = -1;
+          // Third field, optional.  Our "dB<n>" token is a measurement; a bare number is a foreign dbcut,
+          // so it is recognised as the value field but the station stays unmeasured.
+          let dbcutIdx = -1;
           for (let i = 0; i < parts.length; i++) {
             if (i === urlIdx) continue; // Skip URL field
-            const val = parseInt(parts[i]);
-            if (!isNaN(val) && parts[i] === val.toString() && val >= -64 && val <= 64) {
-              ovolIdx = i;
-              ovol = Math.max(-30, Math.min(30, val));
-              break; // Use the first matching ovol
+            const tagged = /^[dD][bB]\d{1,2}$/.test(parts[i]);
+            const val = parseInt(parts[i], 10);
+            const bare = !isNaN(val) && parts[i] === val.toString() && val >= -64 && val <= 64;
+            if (tagged || bare) {
+              dbcutIdx = i;
+              dbcut = tagged ? cutFromToken(parts[i]) : -1;
+              break; // Use the first matching value field
             }
           }
           
-          // Name is FIRST field that's not URL or ovol
+          // Name is FIRST field that's not URL or dbcut
           for (let i = 0; i < parts.length; i++) {
-            if (i !== urlIdx && i !== ovolIdx && parts[i]) {
+            if (i !== urlIdx && i !== dbcutIdx && parts[i]) {
               name = parts[i];
               break;
             }
           }
           
-          if (ovolIdx === -1) ovol = 0;
+          if (dbcutIdx === -1) dbcut = -1;
         }
       }
     } else if (/\s{2,}/.test(line)) {
@@ -913,7 +1005,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (parts[0].includes('.') && (parts[0].includes('/') || parts[0].includes('://'))) {
           url = parts[0];
           name = '';
-          ovol = 0;
+          dbcut = -1;
         }
       } else if (parts.length === 2) {
         // 2 fields: one is URL, one is name (order does not matter)
@@ -928,7 +1020,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx !== -1 && nameIdx !== -1) {
           url = parts[urlIdx];
           name = parts[nameIdx];
-          ovol = 0;
+          dbcut = -1;
         }
       } else if (parts.length >= 3) {
         // 3+ fields: Find URL (required), name is first non-URL field, rest are ignored
@@ -949,7 +1041,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
               break;
             }
           }
-          ovol = 0;
+          dbcut = -1;
         }
       }
     } else {
@@ -971,20 +1063,22 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx > 0) {
           // URL not first, so name is first token
           name = tokens[0];
-          // Check if LAST token is ovol (must be at end)
+          // The value is the LAST token: "dB<n>" is ours, a bare number is a foreign dbcut
           const lastToken = tokens[tokens.length - 1];
-          const lastNum = parseInt(lastToken);
-          if (!isNaN(lastNum) && lastNum >= -64 && lastNum <= 64 && tokens.length >= 2) {
-            ovol = Math.max(-30, Math.min(30, lastNum));
+          const lastNum = parseInt(lastToken, 10);
+          const tagged = /^[dD][bB]\d{1,2}$/.test(lastToken);
+          const bare = !isNaN(lastNum) && lastNum >= -64 && lastNum <= 64;
+          if ((tagged || bare) && tokens.length >= 2) {
+            dbcut = tagged ? cutFromToken(lastToken) : -1;
           }
         } else {
-          // URL is first: everything after URL is the name (no ovol)
+          // URL is first: everything after URL is the name (no dbcut)
           const nameTokens = [];
           for (let i = urlIdx + 1; i < tokens.length; i++) {
             nameTokens.push(tokens[i]);
           }
           name = nameTokens.join(' ');
-          ovol = 0;
+          dbcut = -1;
         }
       }
     }
@@ -1004,7 +1098,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
       if (existingURLs.has(url)) {
         duplicateCount++;
       } else {
-        targetCallback(name, url, ovol);
+        targetCallback(name, url, dbcut);
         existingURLs.add(url);
         addedCount++;
       }
@@ -1029,7 +1123,7 @@ function getExistingURLs() {
   return urls;
 }
 
-function addStationToEditor(name, url, ovol) {
+function addStationToEditor(name, url, dbcut) {
   const ple = getId('pleditorcontent');
   const cnt = ple.getElementsByTagName('li').length;
   const plitem = document.createElement('li');
@@ -1040,7 +1134,7 @@ function addStationToEditor(name, url, ovol) {
     <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="140" />
     <input class="pleinput pleurl" type="text" value="${url}" maxlength="140" />
     <span class="pleinput pleplay" data-command="preview">&#9658;</span>
-    <input class="pleinput pleovol" type="number" min="-30" max="30" step="1" value="${ovol}" />
+    <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="${(dbcut >= 0) ? dbcut : ''}" />
     <span class="pleinput plestatus"></span>`;
   ple.appendChild(plitem);
 }
@@ -1061,14 +1155,14 @@ function exportCurrentPlaylist() {
     const inputs = items[i].getElementsByTagName('input');
     const name = inputs[1].value; // plename
     const url = inputs[2].value;   // pleurl
-    const ovol = inputs[3].value;  // pleovol
+    const dBcut = editorCutValue(inputs);
     
     if (name === '' || url === '') {
       alert(t('msg_pl_missing', 'Station {0} is missing name or URL. Please fill in all fields before exporting.', i+1));
       return;
     }
     
-    csvContent += `${name}\t${url}\t${ovol}\r\n`;
+    csvContent += formatPlaylistLine(name, url, dBcut) + '\r\n';
   }
   
   // Create blob and trigger download
@@ -1099,13 +1193,33 @@ Thanks for participating!
 - Trip5`;
 
 const SHARE_BODY_FALLBACK_HEADER =
-`Wow! That's a lot of radio stations! Unfortunately, ehRadio can't automatically submit such a large playlist. But you can still submit it!
+`Wow! That's a lot of radio stations! ehRadio can't pre-fill an issue with a list this large, so it has downloaded the playlist to your computer as a CSV file.
 
-Go back to ehRadio, export the playlist, save it, then attach the file to this message.
+Attach that file to this message (drag it into the box below) and it can still be submitted.`;
 
-`;
+// GitHub refuses a request URL past 8192 characters with "Whoa there! Your request URL is too long."  The playlist
+// travels percent-encoded inside that URL, so the finished URL is what has to be measured, not the playlist.
+const MAX_SHARE_URL_LENGTH = 8192;
 
-const SHARE_MAX_BODY_BYTES = 60000;
+function shareIssueUrl(body){
+  return 'https://github.com/trip5/webstations/issues/new' +
+    '?template=' +
+    '&title=' + encodeURIComponent('Playlist Submission') +
+    '&body=' + encodeURIComponent(body) +
+    '&labels=playlist';
+}
+
+function openShareUrl(url){
+  // A clicked anchor is not treated as a popup, unlike window.open after a download has started.
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 
 function sharePlaylist() {
   const items = getId('pleditorcontent').getElementsByTagName('li');
@@ -1119,37 +1233,28 @@ function sharePlaylist() {
     const inputs = items[i].getElementsByTagName('input');
     const name = inputs[1].value;
     const url = inputs[2].value;
-    const ovol = inputs[3].value;
+    const dBcut = editorCutValue(inputs);
 
     if (name === '' || url === '') {
       alert(t('msg_pl_missing', 'Station {0} is missing name or URL. Please fill in all fields before sharing.', i + 1));
       return;
     }
 
-    csvData += name + '\t' + url + '\t' + ovol + '\r\n';
+    csvData += formatPlaylistLine(name, url, dBcut) + '\r\n';
   }
 
-  const inlineBody = SHARE_BODY_CORE + '\n\nPLAYLIST_START/\n' + csvData + '\n/PLAYLIST_END';
+  // The downloaded file keeps CRLF; the body does not, because each row's \r\n costs 3 more characters of the URL.
+  const inlineBody = SHARE_BODY_CORE + '\n\nPLAYLIST_START/\n' + csvData.replace(/\r\n/g, '\n') + '\n/PLAYLIST_END';
+  const inlineUrl = shareIssueUrl(inlineBody);
 
-  if (new Blob([inlineBody]).size <= SHARE_MAX_BODY_BYTES) {
-    // Inline path: pre-fill the entire playlist in the issue body
-    const url = 'https://github.com/trip5/webstations/issues/new' +
-      '?template=' +
-      '&title=' + encodeURIComponent('Playlist Submission') +
-      '&body=' + encodeURIComponent(inlineBody) +
-      '&labels=playlist';
-    window.open(url, '_blank');
-  } else {
-    // Fallback path: download the file + open issue with attachment instructions
-    downloadCSV(csvData);
-    const fallbackBody = SHARE_BODY_FALLBACK_HEADER + '\n' + SHARE_BODY_CORE;
-    const url = 'https://github.com/trip5/webstations/issues/new' +
-      '?template=' +
-      '&title=' + encodeURIComponent('Playlist Submission') +
-      '&body=' + encodeURIComponent(fallbackBody) +
-      '&labels=playlist';
-    window.open(url, '_blank');
+  if (inlineUrl.length <= MAX_SHARE_URL_LENGTH) {
+    openShareUrl(inlineUrl);
+    return;
   }
+
+  // Over the cap: open the attach request first, so the download does not consume the click that opens the tab.
+  openShareUrl(shareIssueUrl(SHARE_BODY_FALLBACK_HEADER + '\n\n' + SHARE_BODY_CORE));
+  downloadCSV(csvData);
 }
 
 function downloadCSV(csvContent) {

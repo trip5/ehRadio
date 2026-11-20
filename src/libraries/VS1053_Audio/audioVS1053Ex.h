@@ -254,6 +254,11 @@ private:
     uint8_t       dcs_pin ;                         // Pin where DCS line is connected
     uint8_t       dreq_pin ;                        // Pin where DREQ line is connected
     uint8_t       curvol ;                          // Current volume setting 0..100%
+    float         m_cutDb = 0.0f;                   // station cut, dB; applied inside setVolume()
+    uint8_t       m_lastVolReg = 0;                 // SCI_VOL byte written last: knob + cut, for the meter fix
+    float         m_loudAvg = -120.0f;              // exponential mean of block level, dBFS
+    bool          m_loudHave = false;
+    uint8_t       m_loudRaw = 0;                    // last raw SCI_AICTRL3 reading, for the paired-build log
 
     const uint8_t vs1053_chunk_size = 32 ;
     int8_t          m_balance = 0;                  // -16 (mute left) ... +16 (mute right)
@@ -455,6 +460,11 @@ public:
     void     begin() ;                                  // Begin operation.  Sets pins correctly and prepares SPI bus.
     uint32_t stop_mp3client();
     void     setVolume(uint8_t vol);                    // Set the player volume.Level from 0-21, higher is louder.
+    void     setCutDb(float db);                        // station cut: dB of attenuation, 0 = none
+    void     serviceLoudness();                         // ~10 Hz chip-meter read, gated mean
+    void     loudnessReset();
+    float    loudnessDb();
+    int      loudnessRaw();                             // last raw SCI_AICTRL3 reading (0..95); -1 before the first
     void     setTone(int8_t* rtone);                   // Set the player baas/treble, 4 nibbles for treble gain/freq and bass gain/freq
     uint8_t  getVolume();                               // Get the current volume setting, higher is louder.
     void     printDetails(const char* str);             // Print configuration details to serial output.

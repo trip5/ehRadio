@@ -506,7 +506,7 @@ Other VU Styles are derived from this in the code. Design with this in mind.
 |---|---|
 | `width` | thickness of **one** channel. Both channels sit side by side, so the real thickness is `width*2 + space`. |
 | `height` | length of the bar |
-| `space` | gap between the left and right bars |
+| `space` | gap between the left and right bars. The boombox keeps it and puts leftover pixels at the ends instead - see below |
 | `vspace` | gap between the lit segments that make up a bar |
 | `perheight` | how many segments you would like the bar to have |
 
@@ -533,15 +533,17 @@ The measure is the box's own rectangle: `width*2 + space` one way and `height` t
 — inside the budget.`, or `— over, so it is drawn about W x H.` when it bites.  It is a warning, not a rule: the
 editor clamps nothing, and the device has the last word.
 
-### Segments: `perheight` is a maximum, not a promise
+### Segments: `perheight` is the count you get, and it decides how much of the box the bars fill
 
-The segment pitch is `height / perheight`, rounded **down**. So `perheight` is the number of
-segments you are asking for, and you usually get slightly fewer: with `height = 44` and
-`perheight = 10` the pitch is 4 px, giving 11 segments. The leftover pixels at the loud end are
-simply not covered — every segment is the same size and the remainder is wasted.
+Every segment is the same size. The pitch is `length / perheight`, rounded **down**, and the level
+axis is then snapped down to an exact multiple of `perheight` — so the bar draws exactly that many
+segments and the last one is never a stub: with `length = 44` and `perheight = 10` the pitch is 4 px
+and the bar uses 40 px. What the snap gives up stays background — at the loud end on the vertical and
+Rotate 90 forms, and as an equal margin at each outer edge on the boombox, whose two bars stay centred
+with `space` still between them.
 
-That is harmless, and there is nothing to work around. If the bar looks more "blocky" than you
-wanted, lower `perheight`.
+So a count that divides the length exactly leaves nothing over and fills the box; a count that does
+not leaves a margin. If the bar looks more "blocky" than you wanted, lower `perheight`.
 
 The **speed of the fall is not configurable per layout** — it is worked out from the bar's own
 length, so a long bar and a short bar both fall from full to empty in the same time

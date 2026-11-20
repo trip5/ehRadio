@@ -112,7 +112,10 @@ public:
   void normalizeToCRLF(const char* input, char* output, size_t outputSize);
   bool isHttpUrl(const char* text);
   bool parseCommandLine(const char* input, char* command, size_t commandSize, char* value, size_t valueSize);
-  bool parseCSV(const char* line, char* name, char* url, int& ovol);
+  bool parseCSV(const char* line, char* name, char* url, int& dBcut);
+  bool parsePlaylistLine(const char* line, char* name, char* url, int& dBcut);
+  String formatPlaylistLine(const char* name, const char* url, int dBcut);
+  bool playlistLineNeedsRewrite(const char* line);
   bool parseWsCommand(const char* line, char* cmd, char* val, uint8_t cSize);
   bool parseSsid(const char* line, char* ssid, char* pass);
   bool saveWifi(const char* post);
@@ -121,6 +124,7 @@ public:
   void indexPlaylist();
   void initPlaylist();
   bool cleanPlaylist();
+  bool writeStationCut(uint16_t stationId, uint8_t dBcut);
   uint16_t playlistLength();
   bool loadStation(uint16_t stationId);
   uint16_t findStationByUrl(const char* url);

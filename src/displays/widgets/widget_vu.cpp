@@ -406,8 +406,8 @@ void VuWidget::_draw(){
   #endif
 
   // Resolve the box once, exactly as the single-style widget always did, so every style works from the same numbers.
-  // rotateVU says which bandsConf axis is the level axis: read here for every style, while boomboxVU is a bar-family
-  // flag only.
+  // The orientation says which bandsConf axis is the level axis: read here for every style, while the boombox form
+  // is a bar-family concern only.
   if (!_rotate && _config.align) { _len = _bands.width;  _thk = _bands.height; }
   else                           { _len = _bands.height; _thk = _bands.width;  }
   if (_rotate) { _cw = _len; _ch = _bands.width * 2 + _bands.space; }
@@ -415,12 +415,23 @@ void VuWidget::_draw(){
 
   // Full-size segments: snap the level axis down to an exact multiple of the segment count, the rule initScreensaver()
   // applies too, so `step` divides the axis and the trailing clamp in _drawBars() never fires.  The pixels given up stay
-  // background at the loud end, and _cw/_ch are untouched so the box, canvas and blit keep their size.  BAR FAMILY only -
-  // the trace styles' axis is a time or frequency span.
+  // background, and _cw/_ch are untouched so the box, canvas and blit keep their size.  BAR FAMILY only - the trace
+  // styles' axis is a time or frequency span.
   const uint8_t styleNow = _style();
   if (styleNow == VU_STYLE_BARS || styleNow == VU_STYLE_DIGITAL_LED || styleNow >= (uint8_t)VU_STYLE_COUNT) {
     const uint16_t per = _bands.perheight ? _bands.perheight : 1;
     if (per > 1 && per <= _len) _len = (uint16_t)(per * (_len / per));
+  }
+
+  // The boombox reads middle-out from the box's two ends, so the snapped-away pixels become an equal MARGIN at
+  // each end rather than a gap in the middle: `space` keeps its meaning and the pair stays centred on the box.
+  // A one-pixel remainder would widen the gap rather than one margin, which cannot arise while both strips are
+  // the same length - the slack is always 2 * (bands.width - _len).
+  _b0 = _b1 = 0;
+  if (!_rotate && _config.align) {
+    const int slack = (int)_cw - 2 * (int)_len - (int)_bands.space;
+    if (slack > 0) _b0 = (uint16_t)(slack / 2);
+    _b1 = (uint16_t)(_cw - _b0 - _len);
   }
 
   _levels(_len, _measL, _measR);
@@ -478,7 +489,7 @@ void VuWidget::_reportCost() {
 }
 
 void VuWidget::_drawBars(bool led){
-  const uint16_t len = _len, thk = _thk, cw = _cw;
+  const uint16_t len = _len, thk = _thk;
   uint16_t measL = _measL, measR = _measR;
 
   uint16_t step = len / _bands.perheight;
@@ -555,9 +566,9 @@ void VuWidget::_drawBars(bool led){
   if (_rotate) {
     _fillLocal(len - measL, 0, measL, thk, _bgcolor);
     _fillLocal(len - measR, thk + _bands.space, measR, thk, _bgcolor);
-  } else if (_config.align) {
-    _fillLocal(0, 0, measL, thk, _bgcolor);
-    _fillLocal(cw - measR, 0, measR, thk, _bgcolor);
+  } else if (_config.align) {                 // BoomBox: each strip is cleared from its own outer end
+    _fillLocal(_b0, 0, measL, thk, _bgcolor);
+    _fillLocal((uint16_t)(_b1 + len - measR), 0, measR, thk, _bgcolor);
   } else {
     _fillLocal(0, 0, thk, measL, _bgcolor);
     _fillLocal(thk + _bands.space, 0, thk, measR, _bgcolor);
@@ -571,8 +582,8 @@ void VuWidget::_drawBars(bool led){
       _fillLocal(len - pkL, 0, peakThk, thk, _vupeakcolor);
       _fillLocal(len - pkR, thk + _bands.space, peakThk, thk, _vupeakcolor);
     } else if (_config.align) {
-      _fillLocal(pkL - peakThk, 0, peakThk, thk, _vupeakcolor);
-      _fillLocal(cw - pkR, 0, peakThk, thk, _vupeakcolor);
+      _fillLocal((uint16_t)(_b0 + pkL - peakThk), 0, peakThk, thk, _vupeakcolor);
+      _fillLocal((uint16_t)(_b1 + len - pkR), 0, peakThk, thk, _vupeakcolor);
     } else {
       _fillLocal(0, pkL - peakThk, _bands.width, peakThk, _vupeakcolor);
       _fillLocal(thk + _bands.space, pkR - peakThk, _bands.width, peakThk, _vupeakcolor);
@@ -1131,6 +1142,9 @@ void VuWidget::_levels(uint16_t len, uint16_t &measL, uint16_t &measR) {
 void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
   uint16_t off = 0;
   if (ch) off = _bands.width + _bands.space;
+  // The boombox's strips sit at the origins _draw() resolved - the box's ends less the margin the axis snap
+  // leaves - while every other form keeps the layout's own offset above.
+  const uint16_t boff = ch ? _b1 : _b0;
   #ifdef WIDGET_DEBUG
     _fills++;                  // a rect like any other: the bars draw one per segment per channel
   #endif
@@ -1138,7 +1152,7 @@ void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
     if (_rotate) {
       _canvas->fillRect(pos, off, h, _bands.width, color);
     } else if (_config.align) {
-      _canvas->fillRect(off + pos, 0, h, _bands.height, color);
+      _canvas->fillRect(boff + pos, 0, h, _bands.height, color);
     } else {
       _canvas->fillRect(off, pos, _bands.width, h, color);
     }
@@ -1146,7 +1160,7 @@ void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
     if (_rotate) {
       dsp.fillRect(_config.offset + pos, _config.top + off, h, _bands.width, color);
     } else if (_config.align) {
-      dsp.fillRect(_config.offset + off + pos, _config.top, h, _bands.height, color);
+      dsp.fillRect(_config.offset + boff + pos, _config.top, h, _bands.height, color);
     } else {
       dsp.fillRect(_config.offset + off, _config.top + pos, _bands.width, h, color);
     }

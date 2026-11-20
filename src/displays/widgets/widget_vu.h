@@ -104,8 +104,10 @@ class VuWidget: public Widget {
 
     // Geometry of the current frame. _draw() resolves it once and every style reads it: _len/_thk are the per-channel
     // level axis and cross-section, _cw/_ch the whole box, and _measL/_measR are what _levels() produced (the length
-    // CLEARED from the loud end, so louder is a SMALLER value).
+    // CLEARED from the loud end, so louder is a SMALLER value).  _b0/_b1 are the boombox's two strip origins, zero in
+    // every other orientation and in the boombox itself whenever the axis snap gave nothing up.
     uint16_t _len = 0, _thk = 0, _cw = 0, _ch = 0;
+    uint16_t _b0 = 0, _b1 = 0;
     uint16_t _measL = 0, _measR = 0;
 
     void _draw();

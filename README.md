@@ -172,6 +172,23 @@ Connecting to the radio via telnet will also show serial logs.
 
 ### System Options
 
+#### Auto dBcut
+
+The `playlist.csv` file has a 3rd column, formerly ovol (offset volume), used to "tame" loud streams, now `dBcut`
+It will apply a cut to the dB volume to some streams so that when switching between, a user doesn't suddenly have to lower their volume.
+
+Turning on "Auto dBcut" means the device itself will automatically calculate these values for streams
+**as they are played**, and update the playlist on-device.
+
+For a stream with no `dBcut` value, and as an auditory clue, the initial volume will ramp up to a safe volume in about 3 seconds.
+An initial estimate will be made during the first 30 seconds... it may not be perfect.
+A first calculation will require 5 minutes after that estimate period, at which point the value is written to the playlist.
+A second calculation (which continues based on the first calculation) is made after another 10 minutes, and the playlist is updated again (if the calculation changed).
+
+Turning on "Always Auto dBcut" will continue re-calculating and updating streams even if they already have a valid `dBcut` value.
+Turn this off if you would rather have values set once automatically and only later adjusted by using the Playlist Editor
+(manually adjusting the playing stream will affect the audio).
+
 #### Scan for Best Wi-Fi on Boot
 
 Normally, the device will do a fast and blind connect to the local wireless network.
@@ -388,7 +405,7 @@ There are notes in the `libraries` folder regarding some of the "Frankenstein" o
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.11.16 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053) |
+| 2026.11.21 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053), Auto dBcut (dBcut replaces ovol) |
 | 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
@@ -431,7 +448,7 @@ A full history of ёRadio from v0.4.177 to v0.9.533 can be seen in the [old Read
 Thanks to:
 
   - [death-kiss78](https://github.com/death-kiss78) - `ro_RO` & `it_IT` translations, SDMMC testing, initiated SD File Manager, inspired screensaver info text & screensaver sleep, sleep command fixes
-  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142
+  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142, nice layouts for TFT480x320.
   - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales, battery support and widget, and a bunch of work for ES3C28P (including ES8311 decoder, FT6336 touchscreen)
   - [e2002](https://github.com/e2002) - for [ёRadio](https://github.com/e2002/yoradio/) without which ehRadio would not be possible
 

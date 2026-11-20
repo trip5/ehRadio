@@ -39,7 +39,7 @@ bool CommandHandler::isBlockedForSource(const char *command, CommandSource sourc
     "getindex", "getactive",
     "getsystem", "getscreen", "getscreensaver", "getlocale", "getcontrols", "getweather", "getmqtt", "getbattery", "getmute",
     "curated_import", "loadindex", "loadplaylist",
-    "newmode", "locale_webui", "plvalidate",
+    "newmode", "locale_webui", "plvalidate", "dBcut",
     "irbtn", "chkid", "irclr"
   );
 }
@@ -140,6 +140,10 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "getindex"))    { netserver.requestOnChange(GETINDEX, cid); return true; }
   if (cmdIs(command, "getactive"))   { netserver.requestOnChange(GETACTIVE, cid); return true; }
   if (cmdIs(command, "clearfs"))     { utility.pruneLittleFS(); config.saveValue(&config.store.play_mode, static_cast<uint8_t>(PM_WEB)); return true; }
+  // Live, temporary, never persisted: Save/Undo own the file. Value is "<index>,<dB of cut>".
+  if (cmdIs(command, "dBcut"))       { unsigned idx = 0; int db = 0;
+                                       if (value && sscanf(value, "%u,%d", &idx, &db) == 2) player.setStationCut((uint16_t)idx, db);
+                                       return true; }
 
   /* Options: Load Settings */
   if (cmdIs(command, "getcontrols"))    { netserver.requestOnChange(GETCONTROLS, cid); return true; }
@@ -295,6 +299,12 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   /* Options: System */
   if (cmdIs(command, "wifiscan"))    { config.saveValue(&config.store.wifiscanbest, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "autoupdate"))  { config.saveValue(&config.store.autoupdate, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "dbcutauto"))   {
+    config.saveValue(&config.store.dbcutauto, static_cast<bool>(atoi(value)));
+    netserver.requestOnChange(GETACTIVE, cid);   // "Auto Always" only means anything while "Auto" is on
+    return true;
+  }
+  if (cmdIs(command, "dbcutautoalways")) { config.saveValue(&config.store.dbcutautoalways, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "ehdpname"))    { config.saveValue(config.store.ehdpname, value); network.ehDPinit(); return true; }
   if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); netserver.restartMdns(); return true; }

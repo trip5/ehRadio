@@ -921,6 +921,7 @@ void Player::_dbGlideTick() {
 void Player::_dbAdvanceWindow() {
   _dbT0 = millis() ? millis() : 1;
   _dbFadeIn = false;
+  _dbAdjustMs = 0;
   if (_dbPhase == DB_ESTIMATE) {
     _dbSum = 0.0;
     _dbN = 0;
@@ -937,6 +938,20 @@ void Player::_dbAdvanceWindow() {
   _dbPhase = DB_DONE;
   FUNCTIONLOG("Player", "dbcut: station %u done at %d dB (file holds %d dB)",
               (unsigned)config.lastStation(), (int)(_dbApplied + 0.5f), _dbWritten);
+}
+
+// Half of the gap from the value in force - the file's, when it holds one - toward the running mean.  This is the lean:
+// the target the cut walks toward inside a calculation window, and the value a boundary writes.
+int Player::_dbLeaned() {
+  float mean = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
+  if (mean < 0.0f) mean = 0.0f;
+  if (mean > (float)DBCUT_MAX) mean = (float)DBCUT_MAX;
+  const int anchor = (_dbWritten >= 0) ? _dbWritten : (int)(_dbApplied + 0.5f);
+  const int gap = (int)(mean + 0.5f) - anchor;
+  int leaned = anchor + (gap + (gap > 0 ? 1 : -1)) / 2;
+  if (leaned < 0) leaned = 0;
+  if (leaned > DBCUT_MAX) leaned = DBCUT_MAX;
+  return leaned;
 }
 
 // Learn in two stages and write only from the second.  ESTIMATE is three short windows, each measured on its own so a
@@ -1018,9 +1033,24 @@ void Player::_dbcutTick() {
   }
 #endif
 
+  // Inside a calculation window the cut walks toward the lean every AUTO_DBCUT_ADJUST_MS, so the trim is heard while the
+  // mean firms up: half a step converges in about a minute and then holds.
+  if (_dbPhase == DB_CALCULATE && _dbN &&
+      (_dbAdjustMs == 0 || (uint32_t)(now - _dbAdjustMs) >= AUTO_DBCUT_ADJUST_MS)) {
+    _dbAdjustMs = now ? now : 1;
+    const int target = _dbLeaned();
+    const int inForceNow = (int)(_dbApplied + 0.5f);
+    const int gap = target - inForceNow;
+    if (gap) {
+      const int next = inForceNow + (gap + (gap > 0 ? 1 : -1)) / 2;
+      config.station.dBcut = next;
+      _dbGlideTo = (float)next;
+    }
+  }
+
   const uint32_t windowMs = (_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_MS
                             : ((_dbRepeat == 0) ? AUTO_DBCUT_CALCULATE1_MS : AUTO_DBCUT_CALCULATE2_MS);
-  if (elapsed < windowMs) { _dbGlideTick(); return; }   // window still open: the cut holds where it is
+  if (elapsed < windowMs) { _dbGlideTick(); return; }   // window still open
 
   // The window closed: one estimate, one blend, and a write only where writes are allowed.
   if (_dbN == 0) {                                  // silence for the whole window: change nothing, move on
@@ -1029,31 +1059,19 @@ void Player::_dbcutTick() {
     return;
   }
 
-  float target = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
-  if (target < 0.0f) target = 0.0f;
-  if (target > (float)DBCUT_MAX) target = (float)DBCUT_MAX;
-  const int measuredCut = (int)(target + 0.5f);
-
   // A row that carries a cut is held through the estimate stage, so its number steps from the file's value - twice -
   // rather than jumping to the first estimate.  A fresh row has nothing to hold, so its estimates move it.
   const int inForce = (int)(_dbApplied + 0.5f);
   if (!(_dbPhase == DB_ESTIMATE && _dbWritten >= 0)) {
-    // Half the gap, rounded up in its direction (7 -> 4, 1 -> 1), anchored on the file when it holds a value.
-    const int anchor = (_dbWritten >= 0) ? _dbWritten : inForce;
-    const int gap = measuredCut - anchor;
-    int blended = anchor + (gap + (gap > 0 ? 1 : -1)) / 2;
-    if (blended < 0) blended = 0;
-    if (blended > DBCUT_MAX) blended = DBCUT_MAX;
-
+    const int blended = _dbLeaned();
     if (blended != inForce) {
       config.station.dBcut = blended;               // what is in force, which is not always what the file says
       _dbGlideTo = (float)blended;
-      FUNCTIONLOG("Player", "dbcut: station %u %s %u/%u measured %d dB, %d -> %d dB",
+      FUNCTIONLOG("Player", "dbcut: station %u %s %u/%u -> %d dB",
                   (unsigned)config.lastStation(),
                   (_dbPhase == DB_ESTIMATE) ? "estimate" : "calculate",
                   (unsigned)((_dbPhase == DB_ESTIMATE) ? _dbWindow + 1 : _dbRepeat + 1),
-                  (unsigned)((_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_WINDOWS : 2),
-                  measuredCut, inForce, blended);
+                  (unsigned)((_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_WINDOWS : 2), blended);
     }
 
     // No tolerance: a 1 dB step is audible.  Two calculations, so at most two writes; a settled row writes nothing.

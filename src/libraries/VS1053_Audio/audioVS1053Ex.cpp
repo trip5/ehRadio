@@ -492,12 +492,12 @@ static bool v1053CommentTitle(const uint8_t* p, uint32_t len, char* out, size_t 
 static char s_oggLastTitle[192];
 // AUDIO_INFO cannot be used here: it formats into a member of Audio, and this is a free function.
 static void v1053OggFlacTapTag(const uint8_t* q, uint32_t payload, uint32_t have){
-    char line[128];
     if(have < payload){
         #ifdef AUDIO_DEBUG
         static bool warned = false;
         if(!warned){
             warned = true;
+            char line[128];
             sprintf(line, "flac tag page %u bytes, %u buffered - not parsed", (unsigned)payload, (unsigned)have);
             if(audio_info) audio_info(line);
         }
@@ -509,6 +509,7 @@ static void v1053OggFlacTapTag(const uint8_t* q, uint32_t payload, uint32_t have
     if(strcmp(title, s_oggLastTitle) == 0) return;       // the encoder repeats it; the UI does not need it twice
     strlcpy(s_oggLastTitle, title, sizeof(s_oggLastTitle));
     #ifdef AUDIO_DEBUG
+    char line[192];
     sprintf(line, "flac tag: \"%s\"", title);
     if(audio_info) audio_info(line);
     #endif

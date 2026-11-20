@@ -115,6 +115,7 @@ class Player: public Audio {
     void _writeCut(int dBcut);
     void _dbGlideTick();         // one 200 ms step toward _dbGlideTo: the only way a decided cut moves
     void _dbAdvanceWindow();     // close this window and open the next, or finish
+    int  _dbLeaned();            // half of the gap from the value in force toward the running mean
     enum dbcutPhase_e : uint8_t { DB_IDLE, DB_ESTIMATE, DB_CALCULATE, DB_DONE };
     dbcutPhase_e _dbPhase = DB_IDLE;
     uint8_t  _dbWindow = 0;      // estimate window in progress, 0-based
@@ -122,6 +123,7 @@ class Player: public Audio {
     uint32_t _dbT0 = 0;          // millis() the current window started
     uint32_t _dbTickMs = 0;      // last learn tick, for the 200 ms cadence
     uint32_t _dbLogMs = 0;       // last level log line, 10 s cadence (DBCUT_LEVEL_LOG only)
+    uint32_t _dbAdjustMs = 0;    // last in-window nudge, AUTO_DBCUT_ADJUST_MS cadence
     float    _dbApplied = 0.0f;  // the cut in force, dB
     float    _dbGlideTo = 0.0f;  // the cut is settling on this, one small step per tick
     int      _dbWritten = -1;    // the value believed to be in playlist.csv for this station

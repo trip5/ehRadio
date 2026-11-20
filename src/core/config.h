@@ -66,6 +66,7 @@ extern uint32_t vuPsramBytes;
 #define AUTO_DBCUT_ESTIMATE_WINDOWS 3 // 3 x 10 s = the first 30 s; nothing is written from here
 #define AUTO_DBCUT_CALCULATE1_MS 300000 // first calculation: written at 30 s + 5 min
 #define AUTO_DBCUT_CALCULATE2_MS 600000 // second calculation: written 10 min later, keeping the first's data
+#define AUTO_DBCUT_ADJUST_MS 10000 // inside a calculation window, walk the cut toward the lean this often
 #define DBCUT_LEVEL_LOG 0 // 1 = one level line every 10 s while learning, for the I2S/VS1053 comparison
 
 #define WEATHERKEY_LENGTH 64

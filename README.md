@@ -172,20 +172,24 @@ Connecting to the radio via telnet will also show serial logs.
 
 ### System Options
 
-#### Auto dBcut
+#### dBcut Auto
 
-The `playlist.csv` file has a 3rd column, formerly ovol (offset volume), used to "tame" loud streams, now `dBcut`
-It will apply a cut to the dB volume to some streams so that when switching between, a user doesn't suddenly have to lower their volume.
+The `playlist.csv` file has a 3rd column, formerly ovol (offset volume), used to "tame" loud streams. This is now `dBcut`.
+It will apply a cut to the dB volume of some streams so that when switching between, a user doesn't suddenly have to lower their volume.
 
 Turning on "Auto dBcut" means the device itself will automatically calculate these values for streams
 **as they are played**, and update the playlist on-device.
 
-For a stream with no `dBcut` value, and as an auditory clue, the initial volume will ramp up to a safe volume in about 3 seconds.
-An initial estimate will be made during the first 30 seconds... it may not be perfect.
+For a stream with no `dBcut` value, as an auditory clue, the initial volume will ramp up to a safe volume in about 3 seconds.
+An initial estimate will be made during the first 30 seconds.
+Volume changes may be very obvious during this period.
 A first calculation will require 5 minutes after that estimate period, at which point the value is written to the playlist.
-A second calculation (which continues based on the first calculation) is made after another 10 minutes, and the playlist is updated again (if the calculation changed).
+A second calculation (which continues based on the first calculation) is made during another 10 minute period, and the playlist is updated again (if the calculation changed).
+You may hear slight volume changes as adjustments are made to `dBcut` during these periods.
 
-Turning on "Always Auto dBcut" will continue re-calculating and updating streams even if they already have a valid `dBcut` value.
+#### dBcut Auto Always
+
+Turning on "dBcut Auto Always" will continue re-calculating and updating streams even if they already have a valid `dBcut` value.
 Turn this off if you would rather have values set once automatically and only later adjusted by using the Playlist Editor
 (manually adjusting the playing stream will affect the audio).
 

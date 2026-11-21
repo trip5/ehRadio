@@ -582,8 +582,10 @@ void NetServer::processQueue() {
           String act = F("\"group_wifi\",");
           if (network.status == CONNECTED) {
                                                                 act += F("\"group_system\",");
-            if (config.store.dbcutauto || DBGWUI)               act += F("\"group_autodbcut\",");
-                                                           else act += F("\"hide_group_autodbcut\",");
+            if (config.store.dbcutauto || DBGWUI)             { act += F("\"hide_group_dbcutenable\",");
+                                                                act += F("\"group_dbcutauto\","); }
+                                                         else { act += F("\"hide_group_dbcutauto\",");
+                                                                act += F("\"group_dbcutenable\","); }
             if (battery.isInitialized() || DBGWUI)              act += F("\"group_battery\",");
             if (DSP_MODEL != DSP_DUMMY || DBGWUI)               act += F("\"group_display\",");
             #if defined(DSP_TFT) || DBGWUI
@@ -729,14 +731,15 @@ void NetServer::processQueue() {
                                   config.store.weatherkey,
                                   config.store.weathersyncinterval);
                                   break;
-      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"autoupdate\":%d,\"dbcutauto\":%d,\"dbcutautoalways\":%d}",
+      case GETSYSTEM:     snprintf(wsbuf, sizeof(wsbuf), "{\"wifiscan\":%d,\"ehdp\":%d,\"ehdpname\":\"%s\",\"mdns\":\"%s\",\"autoupdate\":%d,\"dbcutauto\":%d,\"dbcutautoalways\":%d,\"dbcutenable\":%d}",
                                   config.store.wifiscanbest,
                                   config.store.ehdp,
                                   config.store.ehdpname,
                                   config.store.mdnsname,
                                   config.store.autoupdate,
                                   config.store.dbcutauto,
-                                  config.store.dbcutautoalways);
+                                  config.store.dbcutautoalways,
+                                  config.store.dbcutenable);
                                   break;
       case GETMQTT:       snprintf(wsbuf, sizeof(wsbuf), "{\"mqttenable\":%d,\"mqtthost\":\"%s\",\"mqttport\":\"%d\",\"mqttuser\":\"%s\",\"mqttpass\":\"%s\",\"mqtttopic\":\"%s\"}",
                                   config.store.mqttenable,

@@ -302,9 +302,11 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "dbcutauto"))   {
     config.saveValue(&config.store.dbcutauto, static_cast<bool>(atoi(value)));
     netserver.requestOnChange(GETACTIVE, cid);   // "Auto Always" only means anything while "Auto" is on
+    player.refreshCut();                         // and the switch has to be heard on the station playing now
     return true;
   }
   if (cmdIs(command, "dbcutautoalways")) { config.saveValue(&config.store.dbcutautoalways, static_cast<bool>(atoi(value))); return true; }
+  if (cmdIs(command, "dbcutenable")) { config.saveValue(&config.store.dbcutenable, static_cast<bool>(atoi(value))); player.refreshCut(); return true; }
   if (cmdIs(command, "ehdp"))        { config.saveValue(&config.store.ehdp, static_cast<bool>(atoi(value))); return true; }
   if (cmdIs(command, "ehdpname"))    { config.saveValue(config.store.ehdpname, value); network.ehDPinit(); return true; }
   if (cmdIs(command, "mdnsname"))    { config.saveValue(config.store.mdnsname, value); netserver.restartMdns(); return true; }

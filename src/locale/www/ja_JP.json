@@ -52,6 +52,7 @@
   "lbl_country_code": "国コード",
   "lbl_dbcut_auto": "dBcut Auto",
   "lbl_dbcut_auto_always": "dBcut 自動 常に",
+  "lbl_dbcut_enable": "dBcut 有効化",
   "lbl_debug_touch": "タッチデバッグ",
   "lbl_digitsglow": "数字が光る",
   "lbl_dimmed_brightness": "輝度調整",

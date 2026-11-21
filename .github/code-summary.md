@@ -1151,26 +1151,22 @@ thinks the radio forgot everything. The loader-side wait was not built.
     `_applyCut()`, and why `PR_VOL` can simply delegate to `_loadVol()`.
   - station cut (`dBcut`, 0 = not measured, 1..24 dB of attenuation): `PR_DBCUT` carries `(index << 16) | dB` and is
     accepted only for the loaded station; `setStationCut()` clamps and queues for the `dBcut` websocket command.
-    The clamped value reaches the output through the library setters `Audio::setCutDb()` (I2S) and
-    `Audio::setCutDb()` (VS1053, a `SCI_VOL` offset), never through the volume curve.
-  - the learn loop (`_dbcutTick()`, gated by `AUTO_DBCUT` - the behaviour only, the analysis stays compiled): a station
-    whose stored cut is `< 0` is measured from the pre-fader level and its cut is ramped from `AUTO_DBCUT_START_DB`
-    (12) down to 3 dB short of the running estimate over `AUTO_DBCUT_RAMP_MS`, settled in 1 dB steps to
-    `AUTO_DBCUT_SETTLE_MS`, held to `AUTO_DBCUT_FINAL_MS` (quieter at once, louder no faster than 0.5 dB/s), then
-    frozen into `config.station.dBcut` and written back by a one-shot task - never on the audio task, because a
-    LittleFS rewrite would starve the DMA. At `AUTO_DBCUT_FINAL_MS - AUTO_DBCUT_WINDOW_MS` the loudness accumulator is
-    reset, so only the **last 10 s** decides the value: a preroll advert is often 3-20 s of something far louder than
-    the stream. The target is `measured - AUTO_DBCUT_REF` (a stream LOUDER than the reference is the one that gets
-    cut). A station with a stored cut skips the whole thing and applies it at t = 0 - unless `AUTO_DBCUT_OVERWRITE` is
-    on, in which case it is applied and then watched from t = 0 with no fade-in.
-  - after the first write the loop does not stop: `DB_WATCH` keeps a **running mean of every tick since that write**
-    (`_dbWatchSum`/`_dbWatchN`) and uses it for both the live adjustment and the final write, so the ten minutes are
-    averaged over the ten minutes instead of being sampled again. A second 10 s reading at the ten-minute mark is luck,
-    and it moved one station from 2 dB to 7 dB on the first real run. The adjustment rule stays "quieter at once,
-    louder no faster than 0.5 dB/s" until `AUTO_DBCUT_REALLY_FINAL_MS` (ten minutes). The second write is skipped when
-    the value is unchanged, because a full playlist rewrite is a flash write and a ten-minute session would otherwise
-    pay for one per station. Changing station abandons the watch (`_play()` resets the phase), so the first written
-    value is what survives.
+    The clamped value reaches the output through the library setters `Audio::setCutDb()` (I2S: `m_cutLin`, folded into
+    `computeLimit()`) and `Audio::setCutDb()` (VS1053: a `SCI_VOL` offset, 0.5 dB/LSB), never through the volume curve.
+  - `_applyCut()` is the only funnel and the only honour gate: the number reaches the library while
+    `config.store.dbcutauto || config.store.dbcutenable` is on, otherwise 0 dB is pushed and `_dbApplied` still carries
+    the intended value. `PR_CUTRESET` (`Player::refreshCut()`, sent by both switch commands) re-runs `_loadVol()` so a
+    switch is heard on the station already playing, and does not clear mute the way `PR_VOL` does.
+  - the learn loop (`_dbcutTick()`, gated by `config.store.dbcutauto` - the behaviour only, the analysis stays
+    compiled): `DB_IDLE` reads the stored value once; `DB_ESTIMATE` is `DBCUT_AUTO_ESTIMATE_WINDOWS` (3) x
+    `DBCUT_AUTO_ESTIMATE_MS` (10 s) windows, each resetting the accumulator and holding the cut; `DB_CALCULATE` is two
+    never-reset windows (`DBCUT_AUTO_CALCULATE1_MS` 5 min, `DBCUT_AUTO_CALCULATE2_MS` 10 min) that walk the cut half the
+    remaining gap every `DBCUT_AUTO_ADJUST_MS` (10 s) and write at their boundary only when the value changes
+    (`_dbLeaned()`); `DB_DONE` glides in `DBCUT_AUTO_STEP_DB` (0.1 dB every 200 ms) steps. A station with no cut fades
+    in from `DBCUT_AUTO_START_DB` (12); one with a cut is held - unless `config.store.dbcutautoalways`
+    (`DBCUT_AUTO_OVERWRITE`) is on, in which case it is measured through its own cut. The target is
+    `mean - DBCUT_AUTO_REF`, so a stream LOUDER than the reference gets cut. Writes go to a one-shot task, never the
+    audio task, because a LittleFS rewrite would starve the DMA.
   - SD/web mode specific playback behavior
   - error reporting and display/net updates
   - command queue depth: `xQueueCreate(10, ...)` — increased from 5 to prevent queue overflow during rapid mode-switch
@@ -6027,7 +6023,7 @@ Implication:
 - `config.indexPlaylist()/initPlaylist()` refresh index
 - `player` and display refresh via request queue events
 
-The third column is `dBcut`, attenuation only, never a gain (`DBCUT_MAX` in `config.h`). It is a **tagged token**:
+The third column is `dBcut`, attenuation only, never a gain (`DBCUT_AUTO_MAX` in `config.h`). It is a **tagged token**:
 
 | stored | meaning |
 |--------|---------|
@@ -6037,7 +6033,7 @@ The third column is `dBcut`, attenuation only, never a gain (`DBCUT_MAX` in `con
 
 The `dB` **prefix** is load-bearing: yoRadio parses the field with `atoi()`, so `atoi("dB12")` is 0 and our whole file
 is inert there, while a suffix (`"12dB"`) would read as their `ovol 12`. Internally `config.station.dBcut == -1`
-carries "not measured"; `_applyCut()` maps it to 0 dB and `_loadVol()` maps it to `AUTO_DBCUT_START_DB` so an
+carries "not measured"; `_applyCut()` maps it to 0 dB and `_loadVol()` maps it to `DBCUT_AUTO_START_DB` so an
 unmeasured station is quiet rather than blasting while it learns.
 
 **One grammar, two implementations** - `Utility::parsePlaylistLine()` in `utility.cpp` and `parsePlaylistLine()` in

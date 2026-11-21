@@ -53,20 +53,20 @@ extern uint32_t vuPsramBytes;
 // gets cleared.  The "dB" prefix keeps atoi() at 0, so a yoRadio build ignores our values completely -
 // a suffix like "12dB" would read as their ovol 12.  It never adds gain, so both audio paths honour it
 // and normalization can never clip.
-#define DBCUT_MAX 24
+#define DBCUT_AUTO_MAX 24
 // Auto dBcut has two stages.  ESTIMATE is three short windows, each measured on its own, because a station that opens
 // with a preroll advert would otherwise poison its own number; a row that already carries a cut is measured through it
 // and HELD.  CALCULATE is two long windows that never reset, each moving half the remaining gap and writing only when
 // that changes the file - two writes at most, none for a row that is already right.
-#define AUTO_DBCUT_REF -18 // the dBFS-RMS aimed for
-#define AUTO_DBCUT_START_DB 12 // where the fade-in starts; needing more than this is rare
-#define AUTO_DBCUT_STEP_DB 0.1f // one step of the glide, every 200 ms (0.5 dB/s), so nothing ever steps
-#define AUTO_DBCUT_RAMP_MS 3000 // linear from START_DB to (live estimate + 3), so it lands 3 dB quiet
-#define AUTO_DBCUT_ESTIMATE_MS 10000 // each estimate window; the accumulator restarts at every window start
-#define AUTO_DBCUT_ESTIMATE_WINDOWS 3 // 3 x 10 s = the first 30 s; nothing is written from here
-#define AUTO_DBCUT_CALCULATE1_MS 300000 // first calculation: written at 30 s + 5 min
-#define AUTO_DBCUT_CALCULATE2_MS 600000 // second calculation: written 10 min later, keeping the first's data
-#define AUTO_DBCUT_ADJUST_MS 10000 // inside a calculation window, walk the cut toward the lean this often
+#define DBCUT_AUTO_REF -18 // the dBFS-RMS aimed for
+#define DBCUT_AUTO_START_DB 12 // where the fade-in starts; needing more than this is rare
+#define DBCUT_AUTO_STEP_DB 0.1f // one step of the glide, every 200 ms (0.5 dB/s), so nothing ever steps
+#define DBCUT_AUTO_RAMP_MS 3000 // linear from START_DB to (live estimate + 3), so it lands 3 dB quiet
+#define DBCUT_AUTO_ESTIMATE_MS 10000 // each estimate window; the accumulator restarts at every window start
+#define DBCUT_AUTO_ESTIMATE_WINDOWS 3 // 3 x 10 s = the first 30 s; nothing is written from here
+#define DBCUT_AUTO_CALCULATE1_MS 300000 // first calculation: written at 30 s + 5 min
+#define DBCUT_AUTO_CALCULATE2_MS 600000 // second calculation: written 10 min later, keeping the first's data
+#define DBCUT_AUTO_ADJUST_MS 10000 // inside a calculation window, walk the cut toward the lean this often
 #define DBCUT_LEVEL_LOG 0 // 1 = one level line every 10 s while learning, for the I2S/VS1053 comparison
 
 #define WEATHERKEY_LENGTH 64
@@ -231,8 +231,9 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      weatherwind = false;
 
   // System
-  bool      dbcutauto = AUTO_DBCUT;
-  bool      dbcutautoalways = AUTO_DBCUT_OVERWRITE;
+  bool      dbcutauto = DBCUT_AUTO;
+  bool      dbcutautoalways = DBCUT_AUTO_OVERWRITE;
+  bool      dbcutenable = DBCUT_ENABLE;
   bool      wifiscanbest = WIFI_SCAN_BEST_RSSI;
   bool      autoupdate = false;
   bool      ehdp = EHDP;
@@ -297,7 +298,7 @@ struct station_t
   char url[STATION_FIELD_LENGTH];
   char title[STATION_FIELD_LENGTH];
   uint16_t bitrate;
-  int  dBcut;     // dB of attenuation 0..DBCUT_MAX, or -1 when the station has not been measured
+  int  dBcut;     // dB of attenuation 0..DBCUT_AUTO_MAX, or -1 when the station has not been measured
 };
 
 struct neworkItem

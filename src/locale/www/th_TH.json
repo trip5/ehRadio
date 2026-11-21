@@ -52,6 +52,7 @@
   "lbl_country_code": "รหัสประเทศ",
   "lbl_dbcut_auto": "dBcut Auto",
   "lbl_dbcut_auto_always": "dBcut Auto Always",
+  "lbl_dbcut_enable": "เปิดใช้งาน dBcut",
   "lbl_debug_touch": "แก้ไขข้อบกพร่องการสัมผัส",
   "lbl_digitsglow": "ตัวเลขเรืองแสง",
   "lbl_dimmed_brightness": "ความสว่างลดลง",

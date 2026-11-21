@@ -16,7 +16,7 @@ THE THIRD COLUMN:
     The "dB" PREFIX matters: yoRadio reads this field with atoi(), so atoi("dB12") is 0.
 
 THE CUT:
-    cut = measured - ref, clamped 0..DBCUT_MAX.  Attenuation only, so a stream can only be brought DOWN.
+    cut = measured - ref, clamped 0..DBCUT_AUTO_MAX.  Attenuation only, so a stream can only be brought DOWN.
 
 MODES, AND WHY THERE ARE TWO:
     The radio learns in two stages and only writes the file from the second, so a number from this tool is
@@ -36,7 +36,7 @@ MODES, AND WHY THERE ARE TWO:
 MEASUREMENT, IN THE FIRMWARE'S OWN UNITS:
     ~46 ms blocks of raw s16le PCM; block level = 10*log10(mean(sample^2) / 32768^2), blocks below -50 dBFS
     ignored.  Deliberately NOT EBU R128 LUFS: K-weighting reads 2-4 dB high on music, and the reference
-    (AUTO_DBCUT_REF) is a dBFS number.
+    (DBCUT_AUTO_REF) is a dBFS number.
 
 SCHEDULING:
     Every stream is probed first: a two-second ffmpeg run that reads the codec line, so a station that will
@@ -50,7 +50,7 @@ SCHEDULING:
     this - an icecast stream delivers at exactly its encoded rate whatever the link is doing.
 
 OPTIONS:
-    --ref -18        Target level in dBFS (the radio's AUTO_DBCUT_REF)
+    --ref -18        Target level in dBFS (the radio's DBCUT_AUTO_REF)
     --estimate       The 30 s estimate stage: what the radio applies, not what it records
     --calculate      The 5 min 30 s first calculation: what the radio records at 5:30
     --timeout        Per-stream timeout (default: the mode's length + 15 s)
@@ -103,7 +103,7 @@ import threading
 import time
 import urllib.request
 
-DBCUT_MAX = 24
+DBCUT_AUTO_MAX = 24
 DEFAULT_FILE = os.path.join("data", "data", "playlist.csv")
 ESTIMATE_WINDOWS = 3                    # the radio's estimate stage: three windows, each measured on its own
 ESTIMATE_WINDOW_SECONDS = 10
@@ -114,7 +114,7 @@ SAMPLE_RATE = 44100
 BLOCK_BYTES = 8192                      # ~46 ms of s16 stereo, close to the firmware's 50 ms block
 BYTES_PER_SECOND = SAMPLE_RATE * 4      # s16 x 2 channels
 GATE_DBFS = -50.0                       # the firmware ignores blocks below this
-REFERENCE_DBFS = -18.0                  # AUTO_DBCUT_REF, overridden by --ref
+REFERENCE_DBFS = -18.0                  # DBCUT_AUTO_REF, overridden by --ref
 RETRY_DELAYS = (5, 10, 20, 30)          # gap before each retry; the last value repeats if --retries is higher
 DEFAULT_MAX_KBPS = 2000                 # the budget when the link cannot be measured
 ASSUMED_KBPS = 320                      # what a stream costs when the probe does not say
@@ -160,7 +160,7 @@ def cut_from_token(tok):
     digits = text[2:]
     if not digits.isdigit():
         return -1
-    return max(0, min(DBCUT_MAX, int(digits)))
+    return max(0, min(DBCUT_AUTO_MAX, int(digits)))
 
 
 def format_line(name, url, dBcut):
@@ -201,12 +201,12 @@ def half_step(anchor, target):
     """Half of the remaining gap, rounded up in its direction - the radio's rule (7 -> 4, 3 -> 2, 1 -> 1)."""
     gap = target - anchor
     step = (gap + (1 if gap > 0 else -1)) // 2
-    return max(0, min(DBCUT_MAX, anchor + step))
+    return max(0, min(DBCUT_AUTO_MAX, anchor + step))
 
 
 def level_to_cut(level, ref):
     """A stream LOUDER than the reference is the one that gets cut."""
-    return max(0, min(DBCUT_MAX, int(round(level - ref))))
+    return max(0, min(DBCUT_AUTO_MAX, int(round(level - ref))))
 
 
 def estimate_cut(blocks, ref):
@@ -490,7 +490,7 @@ def main(argv=None):
     ap.add_argument("file", nargs="?", default=DEFAULT_FILE,
                     help="playlist to rewrite (default %s)" % DEFAULT_FILE)
     ap.add_argument("--ref", type=float, default=REFERENCE_DBFS,
-                    help="target level in dBFS, the radio's AUTO_DBCUT_REF (default %.0f)" % REFERENCE_DBFS)
+                    help="target level in dBFS, the radio's DBCUT_AUTO_REF (default %.0f)" % REFERENCE_DBFS)
     ap.add_argument("--estimate", action="store_true",
                     help="the 30 s estimate stage: what the radio applies while learning, not what it records")
     ap.add_argument("--calculate", action="store_true",

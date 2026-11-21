@@ -162,6 +162,7 @@ different pictures, so nothing keeps them in step.
 | `autoupdate` | Enable/disable auto update checks. |
 | `dbcutauto` | Enable/disable automatic per-station dBcut measurement (Settings > System > dBcut Auto). |
 | `dbcutautoalways` | Re-measure stations that already carry a dBcut, correcting them if they drifted (Settings > System > dBcut Auto Always). Only means anything while `dbcutauto` is on. |
+| `dbcutenable` | Apply the dBcut values already stored in the playlist (Settings > System > dBcut Enable). Not needed while `dbcutauto` is on, which applies them anyway. |
 | `ehdp` | Enable/disable eHDP service. |
 | `ehdpname` | Set eHDP name and reinitialize eHDP. |
 | `mdnsname` | Set mDNS host name. |

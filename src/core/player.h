@@ -22,7 +22,7 @@
   #define VS_CHIP_DEAD_STRIKES 3  // stalled feeds against a chip answering 0x0000 before the decoder is declared dead
 #endif
 
-enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9, PR_DBCUT = 10 };
+enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9, PR_DBCUT = 10, PR_CUTRESET = 11 };
 struct playerRequestParams_t
 {
   playerRequestType_e type;
@@ -66,6 +66,7 @@ class Player: public Audio {
     uint8_t volToI2S(uint8_t volume);
     void setVol(uint8_t volume);
     void setStationCut(uint16_t index, int value);   // live edit / learned value, clamped
+    void refreshCut();                               // re-apply the cut after a dBcut switch changed
     void mute();
     bool isMuted() const { return _muted; }
     void clearMute() { _clearMute(); }
@@ -123,13 +124,13 @@ class Player: public Audio {
     uint32_t _dbT0 = 0;          // millis() the current window started
     uint32_t _dbTickMs = 0;      // last learn tick, for the 200 ms cadence
     uint32_t _dbLogMs = 0;       // last level log line, 10 s cadence (DBCUT_LEVEL_LOG only)
-    uint32_t _dbAdjustMs = 0;    // last in-window nudge, AUTO_DBCUT_ADJUST_MS cadence
+    uint32_t _dbAdjustMs = 0;    // last in-window nudge, DBCUT_AUTO_ADJUST_MS cadence
     float    _dbApplied = 0.0f;  // the cut in force, dB
     float    _dbGlideTo = 0.0f;  // the cut is settling on this, one small step per tick
     int      _dbWritten = -1;    // the value believed to be in playlist.csv for this station
     double   _dbSum = 0.0;       // levels in this window (estimate) or in the whole stage (calculate)
     uint32_t _dbN = 0;           // samples in _dbSum
-    bool     _dbFadeIn = false;  // this tune faded in from AUTO_DBCUT_START_DB and is still finding its level
+    bool     _dbFadeIn = false;  // this tune faded in from DBCUT_AUTO_START_DB and is still finding its level
     void _clearMute();   // one place a mute ends, so the footer glyph is repainted wherever it happens
 };
 

@@ -99,8 +99,8 @@ void Player::init() {
 // Two classes, because losing one of them is much worse than losing the other.  The periodic ticks (PR_CHECKSD,
 // PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a nearly full queue may refuse them.
 // Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP, PR_PREV, PR_NEXT, PR_TOGGLE,
-// PR_VOL, PR_BURL): losing one eats a user's Next, or leaves a queued PR_STOP behind a later PR_PLAY, so those wait
-// for room rather than being dropped.
+// PR_VOL, PR_BURL, PR_DBCUT, PR_CUTRESET): losing one eats a user's Next, or leaves a queued PR_STOP behind a later
+// PR_PLAY, so those wait for room rather than being dropped.
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
   const bool tick = (request.type == PR_CHECKSD || request.type == PR_VUTONUS);
@@ -244,7 +244,8 @@ void Player::loop() {
           case PR_VOL:    cmd = "VOL";    break;
           case PR_BURL:   cmd = "BURL";   break;
           case PR_TOGGLE: cmd = "TOGGLE"; break;
-          case PR_DBCUT:  cmd = "DBCUT";  break;
+          case PR_DBCUT:    cmd = "DBCUT";    break;
+          case PR_CUTRESET: cmd = "CUTRESET"; break;
           default: break;
         }
         FUNCTIONLOG("Player", "queue: %s %d", cmd, (int)requestP.payload);
@@ -285,6 +286,11 @@ void Player::loop() {
           _dbGlideTo = _dbApplied;  // ...and nothing left over from a decision may drag it back
           _dbPhase = DB_DONE;   // a human has spoken: the loop must not overwrite it
         }
+        break;
+      }
+      case PR_CUTRESET: {
+        _loadVol(config.store.volume);   // a switch changed what may be heard: re-read the file's cut
+        _dbGlideTo = _dbApplied;         // nothing left over from a decision may drag it back
         break;
       }
       #ifdef USE_SD
@@ -867,7 +873,7 @@ void Player::_loadVol(uint8_t volume) {
   setVolume(v);                              // the knob
   // -1 means "not measured": start at the fade-in value so a loud station is never blasted while it is learned.
   const int cut = config.station.dBcut;
-  _applyCut((float)((cut < 0) ? (config.store.dbcutauto ? AUTO_DBCUT_START_DB : 0) : cut));
+  _applyCut((float)((cut < 0) ? (config.store.dbcutauto ? DBCUT_AUTO_START_DB : 0) : cut));
   #ifdef USE_ES8311
     es.setVolume((uint8_t)map(v, 0, VOLUME_SCALE, 0, 100));
   #endif
@@ -877,20 +883,25 @@ void Player::setVol(uint8_t volume) {
   player.sendCommand({PR_VOL, volume});
 }
 
+void Player::refreshCut() {
+  sendCommand({PR_CUTRESET, 0});
+}
+
 void Player::setStationCut(uint16_t index, int value) {
   if (config.getMode() != PM_WEB) return;        // card rows carry no cut
   if (index != config.lastStation()) return;     // only the station that is loaded
   if (value < 0) value = 0;              // 0 is a measurement, not a lack of one
-  if (value > DBCUT_MAX) value = DBCUT_MAX;
+  if (value > DBCUT_AUTO_MAX) value = DBCUT_AUTO_MAX;
   sendCommand({PR_DBCUT, (int)(((uint32_t)index << 16) | (uint16_t)value)});
 }
 
-// The cut only attenuates: clamp it behind the grammar and setStationCut().  Audio task only.
+// The cut only attenuates, and only while a switch allows it: Auto honours by definition, Enable is the manual one.
+// A refused cut still lands in _dbApplied, so the learner and the knob keep one number.  Audio task only.
 void Player::_applyCut(float db) {
   if (db < 0.0f) db = 0.0f;              // -1 (not measured) and a fresh ramp both mean "no cut yet"
-  if (db > (float)DBCUT_MAX) db = (float)DBCUT_MAX;
+  if (db > (float)DBCUT_AUTO_MAX) db = (float)DBCUT_AUTO_MAX;
   _dbApplied = db;
-  setCutDb(db);
+  setCutDb((config.store.dbcutauto || config.store.dbcutenable) ? db : 0.0f);
 }
 
 void Player::_writeCut(int dBcut) {
@@ -912,8 +923,8 @@ void Player::_writeCut(int dBcut) {
 // One step of the glide, every 200 ms: a correction is a drift, never a lurch.
 void Player::_dbGlideTick() {
   const float togo = _dbGlideTo - _dbApplied;
-  if (togo > (float)AUTO_DBCUT_STEP_DB)        _applyCut(_dbApplied + (float)AUTO_DBCUT_STEP_DB);
-  else if (togo < -(float)AUTO_DBCUT_STEP_DB)  _applyCut(_dbApplied - (float)AUTO_DBCUT_STEP_DB);
+  if (togo > (float)DBCUT_AUTO_STEP_DB)        _applyCut(_dbApplied + (float)DBCUT_AUTO_STEP_DB);
+  else if (togo < -(float)DBCUT_AUTO_STEP_DB)  _applyCut(_dbApplied - (float)DBCUT_AUTO_STEP_DB);
   else if (togo != 0.0f)                       _applyCut(_dbGlideTo);   // the last fraction of a step
 }
 
@@ -926,12 +937,12 @@ void Player::_dbAdvanceWindow() {
     _dbSum = 0.0;
     _dbN = 0;
     loudnessReset();
-    if (++_dbWindow < AUTO_DBCUT_ESTIMATE_WINDOWS) return;
+    if (++_dbWindow < DBCUT_AUTO_ESTIMATE_WINDOWS) return;
     _dbPhase = DB_CALCULATE;
     _dbRepeat = 0;
     FUNCTIONLOG("Player", "dbcut: station %u estimated %d dB after %u s, now calculating",
                 (unsigned)config.lastStation(), (int)(_dbApplied + 0.5f),
-                (unsigned)(AUTO_DBCUT_ESTIMATE_WINDOWS * (AUTO_DBCUT_ESTIMATE_MS / 1000)));
+                (unsigned)(DBCUT_AUTO_ESTIMATE_WINDOWS * (DBCUT_AUTO_ESTIMATE_MS / 1000)));
     return;
   }
   if (++_dbRepeat < 2) return;                      // two calculations: 5 minutes, then 10 more
@@ -943,21 +954,21 @@ void Player::_dbAdvanceWindow() {
 // Half of the gap from the value in force - the file's, when it holds one - toward the running mean.  This is the lean:
 // the target the cut walks toward inside a calculation window, and the value a boundary writes.
 int Player::_dbLeaned() {
-  float mean = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
+  float mean = (float)(_dbSum / (double)_dbN) - (float)DBCUT_AUTO_REF;
   if (mean < 0.0f) mean = 0.0f;
-  if (mean > (float)DBCUT_MAX) mean = (float)DBCUT_MAX;
+  if (mean > (float)DBCUT_AUTO_MAX) mean = (float)DBCUT_AUTO_MAX;
   const int anchor = (_dbWritten >= 0) ? _dbWritten : (int)(_dbApplied + 0.5f);
   const int gap = (int)(mean + 0.5f) - anchor;
   int leaned = anchor + (gap + (gap > 0 ? 1 : -1)) / 2;
   if (leaned < 0) leaned = 0;
-  if (leaned > DBCUT_MAX) leaned = DBCUT_MAX;
+  if (leaned > DBCUT_AUTO_MAX) leaned = DBCUT_AUTO_MAX;
   return leaned;
 }
 
 // Learn in two stages and write only from the second.  ESTIMATE is three short windows, each measured on its own so a
 // preroll advert cannot poison the number; CALCULATE is two long ones whose mean keeps the whole stage.  The cut is HELD
 // inside a window and moves only at a boundary, by half the remaining gap.  -1 means "not measured": that tune fades in
-// from AUTO_DBCUT_START_DB, a calibrated one starts at the file's number.
+// from DBCUT_AUTO_START_DB, a calibrated one starts at the file's number.
 void Player::_dbcutTick() {
   if (!config.store.dbcutauto) return;            // the WebUI switch; the analysis stays compiled either way
   if (config.getMode() != PM_WEB) return;
@@ -986,7 +997,7 @@ void Player::_dbcutTick() {
     _dbWritten = stored;                            // -1: the file holds no measurement for this station
     _dbFadeIn = (stored < 0);
     loudnessReset();
-    _applyCut((float)(_dbFadeIn ? AUTO_DBCUT_START_DB : stored));
+    _applyCut((float)(_dbFadeIn ? DBCUT_AUTO_START_DB : stored));
     _dbGlideTo = _dbApplied;
     return;
   }
@@ -997,14 +1008,14 @@ void Player::_dbcutTick() {
   // Only the first window moves the cut while open - there is nothing to hold yet: a line from START_DB to 3 dB past
   // the live estimate, then 1 dB a tick for the last few.
   if (_dbFadeIn && _dbN) {
-    float aim = (float)(_dbSum / (double)_dbN) - (float)AUTO_DBCUT_REF;
+    float aim = (float)(_dbSum / (double)_dbN) - (float)DBCUT_AUTO_REF;
     if (aim < 0.0f) aim = 0.0f;
-    if (aim > (float)DBCUT_MAX) aim = (float)DBCUT_MAX;
-    if (elapsed < AUTO_DBCUT_RAMP_MS) {
+    if (aim > (float)DBCUT_AUTO_MAX) aim = (float)DBCUT_AUTO_MAX;
+    if (elapsed < DBCUT_AUTO_RAMP_MS) {
       float to = aim + 3.0f;
-      if (to > (float)DBCUT_MAX) to = (float)DBCUT_MAX;
-      const float k = (float)elapsed / (float)AUTO_DBCUT_RAMP_MS;
-      _applyCut((float)AUTO_DBCUT_START_DB + (to - (float)AUTO_DBCUT_START_DB) * k);
+      if (to > (float)DBCUT_AUTO_MAX) to = (float)DBCUT_AUTO_MAX;
+      const float k = (float)elapsed / (float)DBCUT_AUTO_RAMP_MS;
+      _applyCut((float)DBCUT_AUTO_START_DB + (to - (float)DBCUT_AUTO_START_DB) * k);
     } else if (_dbApplied > aim + 1.0f) {
       _applyCut(_dbApplied - 1.0f);
     } else if (_dbApplied < aim - 1.0f) {
@@ -1033,10 +1044,10 @@ void Player::_dbcutTick() {
   }
 #endif
 
-  // Inside a calculation window the cut walks toward the lean every AUTO_DBCUT_ADJUST_MS, so the trim is heard while the
+  // Inside a calculation window the cut walks toward the lean every DBCUT_AUTO_ADJUST_MS, so the trim is heard while the
   // mean firms up: half a step converges in about a minute and then holds.
   if (_dbPhase == DB_CALCULATE && _dbN &&
-      (_dbAdjustMs == 0 || (uint32_t)(now - _dbAdjustMs) >= AUTO_DBCUT_ADJUST_MS)) {
+      (_dbAdjustMs == 0 || (uint32_t)(now - _dbAdjustMs) >= DBCUT_AUTO_ADJUST_MS)) {
     _dbAdjustMs = now ? now : 1;
     const int target = _dbLeaned();
     const int inForceNow = (int)(_dbApplied + 0.5f);
@@ -1048,8 +1059,8 @@ void Player::_dbcutTick() {
     }
   }
 
-  const uint32_t windowMs = (_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_MS
-                            : ((_dbRepeat == 0) ? AUTO_DBCUT_CALCULATE1_MS : AUTO_DBCUT_CALCULATE2_MS);
+  const uint32_t windowMs = (_dbPhase == DB_ESTIMATE) ? DBCUT_AUTO_ESTIMATE_MS
+                            : ((_dbRepeat == 0) ? DBCUT_AUTO_CALCULATE1_MS : DBCUT_AUTO_CALCULATE2_MS);
   if (elapsed < windowMs) { _dbGlideTick(); return; }   // window still open
 
   // The window closed: one estimate, one blend, and a write only where writes are allowed.
@@ -1071,7 +1082,7 @@ void Player::_dbcutTick() {
                   (unsigned)config.lastStation(),
                   (_dbPhase == DB_ESTIMATE) ? "estimate" : "calculate",
                   (unsigned)((_dbPhase == DB_ESTIMATE) ? _dbWindow + 1 : _dbRepeat + 1),
-                  (unsigned)((_dbPhase == DB_ESTIMATE) ? AUTO_DBCUT_ESTIMATE_WINDOWS : 2), blended);
+                  (unsigned)((_dbPhase == DB_ESTIMATE) ? DBCUT_AUTO_ESTIMATE_WINDOWS : 2), blended);
     }
 
     // No tolerance: a 1 dB step is audible.  Two calculations, so at most two writes; a settled row writes nothing.

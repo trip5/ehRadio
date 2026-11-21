@@ -187,11 +187,19 @@ A first calculation will require 5 minutes after that estimate period, at which 
 A second calculation (which continues based on the first calculation) is made during another 10 minute period, and the playlist is updated again (if the calculation changed).
 You may hear slight volume changes as adjustments are made to `dBcut` during these periods.
 
+If enabling it while playing a stream, stop and restart playback to begin learning that station.
+
 #### dBcut Auto Always
 
 Turning on "dBcut Auto Always" will continue re-calculating and updating streams even if they already have a valid `dBcut` value.
 Turn this off if you would rather have values set once automatically and only later adjusted by using the Playlist Editor
 (manually adjusting the playing stream will affect the audio).
+
+#### dBcut Enable
+
+This option is available when "dBcut Auto" is disabled.
+Turn it on to honor `dBcut` from the playlist without automatic calculation.
+Off will ignore `dBcut` numbers in the playlist completely.
 
 #### Scan for Best Wi-Fi on Boot
 

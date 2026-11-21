@@ -567,8 +567,9 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     return;
   }
   if (strcmp(val, "system") == 0) {
-    saveValue(&store.dbcutauto, (bool)AUTO_DBCUT);
-    saveValue(&store.dbcutautoalways, (bool)AUTO_DBCUT_OVERWRITE);
+    saveValue(&store.dbcutauto, (bool)DBCUT_AUTO);
+    saveValue(&store.dbcutautoalways, (bool)DBCUT_AUTO_OVERWRITE);
+    saveValue(&store.dbcutenable, (bool)DBCUT_ENABLE);
     saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
     saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
@@ -1076,6 +1077,8 @@ void Config::bootInfo() {
   BOOTLOG("WebUI Locale:\t%s", store.locale_webui);
   BOOTLOG("Smartstart:\t%s", store.smartstart?"true":"false");
   BOOTLOG("Wifi Scan Best:\t%s", store.wifiscanbest?"true":"false");
+  BOOTLOG("dBcut:\t\tAuto: %s, Always: %s, Enabled: %s", store.dbcutauto?"true":"false",
+          store.dbcutautoalways?"true":"false", store.dbcutenable?"true":"false");
   BOOTLOG("ehDP Enabled:\t%s", store.ehdp?"true":"false");
   BOOTLOG("mDNS Name:\t%s", store.mdnsname);
   BOOTLOG("MQTT Enabled:\t%s", store.mqttenable?"true":"false");
@@ -1170,6 +1173,7 @@ const configKeyMap Config::keyMap[] = {
   // System
   CONFIG_KEY_ENTRY(dbcutauto, "dbcutauto"),
   CONFIG_KEY_ENTRY(dbcutautoalways, "dbcutautoalways"),
+  CONFIG_KEY_ENTRY(dbcutenable, "dbcutenable"),
   CONFIG_KEY_ENTRY(wifiscanbest, "wifiscan"),
   CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
   CONFIG_KEY_ENTRY(ehdp, "ehdp"),

@@ -1646,11 +1646,14 @@ static_assert(
 );
 
 /* --- System --- */
-#ifndef AUTO_DBCUT
-  #define AUTO_DBCUT true
+#ifndef DBCUT_AUTO
+  #define DBCUT_AUTO true
 #endif
-#ifndef AUTO_DBCUT_OVERWRITE
-  #define AUTO_DBCUT_OVERWRITE true
+#ifndef DBCUT_AUTO_OVERWRITE
+  #define DBCUT_AUTO_OVERWRITE true
+#endif
+#ifndef DBCUT_ENABLE
+  #define DBCUT_ENABLE false
 #endif
 #ifndef WIFI_SCAN_BEST_RSSI
   #define WIFI_SCAN_BEST_RSSI true

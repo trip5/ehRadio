@@ -52,6 +52,7 @@
   "lbl_country_code": "Улсын код",
   "lbl_dbcut_auto": "dBcut зүсэлт автомат",
   "lbl_dbcut_auto_always": "dBcut хасах автомат, үргэлж",
+  "lbl_dbcut_enable": "dB хасахыг идэвхжүүлэх",
   "lbl_debug_touch": "Debug touch",
   "lbl_digitsglow": "Оноо гэрэлтэнэ",
   "lbl_dimmed_brightness": "Бүдэгрүүлсэн гэрэлтэлт",

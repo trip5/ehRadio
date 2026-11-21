@@ -279,7 +279,7 @@ int cutFromToken(const PlaylistFields& f) {
     digits = true;
   }
   if (!digits) return -1;
-  if (v > DBCUT_MAX) v = DBCUT_MAX;
+  if (v > DBCUT_AUTO_MAX) v = DBCUT_AUTO_MAX;
   return v;
 }
 }  // namespace
@@ -683,7 +683,7 @@ bool Utility::cleanPlaylist() {
 bool Utility::writeStationCut(uint16_t stationId, uint8_t dBcut) {
   if (config.getMode() != PM_WEB) return false;
   if (stationId == 0) return false;
-  if (dBcut > DBCUT_MAX) dBcut = DBCUT_MAX;
+  if (dBcut > DBCUT_AUTO_MAX) dBcut = DBCUT_AUTO_MAX;
 
   File playlist = LittleFS.open(PLAYLIST_PATH, "r");
   if (!playlist) return false;

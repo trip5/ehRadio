@@ -18,6 +18,13 @@ class MyNetwork {
     uint8_t lastBssid[6] = {0}; // captured for reconnect later
     uint8_t lastChannel = 0;
     bool lastBssidValid = false;
+    // Recovery bookkeeping.  lostBssid is saved at the disconnect
+    // because by the time the new AP is known the old one is already gone; associatedMs is when the current
+    // association began, which is how a node that drops us quickly is told from one that served us for hours.
+    uint8_t lostBssid[6] = {0};
+    bool lostBssidValid = false;
+    uint32_t associatedMs = 0;
+    bool apSuspect = false;     // the AP we were on dropped the link shortly after we joined it
     //uint8_t tsFailCnt, wsFailCnt;
     Ticker ctimer;
     char *weatherBuf = nullptr;

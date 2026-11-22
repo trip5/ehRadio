@@ -31,7 +31,8 @@ the years of work e2002 put into it.  Read [A History of ESP Radios](#a-history-
 ehRadio is focused on increasing usability for a non-builder / non-coder while at the same time
 stressing future-compatibility for builders (starting with the ESP32-S3 and future ESP boards).
 
-ehRadio inherits a lot from ёRadio, but improvements have been made to make it more usable, more stable, and more customizable.
+ehRadio inherits a lot from ёRadio, but improvements have been made to make it more usable, more stable, more customizable,
+with more codec support and ability to play high-bitrate streams.
 
 ### Features For Users
 
@@ -59,27 +60,25 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
     - upload files directly using the SD Card Manager
     - WebUI themes match display themes
 
-  - [Web flasher](https://trip5.github.io/ehRadio/flasher.html) & Internet OTA updates
+  - [Web flasher](https://trip5.github.io/ehRadio/flasher.html)
+    - updates will preserve your preferences and filesystem
+
+  - Internet OTA updates
     - make getting a new version easy-peasy
     - *caveat:* your build must be in the `builds` folder of this repository
 
 ### Features For Builders
 
   - Development is primarily focused on ESP32-S3
-    - 8MB flash recommended (4MB possible but will break features)
-    - PSRAM is required - a board without it will not build
-    - ESP-WROVER with PSRAM likely supported but untested
+    - 8MB+ flash recommended (4MB possible but will break features)
+    - PSRAM is required (2MB supported, 4MB+ recommended)
+    - ESP-WROVER with PSRAM supported but untested (feedback is welcome)
 
   - Multiple decoders supported
-    - I2S DAC Modules are recommended and well-supported
-      - PCM5102
-      - UDA1334
-      - MAX98357A
-      - ES8311 (mono)
+    - I2S DAC Modules are recommended and well-supported: PCM5102,UDA1334, MAX98357A, ES8311 (mono)
     - VS1053 updated and well-supported
 
   - Display architecture based on ёRadio
-    - simplified and expanded
     - multiple themes and layouts compiled-in
     - tools in codebase to edit/import themes and layouts
 
@@ -87,10 +86,12 @@ ehRadio inherits a lot from ёRadio, but improvements have been made to make it 
     - uses custom-named buses `SPIA` and `SPIB` defined in `myoptions.h`
     - recommended to use default pins wherever possible
 
-  - System and user default settings can be set in `myoptions.h`
-    - still changeable in WebUI
+  - Read the [Hardware Choices](Hardware.md) guide for more information
 
 ### Features For Tinkerers
+
+  - System and user default settings can be set in `myoptions.h`
+    - still changeable in WebUI
 
   - Commands can be sent over MQTT, Telnet, and HTTP
     - almost all WebUI [commands](Commands.md) are available
@@ -116,7 +117,8 @@ More screenshots from the WebUI are [here](WebUI.md).
 
 ## Documentation
 
-The best starting point (after reading this page) is the [myoptions Generator](https://trip5.github.io/ehRadio/myoptions/generator.html).
+The best starting point (after reading this page and [Hardware Choices](Hardware.md)) is the [myoptions Generator](https://trip5.github.io/ehRadio/myoptions/generator.html).
+
 This can assist in making a very good `myoptions.h` file, which should be placed in the root of the build folder next to `platformio.ini` (which the generator also makes).
 
 The generator contains almost all supported hardware peripherals and build options which can be used when building an ehRadio, as well as many notes.
@@ -126,7 +128,7 @@ If you need to get more advanced options, there are more build options and comme
 You can use these notes to further customize your `myoptions.h`.
 Some hardware questions may also be answered within this file.
 
-Want to get even more advanced? There are bunches of notes and tools in the codebase including font editors & builders, localization scripts, and more.
+Want to get even more advanced? There are bunches of notes and tools in the codebase including font editors & builders, localization tools, and more.
 
 ### `/data` Folder
 
@@ -169,6 +171,35 @@ Add `#define ALL_DEBUG_LOGS` to your `myoptions.h` to view extended diagnostic i
 Connecting to the radio via telnet will also show serial logs.
 
 ### System Options
+
+#### dBcut Auto
+
+The `playlist.csv` file has a 3rd column, formerly ovol (offset volume), used to "tame" loud streams. This is now `dBcut`.
+It will apply a cut to the dB volume of some streams so that when switching between, a user doesn't suddenly have to lower their volume.
+
+Turning on "Auto dBcut" means the device itself will automatically calculate these values for streams
+**as they are played**, and update the playlist on-device.
+
+For a stream with no `dBcut` value, as an auditory clue, the initial volume will ramp up to a safe volume in about 3 seconds.
+An initial estimate will be made during the first 30 seconds.
+Volume changes may be very obvious during this period.
+A first calculation will require 5 minutes after that estimate period, at which point the value is written to the playlist.
+A second calculation (which continues based on the first calculation) is made during another 10 minute period, and the playlist is updated again (if the calculation changed).
+You may hear slight volume changes as adjustments are made to `dBcut` during these periods.
+
+If enabling it while playing a stream, stop and restart playback to begin learning that station.
+
+#### dBcut Auto Always
+
+Turning on "dBcut Auto Always" will continue re-calculating and updating streams even if they already have a valid `dBcut` value.
+Turn this off if you would rather have values set once automatically and only later adjusted by using the Playlist Editor
+(manually adjusting the playing stream will affect the audio).
+
+#### dBcut Enable
+
+This option is available when "dBcut Auto" is disabled.
+Turn it on to honor `dBcut` from the playlist without automatic calculation.
+Off will ignore `dBcut` numbers in the playlist completely.
 
 #### Scan for Best Wi-Fi on Boot
 
@@ -250,7 +281,7 @@ With the `2026.07.31` release, the display architecture was overhauled to make l
 Further, recent releases have begun to overhaul more of the the display architecture to make switching VUs and fonts changeable as well.
 
 This involved significant changes to the original ёRadio code and layouts.
-Tools are available in the repository to assist in converting files from ёRadio mods for inclusion in ehRadio
+Tools are available in the repository to assist in converting files from ёRadio mods for inclusion in ehRadio.
 
 Trip5 builds include OLED 128x64 and TFTs 480x320, 320x240, 160x128.
 Other display sizes may have quirks or issues with layouts that need repair.
@@ -367,16 +398,16 @@ the former of which is a set of hard rules for AI-assisted coding, the latter of
 
 #### Audio Libraries
 
-ehRadio currently uses the `ESP32-audioI2S` library from [Maleksm's ёRadio mod v0.9.434m](https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228),
+ehRadio was based on the `ESP32-audioI2S` library from [Maleksm's ёRadio mod v0.9.434m](https://4pda.to/forum/index.php?showtopic=1010378&st=11240#entry125839228),
 likely mostly from schreibfaul1's library [3.1.0 January 7, 2025](https://github.com/schreibfaul1/ESP32-audioI2S/releases/tag/3.1.0).
 
-For VS1053 decoding, ehRadio uses the `ESP32-vs1053_ext` library from `nsteplanets` [PR226](https://github.com/e2002/yoradio/pull/226) to yoRadio.
+For VS1053 decoding, ehRadio based its library on the `ESP32-vs1053_ext` library from `nsteplanets` [PR226](https://github.com/e2002/yoradio/pull/226) to yoRadio.
 
 Both libraries have been further optimized to get the best playback possible.
+On `2026.11.16`, ehRadio was updated to `espressif 8.0.0` and includes patches so as to make FLAC streams possible.
+Both audio libraries now include fixes to make `OGG/Flac` streams at up to `1.5Mbps` possible.
 
-There are notes in the `libraries` folder regarding some of the "Frankenstein" operations performed (since I know very little about decoding libraries).
-
-For that and other major needed changes to the codebase, there is a `code-issues.md` file which may be a messy file to look at, depending on how these efforts are going.
+There are notes in the `libraries` folder regarding some of the "Frankenstein" operations performed.
 
 ---
 
@@ -386,6 +417,7 @@ For that and other major needed changes to the codebase, there is a `code-issues
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
+| 2026.11.22 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053), dBcut replaces ovol (with Auto options) |
 | 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
@@ -428,7 +460,7 @@ A full history of ёRadio from v0.4.177 to v0.9.533 can be seen in the [old Read
 Thanks to:
 
   - [death-kiss78](https://github.com/death-kiss78) - `ro_RO` & `it_IT` translations, SDMMC testing, initiated SD File Manager, inspired screensaver info text & screensaver sleep, sleep command fixes
-  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142
+  - [kle7rx](https://github.com/kle7rx) - good dialog and feedback, `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142, nice layouts for TFT480x320
   - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales, battery support and widget, and a bunch of work for ES3C28P (including ES8311 decoder, FT6336 touchscreen)
   - [e2002](https://github.com/e2002) - for [ёRadio](https://github.com/e2002/yoradio/) without which ehRadio would not be possible
 

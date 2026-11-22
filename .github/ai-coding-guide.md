@@ -88,8 +88,9 @@
 - Record what the code actually turned out to be, not only what was intended: the symptom that started it, the options rejected and why, the measurements, the traps, the files and line anchors. That is the detail which will not fit in a comment (Rule #6) and does not belong in `code-summary.md` (Rule #4).
 - Where the implementation proves the plan wrong, **correct the plan**. A plan still describing the design that was intended, after the code went another way, is worse than no plan - the next session will trust it. Corrections are dated; history is not rewritten.
 - Mark the plan implemented when it is, with the state of the verification (built, flashed, retested by the user) and what remains open.
-- The split is: **comments** say what the code does, beside it; **`code-summary.md`** says what the code *is*; **`plans/`** says why this change went the way it did and what was tried. Do not duplicate - link.
+- The split is: **comments** say what the code does, beside it; **`code-summary.md`** says what the code *is*; **`plans/`** says why this change went the way it did and what was tried. Plans may cite each other; the code and `code-summary.md` may not cite a plan - state the conclusion instead.
 - **Check `plans/` during any code inquiry** - before investigating, answering or proposing - and read the plan that covers the area first. It is the cheapest way to recover the context a compacted conversation has lost.
+- **`plans/` is medium-term memory, not an archive.** Plans get deleted once the work is settled or the code has moved on, so citing one leaves a dead link. When a plan's job is done, its conclusion belongs in `code-summary.md` or in a comment.
 - A change that qualifies under Rule #2 needs no plan file.
 
 **Rule #8**: **Localization Files and Tools Are the Maintainer's**

@@ -26,5 +26,13 @@
   {
     "name": "ESP32-S3 N16R8 (16MB Flash 8MB PSRAM) (42 Pin)",
     "file": "ESP32-S3_N16R8_42Pin.json"
+  },
+  {
+    "name": "ESP32-DevKitC (WROVER-E: 8MB Flash 8MB PSRAM) (38 Pin)",
+    "file": "ESP32-DevKitC_38Pin.json"
+  },
+  {
+    "name": "ESP32-DevKit-V1 (WROVER-E: 8MB Flash 8MB PSRAM) (30 Pin)",
+    "file": "ESP32-DevKit-V1_30Pin.json"
   }
 ]

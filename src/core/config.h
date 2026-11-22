@@ -30,7 +30,6 @@ extern uint32_t vuPsramBytes;
 #define TMP_PATH             "/data/" TMP_FILE
 #define INDEX_PATH           "/data/" INDEX_FILE
 
-
 #define SD_DATA_DIR          "/ehradio.data"
 #define PLAYLIST_SD_PATH     SD_DATA_DIR "/" PLAYLIST_SD_FILE
 #define INDEX_SD_PATH        SD_DATA_DIR "/" INDEX_SD_FILE
@@ -47,9 +46,28 @@ extern uint32_t vuPsramBytes;
 #define REAL_PLAYL   config.getMode()==PM_WEB?PLAYLIST_PATH:PLAYLIST_SD_PATH
 #define REAL_INDEX   config.getMode()==PM_WEB?INDEX_PATH:INDEX_SD_PATH
 
-#ifndef MAX_PLAYLIST_ENTRIES
-  #define MAX_PLAYLIST_ENTRIES 65535 // unint_16 maximum
-#endif
+#define MAX_PLAYLIST_ENTRIES 65535 // unint_16 maximum
+
+// The third playlist column is a per-station CUT in dB, written as a TAGGED token: "dB0".."dB24" mean
+// measured (0 = no cut needed), a bare "0" means not measured, and any other bare number is foreign and
+// gets cleared.  The "dB" prefix keeps atoi() at 0, so a yoRadio build ignores our values completely -
+// a suffix like "12dB" would read as their ovol 12.  It never adds gain, so both audio paths honour it
+// and normalization can never clip.
+#define DBCUT_AUTO_MAX 24
+// Auto dBcut has two stages.  ESTIMATE is three short windows, each measured on its own, because a station that opens
+// with a preroll advert would otherwise poison its own number; a row that already carries a cut is measured through it
+// and HELD.  CALCULATE is two long windows that never reset, each moving half the remaining gap and writing only when
+// that changes the file - two writes at most, none for a row that is already right.
+#define DBCUT_AUTO_REF -18 // the dBFS-RMS aimed for
+#define DBCUT_AUTO_START_DB 12 // where the fade-in starts; needing more than this is rare
+#define DBCUT_AUTO_STEP_DB 0.1f // one step of the glide, every 200 ms (0.5 dB/s), so nothing ever steps
+#define DBCUT_AUTO_RAMP_MS 3000 // linear from START_DB to (live estimate + 3), so it lands 3 dB quiet
+#define DBCUT_AUTO_ESTIMATE_MS 10000 // each estimate window; the accumulator restarts at every window start
+#define DBCUT_AUTO_ESTIMATE_WINDOWS 3 // 3 x 10 s = the first 30 s; nothing is written from here
+#define DBCUT_AUTO_CALCULATE1_MS 300000 // first calculation: written at 30 s + 5 min
+#define DBCUT_AUTO_CALCULATE2_MS 600000 // second calculation: written 10 min later, keeping the first's data
+#define DBCUT_AUTO_ADJUST_MS 10000 // inside a calculation window, walk the cut toward the lean this often
+#define DBCUT_LEVEL_LOG 0 // 1 = one level line every 10 s while learning, for the I2S/VS1053 comparison
 
 #define WEATHERKEY_LENGTH 64
 #define MDNS_LENGTH 32
@@ -59,7 +77,15 @@ static constexpr size_t STATION_FIELD_LENGTH = 170; // Max length for station na
 static constexpr size_t WEATHER_STRING_L = 512; // Weather string buffer
 static constexpr uint32_t NVS_SLOW_WRITE_MS = 50; // ms a single NVS commit may take before FUNCTIONLOG names the key
 
-#define ESPFILEUPDATER_USERAGENT "ehradio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
+#define ESPFILEUPDATER_USERAGENT "ehRadio/" RADIOVERSION "(" GITHUBURL ")"  // used as a user-agent string for downloading with ESPFileUpdater
+// The stream identity.  Sent on the FIRST attempt by both audio libraries - the VS1053 fork used to send no
+// User-Agent header at all, and a missing one is a common cause of a bare 403 from a CDN front end.
+// The alternative is used once, and only for a 403: some fronts admit browser-like agents and nothing else.  It is
+// not sent first because it is not who we are, and an operator counting devices should see ehradio in the stats.
+// We can't use the same UA as ESPFileUpdater because some streams may reject the URL.
+#define STREAM_USERAGENT "ehRadio/" RADIOVERSION
+#define STREAM_USERAGENT_ALT "VLC/3.0.21 LibVLC/3.0.21 AppleWebKit/537.36 (KHTML, like Gecko)"
+//#define STREAM_USERAGENT_ALT "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   #define ESP_ARDUINO_3 1
@@ -205,6 +231,9 @@ struct config_t // specify defaults here (and macros in options.h) (defaults are
   bool      weatherwind = false;
 
   // System
+  bool      dbcutauto = DBCUT_AUTO;
+  bool      dbcutautoalways = DBCUT_AUTO_OVERWRITE;
+  bool      dbcutenable = DBCUT_ENABLE;
   bool      wifiscanbest = WIFI_SCAN_BEST_RSSI;
   bool      autoupdate = false;
   bool      ehdp = EHDP;
@@ -269,7 +298,7 @@ struct station_t
   char url[STATION_FIELD_LENGTH];
   char title[STATION_FIELD_LENGTH];
   uint16_t bitrate;
-  int  ovol;
+  int  dBcut;     // dB of attenuation 0..DBCUT_AUTO_MAX, or -1 when the station has not been measured
 };
 
 struct neworkItem
@@ -351,7 +380,7 @@ class Config {
       if (getMode()==PM_WEB) store.lastStation = newstation;
       else saveValueButWait(&store.lastSdStation, newstation, 5000);
     }
-    uint8_t getMode() { return _sdOfflineSession ? PM_SDCARD : store.play_mode; }
+    uint8_t getMode() { return _sdOfflineSession ? (uint8_t)PM_SDCARD : store.play_mode; }
     bool vuSourceWanted() const {
       const bool ss = isScreensaver;
       return (store.vumeter && !ss) || (ss && store.screensaverVU);
@@ -362,7 +391,6 @@ class Config {
     // material bring it down far enough for the bar to empty.  Time-based deliberately: the old VS1053 decay counted
     // `computeVUlevel()` calls, which made it chase the signal and pin the bar at full.  ONE implementation, called by
     // both audio libraries' computeVUlevel(), so the rule cannot fork with them.
-    // See plans/vu-level-reference-and-255-ceiling.md.
     void vuRefTrack(uint16_t left, uint16_t right) {
       const uint16_t live = (left > right) ? left : right;
       if (live > vuThreshold) vuThreshold = live;            // attack: instant, unthrottled

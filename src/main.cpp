@@ -45,14 +45,32 @@ size_t psramFrameBufferBytes = 0;   // set by subsystems, read by Core Monitor
   static uint32_t cmMaxMainLoop   = 0;
   static uint32_t cmLoopStart     = 0;
   static unsigned long cmLastPrint = 0;
-  static uint8_t cmEtcCount      = 0;  // CORE_MONITOR_ETC_LOOPS counter
 #endif
+
+// Internal-heap saple at boot phase: the same pair of figures as the [Heap] line, printed during boot phases only
+static void bootHeapSnapshot(const char* tag) {
+  const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  BOOTLOG("Heap@%s:\t%uKB free, %uKB largest (getFreeHeap %u)", tag,
+          (unsigned)(heap_caps_get_free_size(caps) / 1024),
+          (unsigned)(heap_caps_get_largest_free_block(caps) / 1024),
+          (unsigned)ESP.getFreeHeap());
+}
+
+// PSRAM free and the largest contiguous block, at the points the boot order takes its allocations, boot only
+static void bootPsramSnapshot(const char* tag) {
+  if (!psramFound()) { BOOTLOG("PSRAM@%s:\t[none]", tag); return; }
+  BOOTLOG("PSRAM@%s:\t%uKB free, %uKB largest",
+          tag,
+          (unsigned)(ESP.getFreePsram() / 1024),
+          (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
+}
 
 void setup() {
   #if !defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
     Serial.setTxBufferSize(4096); // activate ring-buffer
   #endif
   Serial.begin(115200);
+  bootHeapSnapshot("setup-start");
   {
     const bool dumpedCrash = crashDumpAvailable();
     #if (CORE_DEBUG_LEVEL > 0) || defined(ALL_DEBUG_LOGS)
@@ -81,13 +99,22 @@ void setup() {
   backlightControls.init();
   BOOTTIMELOG("config.init & controls & backlight");
   display.init();
+  bootPsramSnapshot("display");     // 1 + 2 + 3: the framebuffer windows and both VU canvases
   BOOTTIMELOG("display.init");
   const bool offlineBoot = (network.offlineMode || config.store.SDoffline);
   player.init();
+  bootPsramSnapshot("player.init"); // 3: the VU/FFT scratch
   BOOTTIMELOG("player.init");
   display.putRequest(BOOTVERSION); // follows player.init because of "VS1053" message
   startup.checkLittleFSandVer();
   BOOTTIMELOG("checkLittleFSandVer");
+  // The order finishes here: the WebUI cache first, because its size is the only unpredictable one, then the
+  // de-ogger scratch and the ring.  Both calls are idempotent and degrade to a warning if memory is short.
+  if (psramFound()) netserver.primeFileCache();
+  bootPsramSnapshot("webui-cache");
+  player.reservePsram();
+  bootPsramSnapshot("audio-ring");
+  BOOTTIMELOG("psram order (cache, de-ogger, ring)");
   battery.bootStatus();
   BOOTTIMELOG("battery.bootStatus");
   if (offlineBoot) {
@@ -96,6 +123,7 @@ void setup() {
   } else {
     startup.checkSafeMode();
     network.begin();
+    bootHeapSnapshot("after-wifi");
     BOOTTIMELOG("network.begin (scan & join)");
   }
   if (network.status != CONNECTED && network.status != SDOFFLINE) {
@@ -134,6 +162,7 @@ void setup() {
   BOOTTIMELOG("controls.init");
   display.putRequest(DSP_START);
   while(!display.ready()) delay(10);
+  bootHeapSnapshot("after-display");
   BOOTTIMELOG("display DSP_START");
   if (config.store.mqttenable && network.status != SDOFFLINE) mqtt.init();
   BOOTTIMELOG("mqtt.init");
@@ -156,6 +185,7 @@ void setup() {
   }
   BOOTTIMELOG("smartstart (incl. 1s settle)");
   if (network.status != SDOFFLINE) startup.startupServices();  // needs WiFi — skip in offline SD mode
+  bootHeapSnapshot("after-services");
   BOOTTIMELOG("startupServices kickoff");
   netserver.setBootReady(true);
   config.saveValue(&config.store.SDoffline, false);
@@ -284,12 +314,14 @@ void loop() {
       // walks nothing.  Losing up to a minute of detection is worth a run that survives to produce evidence.
       heapq::verify();
       const uint32_t internal8 = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-      static uint16_t heapTick = 120;    // start due; then one walk every 120 prints (about ten minutes)
+      static uint16_t heapTick = 12;     // start due; then one walk every 12 prints (about a minute)
+      static uint8_t  lfsTick  = 10;     // start due, then every 10th walk: the LittleFS query is the expensive one
       static bool    heapInternalOk = true;
       static bool    heapPsramOk = true;
       static size_t  i8Free = 0, i8Largest = 0, pFree = 0, pLargest = 0;
+      static size_t  prevPsramUsed = 0, prevI8Free = 0;
       bool heapWalkedNow = false;
-      if (++heapTick >= 120) {
+      if (++heapTick >= 12) {
         heapTick = 0;
         heapWalkedNow = true;
         heapInternalOk = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, true);
@@ -302,7 +334,7 @@ void loop() {
       const bool psramImpossible = heapWalkedNow && psramFound() && pFree > (1024UL * 1024UL) && pLargest == 0;
       const char* heapVerdict =
             psramImpossible ? " | heap CORRUPT (PSRAM free but no largest block)"
-          : (heapInternalOk && heapPsramOk) ? (heapWalkedNow ? " | heap ok" : " | heap ok (refreshed every 10 min)")
+          : (heapInternalOk && heapPsramOk) ? (heapWalkedNow ? " | heap ok" : " | heap ok (refreshed every minute)")
           : (!heapInternalOk && !heapPsramOk) ? " | heap CORRUPT (internal+PSRAM)"
           : !heapInternalOk                   ? " | heap CORRUPT (internal)"
                                               : " | heap CORRUPT (PSRAM)";
@@ -330,26 +362,48 @@ void loop() {
                  (unsigned long)(millis() / 1000UL));
         coredump::noteHeapCorruption(heapNote);
       }
-      // Gated on the same slow tick as the heap refresh: the LittleFS query here is what made Max Iteration spike to
-      // ~590 ms every fifth print, the largest recurring stall on this loop, and none of it changes in under a minute.
+      // The LittleFS query stays on a tenth of the heap ticks: it is what made Max Iteration spike to ~590 ms, the
+      // largest recurring stall on this loop, and nothing it reports changes in under a minute.
       if (heapWalkedNow) {
-        const uint32_t etcStart = micros();
-        FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes, took %lums", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes(), (unsigned long)((micros() - etcStart) / 1000UL));
+        if (++lfsTick >= 10) {
+          lfsTick = 0;
+          const uint32_t etcStart = micros();
+          FUNCTIONLOG("LittleFS", "Used: %u / %u bytes, Free: %u bytes, took %lums", LittleFS.usedBytes(), LittleFS.totalBytes(), LittleFS.totalBytes() - LittleFS.usedBytes(), (unsigned long)((micros() - etcStart) / 1000UL));
+        }
         if (psramFound()) {
           // All three of these walk the PSRAM pool - ESP.getPsramSize() included, which reads like a constant and is
-          // not - so they come from the cache the [Heap] line refills, rather than walking again here every fifth pass.
+          // not - so they come from the cache the [Heap] line refills, rather than walking again here every print.
           static const size_t psramTotalCached = ESP.getPsramSize();
           const size_t psramTotal = psramTotalCached;
           const size_t psramUsed  = psramTotal - pFree;
           const size_t audioFill  = player.inBufferFilled();
-          FUNCTIONLOG("PSRAM", "Used: %uKB / %uKB: Framebuffer: %uKB, VU FFT: %uKB, WebUI Cache: %uKB, Audio buffered: %uKB, Contiguous Free: %uKB",
-              psramUsed / 1024,
-              psramTotal / 1024,
-              psramFrameBufferBytes / 1024,
-              vuPsramBytes / 1024,
-              netserver.getFileCache().totalBytes() / 1024,
-              audioFill / 1024,
-              pLargest / 1024);
+          // Everything the line cannot name individually: the audio ring (allocated once at boot, so it is a constant
+          // here it also carries) plus the de-ogger scratch and the decoder set.  A step in this figure is a step in one
+          // of those, and the figures it is built from are printed beside it.
+          const size_t named = psramFrameBufferBytes + vuPsramBytes + netserver.getFileCache().totalBytes();
+          const size_t other = psramUsed > named ? psramUsed - named : 0;
+          const long   dUsed = (long)(psramUsed / 1024) - (long)(prevPsramUsed / 1024);
+          const long   dI8   = (long)(i8Free / 1024) - (long)(prevI8Free / 1024);
+          // A step is the event this line exists to catch: one contiguous block leaving the pool, which a slow refresh
+          // reported minutes after the fact and could not attribute at all.
+          if (prevPsramUsed && (dUsed > 16 || dUsed < -16)) {
+            WARNINGLOG("PSRAM step: %+ldKB used since the last refresh; framebuffer+canvas %uKB, cache %uKB, ring+other %uKB",
+                       dUsed, (unsigned)(psramFrameBufferBytes / 1024),
+                       (unsigned)(netserver.getFileCache().totalBytes() / 1024), (unsigned)(other / 1024));
+          }
+          if (prevI8Free && dI8 < -8) WARNINGLOG("Heap step: internal 8-bit free fell %ldKB since the last refresh", -dI8);
+          prevPsramUsed = psramUsed; prevI8Free = i8Free;
+          // Every one of these is size_t or uint32_t, which is `long unsigned` here, so each is cast rather than
+          // changing the format: the reader wants KB, not the width of the type.
+          FUNCTIONLOG("PSRAM", "Used: %uKB / %uKB: Framebuffer+canvas: %uKB, VU FFT: %uKB, WebUI Cache: %uKB, Audio buffered: %uKB, Ring+other: %uKB, Contiguous Free: %uKB",
+              (unsigned)(psramUsed / 1024),
+              (unsigned)(psramTotal / 1024),
+              (unsigned)(psramFrameBufferBytes / 1024),
+              (unsigned)(vuPsramBytes / 1024),
+              (unsigned)(netserver.getFileCache().totalBytes() / 1024),
+              (unsigned)(audioFill / 1024),
+              (unsigned)(other / 1024),
+              (unsigned)(pLargest / 1024));
         }
       }
       cmLastPrint = millis();

@@ -86,6 +86,6 @@ const char rssiFmt[]              PROGMEM = "%d%%";
 const char iptxtFmt[]             PROGMEM = "";
 const char voltxtFmt[]            PROGMEM = "";
 const char batterytxtFmt[]        PROGMEM = "%d%%";
-const char bitrateFmt[]           PROGMEM = "%d";
+const char bitrateFmt[]           PROGMEM = "%s";
 
 #endif

@@ -125,7 +125,7 @@ REQUIRED_STRINGS = {
     'iptxtFmt':        '""',
     'voltxtFmt':       '""',
     'batterytxtFmt':   '"%d%%"',
-    'bitrateFmt':      '"%d"',
+    'bitrateFmt':      '"%s"',
 }
 
 NAME_MAP = {'heapbarConf': 'bufferbarConf'}
@@ -576,7 +576,7 @@ def force_vu_boombox(value):
 # ignores a negative width while moveZeroed() does not see the entry as empty, so the widget neither
 # moved nor yielded to the VU - the two things the spelling was being used for.  It is retired in favour
 # of writing the widget's OWN coordinates, which is an identity, because a MOVE writes the same left/top
-# fields the conf does, with the same align conventions (see plans/layout-widget-overlap.md).
+# fields the conf does, with the same align conventions.
 MOVE_OWNERS = {
     'clockMove':     'clockConf',
     'weatherMove':   'weatherConf',
@@ -1818,9 +1818,9 @@ def run_fromjson(json_path, name, target, dry_run, script_dir):
 #
 # Geometry has to be recomputed here, which is the honest cost of the report: the C++ derives it at
 # runtime (a window, an align convention, a glyph's advance) from the same conf numbers.  Every rule
-# below is a mirror of one in widgets.cpp and is listed with its source in
-# plans/layout-widget-overlap.md - which is also the note to leave behind for a future on-device layout
-# editor, where the rectangles can be SUPPLIED instead of guessed and all of this can go.
+# below is a mirror of one in widgets.cpp and names its source there - which is also the note to leave
+# behind for a future on-device layout editor, where the rectangles can be SUPPLIED instead of guessed
+# and all of this can go.
 #
 # Model: an edge the tool cannot know (a runtime string's width, a centred line, the clock's glyph run)
 # is None, and a pair that touches an unknown edge is reported as POSSIBLE rather than as a collision.

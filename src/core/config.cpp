@@ -1,4 +1,5 @@
 #include "options.h"
+#include <esp32-hal-cpu.h>   // getCpuFrequencyMhz / getXtalFrequencyMhz / getApbFrequency, for the boot probe below
 #include <esp_system.h>
 #include <ctype.h>
 #include <cstddef>
@@ -47,14 +48,6 @@ uint32_t vuPsramBytes = 0; // to be used for what the VU visualiser has taken fr
 uint8_t _activeLocale = 0; // default is whatever is first (likely be_BY), updated at boot from config.store.locale_display
 
 bool wasUpdated(ESPFileUpdater::UpdateStatus status) { return status == ESPFileUpdater::UPDATED; }
-
-namespace {
-
-bool isHttpUrl(const char* url) {
-  return url != nullptr && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
-}
-
-} // namespace
 
 void u8fix(char *src) {
   if (strlen(src) == 0) return;
@@ -120,7 +113,7 @@ void Config::loadPreferences() {
   for (size_t i = 0; keyMap[i].key != nullptr; ++i) {
     uint8_t* field = (uint8_t*)&store + keyMap[i].fieldOffset;
     size_t sz = keyMap[i].size;
-    size_t read = prefs.getBytes(keyMap[i].key, field, sz);
+    prefs.getBytes(keyMap[i].key, field, sz);
     keyCount++;
   }
   {
@@ -251,7 +244,7 @@ static void setNoStationState() {
   memset(config.station.url, 0, STATION_FIELD_LENGTH);
   memset(config.station.name, 0, STATION_FIELD_LENGTH);
   strncpy(config.station.name, "ehRadio", STATION_FIELD_LENGTH);
-  config.station.ovol = 0;
+  config.station.dBcut = 0;
   config.setTitle("");
 }
 
@@ -268,8 +261,8 @@ void Config::initSDPlaylist(bool force) {
         index.readBytes((char*)&magic, 4);
         index.readBytes((char*)&storedCount, 4);
         uint32_t currentCount = sdman.countAudioFiles();
-        FUNCTIONLOG("SD", "Index found:\tcount: %d magic: %04X\tcurrent count: %d",
-                    storedCount, magic, currentCount);
+        FUNCTIONLOG("SD", "Index found:\tcount: %u magic: %04X\tcurrent count: %u",
+                    (unsigned)storedCount, (unsigned)magic, (unsigned)currentCount);
         // The walk above already paid for this figure: keep it as the total the SDCHANGE counter's zero-fill
         // width is taken from, until the re-index below replaces it with the count the new index holds.
         store.countStation = (uint16_t)currentCount;
@@ -574,11 +567,14 @@ void Config::defaultSettings(const char *val, uint8_t clientId) {
     return;
   }
   if (strcmp(val, "system") == 0) {
+    saveValue(&store.dbcutauto, (bool)DBCUT_AUTO);
+    saveValue(&store.dbcutautoalways, (bool)DBCUT_AUTO_OVERWRITE);
+    saveValue(&store.dbcutenable, (bool)DBCUT_ENABLE);
     saveValue(&store.wifiscanbest, (bool)WIFI_SCAN_BEST_RSSI);
     saveValue(&store.autoupdate, false);
     saveValue(&store.ehdp, (bool)EHDP);
     saveValue(store.ehdpname, "");
-    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", getChipId()); saveValue(store.mdnsname, tmp);
+    char tmp[MDNS_LENGTH]; snprintf(tmp, MDNS_LENGTH, "ehradio-%x", (unsigned)getChipId()); saveValue(store.mdnsname, tmp);
     netserver.requestOnChange(GETSYSTEM, clientId);
     return;
   }
@@ -617,7 +613,7 @@ void Config::setDefaults() {
   nvs_flash_erase();
   nvs_flash_init();
   // defaults set by struct, except one
-  snprintf(store.mdnsname, MDNS_LENGTH, "ehradio-%x", getChipId());
+  snprintf(store.mdnsname, MDNS_LENGTH, "ehradio-%x", (unsigned)getChipId());
   // Write the sentinel immediately after erase so the next boot finds a valid cfgset
   // and does not loop back into reset() again
   prefs.begin("ehradio", false);
@@ -872,6 +868,23 @@ void Config::setDspOn(bool dspon, bool updateState) {
   }
 }
 
+/* Work done per millisecond, measured rather than reported.  Volatile accumulators so the compiler cannot delete the
+   loop; the integer case is pure ALU and the float case exercises the FPU.  The source is identical on both
+   platforms, so the two figures compare directly even when both claim 240 MHz and 32-byte cache lines. */
+#define PERF_PROBE_MS 20
+static uint32_t perfKiloOps(uint32_t budgetMs, bool floating) {
+  volatile uint32_t iacc = 1;
+  volatile float    facc = 1.0f;
+  uint32_t start  = millis();
+  uint32_t rounds = 0;
+  while ((uint32_t)(millis() - start) < budgetMs) {
+    if (floating) { for (uint32_t i = 0; i < 1000; i++) facc = facc * 1.0000001f + 0.0000001f; }
+    else          { for (uint32_t i = 0; i < 1000; i++) iacc = (iacc * 3u + 7u) ^ (iacc >> 5); }
+    rounds++;
+  }
+  return (rounds * 1000U) / budgetMs / 1000U;   // kilo-ops per ms
+}
+
 void Config::bootInfo() {
   SERIALLOGLF();
   SERIALLOGLF();
@@ -881,12 +894,26 @@ void Config::bootInfo() {
   BOOTLOG("Arduino API:\t%d.%d.%d", ARDUINO / 10000, (ARDUINO / 100) % 100, ARDUINO % 100);
   BOOTLOG("Arduino Core:\t%d.%d.%d", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR, ESP_ARDUINO_VERSION_PATCH);
   BOOTLOG("GCC Toolchain:\t%s", __VERSION__);
-  BOOTLOG("%s:\trev: %d, Cores: %d, PSRAM: %dMB, ID: %d", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(), (ESP.getPsramSize() + 524288) / 1048576, ({uint64_t _m=ESP.getEfuseMac(); (((_m>>40)&0xFF)<<16)|(((_m>>32)&0xFF)<<8)|((_m>>24)&0xFF);}));
+  const uint64_t mac = ESP.getEfuseMac();
+  BOOTLOG("%s:\trev: %d, Cores: %d, PSRAM: %uMB, ID: %u", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(),
+          (unsigned)((ESP.getPsramSize() + 524288) / 1048576),
+          (unsigned)((((mac >> 40) & 0xFF) << 16) | (((mac >> 32) & 0xFF) << 8) | ((mac >> 24) & 0xFF)));
   #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
     BOOTLOG("Serial:\tUSB CDC (ARDUINO_USB_CDC_ON_BOOT=%d), TX timeout %u ms", ARDUINO_USB_CDC_ON_BOOT, BOOTLOG_TX_TIMEOUT_MS);
   #else
     BOOTLOG("Serial:\tUART0 at 115200 (ARDUINO_USB_CDC_ON_BOOT is not defined)");
   #endif
+  /* Platform probe.  Both clocks are only *reported*: ESP.getCpuFreqMHz() is what Arduino was told and
+     getCpuFrequencyMhz() is what the HAL holds, and both can be right while the silicon does less work per second.
+     The two probe figures are measured, so they are the evidence; 7.1.3 and 8.0.0 built from this same source make
+     the pair directly comparable.  A soft-float build shows up as an enormous int-to-float gap; a clock, flash-fetch
+     or cache problem scales both together. */
+  BOOTLOG("Clock:\t\tCPU %u MHz, HAL %u MHz, XTAL %u MHz, APB %u MHz",
+          (unsigned)ESP.getCpuFreqMHz(), (unsigned)getCpuFrequencyMhz(),
+          (unsigned)getXtalFrequencyMhz(), (unsigned)getApbFrequency() / 1000000U);
+  BOOTLOG("Perf probe:\tint %u, float %u kilo-ops per ms (%u ms each)",
+          (unsigned)perfKiloOps(PERF_PROBE_MS, false), (unsigned)perfKiloOps(PERF_PROBE_MS, true),
+          (unsigned)PERF_PROBE_MS);
   BOOTLOG("Process: Core:\tMain: 1, Audio: %d, Network: %d, Display: %d", AUDIO_CORE, NETWORK_CORE, DSP_TASK_CORE_ID);
   BOOTLOG("Stack Sizes:\tLoop: %dKB, Display: %dKB, Netserver: %dKB, Network: %dKB", LOOP_TASK_STACK_SIZE, DSP_TASK_STACK_SIZE, NETSERVER_TASK_STACK_SIZE, NETWORK_TASK_STACK_SIZE);
   BOOTLOG("Task Priority:\tDisplay: %d, Netserver: %d, Playback: %d, Network: %d, Low: %d", DSP_TASK_PRIORITY, NETSERVER_TASK_PRIORITY, PLAYBACK_TASK_PRIORITY, NET_TASK_PRIORITY, LOW_TASK_PRIORITY);
@@ -930,7 +957,7 @@ void Config::bootInfo() {
     BOOTLOG("Audio (I2S):\tDOUT: %d, BCLK: %d, LRC: %d, DIN: %d, MCLK: %d", I2S_DOUT, I2S_BCLK, I2S_LRC, I2S_DIN, I2S_MCLK);
   #endif
   #ifdef USE_ES8311
-    BOOTLOGX("Audio (ES8311)\tMAX_I2S: %d");
+    BOOTLOGX("Audio (ES8311)\tMAX_I2S: %d", ES8311_MAX_I2S);
     #ifdef ES8311_I2C_SCL
       SERIALLOG(" I2C SCL: %d SDA: %d", ES8311_I2C_SCL, ES8311_I2C_SDA);
     #else
@@ -1050,6 +1077,8 @@ void Config::bootInfo() {
   BOOTLOG("WebUI Locale:\t%s", store.locale_webui);
   BOOTLOG("Smartstart:\t%s", store.smartstart?"true":"false");
   BOOTLOG("Wifi Scan Best:\t%s", store.wifiscanbest?"true":"false");
+  BOOTLOG("dBcut:\t\tAuto: %s, Always: %s, Enabled: %s", store.dbcutauto?"true":"false",
+          store.dbcutautoalways?"true":"false", store.dbcutenable?"true":"false");
   BOOTLOG("ehDP Enabled:\t%s", store.ehdp?"true":"false");
   BOOTLOG("mDNS Name:\t%s", store.mdnsname);
   BOOTLOG("MQTT Enabled:\t%s", store.mqttenable?"true":"false");
@@ -1142,6 +1171,9 @@ const configKeyMap Config::keyMap[] = {
   CONFIG_KEY_ENTRY(weatherpressure, "weatherpress"),
   CONFIG_KEY_ENTRY(weatherwind, "weatherwind"),
   // System
+  CONFIG_KEY_ENTRY(dbcutauto, "dbcutauto"),
+  CONFIG_KEY_ENTRY(dbcutautoalways, "dbcutautoalways"),
+  CONFIG_KEY_ENTRY(dbcutenable, "dbcutenable"),
   CONFIG_KEY_ENTRY(wifiscanbest, "wifiscan"),
   CONFIG_KEY_ENTRY(autoupdate, "autoupdate"),
   CONFIG_KEY_ENTRY(ehdp, "ehdp"),

@@ -84,6 +84,6 @@ const char rssiFmt[]              PROGMEM = "WiFi %d%%";
 const char iptxtFmt[]             PROGMEM = "\021\022%s";
 const char voltxtFmt[]            PROGMEM = "%d";
 const char batterytxtFmt[]        PROGMEM = "%d%%";
-const char bitrateFmt[]           PROGMEM = "%d kBs";
+const char bitrateFmt[]           PROGMEM = "%s kbps";
 
 #endif

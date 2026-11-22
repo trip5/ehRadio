@@ -1,4 +1,5 @@
 #include "options.h"
+#include <mbedtls/platform.h>   // mbedtls_calloc/free: the allocator TLS actually uses, whichever pool it points at
 #include <time.h>
 #include <ArduinoJson.h>
 #include <DNSServer.h>
@@ -41,7 +42,10 @@ static constexpr uint32_t WIFI_SETTLE_MS               = 1000;   // ms after the
 static constexpr uint32_t WIFI_SCAN_DWELL_MS           = 120;    // ms per channel; too short fails, falls back to 300
 static constexpr uint32_t WIFI_CONNECT_POLL_MS         = 100;    // connect-loop status poll
 static constexpr uint32_t WIFI_RETRY_SCALE             = 2;      // second attempt window = WIFI_ATTEMPTS * 500 ms * this
-static constexpr uint32_t WIFI_FAST_ATTEMPTS           = 4;      // ~2 s: directed reconnect to a known BSSID before a scan
+static constexpr uint32_t WIFI_FAST_ATTEMPTS           = 4;      // ~2 s per pass: the pinned directed reconnect, before a scan
+static constexpr uint8_t  AP_PATIENCE_ROUNDS           = 2;      // reconnect rounds spent waiting for the AP we were on
+static constexpr uint32_t AP_BAD_NODE_MS               = 60000;  // an association shorter than this marks its AP suspect
+static constexpr uint32_t AP_BAD_NODE_SETTLE_MS        = 120000; // associations that started inside the boot window are not judged
 static constexpr uint32_t STREAM_RETRY_SLOW_S          = 60;     // s between retries once the fast budget is spent
 static constexpr uint32_t STREAM_RETRY_RESPAWN_MS      = 5000;   // ms a resume may stay owed before ticks() starts a task
 static constexpr uint32_t WIFI_RECONN_RESPAWN_MS       = 5000;   // ms between retries of a failed wifiReconn spawn
@@ -57,12 +61,21 @@ static constexpr uint32_t NETHEALTH_GATEWAY_TIMEOUT_MS = 400;    // ms per gatew
 // not on 80, and a wrong guess reads as "gateway silent" - a false wedged verdict.
 static const uint16_t kGatewayProbePorts[] = { 80, 53, 443, 8080 };
 
+// Every AP line carries the BSSID: in a mesh the SSID is identical on every node, so a log without the BSSID
+// cannot say whether a recovery landed on the node we lost or on a sibling, which is the whole question.
+#define BSSID_FMT "%02X:%02X:%02X:%02X:%02X:%02X"
+#define BSSID_ARG(b) (unsigned)(b)[0], (unsigned)(b)[1], (unsigned)(b)[2], (unsigned)(b)[3], (unsigned)(b)[4], (unsigned)(b)[5]
+
 MyNetwork network;
 
 TaskHandle_t syncTaskHandle;
 TaskHandle_t streamRetryTaskHandle = NULL;
 static TaskHandle_t wifiReconnTaskHandle = NULL;
 static uint8_t streamResetsUsed = 0;
+// Recovery AP preference.  Both counters are per outage: the task owns them and wifiBegin() reads them,
+// and both run on the same task, so no lock is needed.
+static uint8_t apPatienceRound = 0;         // rounds already spent waiting for the known BSSID
+static bool    apWaitedForKnownAp = false;  // the last wifiBegin() returned false for patience, not for absence
 
 // Recovery restarts, counted in RTC memory: it survives esp_restart(), which is the whole point, and a power
 // cycle clears it.  It means a device that wedges on every boot reboots itself at most RECOVERY_REBOOT_MAX
@@ -289,7 +302,7 @@ void ticks() {
     config.resetScreensaverTimers(0);
   } else {
     if (config.store.screensaverEnabled && display.mode()==PLAYER && !player.isRunning()) {
-      config.screensaverTicks++;
+      config.screensaverTicks = config.screensaverTicks + 1;
       if (config.screensaverTicks > config.store.screensaverTimeout+SCREENSAVERSTARTUPDELAY) {
         if (config.store.screensaverBlank) {
           display.putRequest(NEWMODE, SCREENBLANK);
@@ -299,7 +312,7 @@ void ticks() {
       }
     }
     if (config.store.screensaverPlayingEnabled && display.mode()==PLAYER && player.isRunning()) {
-      config.screensaverPlayingTicks++;
+      config.screensaverPlayingTicks = config.screensaverPlayingTicks + 1;
       if (config.screensaverPlayingTicks > config.store.screensaverPlayingTimeout*60+SCREENSAVERSTARTUPDELAY) {
         if (config.store.screensaverPlayingBlank) {
           display.putRequest(NEWMODE, SCREENBLANK);
@@ -310,7 +323,7 @@ void ticks() {
     }
     #ifndef DEEP_SLEEP_DISABLE
       if (config.store.sleeptimer && (display.mode()==PLAYER || config.isScreensaver)) {
-        if (config.sleepTicks < 0xFFFF) config.sleepTicks++;
+        if (config.sleepTicks < 0xFFFF) config.sleepTicks = config.sleepTicks + 1;
         if (config.sleepTicks > (uint32_t)config.store.sleepSsTimeout * 60 + SCREENSAVERSTARTUPDELAY) utility.requestSleep();
       }
     #endif
@@ -363,12 +376,34 @@ static uint32_t streamRetryWaitMs(uint16_t attempt) {
   return (uint32_t)STREAM_RETRY_SLOW_S * 1000UL;   // then the slow, indefinite tail
 }
 
-// Can a TLS session be paid for right now?  mbedTLS wants ~34-36 KB in ONE block (16 KB in + 16 KB out +
-// context, the figure ESPFileUpdater's own ESPFILEUPDATER_MIN_HEAP_FOR_SSL is built on), and a fragmented heap can
-// have 24 KB free with nothing bigger than 2 KB in it. Total free bytes cannot answer this question.
+// Can a TLS session be paid for right now?  mbedTLS wants ~34-36 KB (16 KB in + 16 KB out + context), and a
+// fragmented heap can have 24 KB free with nothing bigger than 2 KB in it, so total free bytes cannot answer it.
+//
+// Neither can a pool name.  This build swaps in a libmbedtls.a configured for MBEDTLS_EXTERNAL_MEM_ALLOC, so the
+// handshake comes out of PSRAM and an internal-block test would refuse work that succeeds.  Rather than name a pool
+// and be wrong again after the next change, ask the allocator: mbedtls_calloc is the same entry point whether the
+// SDK has pointed it at internal DRAM or at PSRAM.  The blocks are held at the same time because fragmentation, not
+// the total, is what fails.
+#if defined(MBEDTLS_PLATFORM_MEMORY)
+bool heapCanAffordTls(size_t bytes) {
+  const size_t in  = bytes / 2;
+  const size_t out = bytes / 2;
+  const size_t ctx = 4096;                      // context + margin, on top of the two buffers
+  void* a = mbedtls_calloc(1, in);
+  void* b = mbedtls_calloc(1, out);
+  void* c = mbedtls_calloc(1, ctx);
+  const bool ok = (a != nullptr && b != nullptr && c != nullptr);
+  if (a) mbedtls_free(a);
+  if (b) mbedtls_free(b);
+  if (c) mbedtls_free(c);
+  return ok;
+}
+#else
+// No MBEDTLS_PLATFORM_MEMORY: nothing to probe with, so fall back to the old contiguous-block test.
 bool heapCanAffordTls(size_t bytes) {
   return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= bytes;
 }
+#endif
 
 // Probe verdicts: only WEDGED resets the link, everything else means leave it alone
 enum netVerdict_e : uint8_t { NET_STACK_OK, NET_STACK_WEDGED, NET_LINK_DOWN };
@@ -439,6 +474,7 @@ void retryStreamConnection(void * pvParameters) {
   const uint16_t fastAttempts = 40;  // after this many the cadence slows down; it never gives up
   uint16_t attemptCount = 0;
   bool slowed = false;
+  bool lostShown = false;   // the panel is on the LOST page because THIS ladder asked for it
   for (;;) {
     // attemptCount is the number of attempts DONE, so it is also this attempt's index.
     delay(streamRetryWaitMs(attemptCount));
@@ -465,15 +501,15 @@ void retryStreamConnection(void * pvParameters) {
         FUNCTIONLOG("Network", "Stream reconnected successfully!");
         streamResetsUsed = 0;   // a working stream means the next outage starts with a full budget
         network.lostPlaying = false;
+        if (lostShown) display.putRequest(NEWMODE, PLAYER);   // this ladder covered the panel; give it back
         streamRetryTaskHandle = NULL;
         vTaskDelete(NULL);
         return;
       }
 
-      // The LINK never dropped, so WiFiLostConnection never ran and nothing told the user: from the
-      // second failure this is a LOST screen
+      // The LINK never dropped, so WiFiLostConnection never ran and nothing told the user.  The LOST page itself is
+      // requested below and only when the probe says the stack is the problem - see the verdict.
       if (attemptCount == 1) startup.deferBootStable("stream lost");   // no-op unless the boot is unproven
-      if (attemptCount == 2) display.putRequest(NEWMODE, LOST);
 
       // The verdict is asked for on every failure rather than inferred from how long the connect took.  A
       // refusal does return in tens of ms and does prove the path works - but so does a stack whose socket
@@ -485,6 +521,15 @@ void retryStreamConnection(void * pvParameters) {
       FUNCTIONLOG("Network", "attempt %d/%d failed (connect %lums, %s): %s", attemptCount, fastAttempts,
           (unsigned long)connectMs, (connectMs && connectMs < NET_REFUSAL_MS) ? "refused" : "no answer",
           netVerdictName(verdict));
+      /* The LOST page belongs to a wedged stack, not to a refused stream.  The controls go inert on it by design -
+         the recovery path is the mode button -> reboot -> SD Offline - so showing it for a host that merely answered
+         403 is wrong twice over: it disables the knob for a fault the knob had nothing to do with, and when the
+         ladder ends without a play there is no later play to take the page off again.  Requested before the verdict
+         is known, it would stay for ever after a permanent refusal.  Hence here, released on every exit below. */
+      if (verdict == NET_STACK_WEDGED && !lostShown) {
+        display.putRequest(NEWMODE, LOST);
+        lostShown = true;
+      }
       if (verdict == NET_STACK_WEDGED && network.status == CONNECTED && !network.beginReconnect) {
         // forceLinkReset() spends the budget and, past it, restarts.  A refused restart means retrying is all
         // that is left, so the ladder carries on rather than deleting itself.
@@ -495,6 +540,9 @@ void retryStreamConnection(void * pvParameters) {
       if (!network.lostPlaying || player.isRunning()) {
         network.lostPlaying = false;
       }
+      // Release the panel only if this ladder owns it: a WiFi drop re-requests LOST in WiFiLostConnection and that
+      // page has to survive until the link is back.
+      if (lostShown && !network.lostPlaying) display.putRequest(NEWMODE, PLAYER);
       streamRetryTaskHandle = NULL;
       vTaskDelete(NULL);
       return;
@@ -506,6 +554,9 @@ void MyNetwork::WiFiReconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
   network.beginReconnect = false;
   // Runs at GOT_IP after any path found an AP, so this is where the truth about where we landed is kept
   network.captureCurrentAp();
+  // The link is up by whatever route, so the patience for the AP we were on has served its purpose.  The task
+  // resets this itself when it starts; this covers the paths that reconnect without it.
+  apPatienceRound = 0;
   // A link was just rebuilt, so the boot-stable countdown restarts from here, not from before the outage
   startup.deferBootStable("wifi reconnected");
   player.lockOutput = false;
@@ -530,11 +581,31 @@ void MyNetwork::WiFiReconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (config.store.mqttenable) mqtt.init();
 }
 
+// Did the association we are losing end young enough that this AP should not get the benefit of the doubt?
+// An association that began inside the boot window is never judged: the first link of a boot is a cold start,
+// not a bounce, and treating it as one would send the first recovery after every power-up to another node.
+static bool lastAssociationWasShort() {
+  if (network.associatedMs == 0 || network.associatedMs < AP_BAD_NODE_SETTLE_MS) return false;
+  return (uint32_t)(millis() - network.associatedMs) < AP_BAD_NODE_MS;
+}
+
 void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (!network.beginReconnect) {
    // SSID is bounds-checked because this can fire before a first connection. */
     const char* lostSsid = (config.store.lastSSID > 0 && config.store.lastSSID <= config.ssidsCount) ? config.ssids[config.store.lastSSID - 1].ssid : "?";
-    FUNCTIONLOG("Network", "WiFi Lost: %lu ms, event=%d, SSID=%s, RSSI=%d", millis(), (int)event, lostSsid, WiFi.RSSI());
+    // Saved here and not later: this is the last moment the AP we were on can be asked who it was, and the
+    // recovery log needs it to say whether the node we came back on is the one we lost.
+    const uint8_t* lostBssid = WiFi.BSSID();
+    if (lostBssid) { memcpy(network.lostBssid, lostBssid, sizeof(network.lostBssid)); network.lostBssidValid = true; }
+    FUNCTIONLOG("Network", "WiFi Lost: %lu ms, event=%d, SSID=%s, BSSID " BSSID_FMT " Ch: %u, RSSI=%d",
+        millis(), (int)event, lostSsid, BSSID_ARG(network.lastBssid), (unsigned)network.lastChannel, WiFi.RSSI());
+    // J4: a node that dropped us shortly after we joined it is not worth waiting for, so the reconnect will
+    // neither retry it first nor sit out a patience round on it.  It earns its chance back at the next GOT_IP.
+    network.apSuspect = lastAssociationWasShort();
+    if (network.apSuspect) {
+      FUNCTIONLOG("Network", "that AP held us for only %lus - the next round will not go back to it",
+          (unsigned long)((millis() - network.associatedMs) / 1000UL));
+    }
     if (config.getMode()==PM_SDCARD) {
       display.putRequest(NEWIP, 0);
     } else {
@@ -559,42 +630,76 @@ void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
   }
 }
 
-// Remember the AP we are on so the next forced reset can reconnect to it directly (GOT_IP, end of begin)
+// Remember the AP we are on so the next forced reset can reconnect to it directly (GOT_IP, end of begin).
+// This is also the only place that says in the log WHICH node we landed on: in a mesh the SSID is the same
+// everywhere, so without the BSSID a recovery looks identical whether it came back to the node we lost or
+// moved to a sibling, and the two behave very differently (the 2026.11.13 CCMP replay run was a sibling).
 void MyNetwork::captureCurrentAp() {
   const uint8_t* bssid = WiFi.BSSID();
   if (bssid) {
+    // Decided here because this is the first moment the new BSSID is known, and the last moment the saved one
+    // is: the copy below overwrites it.
+    const bool changed = lostBssidValid && memcmp(bssid, lostBssid, sizeof(lostBssid)) != 0;
     memcpy(lastBssid, bssid, sizeof(lastBssid));
     lastChannel = (uint8_t)WiFi.channel();
     lastBssidValid = true;
+    associatedMs = millis() ? millis() : 1;
+    // A fresh chance for this node; WiFiLostConnection re-arms apSuspect if it drops us quickly again.
+    apSuspect = false;
+    lostBssidValid = false;
+    FUNCTIONLOG("Network", "AP: " BSSID_FMT " | Ch: %u | RSSI: %d%s",
+        BSSID_ARG(lastBssid), (unsigned)lastChannel, WiFi.RSSI(),
+        changed ? " - a DIFFERENT node from the one we lost" : "");
   }
 }
 
-// Directed reconnect to the AP we were last on, by BSSID and channel - the case a forced reset creates
-// A failed directed attempt falls back to the full wifiBegin(), which is what a moved AP or a real dropout needs
+// Restart the radio and reconnect, optionally pinned to one BSSID and channel.  Declared here because the
+// directed reconnect below needs it and it is defined after: wifioff makes the netif go down, so the DHCP
+// client's DISCOVER backoff resets and the association starts from a clean state.
+static void wifiRestartForRetry(const char* ssid, const char* password,
+                                uint8_t channel = 0, const uint8_t* bssid = nullptr);
+
+// Directed reconnect to the AP we were last on, by BSSID and channel - the case a forced reset creates.
+// A failed directed attempt falls back to the full wifiBegin(), which is what a moved AP or a real dropout needs.
+//
+// Two passes, because the first one can fail for a reason that has nothing to do with the AP having gone: a
+// directed attempt is PINNED to the channel, so a node that changed channel never associates, and 2 s is tight
+// for association plus lease.  The second pass costs no scan time, so it is cheaper than the scan it saves.
+//
+// Skipped entirely when the AP is suspect - meaning it dropped the link shortly after we joined it.  Going
+// back to it immediately in that case is how a bad node becomes a sticky loop.
 bool MyNetwork::wifiBeginFast(bool silent) {
-  if (network.lastBssidValid && config.store.lastSSID > 0 && config.store.lastSSID <= config.ssidsCount) {
+  if (network.apSuspect) {
+    FUNCTIONLOG("Network", "not retrying the AP we were on: it dropped the link shortly after we joined it");
+  } else if (network.lastBssidValid && config.store.lastSSID > 0 && config.store.lastSSID <= config.ssidsCount) {
     if (WiFi.mode(WIFI_STA) != WIFI_STA) delay(WIFI_SETTLE_MS);
     const uint8_t idx = config.store.lastSSID - 1;
+    const char* ssid = config.ssids[idx].ssid;
+    const char* password = config.ssids[idx].password;
     // Not gated on silent: this line proves the scan-free path ran (the task always passes silent)
-    FUNCTIONLOG("Network", "direct reconnect to %s | Ch: %u", config.ssids[idx].ssid, network.lastChannel);
-    WiFi.begin(config.ssids[idx].ssid, config.ssids[idx].password, network.lastChannel, network.lastBssid);
-    uint8_t errcnt = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-      if (!silent) SERIALLOGDOT();
-      delay(500);
-      network.loopImprov();
-      // Deliberately impatient: a directed association takes a second or two, so past WIFI_FAST_ATTEMPTS
-      // the AP has moved or gone and every extra second delays the scan that would find it.
-      if (++errcnt > WIFI_FAST_ATTEMPTS) { SERIALLOGLF(); break; }
+    FUNCTIONLOG("Network", "direct reconnect to %s | BSSID " BSSID_FMT " Ch: %u",
+        ssid, BSSID_ARG(network.lastBssid), (unsigned)network.lastChannel);
+    for (uint8_t pass = 0; pass < 2; pass++) {
+      if (pass == 0) WiFi.begin(ssid, password, network.lastChannel, network.lastBssid);
+      else wifiRestartForRetry(ssid, password, network.lastChannel, network.lastBssid);
+      uint8_t errcnt = 0;
+      while (WiFi.status() != WL_CONNECTED) {
+        if (!silent) SERIALLOGDOT();
+        delay(500);
+        network.loopImprov();
+        // Deliberately impatient: a directed association takes a second or two, so past WIFI_FAST_ATTEMPTS
+        // the AP has gone and every extra second delays the scan that would find it.
+        if (++errcnt > WIFI_FAST_ATTEMPTS) { SERIALLOGLF(); break; }
+      }
+      if (WiFi.status() == WL_CONNECTED) { SERIALLOGLF(); return true; }
     }
-    if (WiFi.status() == WL_CONNECTED) { SERIALLOGLF(); return true; }
     FUNCTIONLOG("Network", "direct reconnect failed, falling back to a scan");
   }
   return wifiBegin(silent);
 }
 
 static void wifiRestartForRetry(const char* ssid, const char* password,
-                                uint8_t channel = 0, const uint8_t* bssid = nullptr) {
+                                uint8_t channel, const uint8_t* bssid) {
   WiFi.disconnect(true, false);  // wifioff: the netif goes down, so DHCP stops and can start clean
   for (uint32_t tDisc = millis(); WiFi.RSSI() != 0 && millis() - tDisc < WIFI_SETTLE_MS; ) delay(WIFI_CONNECT_POLL_MS);
   if (channel && bssid) WiFi.begin(ssid, password, channel, bssid);
@@ -625,7 +730,9 @@ bool MyNetwork::wifiBegin(bool silent) {
     // Deferred, not immediate: the boot line still shows the firmware version, and replacing it at once is what made
     //   that flash past in ~100ms.  No pause needed here (unlike the LittleFS format message, whose flash erase halts the
     //   other core) - the display task keeps running throughout the scan.
-    display.putRequestDelayed(SCANNINGWIFI, 0, 2000);
+    // Boot only: on the recovery path the panel belongs to LOST or PLAYER, and a scanning screen over it was
+    // already the wrong page - the more so now that a patience round scans again without ever connecting.
+    if (!silent) display.putRequestDelayed(SCANNINGWIFI, 0, 2000);
     if (!silent) BOOTLOG("Scanning for best available network...");
     int n = 0;
     for (int pass = 0; pass < 2 && n < 1; pass++) {
@@ -676,9 +783,43 @@ bool MyNetwork::wifiBegin(bool silent) {
                   i+1, config.ssids[matches[i].configIndex].ssid,
                   matches[i].bssid[0], matches[i].bssid[1], matches[i].bssid[2],
                   matches[i].bssid[3], matches[i].bssid[4], matches[i].bssid[5],
-                  matches[i].rssi, matches[i].channel);
+                  (int)matches[i].rssi, (int)matches[i].channel);
         }
       }
+    }
+    // The AP we were on, ahead of the strongest node of the same name.  This is what wifiscanbest was missing:
+    // the match above is by SSID only, so "the name is up" was enough to take a different mesh node - and a
+    // different node is a different association and a different security state, which is how the 2026.11.13
+    // recovery ended up starved behind CCMP replay errors while the name had never gone away.
+    int knownIdx = -1;
+    if (!network.apSuspect && network.lastBssidValid) {
+      for (int i = 0; i < matchCount; i++) {
+        if (memcmp(matches[i].bssid, network.lastBssid, sizeof(network.lastBssid)) == 0) { knownIdx = i; break; }
+      }
+    }
+    if (knownIdx >= 0) {
+      if (knownIdx > 0) {
+        // Move it to the front and keep the rest in RSSI order (the array is small and this runs once per recovery)
+        MatchedNetwork keep = matches[knownIdx];
+        for (int i = knownIdx; i > 0; i--) matches[i] = matches[i - 1];
+        matches[0] = keep;
+      }
+      FUNCTIONLOG("Network", "the AP we were on is in the scan (RSSI %d, Ch: %u) - going back to it, not to a stronger node",
+          (int)matches[0].rssi, (unsigned)matches[0].channel);
+    } else if (matchCount > 0 && !network.apSuspect && network.lastBssidValid && apPatienceRound < AP_PATIENCE_ROUNDS) {
+      // The name is up, but not the node that was carrying us.  Do not take a sibling yet: it may be rebooting,
+      // or still off the scan it only just fell off.  The cost is bounded by AP_PATIENCE_ROUNDS waits (5 s then
+      // 10 s), after which this branch stops firing and the RSSI choice below is allowed.
+      apPatienceRound++;
+      WiFi.scanDelete();
+      apWaitedForKnownAp = true;
+      FUNCTIONLOG("Network", "the AP we were on (" BSSID_FMT " Ch: %u) is not in the scan - waiting for it (%u/%u) rather than taking another node",
+          BSSID_ARG(network.lastBssid), (unsigned)network.lastChannel,
+          (unsigned)apPatienceRound, (unsigned)AP_PATIENCE_ROUNDS);
+      return false;
+    } else if (matchCount > 0 && (network.apSuspect || apPatienceRound >= AP_PATIENCE_ROUNDS)) {
+      FUNCTIONLOG("Network", "taking the strongest matching node - %s",
+          network.apSuspect ? "the AP we were on dropped us quickly" : "it did not come back in time");
     }
     // Try each matched network in RSSI order
     for (int attempt = 0; attempt < matchCount; attempt++) {
@@ -688,7 +829,7 @@ bool MyNetwork::wifiBegin(bool silent) {
                 attempt + 1, config.ssids[configIdx].ssid,
                 matches[attempt].bssid[0], matches[attempt].bssid[1], matches[attempt].bssid[2],
                 matches[attempt].bssid[3], matches[attempt].bssid[4], matches[attempt].bssid[5],
-                matches[attempt].rssi);
+                (int)matches[attempt].rssi);
         BOOTLOGX("\t");
         display.putRequest(BOOTSTRING, configIdx);
       }
@@ -857,9 +998,11 @@ static uint16_t wifiReconnectWaitS(uint8_t round) {
 void wifiReconnectionTask(void * pvParameters) {
   FUNCTIONLOG("Network", "WiFi.reconnect: starting smart reconnection (scan + sequential fallback)");
   uint8_t round = 0;
+  apPatienceRound = 0;   // a new outage gets the full patience for the AP we were on
   while (network.beginReconnect && network.status != SOFT_AP) {
-    // Run the full wifiBegin strategy: scan, match against saved SSIDs, sort by RSSI,
-    // connect to strongest by BSSID, fall back to sequential trial of all saved SSIDs
+    // Run the full wifiBegin strategy: back to the AP we were on, then scan, match against saved SSIDs,
+    // sort by RSSI, connect to strongest by BSSID, fall back to sequential trial of all saved SSIDs
+    apWaitedForKnownAp = false;
     if (network.wifiBeginFast(true)) {
       // Connection established. The ARDUINO_EVENT_WIFI_STA_GOT_IP event fires,
       // WiFiReconnected() handles display restore, stream resume, MQTT reconnect, etc.
@@ -870,7 +1013,13 @@ void wifiReconnectionTask(void * pvParameters) {
     // link returns by another route or the user goes to AP mode
     const uint16_t waitS = wifiReconnectWaitS(round);
     if (round < 255) round++;
-    FUNCTIONLOG("Network", "WiFi.reconnect: no known networks available, retrying in %u s", (unsigned)waitS);
+    // A round spent waiting for the known AP is NOT an outage round and must not claim there is no network:
+    // the name was up, this device chose not to take a different node yet.
+    if (apWaitedForKnownAp) {
+      FUNCTIONLOG("Network", "WiFi.reconnect: waiting for the AP we were on, next scan in %u s", (unsigned)waitS);
+    } else {
+      FUNCTIONLOG("Network", "WiFi.reconnect: no known networks available, retrying in %u s", (unsigned)waitS);
+    }
     for (uint16_t i = 0; i < waitS; i++) {
       if (!network.beginReconnect || network.status == SOFT_AP) {
         wifiReconnTaskHandle = NULL;
@@ -880,6 +1029,7 @@ void wifiReconnectionTask(void * pvParameters) {
       delay(1000);
     }
   }
+  apPatienceRound = 0;
   wifiReconnTaskHandle = NULL;
   vTaskDelete(NULL);
 }
@@ -1534,7 +1684,6 @@ bool getWeather_OpenWeather30(char *wstr) {
     int humidity = current["humidity"];
     float wind_speed_ms = current["wind_speed"];  // m/s from metric API
     int wind_deg = current["wind_deg"];
-    int wind_dir_idx = (int)(wind_deg / 22.5) % 16;
     
     // Get or fetch elevation for barometric adjustment
     float elevation = 0.0;

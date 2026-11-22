@@ -54,17 +54,17 @@ const GFXfont* const _systemFonts[] = {
 extern uint8_t activeSystemFontId;
 
 // --- ACTIVE FONT ACCESSOR ---
-// The one place the active display font is chosen, so runtime font switching changes only this function - see
-// plans/font-overhaul.md for the obligations that come with it. Any font returned here must stay on the
-// 6x8 metric class (xAdvance 6, yAdvance 8): widget layout comes from CHARWIDTH/CHARHEIGHT, not from the font.
+// The one place the active display font is chosen, so runtime font switching changes only this function.  Any font
+// returned here must stay on the 6x8 metric class (xAdvance 6, yAdvance 8): widget layout comes from
+// CHARWIDTH/CHARHEIGHT, not from the font.
 inline const GFXfont *displayFont() { return _systemFonts[activeSystemFontId]; }
 
 // There is deliberately NO size ladder here.  The clock size used to be TIME_SIZE, a single number
 // derived from DSP_HEIGHT for the whole build; it is now the layout's own `clockConf.textsize`, a
 // size index, and both the clock and the number page read it from their conf.  The DSP_HEIGHT rules
 // were applied once, to every shipped conf, when the index moved there - the per-panel table is in
-// plans/font-overhaul.md 2.11 and in the `clockConf` comment in widgetsconfig.h, which is where a
-// conf author looks, and where a new layout gets its value from the layout tooling.
+// the `clockConf` comment in widgetsconfig.h, which is where a conf author looks, and where a new
+// layout gets its value from the layout tooling.
 
 /*--- BOOTLOGO ---*/
 #if DSP_HEIGHT >= 320 && defined(BIG_BOOT_LOGO) && BIG_BOOT_LOGO

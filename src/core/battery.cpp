@@ -171,7 +171,7 @@ void Battery::bootStatus() {
     lastPct = pct;
     battStatus.percentage = pct;
     battStatus.voltage_mv = voltage_mv;
-    BOOTLOG("battery\t\tADC:%d, %dmV, %d%%", adc_sample, voltage_mv, pct);
+    BOOTLOG("battery\t\tADC:%u, %umV, %u%%", (unsigned)adc_sample, (unsigned)voltage_mv, (unsigned)pct);
   } else {
     BOOTLOG("battery\t\tnot detected");
     battStatus.percentage = 0;

@@ -65,22 +65,37 @@
 }
 :root[data-theme="4"] {
   --theme-name:         "Graphite (Kle7rx)";
-  --actives:            #ebebeb;
-  --control-bg:         #d00000;
-  --edges:              #7d7d7d;
-  --fills:              #5e5e5e;
-  --highlights:         #6070f5;
-  --infotexts:          #c0c0c0;
-  --labels:             #ffffff;
-  --link-text:          #6070f5;
-  --list-names:         #c8c8c8;
-  --logo:               #ffffff;
-  --logo-shadow:        #505050;
-  --logo-text:          #ffffff;
-  --maintexts:          #c0c0c0;
-  --meter-fill:         #d00000;
-  --outlines:           #bbbbbb;
-  --warning-outline:    #d00000;
+  --button-active-text: #010101;
+  --button-fill:        #010101;
+  --button-text:        #c0c0c0;
+  --control-bg:         #a00000;
+  --editor-cell-text:   #9e9e9e;
+  --fills:              #1c1c1c;
+  --highlights:         #7583ff;
+  --icon-active-glyph:  #000000;
+  --icons-outline:      #7583ff;
+  --infotexts:          #aaaaaa;
+  --input-text:         #9e9e9e;
+  --labels:             #d7d7d7;
+  --link-text:          #7583ff;
+  --list-active-text:   #ffffff;
+  --list-names:         #d7d7d7;
+  --list-urls:          #9e9e9e;
+  --logo-shadow:        #691713;
+  --maintexts:          #aaaaaa;
+  --meter-outline:      #404040;
+  --outlines:           #761976;
+  --panel-border:       #761976;
+  --panel-gradient:     #0c0c0c;
+  --scrollbar-thumb:    #7583ff;
+  --section-title-text: #7583ff;
+  --select-text:        #9e9e9e;
+  --spinner-ring:       #a00000;
+  --switch-off-text:    #c0c0c0;
+  --switch-text:        #ebebeb;
+  --switch-thumb:       #1c1c1c;
+  --switch-track:       #a00000;
+  --warning-outline:    #a00000;
 }
 :root[data-theme="5"] {
   --theme-name:         "Gray (Krzsiek)";

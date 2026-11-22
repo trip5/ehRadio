@@ -47,8 +47,8 @@
 // It then grows a little with the PANEL's width, because the same px/s replaces the content of the scrolling row far
 // sooner on a small screen: ~1.8 s on a 110 px row against ~7.7 s on a 460 px one, which reads as too fast and too slow
 // respectively.  The two ends are calibrated on those two panels by eye, and everything in between interpolates:
-// 52 at 128 wide (128x64 / 128x32 OLED, 128x128 and 160x80 TFT), 54 at 240, 56 at 320, 58 at 428, 60 at 480.  Affine
-// rather than proportional on purpose - a readable character rate barely depends on the panel, and only the
+// 44 at 128 wide (128x64 / 128x32 OLED, 128x128) 45 at 160, 49 at 240, 52 at 320, 57 at 428, 60 at 480.
+// Affine rather than proportional on purpose - a readable character rate barely depends on the panel, and only the
 // sluggishness term grows with the row.  DSP_WIDTH is the configured width, before rotation, i.e. the space layouts
 // are authored in.
 //
@@ -57,7 +57,7 @@
 //
 // This can be overridden in myoptions.h and is not to be considered a perfect scale.-
 #ifndef SCROLLPX
-  #define SCROLLPX (52 + (DSP_WIDTH - 128) / 44)
+  #define SCROLLPX (44 + (DSP_WIDTH - 128) / 22)
 #endif
 
 #if defined(DSP_OLED)

@@ -134,7 +134,9 @@ public:
     bool     havePSRAM() { return m_f_psram; };
 
 protected:
-    size_t            m_buffSizePSRAM    = UINT16_MAX * 10;   // most webstreams limit (65535 * 10)
+    // 1.5 MB: the ring stands between a stalled read and silence on the DAC, and FLAC is the one codec whose ring
+    // runs full because the decoder is slower than the producer.  Totals are in the options.h PSRAM table.
+    size_t            m_buffSizePSRAM    = 1536 * 1024;
     size_t            m_buffSizeRAM      = 1600 * AUDIOBUFFER_MULTIPLIER2;
     size_t            m_buffSize         = 0;
     size_t            m_freeSpace        = 0;
@@ -159,7 +161,7 @@ static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 extern char audioI2SVers[];
 
 // A permanent verdict on a stream, set only by Audio::setRefuse().  Keep the order and the values identical in both
-// forks - core matches on these names, never on numbers.  See plans/handle-unsupported-unrecognized.md.
+// forks - core matches on these names, never on numbers.
 enum streamRefuse_e : uint8_t {
     STREAM_REFUSE_NONE = 0,     // nothing to refuse
     STREAM_REFUSE_UNSUPPORTED,  // recognised container or codec we cannot decode (fMP4, encrypted HLS, ...)
@@ -192,6 +194,13 @@ public:
     bool setPinout(uint8_t BCLK, uint8_t LRC, uint8_t DOUT, int8_t DIN = I2S_GPIO_UNUSED, int8_t MCLK = I2S_GPIO_UNUSED);
     bool pauseResume();
     bool isRunning() {return m_f_running;}
+    // The stream identity: STREAM_USERAGENT first, STREAM_USERAGENT_ALT after a 403 (see src/core/config.h).
+    // One retry per attempt; cleared as soon as a stream actually starts, so the next play begins honestly again.
+    // m_f_altUaTried is the durable half: the UA flag decides which identity the next request carries and is reset by a
+    // successful header parse, so it cannot answer "have we already spent the retry?".  Measured 2026.11.16: three
+    // "retrying once" lines in a row, each then reconnecting with the SAME identity, because this flag had been cleared.
+    void setAlternateUserAgent(bool on) {m_f_altUserAgent = on; if(!on) m_f_altUaTried = false;}
+    bool alternateUserAgent() {return m_f_altUserAgent;}
     uint8_t refuseReason() {return m_refuseReason;}   // non-zero: a verdict for Player::loop() to act on
     void clearRefuse() {m_refuseReason = STREAM_REFUSE_NONE;}   // consumed between validator probes
     void loop();
@@ -228,6 +237,10 @@ public:
          getSpectrum: fills 2 * n uint8, the low bands for L then the low bands for R. */
     bool     getWaveform(int16_t *out, uint16_t n);
     bool     getSpectrum(uint8_t *bands, uint8_t n);
+    /* Build the spectrum's scratch now, so it is taken before the audio ring; getSpectrum() retries lazily. */
+    bool     vuScratchReserve();
+    /* The de-ogger scratch and the ring, taken at boot in the order the table in core/options.h gives. */
+    void     reservePsram();
 //    uint8_t  vuLeft, vuRight;                  // average value of samples, left channel, right channel
     esp_err_t i2s_mclk_pin_select(const uint8_t pin);
     bool     eofHeader;
@@ -316,6 +329,12 @@ private:
 public:
   void            setAudioTaskCore(uint8_t coreID);
   uint32_t        getHighWatermark();
+  // Station cut and the level meter the learned cut reads.  Public because Player applies both.
+  void            setCutDb(float db);                 // dB of attenuation; 0 = none
+  void            loudnessAccum(int16_t l, int16_t r);
+  void            loudnessReset();
+  float           loudnessDb();
+  int             loudnessRaw();   // -1 here: this path has no chip meter.  The VS1053 build returns SCI_AICTRL3
 private:
   void            startAudioTask(); // starts a task for decode and play
   void            stopAudioTask();  // stops task for audio
@@ -329,7 +348,7 @@ private:
   uint16_t readMetadata(uint16_t b, bool first = false);
   size_t   chunkedDataTransfer(uint8_t* bytes);
   bool     readID3V1Tag();
-  boolean  streamDetection(uint32_t bytesAvail);
+  boolean  streamDetection(uint32_t bytesAdded);   // bytes that reached the ring, not bytes the socket offered
   void     seek_m4a_stsz();
   void     seek_m4a_ilst();
   uint32_t m4a_correctResumeFilePos(uint32_t resumeFilePos);
@@ -726,6 +745,15 @@ private:
     uint32_t              m_i2sWriteUs     = 0;
     uint32_t              m_i2sWriteShort  = 0;
     uint32_t              m_decodeUs       = 0;
+    // What the decoder actually produced in the same window, in PCM frames.  Printed beside m_i2sFramesOut it
+    // separates the two ways a stream can come up short: fewer frames produced than the DAC consumes (a decoder or
+    // producer limit) versus frames produced and never written (a loss inside the player).  The loss to look for on
+    // FLAC is "about one half per frame", because a 4096-sample block is emitted as two 2048-sample halves and the
+    // second half is produced by a call that consumes only the frame footer.
+    uint32_t              m_smpDecoded     = 0;
+    // Raised by setDefaults(): the i2s window counters belong to one stream, and a stall produces no report, so
+    // without this the next stream's first window carried the previous one's span and totals.
+    bool                  m_f_winReset     = true;
     // Worst gap between passes of the audio task itself.  It separates the two possible faults behind an audible stop:
     // longer than the DMA depth (dma_desc_num * dma_frame_num frames, 682 ms at 24000 Hz) means the task was
     // descheduled and the DAC ran dry; much smaller means the task was running and the silence came from the data.
@@ -787,6 +815,11 @@ private:
 //    uint16_t        m_vol_steps = 254;               // default
     float            m_limit_left = 1;               // limiter for Gain, left channel
     float            m_limit_right = 1;             // limiter for Gain, right channel
+    float            m_cutLin = 1.0f;                // station cut as a factor, folded into computeLimit
+    uint64_t         m_loudSum = 0;                  // sum of squares for the current ~50 ms block; integer, see loudnessAccum()
+    uint32_t         m_loudN = 0;                    // samples in m_loudSum
+    float            m_loudAvg = -120.0f;            // exponential mean of block level, dBFS
+    bool             m_loudHave = false;
 //    uint8_t         m_timeoutCounter = 0;           // timeout counter
 //    uint8_t         m_curve = 0;                    // volume characteristic
     uint8_t         m_bitsPerSample = 16;           // bitsPerSample
@@ -868,6 +901,8 @@ private:
     bool            m_f_commFMT = false;            // false: default (PHILIPS), true: Least Significant Bit Justified (japanese format)
     bool            m_f_stream = false;             // stream ready for output?
     uint8_t         m_refuseReason = STREAM_REFUSE_NONE;  // see setRefuse()
+    bool            m_f_altUserAgent = false;       // true: this attempt sends STREAM_USERAGENT_ALT
+    bool            m_f_altUaTried   = false;       // true: the alternate identity has already been tried this attempt
     bool            m_f_decode_ready = false;       // if true data for decode are ready
     bool            m_f_eof = false;                // end of file
     bool            m_f_lockInBuffer = false;       // lock inBuffer for manipulation

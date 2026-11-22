@@ -199,7 +199,7 @@ const LayoutData _layouts[] PROGMEM = {
         /* CODEC BADGE         {{ offset, top, fontsize, align }, dimension} */
         .fullbitrateConf     = { }, // unused
         /* VU BANDS            { onebandwidth, onebandheight, bandsHspace, bandsVspace, numofbands } */
-        .bandsConf           = { DSP_WIDTH/2-TFT_BORDER*2, 11, 2, 1, 16 },
+        .bandsConf           = { DSP_WIDTH/2-TFT_BORDER*2, 11, 2, 1, 15 },
         /* MOVES               { left, top, width } */
         .clockMove           = { }, // clock disappears when VU is on
         .weatherMove         = { TFT_BORDER, 64-10, 0 },
@@ -219,6 +219,6 @@ const char rssiFmt[]              PROGMEM = "%d%%";
 const char iptxtFmt[]             PROGMEM = "\021\022%s";
 const char voltxtFmt[]            PROGMEM = "";
 const char batterytxtFmt[]        PROGMEM = "";
-const char bitrateFmt[]           PROGMEM = "%d";
+const char bitrateFmt[]           PROGMEM = "%s";
 
 #endif

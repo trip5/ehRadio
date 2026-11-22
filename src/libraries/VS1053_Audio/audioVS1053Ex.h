@@ -173,7 +173,10 @@ public:
     }
 
 protected:
-    const size_t m_buffSizePSRAM    = 300000;   // most webstreams limit the advance to 100...300Kbytes
+    // 600000, not 300000: this holds COMPRESSED bytes for a chip that decodes on its own silicon, so it is cheap
+    // network immunity rather than a CPU buffer.  293 KB was 18 s at 128 kbit/s but only 1.7 s at 1.4 Mbit/s, and a
+    // 2 s network stall at a high bitrate emptied it.  See the PSRAM table in options.h for the totals.
+    const size_t m_buffSizePSRAM    = 600000;
     //const size_t m_buffSizeRAM      = 1600 * 10;
     const size_t m_buffSizeRAM      = 1600;
     size_t       m_buffSize         = 0;
@@ -203,7 +206,7 @@ static StackType_t  __attribute__((unused)) xAudioStack[AUDIO_STACK_SIZE];
 struct Audio;
 
 // A permanent verdict on a stream, set only by Audio::setRefuse().  Keep the order and the values identical in both
-// forks - core matches on these names, never on numbers.  See plans/handle-unsupported-unrecognized.md.
+// forks - core matches on these names, never on numbers.
 enum streamRefuse_e : uint8_t {
     STREAM_REFUSE_NONE = 0,     // nothing to refuse
     STREAM_REFUSE_UNSUPPORTED,  // recognised container or codec we cannot decode (fMP4, encrypted HLS, ...)
@@ -251,6 +254,11 @@ private:
     uint8_t       dcs_pin ;                         // Pin where DCS line is connected
     uint8_t       dreq_pin ;                        // Pin where DREQ line is connected
     uint8_t       curvol ;                          // Current volume setting 0..100%
+    float         m_cutDb = 0.0f;                   // station cut, dB; applied inside setVolume()
+    uint8_t       m_lastVolReg = 0;                 // SCI_VOL byte written last: knob + cut, for the meter fix
+    float         m_loudAvg = -120.0f;              // exponential mean of block level, dBFS
+    bool          m_loudHave = false;
+    uint8_t       m_loudRaw = 0;                    // last raw SCI_AICTRL3 reading, for the paired-build log
 
     const uint8_t vs1053_chunk_size = 32 ;
     int8_t          m_balance = 0;                  // -16 (mute left) ... +16 (mute right)
@@ -352,6 +360,8 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     bool            m_f_ogg=false;                  // Set if oggstream
     bool            m_f_stream_ready=false;         // Set after connecttohost and first streamdata are available
     uint8_t         m_refuseReason = STREAM_REFUSE_NONE;  // see setRefuse()
+    bool            m_f_altUserAgent = false;       // true: this attempt sends STREAM_USERAGENT_ALT
+    bool            m_f_altUaTried   = false;       // true: the alternate identity has already been tried this attempt
     // [Maleksm graft] variables needed by task-coordinated playAudioData()
     bool            m_f_stream = false;             // stream ready for output?
     bool            m_f_eof = false;                // end of file reached
@@ -444,10 +454,17 @@ public:
     //Audio ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t spi = VSPI, uint8_t mosi = 23, uint8_t miso = 19, uint8_t sclk = 18);
     Audio ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, SPIClass *spi=&SPI);
     ~Audio();
+    /* The input ring, taken at a point setup() chooses instead of at the first connecttohost().  Idempotent. */
+    void     reservePsram();
 
     void     begin() ;                                  // Begin operation.  Sets pins correctly and prepares SPI bus.
     uint32_t stop_mp3client();
     void     setVolume(uint8_t vol);                    // Set the player volume.Level from 0-21, higher is louder.
+    void     setCutDb(float db);                        // station cut: dB of attenuation, 0 = none
+    void     serviceLoudness();                         // ~10 Hz chip-meter read, gated mean
+    void     loudnessReset();
+    float    loudnessDb();
+    int      loudnessRaw();                             // last raw SCI_AICTRL3 reading (0..95); -1 before the first
     void     setTone(int8_t* rtone);                   // Set the player baas/treble, 4 nibbles for treble gain/freq and bass gain/freq
     uint8_t  getVolume();                               // Get the current volume setting, higher is louder.
     void     printDetails(const char* str);             // Print configuration details to serial output.
@@ -464,6 +481,12 @@ public:
     bool     connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
     bool     connecttospeech(const char* speech, const char* lang);
     bool     isRunning() {return m_f_running;}
+    // The stream identity: STREAM_USERAGENT first, STREAM_USERAGENT_ALT after a 403 (see src/core/config.h).
+    // One retry per play; the core clears it when a new station is started.  m_f_altUaTried is the durable half: the UA
+    // flag decides which identity the next request carries and a successful header parse resets it, so it cannot answer
+    // "have we already spent the retry?" - the I2S fork looped three times on the same identity because of exactly that.
+    void     setAlternateUserAgent(bool on) {m_f_altUserAgent = on; if(!on) m_f_altUaTried = false;}
+    bool     alternateUserAgent() {return m_f_altUserAgent;}
     uint8_t  refuseReason() {return m_refuseReason;}   // non-zero: a verdict for Player::loop() to act on
     void     clearRefuse() {m_refuseReason = STREAM_REFUSE_NONE;}   // consumed between validator probes
     uint8_t  chipDeadStrikes() const { return m_chipDeadStrikes; }  // 0 = answering, see sendBytes()
@@ -495,6 +518,7 @@ private:
     void            audioTask();
     void            performAudioTask();
     void            endLocalFile();        // the single end-of-track path for a local file
+    size_t          feedOggFlac();         // forwards native FLAC out of an Ogg FLAC stream, see m_f_oggFlac
     uint8_t         m_audioTaskCoreId = 1;
     bool            m_f_audioTaskIsRunning = false;
     // SDI liveness, written by sendBytes() and read by the VU flat-meter report: total bytes handed to the
@@ -504,6 +528,13 @@ private:
     // Stalled feeds against a chip that answers 0x0000 in SCI_MODE: not backpressure, nothing driving MISO.  Cleared
     // on any byte moved and in begin(), never in setDefaults() - the track changes are what prove it.
     volatile uint8_t  m_chipDeadStrikes = 0;
+    // Ogg FLAC container stripping.  A FLAC radio stream arrives as Ogg pages and the VS1053 FLAC plugin wants the
+    // bare FLAC bitstream those pages wrap, so the layer is removed here instead of being sent to the chip.  The
+    // stripper forwards payload slices straight out of InBuff, so the whole state is "how much of this page is
+    // left" and "has the native signature gone yet" - no page buffer, no FLAC parsing.
+    bool     m_f_oggFlac   = false;        // set where determineOggCodec() answers CODEC_FLAC for an Ogg page
+    uint32_t m_oggPageLeft = 0;            // payload bytes still to forward from the current page
+    bool     m_f_oggSigFwd = false;        // the native fLaC signature has already been forwarded
     // Silent exit counters.  Every one of these exits returns without logging, so a stalled audio task is
     // indistinguishable from a healthy one; these name the exit instead.  Only the printing is gated.
     volatile uint32_t m_dbgStopCalls = 0;

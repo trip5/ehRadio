@@ -284,7 +284,15 @@ void AudioHandlers::handleShowStreamTitle(const char* info) {
   if (playlistValidator.active()) return;   // the validator owns the indicator while it sweeps
   if (handleAccountError(info)) return;  // error handled, don't display raw HTTP response as title
   const int status = httpStatusCode(info);
-  if (status == 404 || status == 410) { player.noteFatalStream(); return; }
+  // A permanent refusal: the server will not serve this URL to us and no amount of retrying changes that.  404/410
+  // are gone, 401/403 are auth and region blocks, 451 is "unavailable for legal reasons".  408 and 429 really are
+  // transient and 5xx is somebody else's bad minute, so those keep the patient ladder.  The libraries try an
+  // alternate User-Agent once before this line is ever reached, so a user-agent gate has already had its second
+  // chance by now.
+  if (status == 404 || status == 410 || status == 401 || status == 403 || status == 451) {
+    player.noteFatalStream();
+    return;
+  }
   #ifdef DEBUG_TITLES
     config.setTitle(DEBUG_TITLES);
     return;
@@ -378,7 +386,12 @@ void AudioHandlers::handleEofMp3(const char* info) {
 void AudioHandlers::handleEofStream(const char* info) {
   (void)info;
   player.sendCommand({PR_STOP, 0});
-  if (!player.resumeAfterUrl) return;
+  if (!player.resumeAfterUrl) {
+    // A web stream that ended - or that the library declared stalled - has to be retried.  Returning here is what
+    // left a stalled station silent until the user intervened; the ladder is the only thing that reconnects.
+    player.noteStreamStalled();
+    return;
+  }
   if (config.getMode() == PM_WEB) {
     player.resumeLastWebSource();
   } else {

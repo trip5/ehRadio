@@ -1583,6 +1583,11 @@ void MP3Decoder_ClearBuffer(void) {
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
     // ESP32-S3: If there is PSRAM, prefer it
+    //
+    // The reverse order was tried on 2026.11.12 to test whether PSRAM residency was the 8.0.0 slowdown.  It is not: the
+    // decoder's ~57 KB working set moved into internal RAM (free heap after init 45 KB -> 27 KB), decode throughput
+    // stayed at ~30,000 frames/s, and the display task then lost the RAM it needs - "DISPLAY: queue full" with a 10 s
+    // Max Dsp Work.  Reverted.
     #define __malloc_heap_psram(size) \
         heap_caps_malloc_prefer(size, 2, MALLOC_CAP_DEFAULT|MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT|MALLOC_CAP_INTERNAL)
 #else

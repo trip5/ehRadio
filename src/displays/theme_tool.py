@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-theme_tool.py - one tool for the WebUI palette files and the themes.h list they belong to.
+theme_tool.py - one tool for the WebUI palette file (themes.css) and the themes.h list they belong to.
 
 USAGE:
     py theme_tool.py                          # audit: structure, names, quantise status

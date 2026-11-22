@@ -16,6 +16,10 @@ resets and the ID3v2 frame-size guard). Two practices follow:
   the board failing: the three per-track resets that this graft had lost were present and correct in `I2S_Audio`, and
   copying them back - then correcting the origin the copy brought with it - is what fixed playback. Diff the other
   library; sometimes it is the fault, sometimes it is the reference.
+* **Some code is duplicated on purpose, and must be kept in step.** The FLAC tag parser exists twice -
+  `v1053Le32()`, `v1053KeyIs()`, `v1053VorbisComment()` and `v1053CommentTitle()` here, and `dgLe32()`, `dgKeyIs()`
+  and `FLACOfferCommentPacket()` in `I2S_Audio/flac_decoder/flac_decoder.cpp` - because this fork has no de-ogger to
+  hang it on. A bound-check fix in one belongs in the other; see item 10 of the 2026.11.13 to 2026.11.16 section.
 
 ## ehRadio Additions After the Graft (read this first)
 
@@ -36,22 +40,27 @@ This document records the complete process of grafting Maleksm's anti-skip FreeR
 
 | Name | Folder | Description |
 |------|--------|-------------|
-| **Grafted (current)** | `src/libraries/VS1053_Audio/` | Result of this surgery — PR226 core + Maleksm task + ehRadio adaptations. **The only copy of our own library.** |
-| **ehRadio PR226 copy** | `VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` | PR226 with Trip5's minimal ehRadio adaptations. **This was the graft base.** |
-| **Active (old)** | `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))` | The previous (pre-PR226) Maleksm-based ehRadio library, kept for reference |
-| **Maleksm** | `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` | Original Maleksm v0.9.434m — FreeRTOS task infrastructure originates here |
+| **Grafted (current)** | `src/libraries/VS1053_Audio/` | Result of this surgery - PR226 core + Maleksm task + ehRadio adaptations. **The only copy, of our library and of anything else.** |
 
-There is **no folder backup of the current library**. The one that existed (`VS1053_Audio (ehRadio
-nsteplanets PR226 frankenstein)`) was a snapshot taken at the graft and never refreshed, so it was
-removed on 2026-09-27: restoring from it would have silently reverted every post-graft fix recorded
-below. `src/libraries/VS1053_Audio/` is the only copy, and its git history is the backup.
+Every other copy is gone, and that is now the intended state. The reference folders this surgery worked from -
+`VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` (the graft base), `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))`
+(the previous pre-PR226 ehRadio library) and `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` (where the FreeRTOS task
+infrastructure came from) - were removed on 2026.11.20, once everything worth taking had been taken. Recover one with
+`git checkout bfe571afa7ef758d7f6340041eeca70a1a73d7af -- "src/libraries/VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))"`:
+that commit, subject "2026.11.16", is the last tree that contained them. They are not expected back.
+
+A folder backup of the current library was removed earlier, on 2026-09-27, for the same reason: the snapshot had never
+been refreshed, so restoring it would have silently reverted every post-graft fix recorded below.
+`src/libraries/VS1053_Audio/` is the only copy, and its git history is the backup.
+
+The rule that follows: **never add a folder copy of a library.** A snapshot stops being accurate the moment either side is
+patched, and a diff against a named commit is the comparison.
 
 ---
 
 ## Trust Order (when making decisions)
-Active > Maleksm
-
-When in doubt during grafting: prefer the Active library's patterns, then Maleksm's.
+Active. When in doubt during a future graft, prefer the Active library's patterns and diff against a named commit rather
+than a folder on disk - there is no Maleksm copy left to prefer.
 
 ---
 
@@ -66,17 +75,20 @@ When in doubt during grafting: prefer the Active library's patterns, then Maleks
 
 ---
 
-## Pre-Surgery Comparison Strategy
+## Pre-Surgery Comparison Strategy (historical)
 
-Before grafting, compare these pairs to understand what changed:
+This is the record of what was compared to plan the graft, not an instruction that can still be followed: the folders it
+names were removed on 2026.11.20 and live only in commit `bfe571afa7ef758d7f6340041eeca70a1a73d7af` ("2026.11.16").
 
 1. **`VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))` vs `VS1053_Audio (ehRadio Maleksm v0.9.434m(04.04.25))`**
-   → Reveals Trip5's ehRadio adaptations to Maleksm (include paths, logging, PSRAM macros, config changes)
+   → revealed Trip5's ehRadio adaptations to Maleksm (include paths, logging, PSRAM macros, config changes)
 
 2. **`VS1053_Audio (ehRadio nsteplanets yoRadio PR226)` vs `VS1053_Audio (yoRadio Maleksm v0.9.434m(04.04.25))`**
-   → Reveals what Maleksm changed from the PR226 base (task infrastructure, VU meter, SM_CANCEL fix, playAudioData coordination)
+   → revealed what Maleksm changed from the PR226 base (task infrastructure, VU meter, SM_CANCEL fix, playAudioData
+   coordination)
 
-For future migrations, do both comparisons before starting the graft.
+A future migration does the same thing against upstream's current release rather than against a local copy, which is the
+only version that will be newer than this one.
 
 ---
 
@@ -828,8 +840,9 @@ when `SM_CANCEL` reads 0, so the seconds were never being spent there.
 
 ## Post-Graft Patch Fixes (2026.11.03)
 
-Streams that must not be played, mirrored from the I2S fork so the two behave identically. The plan
-(`plans/handle-unsupported-unrecognized.md`) holds the evidence; this holds what the code now does.
+Streams that must not be played, mirrored from the I2S fork so the two behave identically. What the code now does,
+with the reason each rule exists: bytes that are not audio, or a host that will not serve the URL, end in a one-shot
+verdict rather than in the retry ladder, because retrying a guaranteed failure only delays the message.
 
 - **A verdict channel.** `streamRefuse_e` (`NONE`/`UNSUPPORTED`/`NOT_AUDIO`/`NO_HEAD`), `m_refuseReason`, one setter
   `setRefuse(reason, shape)` that logs the shape and the URL and stops, and a public `refuseReason()` that
@@ -883,7 +896,9 @@ Not bugs in hand - things a future reader should know are still true, in the ord
 ## Post-Graft Patch Fixes (2026.11.04)
 
 **Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` - `computeVUlevel()`, `get_VUlevel()`,
-`m3u8redirection()`. Full reasoning for the VU pair is in `plans/vu-level-reference-and-255-ceiling.md`.
+`m3u8redirection()`. The VU pair is two separate bounds: `get_VUlevel()` packs the length *cleared* from each bar, so
+`0` means a full bar rather than an empty one; and the display gain is `256 / vuThreshold` because `computeVUlevel()`
+stores `abs(sample >> 7)` and keeps the high-water mark as the reference.
 
 1. **`get_VUlevel()` answered a FULL bar when it had nothing to say.** Its return packs the length *cleared* from the
    loud end of each bar, 8 bits a channel, so `0` means "nothing cleared" - a fully lit bar. The early
@@ -920,3 +935,153 @@ decides how quickly quiet material empties.
    **Do not move v2 back above v1 for bandwidth or quality reasons without re-testing on the chip.** It is not a
    preference here, it is a lost channel. The I2S fork keeps xHE last and v2 above it, because there PS runs; the two
    tables differ in exactly that one position on purpose.
+
+## Post-Graft Patch Fixes (2026.11.11)
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp`. **No behaviour change**: this is the warning sweep
+for `platform-espressif32` 8.0.0, whose GCC 14 is stricter than the GCC 8 of 7.1.3. Every item is a warning about code
+that already did the right thing.
+
+1. **The `m_dbg*` / `m_chipDeadStrikes` counters step with `x = x + 1` now.** They are `volatile` - written by the audio
+   and reader tasks, read by the display task - and `++` on a volatile is deprecated in C++20, which GCC 14 now says
+   out loud (`-Wvolatile`). A compound assignment is not deprecated and is the same read-modify-write, so what the
+   tasks publish is unchanged. Thirteen sites: `sendBytes()`, `stopSong()`, `processLocalFile()`,
+   `processWebStream()`, `playAudioData()`, `setDefaults()`, `performAudioTask()`.
+2. **`processWebStream()` lost its dead `compression` block.** The `if(f_stream){ ... cnt++ ... }` stub existed only to
+   feed `if(cnt == compression){ playAudioData(); cnt = 0; }` - a call the Maleksm graft moved to the audio task - so
+   all it computed in the end was an unused `compression` (`-Wunused-but-set-variable`). The comment it carried is not
+   repeated: there is no code left to explain.
+3. **`asked` in `sendBytes()` is `[[maybe_unused]]`.** It is read only by the `AUDIO_DEBUG` report further down, so a
+   build without `AUDIO_DEBUG` - both of the ones we ship - warned it was unused. It cannot move into that block: it
+   has to be captured before the `while(len)` loop consumes `len`, and the report prints it as "wrote N of asked".
+
+## Post-Graft Patch Fixes (2026.11.13 to 2026.11.16)
+
+One session, closed on the 16th; built on **espressif32 8.0.0** with the patched files `builds/patch/` applies.
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp`, `audioVS1053Ex.h`, `src/core/audiohandlers.cpp`.
+
+1. **Ogg FLAC plays on the chip.** Encoders that wrap FLAC in Ogg (`stream.radioparadise.com/mellow-flac`,
+   `mscp4.live-streams.nl:8142/lounge.ogg`) send a mapping header (`0x7F 'F' 'L' 'A' 'C'`, version, header count,
+   then `fLaC`) and then a page layer of 27-byte headers plus a lacing table. The chip wants native FLAC, so
+   `feedOggFlac()` strips pages **in place**: it slices the payload forward out of the ring, copying nothing, and
+   leaves the reverse-sync, the frame headers and the metadata blocks untouched on the wire.
+   `determineOggCodec()` already returned `CODEC_FLAC` correctly; the pages were simply being fed to the chip.
+
+2. **The trap: after the mapping-header packet is dropped, the rest of that same packet still belongs on the wire.**
+   It is `fLaC` plus STREAMINFO. Clearing the page's remaining byte count there resynced past STREAMINFO and left the
+   stream silent, so `m_oggPageLeft` has to account for it.
+
+3. **The info line says `format is flac (ogg container)` deliberately.** `audiohandlers.cpp` matches the decoder's
+   format line with `strstr` in order and the Ogg test comes last, so a line that still said "ogg" would win the badge
+   and the display would show `OGG` for what is a FLAC stream.
+
+4. **`feed stalled` is time-based, not loop-based.** The report fired whenever a feed write made no progress, which is
+   normal for the 2 KB SDI FIFO. It now requires more than a second since the last byte *and* a five second gap between
+   reports, so it means "the chip has not taken a byte in a second", which is what the line claims.
+
+5. **Every request carries the configured `User-Agent`, and the retry really happens.** `STREAM_USERAGENT` /
+   `STREAM_USERAGENT_ALT` from [`src/core/config.h:63`](../../src/core/config.h:63) are sent on the stream request and on
+   the playlist requests `httpPrint()` builds. The `403/502/503` retry is authorised once per request chain by
+   `m_f_altUaTried`, a *durable* flag: `m_f_altUserAgent` alone is reset by any successful header parse, so on the I2S
+   fork the "retrying once" line printed four times while reconnecting with the same identity (measured 2026.11.16).
+   When the budget is spent the refusal becomes a verdict, so the player shows an error instead of claiming to play.
+
+6. **A stalled stream hands itself to the retry ladder.** `streamDetection()` no longer calls `connecttohost()` from
+   inside playback after five seconds without data - a full session reset issued from the audio task. It declares the
+   stall, stops the decoder, raises `audio_eof_stream("stalled")`, and `Player::noteStreamStalled()` owns the retry with
+   its backoff and its pause for a permanent status. Its liveness input is the ring, as on I2S: a file-scope
+   `s_ringTotal` counts every `InBuff.bytesWritten()`, and the lost timer only resets when that has advanced **and**
+   the socket has something to offer. On its own the offer is `min(available, writeSpace)` measured *before* the read,
+   which is what the I2S fork's de-ogger defect proved is not evidence of progress.
+
+7. **`reservePsram()` so the ring is taken at boot.** `Audio::reservePsram()` calls `initInBuff()`, which latches
+   itself, and `setup()` calls it after the WebUI file cache has been primed - so the ring no longer races the cache for
+   the contiguous PSRAM block.
+
+8. **The `bytesAdded` sites that count.** The ID3 and transport-stream pre-roll paths write into the ring too, but they
+   run once per stream, so `s_ringTotal` is advanced only where live audio lands: the plain stream read, the
+   metadata-clamped stream read, the chunked segment feed and the web-file read. Nothing reads the counter outside
+   `streamDetection()`.
+
+9. **An HLS segment request must never travel on the playlist's connection.** `httpPrint()` reconnected only when
+   `!_client->connected()`, so as soon as the playlist was open every segment request was written down *that* socket.
+   The segment's host does not hold that path - real chains put segments on another CDN edge, often `https:443` while
+   the playlist was `http:80` - so the far end answered 404, no connect was logged, and `m_lastHost` made the error name
+   the playlist.  `httpPrint()` now derives the scheme and port from the URL and reconnects whenever the target's
+   host/port/scheme differs from the socket in use, stopping the old one first.  Found on the I2S fork against scastream
+   and mirrored here before it bit; that chain needed no cookie and no special agent, only the right server.
+
+10. **The Ogg page stripper is also the only place a FLAC tag can be read, so it now reads it.** The chip reports audio
+    and nothing textual, and an Ogg FLAC stream carries no ICY metadata, so a FLAC station here showed no title at all
+    while the same station had one on I2S (`radioemisoras.cl/distorsion.flac`, measured 2026.11.16). `feedOggFlac()`
+    already knows where every page payload starts, so the payload is parsed on its way past: a `VORBIS_COMMENT` (block
+    type 4) yields `ARTIST - TITLE`, handed to `audio_showstreamtitle()` - the ICY callback - so the display, the WebUI
+    and MQTT take their normal path and nothing else had to learn a new one. Only a page that is *wholly* inside the
+    ring is parsed: a PICTURE block can be tens of KB against a 4 KB block size and waiting for one would stall the
+    feed, so the section is skipped and the skip is named once under `AUDIO_DEBUG`. `s_oggLastTitle` dedups repeats and
+    is cleared in `setDefaults()`, so a reconnect re-emits the same title instead of staying silent.
+    The parser is a **deliberate duplicate** of `dgLe32()` / `dgKeyIs()` / `FLACOfferCommentPacket()` in
+    `I2S_Audio/flac_decoder/flac_decoder.cpp`, which this fork cannot call (no de-ogger). Both files carry the standing
+    rule: a bound check changed in one belongs in the other, and the vendor-length test is the one that matters - a
+    length read from foreign data must never become an offset.
+
+## Post-Graft Patch Fixes (2026.11.17)
+
+**Files changed**: `audioVS1053Ex.cpp`, `audioVS1053Ex.h`. Built on **espressif32 8.0.0** with the patched files that
+`builds/patch/` applies.
+
+1. **A per-station cut, applied in the register domain.** `setCutDb(float)` stores the dB and re-sends `SCI_VOL` via
+   `setVolume(curvol)`, which now adds `m_cutDb * 2` to both mapped bytes before the write. Two facts make that exact:
+   `SCI_VOL` counts **down** from `0x00` (loudest), so attenuation is an **add**, and one LSB is **0.5 dB**, hence the
+   factor of 2. Both bytes are capped at `0xF8`, the curve's own floor: this path attenuates and can never amplify,
+   because the chip has no gain above 0 dB. Balance is untouched - it is applied to `valueL/valueR` before the curve, so
+   the cut lands on both channels equally.
+
+2. **The chip's own meter feeds the learned cut.** `serviceLoudness()` reads `SCI_AICTRL3` (0..95 dB per channel, 1 dB
+   resolution) on a 100 ms gate, called from `loop()` rather than from `computeVUlevel()` - that function returns early
+   unless the VU bar is wanted, while the learned cut is needed with no meter drawn at all. It uses
+   `read_register_nowait()` for the same reason that path does: the DREQ wait is what made these reads expensive.
+
+3. **Two calibration constants, both `#ifndef`-guarded so `myoptions.h` can override them.** `VS1053_METER_FULL_DB`
+   (default 95 at the time, now 100 - see the 2026.11.18 section) converts the chip's scale to something dBFS-ish, and
+   `VS1053_METER_PRE_VOL` (default 1) states whether the meter reads before `SCI_VOL`. If the meter turns out to sit
+   after the volume register, setting the flag to 0 makes `serviceLoudness()` add `m_cutDb` back to each reading -
+   otherwise the learning loop would chase its own attenuation. Both constants have since been measured rather than
+   guessed.
+
+4. **The write is now assembled from two clamped bytes.** `value` is built from `rL`/`rR` instead of the raw mapped
+   bytes; nothing else in `setVolume()` changed, so the mute-equivalent case (`VS1053VOLM` -> 0) and the balance map
+   behave exactly as before.
+
+## Post-Graft Patch Fixes (2026.11.18)
+
+**Files changed**: `audioVS1053Ex.cpp`, `audioVS1053Ex.h`. Built on **espressif32 8.0.0** with the patched files that
+`builds/patch/` applies.
+
+1. **`loudnessRaw()` and `m_loudRaw` keep the register value the level was derived from.** `serviceLoudness()` now stores
+   `max(dbL, dbR)` before converting it, the accessor returns that (or `-1` before the first sample), and
+   `loudnessReset()` clears it. `loudnessDb()` is unchanged. The reason is the paired-build log in `player.cpp`: one line
+   every 10 s carrying `meter 78 level -17.0 dBFS` lets a calibration be fitted from meter against dBFS directly
+   (section 13.21 of `plans/ovol-fix-and-live-edit.md`) instead of from final cut values, and a step size that is really
+   0.7 dB shows up as 0.7 rather than being inferred.
+
+2. **`VS1053_METER_FULL_DB` is now 100, and both constants are measured.** Four streams were played on both builds at the
+   same time, logging `meter` and `level` every 10 s, and compared over their steady minutes: the pad reported levels
+   4.0, 5.2, 5.3 and 8.1 dB above the I2S path across 19 dB of programme (mean 5.65, no usable trend). It also saturates
+   near the top - the loudest stream's meter read 92..94 while its true level was -7.5 dBFS - so the correction is a
+   flat trim, not a slope.
+
+   The direction is easy to get backwards and was: `level` is `meter - FULL_DB`, so a meter that reads high is corrected
+   by **raising** the constant. Setting it to 89 (the excess subtracted instead of added) made the next run write 18 dB
+   where I2S wrote 4, with the pad reading ~0 dBFS against -13.4. Per station the value that agrees with I2S is 102.4,
+   100.5, 100.5 and 98, so 100 it is. Anything louder than about -5 dBFS then reads as -5, because 0 dBFS now maps
+   above what the register can report - a cap on the cut for the very loudest streams, which is the safe way to be wrong.
+
+   `VS1053_METER_PRE_VOL 1` is measured too: on one stream the applied cut swung from 1.3 dB to 14.0 dB between two log
+   lines and the reported level did not move, where a meter reading after `SCI_VOL` would have fallen by that 12.7 dB.
+   An earlier eleven-stream run had already pointed the same way - this pad cut more than I2S on every station, which a
+   post-volume meter cannot do, because the loop would then be self-limiting and settle below the I2S values.
+
+   The residual after the trim is within 2.1 dB on all four streams, and three of the four land within 1 dB of the I2S
+   cut. The conversion stays in one expression, so a further fit would change `serviceLoudness()` and nothing else.

@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.11.09"
+#define RADIOVERSION "2026.11.22"
 
 /*******************************************************
  
@@ -32,21 +32,32 @@ or examine the examples in builds/trip5 and make your own!
   #error PSRAM is required: add -DBOARD_HAS_PSRAM to build_flags in platformio.ini
 #endif
 
-// PSRAM Buffers (highest-case estimates, in allocation order: display.init() → player.init() → netserver.begin())
-//   Display framebuffer (480×320): ~74 KB  (TFT only, allocated first, display.init())
-//   VU canvas:                    ~154 KB  (TFT only, VU_MAX_WIDTH 280 * VU_MAX_HEIGHT 140 * 2 (there are 2)) 
-//   VS1053 audio buffer:          ~293 KB  (300000 bytes, player.init())
-//   I2S audio buffer:             ~640 KB  (UINT16_MAX * 10, player.init())
-//   VU/FFT Scratch                   8 KB  (vuScratchAlloc())
-//   SD File Manager                 68 KB  (allocated only when SD File Manager runs, asmBegin())
-//   WebUI files cache:            ~130 KB  (actually ~420 KB if using uncompressed files, allocated last, netserver.begin())
-// ---------------------------------------
-//   VS1053 & OLED total:          ~499 KB or ~789 KB (uncompressed WebUI files)
-//   I2S & OLED total:             ~846 KB or ~1136 KB
-//   VS1053 & TFT total:           ~727 KB or ~1017 KB
-//   I2S & TFT total:             ~1074 KB or ~1364 KB
-// Note: WebUI cache is opportunistic so if PSRAM runs low, files stay in LittleFS instead.
-
+// PSRAM buffers, in the order they are allocated - setup() (src/main.cpp) enforces that order.
+// Largest-case numbers (480x320); smaller TFT displays use less.
+//
+//   item                         bytes                 allocated by / when
+//   display framebuffer          ~60 KB     (TFT only) display.init() → _buildPager();
+//   VU canvas, player page       ~77 KB     (TFT only) display.init() → _buildPager()
+//   VU canvas, screensaver       ~77 KB     (TFT only) display.init() → _primeScreensaverCanvas(),
+//   VU/FFT scratch                 8 KB     (I2S only) player.init() → vuScratchReserve()
+//   WebUI files cache (gzipped) ~107 KB                setup() → netserver.primeFileCache(), right after LittleFS mounts
+//                (uncompressed) ~420 KB
+//   de-ogger scratch             ~33 KB     (I2S only) setup() → player.reservePsram() → initInBuff() (16,896 ring-side + 16,384 comment capture)
+//   SD File Manager               68 KB     (reserved) asmBegin() takes it when an upload opens
+//   decoder set (FLAC)          ~237 KB     (I2S only, reserved) setDefaults() frees them all - 192 KB of it is s_samplesBuffer (2 ch x 24,576 samples x int32), the rest the Ogg carry
+//   TLS session (https)          ~96 KB     (reserved) mbedTLS allocates externally since espressif32 8.0.0, so a live https stream holds 79-95 KB here; refused rather than failed when tight
+//   audio buffer ring    VS1053: 586 KB                setup() → player.reservePsram(), the last allocation / opportunistic
+//                          I2S: 1536 KB
+//   -----------------------------------
+//   I2S & TFT total:           ~2073 KB     ~2383 KB (uncompressed WebUI)
+//   I2S & OLED total:          ~1863 KB     ~2173 KB
+//   VS1053 & TFT total:         ~910 KB     ~1220 KB
+//   VS1053 & OLED total:        ~695 KB     ~1010 KB
+//
+// Note: While these numbers are comfortable with a board that exceeds 2MB of PSRAM, a 2 MB board also fits the I2S audio ring at
+//   (almost) full size with a gzipped WebUI. If exceeding available PSRAM, the audio ring steps down, which only affects the buffer
+//   for FLAC streams (MP3, AAC never fill the buffer). The de-ogger and the decoder are the only entries that live and die
+//   with a stream; everything else is taken once, at boot, and stays. PSRAM that is "reserved" is held inside the ring's floor.
 
 /* ============================== DISPLAY ============================== */
 
@@ -403,9 +414,6 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 #ifndef PLAYER_FORCE_MONO
   #define PLAYER_FORCE_MONO false // mono option - false stereo, true mono (also add for mono I2S decoders for the VU)
-#endif
-#ifndef SS_INFO_TEXT
-  #define SS_INFO_TEXT false
 #endif
 
 /* --- VOLUME SCALE --- */
@@ -1100,10 +1108,8 @@ or examine the examples in builds/trip5 and make your own!
 
 /* --- OTHER COMPILE OPTIONS --- */
 /*  Here are other #defines that may be added to myoptions.h   */
-#ifdef PLAYLIST_DEFAULT_URL
- // This will download a playlist when first-booting and no playlist is present on LittleFS.  Can be CSV or JSON format.  Example:
- // #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
-#endif
+// This will download a playlist when first-booting and no playlist is present on LittleFS.  Can be CSV or JSON format.  Example:
+// #define PLAYLIST_DEFAULT_URL "https://github.com/trip5/webstations/releases/latest/download/trip5-radio-playlist.csv"
 #ifndef SCREENSAVERSTARTUPDELAY // initial delay
   #define SCREENSAVERSTARTUPDELAY 5
 #endif
@@ -1344,26 +1350,32 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef SD_SHUFFLE
   #define SD_SHUFFLE false
 #endif
+/* --- Controls --- */
 #ifndef SMART_START
   #define SMART_START true
 #endif
-#ifndef SHOW_BUFFERBAR
-  #define SHOW_BUFFERBAR false
+#ifndef ONE_CLICK_SWITCH
+  #define ONE_CLICK_SWITCH false
 #endif
-#ifndef SHOW_VU_METER
-  #define SHOW_VU_METER true
+#ifndef TOUCH_FLIP
+  #define TOUCH_FLIP false
 #endif
-#ifndef SHOW_VU_PEAK
-  #define SHOW_VU_PEAK true
+#ifndef TOUCH_DEBUG
+  #define TOUCH_DEBUG false
 #endif
-#ifndef VU_STYLE_DEFAULT
-  #define VU_STYLE_DEFAULT 0 // be sure about the number before setting it
+#if defined(ROTARY_ACCEL) && (ROTARY_ACCEL < 0 || ROTARY_ACCEL > 7)
+  #warning "define warning in myoptions.h: ROTARY_ACCEL is out of range (0-7), reverting to default 2"
+  #undef ROTARY_ACCEL
 #endif
-#ifndef WIFI_SCAN_BEST_RSSI
-  #define WIFI_SCAN_BEST_RSSI true
+#ifndef ROTARY_ACCEL
+  #define ROTARY_ACCEL 2
 #endif
-#ifndef EHDP
-  #define EHDP true
+#if defined(IR_TOLERANCE) && (IR_TOLERANCE < 10 || IR_TOLERANCE > 80)
+  #warning "define warning in myoptions.h: IR_TOLERANCE is out of range (10-80), reverting to default 35"
+  #undef IR_TOLERANCE
+#endif
+#ifndef IR_TOLERANCE
+  #define IR_TOLERANCE 35
 #endif
 
 /* --- Screen --- */
@@ -1438,12 +1450,50 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef DIGITSGLOW
   #define DIGITSGLOW true
 #endif
+
+#ifndef SHOW_BUFFERBAR
+  #define SHOW_BUFFERBAR false
+#endif
+#ifndef SHOW_VU_METER
+  #define SHOW_VU_METER true
+#endif
+#ifndef SHOW_VU_PEAK
+  #define SHOW_VU_PEAK true
+#endif
+#ifndef VU_STYLE_DEFAULT
+  #define VU_STYLE_DEFAULT 0 // be sure about the number before setting it
+#endif
+
 #if defined(SCREEN_BRIGHTNESS) && (SCREEN_BRIGHTNESS < 1 || SCREEN_BRIGHTNESS > 100)
   #warning "define warning in myoptions.h: SCREEN_BRIGHTNESS is out of range (1-100), reverting to default 100"
   #undef SCREEN_BRIGHTNESS
 #endif
 #ifndef SCREEN_BRIGHTNESS
   #define SCREEN_BRIGHTNESS 100
+#endif
+
+/* --- Auto Dimming --- */
+#ifndef DIMMING_ENABLED
+    #define DIMMING_ENABLED false
+#endif  
+#if defined(DIMMING_TIMEOUT) && (DIMMING_TIMEOUT < 5 || DIMMING_TIMEOUT > 65520)
+  #warning "define warning in myoptions.h: DIMMING_TIMEOUT is out of range (5-65520), reverting to default 120"
+  #undef DIMMING_TIMEOUT
+#endif
+#ifndef DIMMING_TIMEOUT
+  #define DIMMING_TIMEOUT 120
+#endif
+#if defined(DIMMING_BRIGHTNESS) && (DIMMING_BRIGHTNESS < 0 || DIMMING_BRIGHTNESS > 100)
+  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is out of range (0-100), reverting to default 50"
+  #undef DIMMING_BRIGHTNESS
+#elif defined(DIMMING_BRIGHTNESS) && DIMMING_BRIGHTNESS < SCREEN_BRIGHTNESS
+  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is less than SCREEN_BRIGHTNESS, reverting to default 50 and 100"
+  #undef SCREEN_BRIGHTNESS
+  #undef DIMMING_BRIGHTNESS
+  #define SCREEN_BRIGHTNESS 100
+#endif
+#ifndef DIMMING_BRIGHTNESS
+  #define DIMMING_BRIGHTNESS 50
 #endif
 
 /* --- Screensaver --- */
@@ -1500,55 +1550,6 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 #ifndef SS_SLEEPTIME
   #define SS_SLEEPTIME 30
-#endif
-
-/* --- Screen Dimming --- */
-#ifndef DIMMING_ENABLED
-    #define DIMMING_ENABLED false
-#endif  
-#if defined(DIMMING_TIMEOUT) && (DIMMING_TIMEOUT < 5 || DIMMING_TIMEOUT > 65520)
-  #warning "define warning in myoptions.h: DIMMING_TIMEOUT is out of range (5-65520), reverting to default 120"
-  #undef DIMMING_TIMEOUT
-#endif
-#ifndef DIMMING_TIMEOUT
-  #define DIMMING_TIMEOUT 120
-#endif
-#if defined(DIMMING_BRIGHTNESS) && (DIMMING_BRIGHTNESS < 0 || DIMMING_BRIGHTNESS > 100)
-  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is out of range (0-100), reverting to default 50"
-  #undef DIMMING_BRIGHTNESS
-#elif defined(DIMMING_BRIGHTNESS) && DIMMING_BRIGHTNESS < SCREEN_BRIGHTNESS
-  #warning "define warning in myoptions.h: DIMMING_BRIGHTNESS is less than SCREEN_BRIGHTNESS, reverting to default 50 and 100"
-  #undef SCREEN_BRIGHTNESS
-  #undef DIMMING_BRIGHTNESS
-  #define SCREEN_BRIGHTNESS 100
-#endif
-#ifndef DIMMING_BRIGHTNESS
-  #define DIMMING_BRIGHTNESS 50
-#endif
-
-/* --- Controls --- */
-#ifndef TOUCH_FLIP
-  #define TOUCH_FLIP false
-#endif
-#ifndef TOUCH_DEBUG
-  #define TOUCH_DEBUG false
-#endif
-#if defined(ROTARY_ACCEL) && (ROTARY_ACCEL < 0 || ROTARY_ACCEL > 7)
-  #warning "define warning in myoptions.h: ROTARY_ACCEL is out of range (0-7), reverting to default 2"
-  #undef ROTARY_ACCEL
-#endif
-#ifndef ROTARY_ACCEL
-  #define ROTARY_ACCEL 2
-#endif
-#ifndef ONE_CLICK_SWITCH
-  #define ONE_CLICK_SWITCH false
-#endif
-#if defined(IR_TOLERANCE) && (IR_TOLERANCE < 10 || IR_TOLERANCE > 80)
-  #warning "define warning in myoptions.h: IR_TOLERANCE is out of range (10-80), reverting to default 35"
-  #undef IR_TOLERANCE
-#endif
-#ifndef IR_TOLERANCE
-  #define IR_TOLERANCE 35
 #endif
 
 /* --- Locale --- */
@@ -1643,6 +1644,23 @@ static_assert(
   __builtin_strcmp(WEATHER_WIND_SPEED_UNITS, "m/s") == 0,
   "define error: WEATHER_WIND_SPEED_UNITS must be \"kmh\", \"mph\", \"kn\", or \"m/s\""
 );
+
+/* --- System --- */
+#ifndef DBCUT_AUTO
+  #define DBCUT_AUTO true
+#endif
+#ifndef DBCUT_AUTO_OVERWRITE
+  #define DBCUT_AUTO_OVERWRITE true
+#endif
+#ifndef DBCUT_ENABLE
+  #define DBCUT_ENABLE false
+#endif
+#ifndef WIFI_SCAN_BEST_RSSI
+  #define WIFI_SCAN_BEST_RSSI true
+#endif
+#ifndef EHDP
+  #define EHDP true
+#endif
 
 /* --- MQTT --- */
 #ifndef MQTT_ENABLE

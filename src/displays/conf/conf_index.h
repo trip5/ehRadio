@@ -10,7 +10,6 @@
 // field is which struct, and where it sits in LayoutData) and the editor page
 // (the same facts, to draw and label the boxes).  Nothing here decides behaviour:
 // a layout file stores numbers and this header says what they mean.
-// rationale, alternatives and measurements: plans/layout-editor.md
 
 #include <stddef.h>
 #include <stdint.h>

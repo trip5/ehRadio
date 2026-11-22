@@ -417,7 +417,7 @@ There are notes in the `libraries` folder regarding some of the "Frankenstein" o
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.11.21 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053), Auto dBcut (dBcut replaces ovol) |
+| 2026.11.21 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053), dBcut replaces ovol (with Auto option) |
 | 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |
 | 2026.08.13 | Memory usage, stability, and bug fixes (especially to SD, VS1053) |
@@ -460,7 +460,7 @@ A full history of ёRadio from v0.4.177 to v0.9.533 can be seen in the [old Read
 Thanks to:
 
   - [death-kiss78](https://github.com/death-kiss78) - `ro_RO` & `it_IT` translations, SDMMC testing, initiated SD File Manager, inspired screensaver info text & screensaver sleep, sleep command fixes
-  - [kle7rx](https://github.com/kle7rx) - `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142, nice layouts for TFT480x320.
+  - [kle7rx](https://github.com/kle7rx) - good dialog and feedback, `ru_RU` translation, debugging, mute functionality, VS1053/I2S fixing, amplifier schematics, SSD1327 fixes, SD1322 fixes, NV3007 support, OLED128x64 Minimal & Compact layouts, Default layouts for OLED256x64 & TFT428x142, nice layouts for TFT480x320
   - [Kasperaitis](https://github.com/kasperaitis) - `lt_LT` translation, initiating locales, battery support and widget, and a bunch of work for ES3C28P (including ES8311 decoder, FT6336 touchscreen)
   - [e2002](https://github.com/e2002) - for [ёRadio](https://github.com/e2002/yoradio/) without which ehRadio would not be possible
 

@@ -2700,13 +2700,18 @@ bool Audio::pauseResume() {
 //****************************************************************************************
 #include <esp_cpu.h>   // esp_cpu_get_cycle_count(): the only clock that excludes other tasks' slices
 
-/* Cycles spent inside sendBytes() for the current i2s report window.
+/* Two counters for the current i2s report window, and why one of them is useless on its own.
  *
- * micros() measures wall time, so every slice another task takes on this core (Wi-Fi 23, lwIP 18, esp_timer 22,
- * AsyncTCP 10 and free to float onto any core) inflates it.  The CPU cycle counter does not move while we are not
- * running.  Reporting both is therefore the whole experiment: if microseconds per frame grows while cycles per frame
- * does not, the decoder is being preempted and its code is innocent; if both grow, the code itself really is slower. */
+ * s_decodeCycles brackets sendBytes(), which blocks in i2s_write() waiting for the DMA and yields to the other tasks
+ * meanwhile.  The cycle counter is free-running - it advances while this task is blocked and while anyone else holds
+ * the core - so per output frame it can never read much below clock/rate: 4,900-4,912 measured against 240 MHz /
+ * 48 kHz = 5,000.  It is pinned, which is why three builds a whole -O level apart all read the same number.
+ *
+ * s_decodeOnlyCycles brackets the decoder call alone, with the write and every wait outside it, so it is the figure
+ * that actually moves when the decoder's code changes.  Read `dcyc` against `us/frame` x clock; read plain
+ * `cyc/frame` only to spot frames the decoder never produced. */
 static uint32_t s_decodeCycles = 0;
+static uint32_t s_decodeOnlyCycles = 0;
 
 void Audio::playChunk() {
 
@@ -2846,7 +2851,7 @@ i2swrite:
             m_f_winReset    = false;
             sFramesMs       = nowMs;
             m_i2sFramesOut  = 0; m_i2sWriteUs    = 0; m_i2sWriteShort = 0;
-            m_decodeUs      = 0; m_smpDecoded    = 0; s_decodeCycles  = 0;
+            m_decodeUs      = 0; m_smpDecoded    = 0; s_decodeCycles  = 0; s_decodeOnlyCycles = 0;
             m_audioGapMaxUs = 0; m_silRuns       = 0; m_silMaxRun     = 0;
         }
         m_i2sFramesOut += (uint32_t)(i2s_bytesConsumed / (size_t)sampleSize);
@@ -2859,7 +2864,7 @@ i2swrite:
             // `smp` is decoded-versus-written in PCM frames, and it is the pair that separates "the decoder produced
             // too little" from "it produced enough and the samples never reached the DAC".  `nod` is the bytes the
             // player skipped looking for a sync: flat means the decoder is not failing, climbing means it is.
-            AUDIO_INFO("i2s: %u frames/s (decoder %u Hz, clock %u Hz) decode %u ms, write %u ms of %u, short %u, gap %u ms, sil %u runs (max %u ms), buf %u, %lu us/frame, %lu cyc/frame, smp %u/%u, nod %u",
+            AUDIO_INFO("i2s: %u frames/s (decoder %u Hz, clock %u Hz) decode %u ms, write %u ms of %u, short %u, gap %u ms, sil %u runs (max %u ms), buf %u, %lu us/frame, %lu cyc/frame, dcyc %lu, smp %u/%u, nod %u",
                     (unsigned)((uint64_t)m_i2sFramesOut * 1000ULL / span),
                     (unsigned)getSampleRate(), (unsigned)m_i2sAppliedRate,
                     (unsigned)(m_decodeUs / 1000U), (unsigned)(m_i2sWriteUs / 1000U), (unsigned)span,
@@ -2869,6 +2874,7 @@ i2swrite:
                     (unsigned)InBuff.bufferFilled(),
                     (unsigned long)(m_i2sFramesOut ? ((uint64_t)m_decodeUs / m_i2sFramesOut) : 0),
                     (unsigned long)(m_i2sFramesOut ? (s_decodeCycles / m_i2sFramesOut) : 0),
+                    (unsigned long)(m_i2sFramesOut ? (unsigned long)(s_decodeOnlyCycles / m_i2sFramesOut) : 0),
                     (unsigned)m_smpDecoded, (unsigned)m_i2sFramesOut, (unsigned)m_bytesNotDecoded);
             #if FLAC_PROFILE
             {
@@ -2895,6 +2901,7 @@ i2swrite:
             m_decodeUs      = 0;
             m_smpDecoded    = 0;
             s_decodeCycles  = 0;
+            s_decodeOnlyCycles = 0;
             m_audioGapMaxUs = 0;
             m_silRuns       = 0;
             m_silMaxRun     = 0;
@@ -5438,6 +5445,7 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
     if(m_codec == CODEC_NONE && m_playlistFormat == FORMAT_M3U8) return 0; // can happen when the m3u8 playlist is loaded
     if(!m_f_decode_ready) return 0; 									// find sync first
 
+    const uint32_t dc0 = esp_cpu_get_cycle_count();
     switch(m_codec) {
         case CODEC_WAV:  m_decodeError = 0; bytesLeft = 0; break;
         case CODEC_MP3:  m_decodeError = MP3Decode(data, &bytesLeft, m_outBuff, 0); break;
@@ -5451,6 +5459,9 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
             stopSong();
         }
     }
+    // Decode CPU alone: this bracket excludes i2s_write() and every wait, so it is the figure that moves when the
+    // decoder's code changes.  Reported as `dcyc` on the i2s: line.
+    s_decodeOnlyCycles += (uint32_t)(esp_cpu_get_cycle_count() - dc0);
 
     // m_decodeError - possible values are:
     //                   0: okay, no error
@@ -6576,12 +6587,17 @@ float Audio::loudnessDb() { return m_loudHave ? m_loudAvg : -120.0f; }
 int Audio::loudnessRaw() { return -1; }
 //****************************************************************************************
 // Mean level before Gain(), so it is independent of the knob and the cut.  ~50 ms blocks, gated at -50 dBFS.
+//
+// Integers on purpose: this runs once per sample-frame on the audio task, and a double is emulated on this chip, so
+// the old `(double)l * l + (double)r * r` was six soft-float calls per output frame - on the same core as the decoder.
+// The sum is exact either way: a square of a 16-bit sample is <= 32768^2, so a pair fits uint32 and a 50 ms block at
+// 48 kHz fits uint64 with room to spare.
 void Audio::loudnessAccum(int16_t l, int16_t r) {
-    m_loudSum += (double)l * l + (double)r * r;
+    m_loudSum += (uint32_t)((int32_t)l * l) + (uint32_t)((int32_t)r * r);
     m_loudN   += 2;
     const uint32_t blockSamples = (m_sampleRate ? (m_sampleRate / 20) : 800);
     if (m_loudN < blockSamples) return;
-    const double ms = m_loudSum / m_loudN / (32768.0 * 32768.0);
+    const double ms = (double)m_loudSum / (double)m_loudN / (32768.0 * 32768.0);
     const float  db = (ms > 0.0) ? 10.0f * log10f((float)ms) : -120.0f;
     if (db > -50.0f) {
         m_loudAvg  = m_loudHave ? (m_loudAvg + (db - m_loudAvg) * (1.0f / 200.0f)) : db;

@@ -816,7 +816,7 @@ private:
     float            m_limit_left = 1;               // limiter for Gain, left channel
     float            m_limit_right = 1;             // limiter for Gain, right channel
     float            m_cutLin = 1.0f;                // station cut as a factor, folded into computeLimit
-    double           m_loudSum = 0;                  // sum of squares for the current ~50 ms block
+    uint64_t         m_loudSum = 0;                  // sum of squares for the current ~50 ms block; integer, see loudnessAccum()
     uint32_t         m_loudN = 0;                    // samples in m_loudSum
     float            m_loudAvg = -120.0f;            // exponential mean of block level, dBFS
     bool             m_loudHave = false;

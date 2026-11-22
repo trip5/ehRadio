@@ -714,27 +714,135 @@ separately from the API surface. 720m creates its audio task at priority 2, whic
 the copy reintroduced it silently: a constant like that produces no compile error, and it was not in the additions table
 near the top of this file.
 
-## Speed: what was considered, and why it was left alone (2026.11.13)
+## Speed: what was considered, and why it was left alone (2026.11.13 and 2026.11.21)
 
-So that the next round of optimisation starts from measurements rather than from a plausible theory. **The instrument
-that settles all of it is `decode` minus `write` on the `i2s:` line** - the decoder's own share, with the blocking
-`i2s_write()` removed. It has read 23-31% on every stream that plays.
+**The benchmark stream is `https://radioemisoras.cl/distorsion.flac`** - 48 kHz FLAC, the highest sample rate we support,
+so it asks the decoder for more than anything else we play and it shows the write-blocking plainly. It is a benchmark
+and not a listening choice: it has latency of its own. Every "Distorsion" below means that URL.
+
+So that the next round of optimisation starts from measurements rather than from a plausible theory. There are **two
+rounds here and they are not comparable with each other**, because the instrument changed in between. Each figure says
+which round it belongs to.
+
+### Measurement 1 - 2026.11.13, pre-DBCUT
+
+The instrument was `decode` minus `write` on the `i2s:` line: 23-31% on every stream that played, 28% for Distorsion at
+48 kHz (`9784 - 6913` of 10025), 29-31% for Radio Paradise at 44.1 kHz. `cyc/frame` read 5,278.
+
+Both fields turned out not to mean what they were assumed to mean - see below - so this round's percentages are a record
+of what the readout said, not a measurement of decoder cost.
+
+### Measurement 2 - 2026.11.21, with DBCUT and with `dcyc`
+
+A third counter now brackets the decoder call itself - `MP3Decode`/`AACDecode`/`FLACDecode`/`OPUSDecode`/`VORBISDecode`,
+with the post-decode bookkeeping outside it - and is reported as `dcyc`. Distorsion, 20 windows of 10 s:
+
+| field | reads | what it is |
+|---|---|---|
+| `decode` | 9,807-9,838 ms of 10,027 | the `sendBytes()` call: 98% of the window |
+| `write` | 6,963-7,291 ms | the blocking `i2s_write()` *inside* that call - 9,819 + 7,262 exceeds the 10 s window, so the two cannot be disjoint |
+| `dcyc` | 636-751, mean **666** cycles per output frame | the decoder call and nothing else |
+| `cyc/frame` | 4,890-4,906 | pinned: 4,905 x 48,003 frames/s is 235 Mcycles/s, essentially all of a 240 MHz core |
+| `buf` | 178-262 KB | `InBuff.bufferFilled()`, the *input* ring: bytes read from the socket and not yet decoded. Read-ahead, not decoded audio waiting to go out |
+
+**`dcyc` is the one stable number on this line, and the formula that makes the rest of it readable is**
+
+    busy % of a core  =  cyc/frame  x  frames/s  /  clock
+
+`dcyc` counts **work** per output frame and is clock-invariant: 636-751 for FLAC at 48 kHz on a 240 MHz build and
+607-663 on a 160 MHz one. `cyc/frame` counts **core-busy** cycles per output frame - the counter stops while the core
+idles - so the same 3,250 is 65% of a core at 240 MHz and 97.5% of one at 160. The `residual` and `lpc` fields of the
+`flac cost` line sit inside `dcyc`; its `total` and `other` are `m_decodeUs` per FLAC frame with the write inside them
+and are not decoder figures.
+
+Two corrections to this file's own earlier claims, both from the 2026.11.21 runs:
+
+- **`cyc/frame` is not pinned to clock/rate.** It read 4,905 in one session and 3,250 in another with the same code
+  path, because what it counts depends on how busy the core is, not on how fast the decoder runs. Three builds a whole
+  `-O` level apart reading 4,905, 4,900 and 4,895 was not a ceiling - it was three builds measured while the core
+  happened to be saturated.
+- **`write`, and therefore `decode` minus `write`, is the unstable field.** It read 5,670-6,427 ms, then 6,963-7,291 ms,
+  then 5,784-6,130 ms across three sessions with no change to that path. A share computed from it moves ten points on
+  its own, so **never compare sessions on `decode` minus `write`**. Compare `dcyc`, and compare `frames/s` against the
+  clock to see whether the stream was actually being kept up with.
+- **Nothing beside `sendBytes()` is worth optimising.** The per-sample path outside it - VU, `loudnessAccum()`, the gain,
+  the ring copy - lives in the 2% of the window `decode` does not cover. `loudnessAccum()` was moved to integer
+  accumulation on 2026.11.21 for that reason and not because it was measurable: identical sum, six soft-float calls per
+  sample-frame fewer, 88 bytes of flash, and `dcyc` unchanged at 597-697 afterwards, as predicted.
+
+### Measurement 3 - 2026.11.21, the CPU clock trial, and why 240 stays
+
+Three minutes each on an FNIRSI FNB-58 at the USB port, volume 0, Distorsion, ring and cut settled first:
+
+| | 240 MHz | 160 MHz |
+|---|---|---|
+| `dcyc` | 597-697 | 607-663 |
+| `cyc/frame` | 3,243-3,260 | 3,245-3,262 |
+| `write` | 5,674-6,130 ms | 5,850-6,107 ms |
+| energy over 3 min | 0.076 Wh (1.52 W avg) | 0.076 Wh (1.52 W avg) |
+
+**Unverified, and it cannot be verified from these numbers.** Every reading above is identical whether or not the clock
+changed - `dcyc` and `cyc/frame` count work, not time, so a half-speed core doing the same work produces the same
+figures. The one line that would have settled it, `Clock: CPU 160 MHz, HAL 160 MHz` from the boot probe, was not kept in
+the capture. So the honest statement is: **either the trial ran at 160 and the core went from ~65% busy to ~97.5% busy,
+or both runs were the same 240 MHz build and the result is only that the counters reproduce to within 0.5% across
+sessions.** The second reading is not worthless, but it is not the experiment.
+
+What does stand, independent of the clock: the energy was 0.076 Wh over three minutes either way, so there is no
+saving large enough to see at this resolution, and 240 stays because it is the default every figure in this file assumes
+and there is no evidence to trade headroom for. The `CPU_FREQ_MHZ` option written for the trial was removed again.
+
+**The rule this costs us:** a benchmark defines its own evidence, so the boot log goes in the capture with it. Anything
+that says which clock, which build and which stream produced the numbers is part of the measurement, not decoration -
+without it a run cannot be told apart from a repeat of the previous one.
+
+### What `dcyc` found on the AAC path, which is the real result of the exercise
+
+Same instrument, `zc9483` - AAC/LATM over HLS - against FLAC at the same 48 kHz:
+
+| | FLAC | AAC over HLS |
+|---|---|---|
+| `dcyc` | 666 | **2,920-3,008** |
+| `write` | ~5,900 ms | **20-108 ms** |
+| `frames/s` against a 48,000 clock | 47,931-48,046 | **43,904-45,075** |
+
+The AAC/LATM decoder alone costs **4.4x the FLAC decoder per output frame** - ~131 Mcycles/s, 55% of a 240 MHz core -
+while `write` sits near zero and frames go missing, which says the task is working rather than waiting on the I2S. The
+`hls: nothing new, buffer ...` lines say part of the shortfall is the segment cadence rather than the CPU. **This is the
+heaviest stream we play and where optimisation would pay, not the FLAC bit reader**; AUDIO_DEBUG on top of it is what
+tips it over, which is why the skips disappear with logging off.
 
 | idea | verdict |
 |---|---|
-| `-O3`, project-wide or as a decoder `#pragma` | **Measured, no.** 5,278 cycles per frame at `-O2`; 5,267-5,289 across three configurations, the project-wide one costing 128,724 bytes of flash. Revisit only with a measurement below 4,500. |
-| FLAC bit-reader rewrite: inline the three readers, 32-bit cache instead of 64, leading-zero table for the unary quotient | **Not the bottleneck.** Needs a decode-bound stream to justify it, and none of the four measured is one. |
+| `-O3`, project-wide or as a decoder `#pragma` | **Measured, no - and the field that would settle it did not exist yet.** 5,278 `cyc/frame` at `-O2` on 2026.11.13, 5,267-5,289 across three configurations, the project-wide one costing 128,724 bytes of flash; on 2026.11.21 `-O3` plus `-fipa-pta` read 4,895 against 4,905 for `-O2`, for 127,568 B more. All of those are `cyc/frame`, which is pinned, so the verdict rests on the flash cost rather than on speed. Re-open only with `dcyc`, and the bar is beating 666 cycles per output frame for 128 KB. |
+| FLAC bit-reader rewrite: inline the three readers, 32-bit cache instead of 64, leading-zero table for the unary quotient | **Not the bottleneck, and now bounded.** `dcyc` says the whole decoder call is 666 cycles per output frame, 13.3% of the core, and only part of that is the bit reader. Needs a stream that is actually decode-bound, and none measured is. |
 | Prediction-loop hoist | **Cheapest real win, deferred - and it is worth ~4% of the window.** Concretely: locals for the pointer, bit cursor and end in `decodeResiduals()` with the refill inlined so the unary loop stops calling `readUint()` per bit; and a `switch(order)` in `restoreLinearPrediction()` with straight-line cases for 0-4, 8 and 12 so the coefficient loads hoist. 13.2 ms of a 29 ms decoder frame, of which it might take a third. |
-| Measure the ~16 ms/frame that no instrument covers (header parse, subframe walk, decorrelation, output scaling) | **Deferred, and it is the larger target.** 31% of the window is all non-write audio work; residual+lpc is only 45% of that. Instrumenting the rest before optimising either is the right order. |
-| Higher-rate FLAC | **Out of scope by decision.** For a given source, decode cost scales with sample rate x bit depth, not bitrate: 44.1/16 is 31%, 96/24 would land near 68%, and 192/24 cannot work - the 6.1 Mbit stream proved that. 1441 kbit/s at 44.1/16 is CD-level and it decodes in a third of the window, which is the bar we chose to stop at. |
+| Measure the ~16 ms/frame that no instrument covers (header parse, subframe walk, decorrelation, output scaling) | **Partly located by `dcyc` on 2026.11.21, and still unsized.** The decoder call is 666 cycles per output frame and 13.3% of a 240 MHz core; what is left over inside `sendBytes()` moves with the `write` field, which is the unreliable one, so it cannot be sized from these fields. It needs its own bracket - that is where the next one belongs. |
+| Higher-rate FLAC | **Out of scope by decision.** Decode cost scales with sample rate x bit depth, not bitrate: 48/16 is 666 cycles per output frame, 13.3% of the core, so 96/24 lands near 53% of it and 192/24 near all of it, before the write-blocking is added - which is what the 6.1 Mbit stream proved. 1441 kbit/s at 44.1/16 is CD-level and decodes in a fraction of the window, which is the bar we chose to stop at. |
 | Bigger reader window, or higher TCP receive window | **Tried, no effect.** `DEOGG_READ_MAX` 4 KB -> 16 KB changed nothing; the de-ogger now reads the full ring room. The 1.2-1.5 Mbit feeds are limited by their own upstream. |
 | Audio task priority | **Already done.** Priority 6, above AsyncTCP (4): that change took the deficit from 7% to 2.7% and is still the reason the decoder keeps up. |
 | DMA depth | **Already done.** 64 descriptors of 256 frames (682 ms at 24 kHz) after a 341 ms network burst emptied 32. |
+| Lower the CPU clock to 160 MHz | **Trial inconclusive (2026.11.21); 240 stays.** 0.076 Wh over three minutes at both settings, and `dcyc` and `cyc/frame` identical - but those fields count work, not time, so they read the same whether or not the clock changed, and the boot line that would have settled it was not captured. No measurable saving, no evidence to trade headroom for, and the framework default is what every figure here assumes. See measurement 3. |
 | Smaller ring for MP3/AAC | **Pointless.** ~6 MB of PSRAM stays free, and only FLAC ever fills a ring. |
 | Prefetch cap | Not a speed matter - it bounds latency. See item 10. |
 | VU and spectrum work | On the display task, never on the audio task. |
 
-**Two streams on the same instrument, and what they disagree about.** Distorsion at 48 kHz spends 28% of the window
+**WLED's `[Speed_Flags]` list, checked against the above (2026.11.21).** Nine flags there. Two are already here -
+`build_unflags = -Os` and `-O2` in `platformio.ini` - and the `-O3` row above is the filter for most of the rest,
+because it says the decoder is not codegen-bound.
+
+| flag | verdict |
+|---|---|
+| `-fipa-pta` | **Measured, no (2026.11.21).** No `-O` level enables it, so the `-O3` row did not cover it. The compiler side is the decisive half: flash moved 16 B in one pair of builds and 4 B in another, RAM identical, 68 s against ~61 s - the output barely changed, which is what a 0.1% effect looks like. The board comparison predates `dcyc`, so it rests on `decode` minus `write` (35.4% against 36.3%), which the `write` field's own swing makes meaningless. If it is ever re-opened, compare `dcyc` against 666. **Out of `platformio.ini`.** |
+| `-funsafe-math-optimizations` | Reachable as part of `-Ofast`, so also untested here - but every decoder in this tree is fixed-point, so it cannot move the 13.3% of the core that `dcyc` measures. The float work is the resampler and biquads in the audio task and the VU FFT on the display task, and no instrument has read either share. Not worth numeric drift in filters before that share is known. |
+| `-fsingle-precision-constant` | **Superseded.** It only affects unsuffixed literals, and the per-sample double it might have helped was an explicit cast it does not touch. `loudnessAccum()` was made integer by hand on 2026.11.21 instead: exact same sum, and it costs nothing at the call site. |
+| `-fno-jump-tables`, `-fno-tree-switch-conversion` | A workaround for a crash WLED hit. Both are de-optimisations wherever a jump table would exist: more flash, and a compare chain instead. `-O2` has shipped here without them, so try them only if an exception ever lands inside a `switch`. |
+| `-freorder-blocks` | Enabled at `-O2` already - no-op. |
+| `-Wwrite-strings` | A C diagnostic. In C++ string literals are `const char[]` already, so no-op, and it would only add warnings. |
+| `-fstrict-volatile-bitfields` | Changes how volatile bitfields are accessed, and there are none under `src/`: every `volatile` is a bool, a counter or a `TaskHandle_t`. |
+| `-free` | Not a GCC option - as written it fails the build, so it is a typo in their file, probably `-Wl,--gc-sections` mangled in transit. |
+
+**Measurement 1, two streams on the old instrument, and what they disagree about.** Distorsion at 48 kHz spends 28% of the window
 (`9784 - 6913` of 10025) and Radio Paradise at 44.1 kHz spends 29-31%, although Distorsion carries 9% more samples per
 second: its residual is 0.55 ms per frame against RP's 8.5-11 ms, because it is a far less complex encode. So sample
 rate sets the floor and source complexity sets the cost on top of it - which is also why the 192/24 stream failed, where

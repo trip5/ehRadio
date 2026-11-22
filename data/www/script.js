@@ -9,10 +9,37 @@ if(params.size>0){
   if(params.has('host')) hostname=params.get('host');
 }
 var websocket;
-var wserrcnt = 0;
+var wserrcnt = 0;          /* consecutive failed attempts; a session that actually ran clears it */
 var wstimeout;
+var wsopenedAt = 0;        /* when the live socket opened - decides whether a close counts as a failure */
+var wsLastMsg = 0;         /* Date.now() of the last frame received: the watchdog's clock */
+var wsProbeAt = 0;         /* Date.now() of the liveness question the watchdog asked, 0 = none outstanding */
+var wsWatch = null;
 var loaded = false;
 var currentItem = 0;
+
+/* Reconnect cadence.  These are gaps BETWEEN attempts, and a powered-off radio does not refuse a connection - it
+   swallows the SYN until the browser's own connect timeout expires - so a long gap costs far more than the number
+   suggests.  2 s covers the tail of a reboot, 10 s is one minute of someone watching the page, and 30 s is the
+   resting probe once the radio is plainly gone.  The jitter keeps several open tabs off the same instant: a reload
+   storm is a known device-side heap problem, so nothing here should arrive in lockstep. */
+const WS_RETRY_FAST_MS  = 2000;
+const WS_RETRY_FAST_MAX = 4;
+const WS_RETRY_MID_MS   = 10000;
+const WS_RETRY_MID_MAX  = 12;
+const WS_RETRY_SLOW_MS  = 30000;
+const WS_JITTER         = 0.25;
+/* A session shorter than this is a failure that merely got as far as opening, so it keeps climbing the ladder - a
+   device stuck in a boot loop must not be retried every 2 s for ever.  A session that lived means the link was good. */
+const WS_SESSION_OK_MS  = 10000;
+/* The device broadcasts NRSSI every 2 s while it is up (network.cpp ticks at 1 s and sends on every second one), so
+   this is fifteen missed heartbeats - wider than any gap the firmware can legitimately make. */
+const WS_SILENCE_MS     = 30000;
+/* Silence is not proof on its own: NRSSI is only sent while network.status is CONNECTED, so a device serving its own
+   access point (SOFT_AP, first-time setup) sends nothing at all on an idle page.  The page therefore proves the socket
+   dead by asking one cheap question and giving the answer this long to arrive before it throws a working link away. */
+const WS_PROBE_GRACE_MS = 5000;
+
 window.addEventListener('load', onLoad);
 
 // bitrate/codec display state
@@ -56,15 +83,97 @@ function initWebSocket() {
 }
 function onLoad(event) { initWebSocket(); }
 
+/* How long to wait before the next attempt, given n consecutive failures.  A step ladder rather than one number:
+   the fast end has to outlast a reboot, and the slow end has to be short enough that a radio switched back on is
+   picked up promptly - which is what the old 120000 ms step could not do. */
+function wsRetryDelay(n) {
+  const base = (n <= WS_RETRY_FAST_MAX) ? WS_RETRY_FAST_MS
+             : (n <= WS_RETRY_MID_MAX)  ? WS_RETRY_MID_MS
+                                        : WS_RETRY_SLOW_MS;
+  return Math.round(base * (1 + WS_JITTER * (Math.random() * 2 - 1)));
+}
+
+/* The RSSI graphic carries the connection state as well as the signal: no bars at all is what it already draws for
+   "no level", so a dead page looks like a page with no signal rather than one that is alive.  Coming back needs no
+   code at all - the device's own NRSSI broadcast repaints the bars within about two seconds of a reconnect. */
+function wsMarkDown() {
+  setRssiBars(0);
+}
+
+/* Silence is the only evidence a dead socket gives: an idle connection to a peer that vanished is not an error, so
+   onclose may never fire at all and the page sits on a link that died minutes ago.  Compared on the wall clock, so a
+   tab the browser throttled to one tick a minute still decides on the time that actually passed.
+   Two stages, because silence alone cannot tell a dead device from a quiet one: ask first, reconnect only if the
+   question goes unanswered.  The answer is ordinary traffic, so it resets the clock like any other frame. */
+function wsStartWatch() {
+  wsStopWatch();
+  wsLastMsg = Date.now();
+  wsProbeAt = 0;
+  wsWatch = setInterval(function(){
+    if (!websocket || websocket.readyState !== 1) return;
+    if (Date.now() - wsLastMsg <= WS_SILENCE_MS) { wsProbeAt = 0; return; }
+    if (!wsProbeAt) {
+      // getmute is one small JSON reply and changes nothing on the device.
+      console.log('WebSocket silent, asking the device if it is there...');
+      wsProbeAt = Date.now();
+      try { websocket.send('getmute=1'); } catch (e) {}
+      return;
+    }
+    if (Date.now() - wsProbeAt < WS_PROBE_GRACE_MS) return;
+    console.log('WebSocket silent and unanswered, reconnecting...');
+    wsDropAndReopen();
+    wsMarkDown();
+  }, 1000);
+}
+function wsStopWatch() {
+  if (wsWatch !== null) { clearInterval(wsWatch); wsWatch = null; }
+}
+
+/* Abandons a socket that may be half-open.  close() towards a peer that is gone can take the browser's whole
+   retransmission budget, so the old socket is detached and left to die: with no handlers it cannot also fire onClose
+   and arm the retry timer, which would leave two chains running. */
+function wsDropAndReopen() {
+  wsStopWatch();
+  if (websocket) {
+    websocket.onopen = null;
+    websocket.onclose = null;
+    websocket.onmessage = null;
+    try { websocket.close(); } catch (e) {}
+    websocket = null;
+  }
+  initWebSocket();
+}
+
+/* A returning user is the case worth optimising: the radio is back on, the tab comes to the front, and the ladder
+   may still be half a minute from its next probe.  Only a socket that is CLOSING or CLOSED is reopened - an attempt
+   already in flight is the fastest thing that can happen anyway, and a second socket would cost the device heap. */
+function wsWakeReconnect() {
+  if (!websocket) { wserrcnt = 0; initWebSocket(); return; }
+  if (websocket.readyState === 0 || websocket.readyState === 1) return;
+  wserrcnt = 0;
+  wsDropAndReopen();
+}
+window.addEventListener('online', wsWakeReconnect);
+window.addEventListener('focus', wsWakeReconnect);
+document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible') wsWakeReconnect(); });
+
 function onOpen(event) {
   console.log('Connection opened');
+  wsopenedAt = Date.now();
+  wsStartWatch();
   continueLoading(playMode); //playMode in variables.js
   loaded = true;
-  wserrcnt=0;
 }
 function onClose(event) {
+  wsStopWatch();
+  /* A session that actually ran was not a failed attempt, so it clears the ladder.  The counter is NOT cleared on
+     open, because a device that opens and dies again a second later has to keep walking away from the fast end. */
+  if (wsopenedAt && Date.now() - wsopenedAt > WS_SESSION_OK_MS) wserrcnt = 0;
+  wsopenedAt = 0;
   wserrcnt++;
-  wstimeout=setTimeout(initWebSocket, wserrcnt<10?2000:120000);
+  /* The timer is armed BEFORE the page is told, so the retry chain never depends on an element existing. */
+  wstimeout=setTimeout(initWebSocket, wsRetryDelay(wserrcnt));
+  wsMarkDown();
 }
 function secondToTime(seconds){
   if(seconds>=3600){
@@ -78,6 +187,8 @@ function showById(show,hide){
   hide.forEach(item=>{ getId(item).classList.add('hidden'); });
 }
 function onMessage(event) {
+  wsLastMsg = Date.now();   // any frame proves the socket is alive, even one we cannot parse
+  wsProbeAt = 0;            // ...and it also answers the watchdog's question
   try{
     const data = JSON.parse(escapeData(event.data));
     /*ir*/

@@ -4143,6 +4143,39 @@ thinks the radio forgot everything. The loader-side wait was not built.
   - online update UI progress handling
   - shared ready-aware redirect helper (`redirectWhenReady`) used by update and reboot flows
   - mode switching (`changeMode`) and its guard state (`setModeSwitching`)
+- **The reconnect cadence is a ladder, and silence is what starts it.** `onClose` waits `wsRetryDelay(n)`: 2 s for the
+  first four failures, 10 s up to twelve, then 30 s, each with ±25 % jitter so several open tabs do not retry in
+  lockstep (a lockstep arrival is the reload-storm shape the device already knows). The old form was
+  `wserrcnt<10?2000:120000` - one step straight to two minutes, which left a radio that came back unseen for up to
+  that long, and it is a *gap* rather than an interval, so each attempt's own connect timeout is added on top.
+  `wserrcnt` is NOT cleared in `onOpen`: it is cleared in `onClose` only when the session lasted longer than
+  `WS_SESSION_OK_MS` (10 s), so a device stuck in a boot loop walks away from the fast end instead of being retried
+  every 2 s for ever. Every number is a `WS_*` constant at the top of the file.
+- **The page starts reconnecting on SILENCE, not on an error.** An idle socket to a peer that has gone is not an
+  error, so `onclose` may never fire and the page sits on a dead link indefinitely - this, not the retry delay, is
+  the dominant delay in the power-off case. `wsStartWatch()`/`wsStopWatch()` run a 1 s timer that compares
+  `Date.now()` with the last frame (`wsLastMsg`, stamped in `onMessage` before the payload is parsed, so an
+  unparseable frame still counts). `WS_SILENCE_MS` (30 s) is set against the device's own heartbeat: `ticks()` runs at
+  1 s and broadcasts `NRSSI` on every second one, so 30 s is fifteen missed beats. The comparison is on the wall clock,
+  so a tab the browser throttled to one tick a minute decides on the time that actually passed.
+- **Silence alone is not proof, so the watchdog asks before it acts.** `NRSSI` is only sent while `network.status` is
+  `CONNECTED`, so a device serving its own access point (`SOFT_AP`, first-time setup) sends nothing at all on an idle
+  page and a bare silence test would churn a perfectly healthy socket every 30 s. Stage one sends `getmute=1` - one
+  small JSON reply, no state change - and stage two reconnects only if the answer has not arrived within
+  `WS_PROBE_GRACE_MS` (5 s). Any frame clears `wsProbeAt`, so an answered probe is just traffic and costs one
+  round-trip per idle half-minute.
+- **An abandoned socket is detached before it is closed.** `wsDropAndReopen()` nulls `onopen`/`onclose`/`onmessage`
+  and then calls `close()`, because `close()` towards a vanished peer can take the browser's whole retransmission
+  budget; a still-attached `onclose` would also arm the retry timer, leaving two chains running.
+- **A returning tab reconnects at once.** `wsWakeReconnect()` is bound to `visibilitychange` (visible only), `online`
+  and `focus`, and acts only on a socket that is CLOSING or CLOSED - never on one already CONNECTING, where a second
+  socket would cost the device heap for nothing - clearing `wserrcnt` so the ladder restarts at its fast end.
+- **The RSSI graphic is the connection indicator.** `wsMarkDown()` calls `setRssiBars(0)` from `onClose` and from the
+  watchdog, so a dead page reads as a page with no signal. Nothing writes a label: the tooltip is a hover target over
+  an area that is not visible at zero bars, so a "Disconnected" caption there could never be read. Coming back needs
+  no code at all - the next `NRSSI` broadcast repaints the bars within about 2 s. `#rssibars` is in `player.html`
+  alone, so the settings and update pages carry no indicator and need none. In `onClose` the retry timer is armed
+  BEFORE the indicator is touched, so a missing element can never leave the page without a retry.
 - **A press that changes something stays lit for a moment.** The `data-command` handler adds `.pressed` to any button
   carrying `hold` and removes it after `HOLD_MS` (2 s), restarting the timer on a repeated press; `style.css` gives
   `.pressed` exactly the hover colours, so a touch screen - which never fires `:hover` - sees the press too.

@@ -425,11 +425,6 @@ table.stations .importantmessage { color: var(--heading-text) !important; font-s
 #updateprogress::-webkit-progress-value { background-color: var(--meter-fill); border-radius: 15px 0 0 15px; }
 #updateprogress::-moz-progress-bar { background-color: var(--meter-fill); border-radius: 15px; }
 .onlineupdatebutton { max-width: 100%; width: 100%; margin: 0; font-family: Times, "Times New Roman", serif; }
-#settingspopup.ir { width: 180px; }
-#settingspopup.ir .button { padding: 8px 8px; }
-#settingsbuttonir { display: none; }
-#settingspopup.ir #settingsbuttonwifi { min-width: 104px; width: 104px; display: inline-block; }
-#settingspopup.ir #settingsbuttonir { min-width: 60px; width: 60px; display: inline-block; margin-left: 0; float: right; }
 .fb.tool { padding: 4px 12px; font-size: 14px; font-weight: normal; min-width: 100px; margin-top: 30px; }
 body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: none; }
 @keyframes spinner { 0% { transform: rotate(0deg);  } 100% { transform: rotate(360deg); } }

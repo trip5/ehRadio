@@ -98,6 +98,8 @@ void setup() {
   controls.checkButtonsHeldOnBoot(); // check for hold-to-SD before network decision
   backlightControls.init();
   BOOTTIMELOG("config.init & controls & backlight");
+  bootHeapSnapshot("before-display");
+  bootPsramSnapshot("before-display");
   display.init();
   bootPsramSnapshot("display");     // 1 + 2 + 3: the framebuffer windows and both VU canvases
   BOOTTIMELOG("display.init");

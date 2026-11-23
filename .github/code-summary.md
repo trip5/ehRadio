@@ -658,8 +658,15 @@ All modules in `src/core/` follow the **class + global instance** pattern:
 - SPI bus initialization: `Config::init()` calls `SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI)` only when `SPIA_SCK` is
   defined and `!= 255`, and `SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI)` only when `SPIB_SCK` is defined and `!= 255`.
   I2C-only builds skip SPI init entirely. Both buses are initialized before `_initHW()` and before `display.init()` /
-  `player.init()`. Both SPI buses are fully configured before any peripheral uses them. `SPIClass
-  SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in `config.h`.
+  `player.init()`. `SPIClass SPIB(SPI_BUS_SECONDARY)` is declared at file scope in `config.cpp`; extern declared in
+  `config.h`.
+- **Bus A is begun again after bus B, and a bus must be re-begun before its first transfer** (2026.11.23, two-bus
+  builds). Starting the second host leaves the first unable to run a transfer on core 3.x: `spiTransaction()` still
+  completes but `cmd.usr` never clears, so the first byte spins forever with no panic, no watchdog message and no log.
+  `SPIClass::begin()` cannot repair it - it returns at once once its handle is set - so `Config::init()` ends bus A and
+  begins it again. This is what made an ILI9488 boot stop dead inside `display.init()`. Every SPI display driver
+  (`Adafruit_SPITFT`, `SSD1322`, `ILI9486_SPI`) begins its bus the same no-op way and is exposed the same way, which is
+  why the fix lives here and not in a driver. `SDManager::_mount()` re-begins its own bus for the same reason.
 - **A safe-mode boot pays a deliberate 1 s before anything else.** `setup()` holds `if (!config.store.bootStableMarker)
   delay(1000)` and then dumps the config (`bootInfo`, ~196 ms at 115200), so the early stage measures ~1586 ms in safe
   mode against ~590 ms settled - the NVS path itself costs ~412 ms and needs no optimisation. `bootStableMarker` is only

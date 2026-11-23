@@ -8,10 +8,14 @@ the library search path at link time.
 | file | what it is |
 |---|---|
 | [`make_patch.py`](make_patch.py) | the one you run. Clones ESP-IDF at the exact version the installed libs package was built from, applies the whitelist, builds only the archives needed, harvests them here |
-| [`pre_patch.py`](pre_patch.py) | runs before every build. Checks whether what is in this folder still matches the installed package, and stays silent when there is no patch |
-| [`post_patch.py`](post_patch.py) | runs after every build. Prepends the folder to `LIBPATH` and prints `Patch linked: ...` once |
+| [`pre_patch.py`](pre_patch.py) | runs before every firmware build. Checks whether what is in this folder still matches the installed package, and stays silent when there is no patch |
+| [`post_patch.py`](post_patch.py) | runs after every firmware build. Prepends the folder to `LIBPATH` and prints `Patch linked: ...` once |
 | `patch-info.txt` | written by the maker, read by the two hooks. IDF version and commit, the sha of the `sdkconfig` it started from, the changes it applied, the toolchain, the archive sha |
 | `<mcu>/` | one directory per MCU: `esp32s3/liblwip.a`, and whatever else that target's run produced |
+
+Both hooks key off SCons `COMMAND_LINE_TARGETS` and skip a run whose only targets are `buildfs`/`uploadfs`: packing
+LittleFS never links, so there is nothing to check and nothing to shadow. A combined `-t upload -t uploadfs` still
+runs them, because the firmware is linked in that run.
 
 ## 0. What gets patched, and why each archive exists
 
@@ -170,14 +174,15 @@ only way to express it and window scaling is an ABI break. 65535 is the ceiling;
 
 ## 5. Verifying a build picked it up
 
-The next `pio run` should print, once, near the end:
+The next `pio run` that links firmware should print, once, near the end:
 
 ```
 Patch linked: liblwip.a 31f1... (4 archive(s) from builds/patch/esp32s3: liblwip.a, libmbedcrypto.a, libmbedtls.a, libmbedx509.a)
 ```
 
 and the pre-build hook prints a one-liner naming the archive sha and the changes it records. If they are
-missing, the pre-build hook found no patch for that MCU or refused a stale one, and it says which.
+missing on a firmware build, the pre-build hook found no patch for that MCU or refused a stale one, and it says which.
+A `buildfs` or `uploadfs` log holds neither line, and that is the correct log for it.
 
 Beware of one trap: **flash size does not change** when you swap these archives. Do not use it as evidence.
 Use the log line, or the map file:

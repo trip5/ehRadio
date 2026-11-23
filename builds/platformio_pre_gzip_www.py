@@ -4,6 +4,8 @@ import shutil
 import time
 from pathlib import Path
 
+from SCons.Script import COMMAND_LINE_TARGETS
+
 # Temp directory outside data folder
 TEMP_BACKUP_DIR = Path(".pio/temp_www_backup")
 LOCK_FILE = Path(".pio/temp_www_backup.lock")
@@ -156,9 +158,9 @@ def compress_and_hide_originals(source, target, env):
     print(f"LittleFS will contain ONLY .gz files (and excluded files)")
     print("="*70 + "\n")
 
-# Detect if we're doing a filesystem operation
-import sys
-any_fs_target = any(t in sys.argv for t in ["uploadfs", "buildfs", "--target"])
+# SCons lists the requested targets, so an image is packed only when one is asked for.
+FILESYSTEM_TARGETS = {"buildfs", "uploadfs"}
+any_fs_target = any(t in FILESYSTEM_TARGETS for t in COMMAND_LINE_TARGETS)
 
 if any_fs_target:
     # Acquire before doing anything

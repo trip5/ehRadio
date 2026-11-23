@@ -16,8 +16,17 @@ Import("env")
 import hashlib
 from pathlib import Path
 
+from SCons.Script import COMMAND_LINE_TARGETS
+
 PREFIX = "Patch"
 PATCH_ROOT = Path(env.subst("$PROJECT_DIR")) / "builds" / "patch"
+FILESYSTEM_TARGETS = {"buildfs", "uploadfs"}
+
+
+def _filesystem_only_build():
+    # A run that only packs LittleFS never links, so the patch cannot matter.
+    targets = list(COMMAND_LINE_TARGETS)
+    return bool(targets) and all(target in FILESYSTEM_TARGETS for target in targets)
 
 
 def _sha256(path, length=12):
@@ -48,8 +57,9 @@ def _announce_after_link(archive_sha, mcu, archives):
         print(f"{PREFIX}: could not hook the link step ({exc})")
 
 
-mcu = _mcu()
-archive = PATCH_ROOT / mcu / "liblwip.a"
-if archive.is_file():
-    env.Prepend(LIBPATH=[str(archive.parent)])
-    _announce_after_link(_sha256(archive), mcu, sorted(path.name for path in archive.parent.glob("*.a")))
+if not _filesystem_only_build():
+    mcu = _mcu()
+    archive = PATCH_ROOT / mcu / "liblwip.a"
+    if archive.is_file():
+        env.Prepend(LIBPATH=[str(archive.parent)])
+        _announce_after_link(_sha256(archive), mcu, sorted(path.name for path in archive.parent.glob("*.a")))

@@ -274,7 +274,9 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 - `post_patch.py` shadows the folder with `env.Prepend(LIBPATH=[builds/patch/<mcu>])` — the builder resolves `-llwip`
   by name through `LIBPATH`, so the prepended directory wins — and prints one `Patch linked: liblwip.a <sha> (N
   archive(s) ...)` line after the link. `pre_patch.py` compares `patch-info.txt` against the live package (IDF version,
-  `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are silent/no-ops when no archive exists.
+  `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are silent/no-ops when no archive exists, and
+  both key off SCons `COMMAND_LINE_TARGETS` to skip a run whose only targets are `buildfs`/`uploadfs`, since packing
+  LittleFS never links.
 - Reverting is deleting a directory. Two measurement traps: the firmware
   **byte count does not change** when the window does (`ili9488` was 3158691 either way), so compare binary hashes or
   count `firmware.map` references instead; and `TCP_RECVMBOX_SIZE` (6) caps in-flight data at ~8.6 KB, so a window-only
@@ -3274,7 +3276,8 @@ thinks the radio forgot everything. The loader-side wait was not built.
     inherits a 40px-wide, 8px-padded, 1px-bordered span box - override every one of those or the element will not be
     the size that was asked for.**
   - **THE WEB FILES ARE NOT IN THE FIRMWARE BINARY.** `board_build.filesystem = littlefs` and the gzip scripts run
-    ONLY for filesystem targets, so `pio run -e <env>` builds the FIRMWARE and nothing else - an edit to
+    ONLY for filesystem targets - `builds/platformio_pre_gzip_www.py` tests SCons `COMMAND_LINE_TARGETS` for
+    `buildfs`/`uploadfs` - so `pio run -e <env>` builds the FIRMWARE and nothing else - an edit to
     `data/www/*.html`, `*.js` or `*.css` is invisible until `-t buildfs` (and `uploadfs` to flash it). The two are a
     pair and are flashed separately. A build that reports no compilation and an unchanged flash size after a web edit
     is telling you the web edit is not in it.

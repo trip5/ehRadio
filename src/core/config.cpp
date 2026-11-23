@@ -72,10 +72,15 @@ void Config::init() {
     }
   #endif
   #if defined(SPIA_SCK) && (SPIA_SCK != 255)
-    SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI);
+    BOOTLOG("SPI A begin(SCK %d, MISO %d, MOSI %d) -> %d", SPIA_SCK, SPIA_MISO, SPIA_MOSI, (int)SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI));
   #endif
   #if defined(SPIB_SCK) && (SPIB_SCK != 255)
-    SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI);
+    BOOTLOG("SPI B begin(SCK %d, MISO %d, MOSI %d) -> %d", SPIB_SCK, SPIB_MISO, SPIB_MOSI, (int)SPIB.begin(SPIB_SCK, SPIB_MISO, SPIB_MOSI));
+  #endif
+  // Bus A is restarted after bus B is started: starting the second host is what leaves the first one unable to transfer.
+  #if defined(SPIA_SCK) && (SPIA_SCK != 255) && defined(SPIB_SCK) && (SPIB_SCK != 255)
+    SPI.end();
+    BOOTLOG("SPI A restarted after bus B -> %d", (int)SPI.begin(SPIA_SCK, SPIA_MISO, SPIA_MOSI));
   #endif
   store.play_mode = store.play_mode & 0b11;
   if (store.play_mode>1) store.play_mode = PM_WEB;

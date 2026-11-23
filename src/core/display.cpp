@@ -264,7 +264,11 @@ static void loopDspTask(void * pvParameters) {
 }
 
 void Display::_createDspTask() {
-  xTaskCreatePinnedToCore(loopDspTask, "DspTask", (DSP_TASK_STACK_SIZE * 1024), NULL, DSP_TASK_PRIORITY, &dspTaskHandle, DSP_TASK_CORE_ID);
+  if (xTaskCreatePinnedToCore(loopDspTask, "DspTask", (DSP_TASK_STACK_SIZE * 1024), NULL, DSP_TASK_PRIORITY, &dspTaskHandle, DSP_TASK_CORE_ID) != pdPASS) {
+    ERRORLOG("DISPLAY: DspTask create failed. Rebooting.");
+    delay(10);
+    ESP.restart();
+  }
 }
 
 #ifndef DUMMYDISPLAY // ============================== DUMMYDISPLAY Below ==============================
@@ -402,7 +406,18 @@ void Display::init() {
   if (displayQueue==NULL) { ERRORLOG("DISPLAY: displayQueue alloc failed. Rebooting."); delay(10); ESP.restart(); }
   _pager = new Pager();
   _createDspTask();
-  while(_bootStep==0) { delay(10); }
+  // The boot screen comes from the display task; without it nothing is ever drawn, so a wait that never ends is
+  // reported rather than left to freeze.
+  const uint32_t bootWaitStart = millis();
+  while(_bootStep==0) {
+    if (millis() - bootWaitStart > 5000UL) {
+      ERRORLOG("DISPLAY: boot screen never came up after %u ms (free %u, psram %u)",
+               (unsigned)(millis() - bootWaitStart), (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram());
+      delay(10);
+      ESP.restart();
+    }
+    delay(10);
+  }
   //_pager.begin();
   //_bootScreen()
   _footer = new Page();

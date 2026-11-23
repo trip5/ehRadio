@@ -1,5 +1,5 @@
 [ { "title": "Audio Decoder",
-    "info": "Read more: https://github.com/trip5/ehRadio#audio-decoder" },
+    "info": "Read more: https://trip5.github.io/ehRadio/Hardware/#audio-decoder" },
   {
     "name": "VS1053 (SPI Audio Decoder)",
     "info": "Highly recommended to make VS1053 the sole device on the SPI bus\nIf VS_PATCH_ENABLE is true, it is required\nOther SPI devices can share a bus\nVS1003 will work but only decode MP3",

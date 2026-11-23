@@ -16,13 +16,98 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read   # the gate reads workflow-run status
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  # The site must not advertise a version whose firmware is not published yet: the flasher and the
+  # firmware page read firmware-info.json from this site, so publishing early shows a new version
+  # with nothing behind it.  Both firmware workflows trigger this one when they complete, so a run
+  # here can stand aside and the site still ends up deployed.  workflow_dispatch is the deliberate
+  # override for when this gate is wrong.
+  firmware-gate:
+    name: Firmware release gate
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.gate.outputs.skip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Check the advertised version has a complete release
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+
+          VERSION_FILE="builds/${{ github.repository_owner }}/web_assets/firmware-info.json"
+          [ -f "$VERSION_FILE" ] || VERSION_FILE="builds/releases/web_assets/firmware-info.json"
+          RADIOVERSION=$(grep -oP '#define RADIOVERSION "\K[^"]+' src/core/options.h)
+          VERSION=$(jq -r '.version // empty' "$VERSION_FILE" 2>/dev/null || true)
+          VERSION=${VERSION:-$RADIOVERSION}
+          echo "advertised version ${VERSION}, RADIOVERSION ${RADIOVERSION}, from ${VERSION_FILE}"
+
+          # A tag build or a manual run of either firmware workflow deploys the site itself when it
+          # finishes, so a push run only has to stand aside while one is working.  The first pause
+          # lets a run started by the same push register; a read error counts as nothing running,
+          # so a flaky API can never wedge the site.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            for pause in 30 15 15; do
+              sleep "$pause"
+              RUNNING=""
+              for wf in build-release-firmware.yml update-builds-in-release.yml; do
+                COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?per_page=20" \
+                  --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 0)
+                if [ "${COUNT:-0}" -gt 0 ]; then RUNNING="${RUNNING} ${wf}"; fi
+              done
+              if [ -n "$RUNNING" ]; then
+                echo "::notice title=Firmware build running::${RUNNING# } is running, and its completion deploys the site"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+          fi
+
+          # The release test is the one update-builds-in-release.yml uses to decide a release is
+          # complete: every app image named in firmware.txt.  Bootloader, partitions and filesystem
+          # images are only reported, because the build workflows treat those as warnings.
+          ASSETS_FILE=$(mktemp)
+          if ! gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > "$ASSETS_FILE" 2>/dev/null; then
+            echo "::notice title=No release ${VERSION}::release ${VERSION} does not exist yet, so the site keeps its current version"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MISSING=""
+          while IFS='|' read -r board_env chip_family fw_env friendly_name; do
+            [ -n "${fw_env:-}" ] || continue
+            grep -qx "${fw_env}.bin" "$ASSETS_FILE" || MISSING="${MISSING} ${fw_env}.bin"
+          done < builds/releases/firmware.txt
+
+          if [ -n "$MISSING" ]; then
+            echo "::notice title=Release ${VERSION} is incomplete::missing${MISSING}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          awk -F'|' '{print $1}' builds/releases/firmware.txt | sort -u | while read -r board_env; do
+            for kind in bootloader partitions filesystem; do
+              grep -qx "${board_env}_${kind}.bin" "$ASSETS_FILE" \
+                || echo "::warning title=Release ${VERSION}::${board_env}_${kind}.bin is missing (non-blocking)"
+            done
+          done
+
+          echo "✅ release ${VERSION} carries every app image, deploying the site"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
   build-deploy:
+    needs: firmware-gate
+    if: always() && needs.firmware-gate.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -116,15 +201,39 @@ jobs:
           #    repo-root relative.
           sed -i -E "s%]\((\./)?([^)#:/][^)#:]*\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|mp4|webm|pdf|zip|apk))\)%](${RAW}/\2)%gI" docs/index.md
           #
-          # 2. Any other repo-relative target becomes a blob url.  MkDocs only resolves
-          #    links between documentation pages, so repo files such as
-          #    [LICENSE](LICENSE) would 404 on the site.  A target without a colon is
-          #    repo-relative; anything containing ':' (https:, mailto:), starting with
-          #    a '#' anchor or starting with '/' (site-absolute) is left untouched.
-          #    Nothing is hardcoded, so forks rewrite against their own repo + branch.
-          sed -i -E "s|]\(([^)#/][^):]*)\)|](${BASE}/\1)|g" docs/index.md
+          # 2. Any other repo-relative target stays relative when it resolves to a file
+          #    inside docs/: that is a page MkDocs builds (or an asset it serves), and
+          #    MkDocs rewrites it to the site url, so the link remains inside the site.
+          #    A repo file the site does not serve, such as [LICENSE](LICENSE), becomes a
+          #    blob url so it does not 404.  The test is file existence, not a page list,
+          #    so a newly linked page needs no edit here, and a link to a page that does
+          #    not exist fails 'mkdocs build --strict' instead of silently becoming
+          #    repository view.  Targets containing ':' (https:, mailto:), starting with
+          #    '#' or starting with '/' (site-absolute) are left untouched.  Nothing is
+          #    hardcoded, so forks rewrite against their own repo + branch.
+          BASE="${BASE}" python3 - <<'PY'
+          import os
+          import re
+
+          base = os.environ["BASE"]
+          link = re.compile(r"\]\(([^)\s]+)([^)]*)\)")
+
+          def rewrite(match):
+              target = match.group(1)
+              if ":" in target or target.startswith(("#", "/")):
+                  return match.group(0)
+              clean = target[2:] if target.startswith("./") else target
+              if os.path.exists(os.path.join("docs", clean.split("#")[0])):
+                  return match.group(0)
+              return f"]({base}/{clean}{match.group(2)})"
+
+          with open("docs/index.md", encoding="utf-8") as fh:
+              text = fh.read()
+          with open("docs/index.md", "w", encoding="utf-8") as fh:
+              fh.write(link.sub(rewrite, text))
+          PY
           echo "Asset links rewritten against ${RAW}/"
-          echo "Repo file links rewritten against ${BASE}/"
+          echo "Site-served links left relative; repo file links rewritten against ${BASE}/"
 
       - name: Customize firmware.html and flasher.html
         if: github.repository_owner != 'trip5'

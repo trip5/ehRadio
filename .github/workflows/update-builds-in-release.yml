@@ -66,8 +66,9 @@ jobs:
 
       - name: Verify builds/releases/ is up-to-date
         # --no-build: the next step compiles the firmware that is actually missing or
-        # changed, and this workflow deliberately does not rebuild everything. The full
-        # build gate runs on the PR into main.
+        # changed, and this workflow deliberately does not rebuild everything. The PR into
+        # main only proves this metadata was regenerated locally; nothing compiles here but
+        # the missing or changed firmware below.
         run: |
           echo "🔍 Verifying builds/releases/ is up-to-date..."
           python3 builds/prepare_releases.py --yes --no-build

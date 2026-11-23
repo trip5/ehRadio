@@ -66,10 +66,10 @@ jobs:
 
       - name: Verify builds/releases/ is up-to-date
         # --no-build because the next step compiles every environment anyway: building here
-        # too would compile the same environments twice for no extra evidence. The build
-        # gate that matters runs on the PR into main, where prepare_releases.py is called
-        # without --no-build. git status rather than git diff, because manifests are deleted
-        # and rewritten and an orphaned one is untracked, which a diff never reports.
+        # too would compile the same environments twice for no extra evidence. The PR into
+        # main only proves this metadata was regenerated locally, so the compile gate for a
+        # release is the build below. git status rather than git diff, because manifests are
+        # deleted and rewritten and an orphaned one is untracked, which a diff never reports.
         run: |
           echo "🔍 Verifying builds/releases/ is up-to-date..."
           python3 builds/prepare_releases.py --yes --no-build

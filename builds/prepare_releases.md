@@ -22,7 +22,7 @@ Nothing under `releases/` is written until the build has passed, so a tree that 
 python builds/prepare_releases.py             # validate, build every variant, then generate
 python builds/prepare_releases.py --yes       # same, without the confirmation prompt (CI)
 python builds/prepare_releases.py --check     # validate only: no build, no writes
-python builds/prepare_releases.py --no-build  # skip the build (release workflows only)
+python builds/prepare_releases.py --no-build  # skip the build (CI metadata checks for Github Workflow)
 python builds/prepare_releases.py --verbose   # stream compiler output instead of capturing it
 ```
 
@@ -30,7 +30,7 @@ The default run asks `Are you ready to compile all builds? [y/N]` before it star
 
 **`--check`** runs the two validation phases and stops: contributor naming/filesystem rules plus preprocessor balance. It writes nothing and compiles nothing, so it is the fast gate used by `add_builds.py` STAGE 0 and the `Config check` PR job.
 
-**`--no-build`** skips only the compile. The metadata is still validated and regenerated, so this cannot produce a false pass: the `Build all firmware` job on the PR into `main` runs the script *without* this flag, and compiles everything regardless of what was done locally. It exists so the two release workflows, whose next step compiles the same environments, do not build them twice.
+**`--no-build`** skips only the compile. The metadata is still validated and regenerated, so it cannot turn a broken config into a pass. It is used where the compile happens elsewhere: the two release workflows, whose next step compiles the same environments, and the `Release metadata check` on a PR into `main`, where the full build was run locally and happens again on the tag. Fresh committed metadata is the evidence that local run happened, because nothing is written before the build phase passes.
 
 The script runs four phases, stopping at the first failure:
 1. **Naming**: scan all immediate subfolders of `builds/` (e.g. `trip5/`, `no_display/`) for a `myoptions.h`, and check every `FIRMWARE` name and filesystem type (see the rules below)
@@ -107,7 +107,7 @@ Variant names are formatted as `Contributor FriendlyName` (e.g. `Trip5 Color Scr
 Three CI touch points, all running this one script:
 
 - `pr-check.yml` **Config check** (`--check`) on PRs into `dev` and `main`: naming, filesystem and preprocessor balance. Seconds, no compiler.
-- `pr-check.yml` **Build all firmware** on PRs into `main`: the full run, every contributor's every environment, then a `git status` check on `builds/releases/`. A folder that no longer compiles, or metadata that was not regenerated, blocks the merge to `main`.
+- `pr-check.yml` **Release metadata check** on PRs into `main`: `--no-build`, so no compiler runs, then a `git status` check on `builds/releases/`. Regenerated-but-uncommitted metadata blocks the merge to `main`. The compile gate for a release is `build-release-firmware.yml` on the tag, which builds every environment before it creates the release.
 - The two release workflows run it with `--no-build` in their verify step, because their next step compiles the same environments, and fail if `git status` shows any change under `builds/releases/`.
 
 The compile jobs are skipped when a PR changes nothing the toolchain reads: `src/**`, any `platformio.ini`, `builds/**`, `data/**`, `*.c/*.cc/*.cpp/*.h/*.hpp/*.ino`, or `.github/workflows/**`. A docs-only PR therefore runs only the branch and config checks. A skipped job still counts as a satisfied required check, so a README change merges without waiting for a build. Add the `force-build` label to a PR to run the compile jobs anyway.

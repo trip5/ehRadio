@@ -62,8 +62,9 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   orphan `#endif` closes the include guard early and fails every translation unit), a build of every `[env:...]`
   in every contributor folder (`pio run -e <env>` inside a scratch copy at `.build_all/`, which is deleted
   afterwards so the live root `platformio.ini`/`myoptions.h` and `use_build.py`'s locks are never touched), then
-  the metadata generation. `pr-check.yml` runs it **without** `--no-build` on PRs into `main`; `--no-build` exists
-  only for the two release workflows, and `--check` stops after the two validation phases.
+  the metadata generation. `pr-check.yml` runs it with `--no-build` in `Release metadata check`, so that gate
+  proves the metadata was regenerated locally instead of compiling a second time; the compile gate for a release
+  is `build-release-firmware.yml` on the tag. `--check` stops after the two validation phases.
 - Both release workflows also produce one `<board_env>_filesystem.bin` per board: `pio run -e <env> -t buildfs`, then
   the image is copied out of `$BUILD_DIR/littlefs.bin` and deduplicated with an `fs_done` map, exactly like the
   bootloader and partitions. Content is identical across variants, so one image per partition layout is enough. If
@@ -73,8 +74,15 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   the `littlefs` row) and writes a non-standard `filesystem` entry (`path`, `offset`, `size`) into every manifest.
   ESP Web Tools ignores it; `docs/flasher.html` uses it to write the WebUI filesystem when "Full reinstall" is ticked,
   which is why that path skips the first-boot format and the later download of the web files.
-- `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves
-  the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
+- `.github/workflows/build-deploy-page.yml` deploys Pages on a push to `main`, on completion of either firmware
+  workflow, and on manual dispatch. A `firmware-gate` job runs first and skips the deploy while a firmware workflow
+  is queued or running (push runs only) or while the advertised `firmware-info.json` version has no release carrying
+  every `<fw_env>.bin` in `firmware.txt`, so the page cannot advertise firmware that is not published. The `deploy`
+  job's condition reads `always() && needs.build-deploy.result == 'success'` because a skipped `firmware-gate`
+  otherwise makes the implicit `success()` false and silently skips the publish. On branch/manual runs the workflow
+  preserves the currently published `firmware-info.json` and manifests instead of overwriting them from
+  `builds/*/web_assets`; those downloads are retried and fall back to the committed manifest, because Pages answers
+  503 while a deployment is in flight and that used to fail the whole job.
 - `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to
   `dev`, enabling ruleset bypass configured for Deploy keys.
 

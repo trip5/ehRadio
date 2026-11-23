@@ -21,7 +21,7 @@ Usage:
   python builds/prepare_releases.py             # all four phases; asks before compiling
   python builds/prepare_releases.py --yes       # same, without the prompt (CI)
   python builds/prepare_releases.py --check     # phases 1-2: no build, no writes
-  python builds/prepare_releases.py --no-build  # phases 1, 2, 4 (release workflows only)
+  python builds/prepare_releases.py --no-build  # phases 1, 2, 4 (CI: the tag build compiles)
 
 WHY A SCRATCH COPY
   Root platformio.ini / myoptions.h are the live files that use_build.py swaps and that the
@@ -704,7 +704,7 @@ def parse_args():
     parser.add_argument('--check', action='store_true',
                         help='phases 1-2 only: validate configs, build nothing, write nothing')
     parser.add_argument('--no-build', action='store_true',
-                        help='skip the build phase (release workflows only: they compile next)')
+                        help='skip the build phase (CI verifies metadata; the tag build compiles)')
     parser.add_argument('--verbose', action='store_true',
                         help='stream compiler output instead of capturing it')
     return parser.parse_args()

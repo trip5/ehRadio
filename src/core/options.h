@@ -1158,54 +1158,24 @@ or examine the examples in builds/trip5 and make your own!
 
 /* ============================== DEBUG ============================== */
 
-/* Enable all the debug logs with #define ALL_DEBUG_LOGS */
-/* Note that turning on all logs can make the serial log very noisy (and every print to serial adds milliseconds of delay to running code! */
-/* So it is highly recommended to NEVER use ALL_DEBUG_LOGS or any debug includes in a "final" build! */
-/* Even when serial monitor is not connected,*/
-/* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. */
+/* Note that turning on many logs can make the serial log very noisy - and every print to serial adds milliseconds of delay to running code! */
+/* So it is highly recommended to NEVER include any debug logging includes in a "final" build! Even when serial monitor is not connected! */
+/* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. A lot of output is diagnostic data. */
 
-#ifdef ALL_DEBUG_LOGS
-  #ifndef WARNINGS_LOG
-   #define WARNINGS_LOG // This enables showing non-fatal warning-level errors
-  #endif
-  #ifndef CONFIG_KEY_DEBUG
-    #define CONFIG_KEY_DEBUG // This shows every Prefs key and the value written to it
-  #endif
-  #ifndef METADATA_LOG
-    #define METADATA_LOG // This enables showing ID3 and Icy Metadata in the logs - useful to debug titles not being printed by handleShowStreamTitle()
-  #endif
-  #ifndef NETSERVER_DEBUG
-   #define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
-  #endif
-  #ifndef CORE_MONITOR
-    #define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s), includes LittleFS information
-  #endif
-  #ifndef BOOTLOG_TIME
-    #define BOOTLOG_TIME // Prefixes every BOOT log line with the time since boot, e.g. "[BOOT]          00600ms: ..." (the bootLogX progress lines the dots extend are left alone)
-  #endif
-  #ifndef WIDGET_DEBUG
-    #define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
-  #endif
-  #ifndef AUDIO_DEBUG
-    #define AUDIO_DEBUG // Per-track chatter from the audio library: tag and file sizes, syncword positions, the 10 s ring arithmetic, the codec/rate report - plus the ID3 frame walk and the library's own diagnostic lines
-  #endif
-  #ifndef VU_VS1053_LOG
-    #define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
-  #endif
-#endif
+//#define WARNINGS_LOG // This enables showing non-fatal warning-level errors
+//#define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s), includes LittleFS information (adds 1 s to boot time)
+//#define BOOTLOG_TIME // Prefixes every BOOT log line with the time since boot, e.g. "[BOOT]          00600ms: ..." (the bootLogX progress lines the dots extend are left alone) (adds 1 s to boot time)
+//#define CONFIG_KEY_DEBUG // This shows every Prefs key and the value written to it (adds 1 s to boot time)
+//#define METADATA_LOG // This enables showing ID3 and Icy Metadata in the logs - useful to debug titles not being printed by handleShowStreamTitle()
+//#define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
+//#define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
+//#define AUDIO_DEBUG // Per-track chatter from the audio library: tag and file sizes, syncword positions, the 10 s ring arithmetic, the codec/rate report - plus the ID3 frame walk and the library's own diagnostic lines
+//#define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
+//#define HEAPMAP_LOG // The [HeapMap] line: which pool TextId3 buffers really live in, plus the quarantine count, printed on every ID3 header (twice per HLS segment).  It proves all three buffers are PSRAM and never move.
 
-/* The [HeapMap] line: which pool TextId3 buffers really live in, plus the quarantine count, printed on every ID3
-   header (twice per HLS segment).  It is what proved all three buffers are PSRAM and never move, so it is kept but
-   switched off - uncomment in myoptions.h to bring it back.  Deliberately NOT part of ALL_DEBUG_LOGS: it is far too
-   frequent to enable by accident. */
-//#define HEAPMAP_LOG
-
+ // Set to true to enable ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
 #ifndef ESPFILEUPDATER_VERBOSE
-  #ifdef ALL_DEBUG_LOGS
-    #define ESPFILEUPDATER_VERBOSE true // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
-  #else
-    #define ESPFILEUPDATER_VERBOSE false // it needs a value
-  #endif
+  #define ESPFILEUPDATER_VERBOSE false // requires a default
 #endif
 
 /* Print the previous boot's crash at boot (only useful if the binar)*/

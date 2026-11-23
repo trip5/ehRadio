@@ -1059,24 +1059,20 @@ void Config::bootInfo() {
   #else
     SERIALLOG(" (no password)");
   #endif
-  #ifdef ALL_DEBUG_LOGS
-    BOOTLOG("ALL_DEBUG_LOGS:\tenabled");
-  #else
-    #if defined(ESPFILEUPDATER_DEBUG)
-      BOOTLOG("ESPFILEUPDATER_DEBUG enabled");
-    #endif
-    #if defined(NETSERVER_DEBUG)
-      BOOTLOG("NETSERVER_DEBUG\tenabled");
-    #endif
-    #if defined(CORE_MONITOR)
-      BOOTLOG("CORE_MONITOR\tenabled");
-    #endif
+  #if defined(WARNINGS_LOG)
+    BOOTLOG("WARNINGS_LOG enabled");
   #endif
-  #if defined(CORS_DEBUG)
-    BOOTLOG("CORS_DEBUG\tenabled");
+  #if defined(CORE_MONITOR)
+    BOOTLOG("CORE_MONITOR\tenabled");
   #endif
-  #if defined(BATTERY_DEBUG)
-    BOOTLOG("BATTERY_DEBUG\tenabled");
+  #if defined(BOOTLOG_TIME)
+    BOOTLOG("BOOTLOG_TIME\tenabled");
+  #endif
+  #if defined(CONFIG_KEY_DEBUG)
+    BOOTLOG("CONFIG_KEY_DEBUG\tenabled");
+  #endif
+  #if (ESPFILEUPDATER_VERBOSE)
+    BOOTLOG("ESPFILEUPDATER_VERBOSE\tenabled");
   #endif
   BOOTLOG("Display Locale:\t%s", store.locale_display);
   BOOTLOG("WebUI Locale:\t%s", store.locale_webui);

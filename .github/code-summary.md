@@ -110,9 +110,8 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - `AUDIOLOG(category, ...)`: callback-safe logging wrapper for stack-sensitive audio callback contexts.
   - `WARNINGLOG(...)`: warning-category wrapper (`[Warning]`), the middle level - see the two-level rule below.
   - `WARNINGS_LOG` is the switch for that level, and it is a plain flag like every other debug switch here:
-    `#ifdef WARNINGS_LOG` / `#ifndef WARNINGS_LOG`, listed in `options.h` inside the `ALL_DEBUG_LOGS` block. So
     `[Warning]` lines exist only in a debug build, which is the point: a shipped log carries `[ERROR]` and nothing
-    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h` (or `ALL_DEBUG_LOGS`). Two traps.
+    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h`. Two traps.
     (1) A flag is on whether it is 1 or 0, so `#define WARNINGS_LOG 0` *enables* it - the way to leave it off is
     simply not to define it. (2) The test sits in the body of `warningLog()` in `logging.cpp`, not around the macro in
     `logging.h`: that header is included by translation units that cannot see `options.h`, where the flag would be
@@ -146,23 +145,22 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   the two `[SD]` trace lines (`connecttoFS`, `play pos ... card n/m`) are behind `SD_PLAY_TRACE_MS`, which now defaults
   to **0** - set it to e.g. 30000 in `myoptions.h` for a soak, since that pair is what says whether the card reader or
   the decoder stopped. `CONFIG_KEY_DEBUG` does the same for the `[Config.key]` value dumps in `config.h`.
-  - `BOOTLOG_TIME` (defaulted in `options.h` under `ALL_DEBUG_LOGS`, set in `myoptions.h` for debug builds) makes every
-    `BOOTLOG` line carry the time since boot, zero-padded to five digits, between the 16-character category field and
-    the message: `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false
-    in that one file alone while the rest of the build has the macro - a silent feature loss with a green build. Only
-    `bootLog()` stamps, selected by category plus newline (`appendNewline && category == "BOOT"`), because `bootLogX()`
-    writes no newline and a stamp there would land mid-line; the value is `millis()` at emit time and self-widens past
-    100 s, and telnet receives the same composed line. Boot logs are the boot-timing measurement: consecutive deltas
+  - `BOOTLOG_TIME` (set in `myoptions.h` for debug builds) makes every `BOOTLOG` line carry the time since boot,
+    zero-padded to five digits, between the 16-character category field and the message:
+    `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false in that one
+    file alone while the rest of the build has the macro - a silent feature loss with a green build. Only `bootLog()`
+    stamps, selected by category plus newline (`appendNewline && category == "BOOT"`), because `bootLogX()` writes no
+    newline and a stamp there would land mid-line; the value is `millis()` at emit time and self-widens past 100 s,
+    and telnet receives the same composed line. Boot logs are the boot-timing measurement: consecutive deltas
     attribute a slow boot to its stages. It is also the switch for the three stage timing logs (`BOOTTIMELOG`,
     `LITTLEFSTIMELOG`, `CONFIGTIMELOG`): undefined, their bodies compile to nothing, so the build has no stage lines and
     loses the `[BOOT] ...ms:` prefixes too. Measured: 216 bytes, 52 of them call sites, which stay as empty functions in
     the off build.
-  - `ESPFILEUPDATER_VERBOSE` is derived in `options.h`, immediately after `ESPFILEUPDATER_DEBUG` is settled there, not
-    in `logging.h`. It lived in `logging.h` once, where the library files that include that header without `options.h`
-    (`FT6336.cpp`, `es8311.cpp`, the four `audioVS1053Ex.cpp` variants) resolved it to `false` while the core resolved
-    it to `true` - one macro with two values in one build. All six call sites pass it to
-    `ESPFileUpdater::checkAndUpdate()` and include `options.h`; a seventh that forgets now fails to compile rather than
-    quietly logging nothing.
+  - `ESPFILEUPDATER_VERBOSE` is defaulted to `false` in `options.h`. It lived in `logging.h` once, where the library
+    files that include that header without `options.h` (`FT6336.cpp`, `es8311.cpp`, the four `audioVS1053Ex.cpp` variants)
+    resolved it to `false` while the core resolved it to `true` - one macro with two values in one build. All six call
+    sites pass it to `ESPFileUpdater::checkAndUpdate()` and include `options.h`; a seventh that forgets now fails to compile
+    rather than quietly logging nothing.
   - Boot stage attribution: `BOOTTIMELOG(name)` closes each block of `setup()` with the stage's cost, e.g.
     `[BOOT]          01950ms: checkLittleFSandVer                    377ms` - the timestamp is the running total to the end
     of that stage and the message is that stage's share. The init paths announce completion with `BOOTLOGX` progress
@@ -223,9 +221,10 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   It then erases the dump, or every later boot would report the same crash again. `COREDUMP_KEEP_DUMP` (options.h)
   leaves it in flash for `esp-coredump`, and `COREDUMP_SUMMARY_AT_BOOT` (on by default) is the switch for the feature;
   both it and `CONFIG_ESP_COREDUMP_*` must hold or the file compiles to empty stubs.
-- `main.cpp` calls it right after the 1 second pre-log delay, inside the same `CORE_DEBUG_LEVEL`/`ALL_DEBUG_LOGS` guard,
-  and that delay also fires when a dump is waiting (after a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT
-  reason, not `ESP_RST_POWERON`). The block runs early in `setup()`, so the crash is logged before the rest of the boot.
+- `main.cpp` calls it right after the 1 second pre-log delay, inside the same
+  `CORE_DEBUG_LEVEL`/`BOOTLOG_TIME`/`CONFIG_KEY_DEBUG` guard and that delay also fires when a dump is waiting (after
+  a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT reason, not `ESP_RST_POWERON`). The block runs early in
+  `setup()`, so the crash is logged before the rest of the boot.
 - The summary API exists only in the ELF core-dump build of the IDF libraries, so `crashreport.cpp` is guarded by `#if
   defined(COREDUMP_SUMMARY_AT_BOOT) && CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`; both
   sdkconfig macros are 1 here, and the map file confirms `esp_core_dump_get_summary` links in from
@@ -2641,9 +2640,6 @@ thinks the radio forgot everything. The loader-side wait was not built.
   the battery payload is `volt: NmV, percentage: N%` with nothing else. `Battery::formatStatusLine()` and the WebUI's
   three status spans (`battery_charging` / `battery_discharging` / `battery_idle`) are gone; the older description of
   "charge/discharge inference with candidate windows" and `applyPowerPolicy()` never existed in this code.
-- Logging note:
-  - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths),
-    replacing direct serial/telnet prints.
 
 ## `src/core/backlightcontrols.h` / `backlightcontrols.cpp`
 - `backlightcontrols.h` declares `class BacklightControls` (real class under `BRIGHTNESS_PIN` + `DSP_DIMMING_ENABLED`
@@ -5378,8 +5374,7 @@ and draw time and prints them every 5 s like the Core Monitor: `[VU.Widget] Box 
 avg / 2.31ms peak, interval 33ms, 12.0 fills/frame, free heap 93000`. `fills/frame` counts `_fillLocal()` and
 `_drawBand()` calls (not the blit) and is what shows whether a style is drawing rects it does not need; the draw time
 shows whether the box is simply too big for the panel. The members and the log are both behind `#ifdef WIDGET_DEBUG`, so
-a normal build pays nothing for either. The `WIDGET_DEBUG` line in `options.h`'s `ALL_DEBUG_LOGS` block used to read
-`#ifdef WIDGET_DEBUG`, a define that could never take effect; it is now `#ifndef`, matching its siblings.
+a normal build pays nothing for either.
 
 ### Colours on OLED
 
@@ -5680,8 +5675,7 @@ ones that are still raw literals are marked as **words** (x4), which is where th
 
 ### CORE_MONITOR debug feature (opt-in)
 
-Enabled by `ALL_DEBUG_LOGS`, or directly with `#define CORE_MONITOR` in `myoptions.h` — `options.h` only defines it
-inside the `ALL_DEBUG_LOGS` block. The counters and helpers in `src/displays/tools/dspstats.h` compile to nothing when
+Enabled with `#define CORE_MONITOR` in `myoptions.h` only. The counters and helpers in `src/displays/tools/dspstats.h` compile to nothing when
 it is not defined, so a build without the monitor pays nothing for them.
 
 Emits to serial + telnet every 5 seconds:

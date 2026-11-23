@@ -4171,12 +4171,30 @@ thinks the radio forgot everything. The loader-side wait was not built.
   small JSON reply, no state change - and stage two reconnects only if the answer has not arrived within
   `WS_PROBE_GRACE_MS` (5 s). Any frame clears `wsProbeAt`, so an answered probe is just traffic and costs one
   round-trip per idle half-minute.
-- **An abandoned socket is detached before it is closed.** `wsDropAndReopen()` nulls `onopen`/`onclose`/`onmessage`
-  and then calls `close()`, because `close()` towards a vanished peer can take the browser's whole retransmission
-  budget; a still-attached `onclose` would also arm the retry timer, leaving two chains running.
-- **A returning tab reconnects at once.** `wsWakeReconnect()` is bound to `visibilitychange` (visible only), `online`
-  and `focus`, and acts only on a socket that is CLOSING or CLOSED - never on one already CONNECTING, where a second
-  socket would cost the device heap for nothing - clearing `wserrcnt` so the ladder restarts at its fast end.
+- **`initWebSocket()` is the ONLY place a socket is created, and it tears the old one down first.** It nulls
+  `onopen`/`onclose`/`onmessage`, calls `close()` and clears the global before constructing. That is not tidiness. The
+  wake listeners are registered while the shell's `<head>` (`index_html` in `netserver.h`) is still parsing, and
+  Firefox Android fires `focus`/`visibilitychange` for a NEW document before `load`: a wake trigger opened socket A,
+  `load` opened socket B, and A stayed attached. A's `onOpen` ran `continueLoading` and set `loaded`; the page's burst
+  then went to B while B was still CONNECTING, `send()` threw `InvalidStateError`, and the throw abandoned the rest of
+  the burst - the settings page kept the groups it never unhid and the player page never sent `getindex`, so no
+  playlist and no now-playing. B's own `onOpen` could not repair it, because `continueLoading` returns early on
+  `loaded`. Edge mobile and the desktop browsers never fired the event early enough to lose that race, which is why it
+  looked Firefox-mobile-only.
+- **Stale events are ignored.** `onOpen`, `onClose` and `onMessage` all begin with `if (event.target !== websocket)
+  return;`, so a replaced socket can neither arm a retry nor blank the bars nor touch the page. Order stops mattering,
+  which is what makes the teardown above safe to rely on.
+- **A page's request burst does not depend on the connection's timing.** Each page's load records its request set with
+  `wsSetPageBurst(...)` - the player's `getindex`, the settings page's `get*` set, AP mode's `getactive` - and asks for
+  it with `wsRequestPageState()`, which sends only while the socket is OPEN. `onOpen` asks for the same set on every
+  open, so a burst whose fetch resolved during a connect is served by the open that follows, and a reconnect
+  REPOPULATES the page instead of leaving it as it was before the drop. Deliberately state-only: replaying an action
+  (`reboot`, `format`, a delete) after a reconnect would be worse than losing the press, so those stay direct sends.
+- **A returning tab reconnects at once, and nothing else does.** `wsWakeReconnect()` is bound to `visibilitychange`
+  (visible only), `online` and `focus`; it does nothing until `loaded` is true - before that `onLoad` is the only
+  opener and an early event has nothing to repair - and it replaces only a socket whose `readyState` is 3 (CLOSED).
+  CLOSING is already on its way to `onClose`, and minting a socket on top of it is the other way a phone ends up
+  holding two. It clears `wserrcnt` so the ladder restarts at its fast end.
 - **The RSSI graphic is the connection indicator.** `wsMarkDown()` calls `setRssiBars(0)` from `onClose` and from the
   watchdog, so a dead page reads as a page with no signal. Nothing writes a label: the tooltip is a hover target over
   an area that is not visible at zero bars, so a "Disconnected" caption there could never be read. Coming back needs
@@ -4222,8 +4240,20 @@ thinks the radio forgot everything. The loader-side wait was not built.
     reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host
     with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without
     redirect.
-- consolidated with `data/www/dragpl.js`
-  - Playlist drag-and-drop reorder behavior.
+- **Playlist row reordering (folded in from the former `data/www/dragpl.js`) is one Pointer Events path for mouse and
+  touch, started by MOVEMENT and never by a timer.** `pointerdown` on a `.grabbable` handle arms `pressHandle`,
+  `pointermove` starts the drag once either axis passes `DRAG_START_PX` (6 px), `pointerup` drops through
+  `elementFromPoint` (so pointer capture cannot hide the real target) and `pointercancel` cleans up. `pointerdown` also
+  calls `preventDefault()`, and the handle carries no `draggable` attribute, because Firefox Android's long-press
+  gesture owns a held touch: it starts a native drag on a `draggable` element and cancels the pointer stream, so a
+  timer-gated grab can never complete there. That is why BOTH earlier designs - HTML5 DnD plus hand-rolled touch
+  events, and then a 1 s long press on pointer events - did nothing at all on that browser while working everywhere
+  else: `startDrag()` was never reached, and the row never even dimmed. `#pleditorcontent .grabbable` sets
+  `touch-action: none`, whose price is that a swipe beginning on the number column no longer scrolls the list; the row
+  body still does. `startDrag`, `setIndicator`, `doDrop`, `handleAutoScroll` and `updateIndices` are unchanged and
+  shared - they take plain `clientX`/`clientY`, so mouse and touch run the same code. Confirmed on Firefox Android,
+  Chrome Android and desktop after the threshold change (2026.11.23). A temporary `?dbgdrag=1` overlay traced the
+  event stream while this was being found and is deliberately gone: a timer-gated grab was the fault, not the events.
 
 ## `data/www/options.js`
 - Settings page behavior.

@@ -397,8 +397,15 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   after the board/PSRAM guards. The display framebuffer and VU canvas lines are TFT-only (an OLED build has neither);
   the WebUI cache is opportunistic and falls back to LittleFS, so it is headroom rather than a hard requirement.
 - Buffer bar visual mapping:
-  - `BUFFERBAR_VISUAL_FULL_PERCENT` controls where input-buffer fill is rendered as visually full.
-  - default `82` means 82% raw fill maps to 100% bar width; set `100` to keep direct 1:1 mapping.
+  - `BUFFERBAR_VISUAL_FULL_KB` is the byte count at which `player.inBufferFilled()` renders as a full bar
+    (`1024 * 250`); the widget's `setValue()` is clamped to it by `normalizeBufferbarValue()` in `display.cpp`.
+  - It is a fixed byte count on purpose: the bar shows fill, not listening time, so it saturates at a different
+    number of seconds on every bitrate. (An earlier entry here said `BUFFERBAR_VISUAL_FULL_PERCENT`, default 82 -
+    that macro no longer exists.)
+- Audio-risk display limiter (`audioRingAtRisk()` in `display.cpp`): `DSP_TASK_DELAY` is multiplied by 4 while the
+  ring holds less than `AUDIO_RISK_ENGAGE_MS` of audio, released above `AUDIO_RISK_RELEASE_MS` (250 / 750 in
+  `options.h`, guarded by a `#error` if the two are inverted). Measured in time, not bytes; until a stream has
+  measured `streamBytesPerSecond()`, a 32 KB floor stands in.
 
 ### `src/core/options_overrides.h` (the force-included config)
 - **Why it exists**: third-party libraries are their own translation units and never include `options.h`, so a value

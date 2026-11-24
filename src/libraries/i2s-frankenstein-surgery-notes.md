@@ -1021,3 +1021,155 @@ applies.
    `SCI_AICTRL3` reading under the same name, so `player.cpp` can log one line every 10 s while a station is learning on
    *either* build, and the two logs can be paired to calibrate that meter against this path - which is how its
    `VS1053_METER_FULL_DB` was set to 100. Nothing about the measurement, the gate or the time constant changed.
+
+## Post-Graft Patch Fixes (2026.11.23)
+
+**Files changed**: `src/libraries/VS1053_Audio/audioVS1053Ex.cpp` (+ `.h`). A VS1053 change recorded here because the
+numbers that explain it are the ones above; the fork's own notes carry the short version.
+
+1. **The VS1053 bitrate is measured now, not read out of a register.** `getAudioCurrentTime()` read `SCI_HDAT0` and
+   multiplied by 8 - the AAC conversion, which that file itself calls undocumented - and the result had to land inside
+   8,000-640,000 to survive. On an Ogg FLAC stream the register holds something else: two consecutive connections to the
+   same ~2 Mbit source read **262,944** and **444,104** bit/s, and `m_brEstimated` then locked the first of them in for
+   the rest of the stream. The display was never at fault - `formatBitrate3()` already renders `kbps >= 1000` as one
+   decimal of a Mbit, so 2,000 kbit reads `2.0`, and 9.9 is the only ceiling because that is all three characters hold.
+
+   The replacement is the ring balance: `(Δ bytes that reached the ring − Δ ring occupancy) × 8 ÷ Δt` is what the chip
+   consumed, and a real-time stream consumes at its own bitrate. Server bursts and ring depth cancel in the subtraction,
+   so it needs no per-codec table and cannot be fooled by a full ring. The two numbers it subtracts already existed:
+   `s_ringTotal`, counted for the liveness clock, and `InBuff.bufferFilled()`.
+
+2. **A 2 s window, smoothed over five, published only when the kbit would change.** The core's field is kbit and the
+   badge redraws on every `setBitrate()`, so sub-kbit wobble would cost display work and show nothing. **No range gate
+   and no latch:** whatever the measurement says is the number, and it is free to change - which is the whole point of
+   replacing a latch with a measurement.
+
+3. **MP3 keeps its exact value.** `getAudioCurrentTime()` reads the frame bitrate out of `HDAT1` through the l3id3 /
+   l3id012 tables, better than any measurement for MP3 including VBR, so the measured path skips MP3 and the rest of
+   that function is now `return 0`.
+
+4. **`slow stream, dropouts are possible` is gone from the VS1053 fork**, for exactly the reason item 6 of the I2S
+   post-graft list gives about the same message here: a ring below one max block is the steady state, because the feeder
+   drains whole blocks. Measured on a healthy 1.4 Mbit stream it fired three times over a ring that then held 334 KB.
+   The five-second no-bytes-reached-the-ring clock is the honest test and stays.
+
+5. **`track10s` reports a feed rate in KB/s.** `m_feedBytes` is cumulative across connections, so the rate comes from a
+   baseline captured when the connection starts. It is the throughput figure that fork lacked, and it separates "the chip
+   is ahead of us" from "the network is behind us" in a capture.
+
+6. **The same number on I2S, from the one place that can see it.** `computeAudioTime()` returns at once for a live
+   stream - its guard wants a local file or a `ST_WEBFILE`, and a stream is `ST_WEBSTREAM` - so the FLAC badge there
+   showed `setBitrate(FLACGetBitRate())`, the decoder's one-frame nominal, for ever: **2.7 Mbit on a 24-bit stream that
+   carries 1.7**, because that formula divides by a "compression ratio" below 1, which FLAC cannot produce. The
+   measurement now lives in `playChunk()`'s existing 10 s report window - `Δm_sumBytesDecoded × 8000 ÷ span` - and both
+   forks share one publishing rule: **at most once every 10 s, and only when the number the badge renders changes**
+   (tenths of a Mbit at 1000 kbit and above, whole kbit below). A 1.5 Mbit stream wobbles by several kbit a second, and
+   publishing every wobble was printing a line a second. MP3 keeps its exact `HDAT1` frame bitrate, which is better than
+   any measurement and only changes when a VBR encoder does.
+
+7. **What a 24-bit stream really does on I2S: it starves, it does not decode slowly.** Lapfox
+   (`radio.lapfoxradio.com/radio/8000/stream-flac.flac`, 48 kHz, 2 ch, **24 bit**, block 4096, ~1.7 Mbit, chunked over
+   TLS) reports `38,477 frames/s` against a 48,000 clock - **20% of frames never produced**, which is the static heard
+   on that board - while `dcyc` reads **1,144**, the same as Distorsion's 1,089-1,172 on the same build, `decode` is
+   only 30% of the window and `write` is 36 ms. So the decoder is not the constraint: the ring sits at 10-28 KB (one to
+   three frames), the de-ogger shows `avail 0` and its reads swing 45-208 KB/s. **The free heap at connect was 46 KB
+   here against 156 KB on the VS1053 board for the same station**, which is where to look next: a TLS session needs
+   room, and a socket that keeps answering "nothing available" is what a 20% frame deficit looks like from the audio
+   task. The frame sizes rule out the other easy theory - measured in a capture, median 19,796 bytes, max 21,635, all
+   under the 24,576-byte reader window.
+
+8. **The 24-bit static was a 32-bit accumulator in the LPC reconstruction.** `restoreLinearPrediction()` summed
+   `sample x coefficient` in an `int32_t`. For a 16-bit source that lands just under 2^31 - 2^15 samples x 2^15
+   coefficients, with the quantiser shift keeping it in range - which is why it looked safe for years. For a 24-bit
+   source it is **2^23 x 2^15 = 2^38**, so every LPC subframe wrapped and came out as noise. The measured signature is
+   worth remembering because nothing in the log looks wrong: `smp` equal to `frames`, `nod 0`, `dcyc` the same as a
+   16-bit stream, `sil 0 runs`, and a post-downshift peak just under full scale (`8269473 -> 32303`, exactly /256). A
+   value that is *wrong* is invisible to every counter here, and the frame CRC-16 is read and discarded, so there was no
+   integrity check to catch it either. The accumulator is `int64_t` when `bitsPerSample > 16`; 16-bit streams keep the
+   int32 loop unchanged. `shift` also became `int32_t` - LPC's quantiser shift is signed by definition, and a negative
+   value was being truncated to `uint8_t` and turned into a shift of 255.
+
+9. **An unsupported FLAC depth now ends the stream instead of spinning.** `bitsPerSample > 24` returns
+   `ERR_FLAC_BITS_PER_SAMPLE_TOO_BIG` on **every** frame, and the `stopSong()` for it was commented out - so the error
+   path only cleared `m_f_playing`, sought the next syncword, failed again, and looped at frame rate with the UI showing
+   PLAYING and nothing said. It now calls `setRefuse(STREAM_REFUSE_UNSUPPORTED, …)` and stops, the same route item 14
+   used for a station refused by both identities. 24 bits stays the ceiling and that is a decision, not an oversight: a
+   32-bit sample plus its one-bit side channel is **33 bits**, so `s_samplesBuffer` (int32_t), `readUint()` (uint32_t)
+   and the mid/side `<< 1` would all have to become 64-bit, and the decoder's PSRAM would double from ~196 KB to ~393 KB
+   and no longer fit a 2 MB board. No station in the list sends 32-bit FLAC, and the wall for the 24-bit one we do have
+   is the input path, not the decoder - so refusing clearly is worth more than half-supporting it.
+
+10. **The display throttles itself while the audio ring is starving.** `loopDspTask()`'s `DSP_TASK_DELAY` is multiplied
+    by four while the ring holds less than **250 ms** of audio and released above **750 ms**. The evidence is the
+    24-bit station: with a live 480x320 TFT its ring sat at 10-28 KB and 20% of frames were never produced; with the
+    screensaver blanking the screen the same stream filled to **1.29-1.42 MB**, ran at 48,000 frames/s with `sil 0`, and
+    **did not fall back when the screen came on again** - so the cost is the fill phase, not drawing per se.
+
+    The threshold is TIME, not bytes - `bufferFilled() x 1000 / streamBytesPerSecond()` - because the same byte count is
+    a moment at 1.7 Mbit and tens of seconds at 128 kbit, and HLS stations legitimately run a shallow ring, so a byte
+    threshold would pin the limiter on for a stream that is healthy. Both forks grew a `streamBytesPerSecond()` under
+    the same name (measured consumption, 0 until known) so `display.cpp` needs no `#if`; until a rate exists - the first
+    seconds of a station, exactly when this matters - a 32 KB floor stands in for it. On the VS1053 path the ring
+    normally holds hundreds of KB against 128-320 kbit, so it never engages. Transitions log `Audio.risk engaged` /
+    `released` under AUDIO_DEBUG, so a soak can confirm it rather than assume it.
+
+    The older entry in this file saying "display load as the cause" was measured on a stream that was keeping up
+    (48,000 frames/s, nothing to lose), so it neither contradicts this nor tested it.
+
+**And one misreading worth recording, because the log invites it.** `feed ok: wrote 640 of 1600, DREQ low` is not
+starvation. The feeder loop breaks when DREQ goes low, so for a partial write that field is the *reason* it stopped: the
+chip's FIFO is full, i.e. we are ahead of it. Starvation reads `feed stalled: wrote 0 of …` and requires more than a
+second since the last accepted byte. `DREQ high` with a full 1600-byte write is the chip taking everything and still
+wanting more - equally healthy, and both appear in an ordinary capture.
+
+## Comment Sweep (2026.11.24)
+
+**Files changed**: `Audio.cpp`, `Audio.h`, `flac_decoder.cpp`, `flac_decoder.h`, `audioVS1053Ex.cpp`, `audioVS1053Ex.h`,
+`display.cpp`. Comments only - no statement was added, removed or reordered.
+
+The project rule is a comment of five to thirty words as `//`, never a paragraph. These two libraries break it in three
+ways: upstream `/* */` blocks, banner attribution, and paragraphs added by hand during surgery. `builds/comment_audit.py`
+was written to scope the sweep from numbers rather than memory, and it stays in the repository as the check.
+
+1. **What was converted.** 106 standalone `/* */` blocks became `//` lines across the seven files. A block is converted
+   only when it starts a line and nothing follows it on its closing line - `x = a /* note */ + b;` cannot become `//`
+   without swallowing the statement, and 76 such inline blocks were reported and left alone. The file banner is never
+   touched: it is attribution, and one of the two things the header convention is for.
+
+2. **Vendored and upstream code is excluded by name**, because rewriting its comments makes the next re-graft undiffable:
+   `libfaad/*`, `opus_decoder/silk.cpp` + `celt.cpp`, `vorbis_decoder/lookup.h`, `vs1053b-patches-flac.h` (10 files, never
+   touched), and the four decoder implementations under `mp3_decoder/`, `vorbis_decoder/`, `opus_decoder/`,
+   `aac_decoder/`. Those are still *audited* so their size is visible - 409 block comments in `mp3_decoder.cpp` alone - and
+   the tool prints them in a separate table that it never converts.
+
+3. **Two converter defects found by running it, both silent.** The first: no `//` branch. A `/*` *mentioned inside* a
+   `//` comment - `if(/* m_streamType != ST_WEBFILE && */ …)` is the reverse case, but a comment that documents a
+   block-comment syntax is the real one - then pairs with a distant `*/` and the region between is read as one block, so
+   real blocks went unconverted in `Audio.cpp` (20 of them, found only after the first pass reported 106 and left the file
+   still full of `/*`). The second: `standalone` tested only what preceded the block on its line, so `    /* note */ x = 1;`
+   would have become `    // note x = 1;` and commented out the assignment. Both are fixed, and the fix is recorded in
+   `libraries-note.md` where the convention lives.
+
+4. **Three guards, because a comment sweep is a refactor.** `--fix --write` compares each file's code - with comments,
+   blank lines and indentation removed - against the file it is about to write, and refuses that file if a statement
+   moved. It reports any `//` line that would swallow a macro continuation's backslash, which would shorten a macro
+   silently rather than fail to build; there were none, and the three `VS1053VOL` curves are exactly the shape that would
+   hide it. And the block-comment count before and after is printed, so "did it actually convert?" needs no diff.
+
+5. **The numbers.** Our seven files: 177 block comments and 57 comments longer than five lines before; 50 and 22 after
+   (a `//` run and a block are counted alike). 106 blocks converted, 76 inline blocks reported. The 22 that remain are
+   rule boxes (`// ---- … ----`), ASCII diagrams - the `AudioBuffer` wrap-around drawing in both headers, which is the
+   only explanation of `m_resBuffSize` there is - the `SCI_MODE` bit-field table, and Wolle's API text. Paragraphs that
+   were genuinely prose were rewritten to two or three lines: the de-ogger's four paragraphs, the cycle-counter note, the
+   HLS and XML examples (13 and 11 lines), `computeLimit()`'s commented-out variants, `setPlaybackSpeed()`'s dead
+   reclock, and `display.cpp`'s limiter, MOVE, clock, numbering and font-switch notes.
+
+6. **The proof that nothing moved.** Both forks were built before the sweep and after: `firmware.bin` is
+   **3,160,640** bytes for `ili9488_pcm_1button_full` and **2,566,592** for `sh1106_vs1053_3buttons`, both byte-for-byte
+   the same size as the pre-sweep images, with RAM 110,328 and 90,524 unchanged. A swallowed statement changes image
+   size; a converted comment does not.
+
+7. **The two files that had no ehRadio header got one**, `flac_decoder.cpp` and `flac_decoder.h` - the most-edited files
+   of the day and the only two in the libraries without it. `flac_decoder.h`'s restriction list also stopped claiming
+   "bits per sample must be 8 or 16", which the 24-bit fix has made untrue, and now says 24 is downshifted to 16. The
+   convention and the check that enforces it are in `libraries-note.md`.

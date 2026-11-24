@@ -1062,9 +1062,8 @@ One session, closed on the 16th; built on **espressif32 8.0.0** with the patched
 1. **`loudnessRaw()` and `m_loudRaw` keep the register value the level was derived from.** `serviceLoudness()` now stores
    `max(dbL, dbR)` before converting it, the accessor returns that (or `-1` before the first sample), and
    `loudnessReset()` clears it. `loudnessDb()` is unchanged. The reason is the paired-build log in `player.cpp`: one line
-   every 10 s carrying `meter 78 level -17.0 dBFS` lets a calibration be fitted from meter against dBFS directly
-   (section 13.21 of `plans/ovol-fix-and-live-edit.md`) instead of from final cut values, and a step size that is really
-   0.7 dB shows up as 0.7 rather than being inferred.
+   every 10 s carrying `meter 78 level -17.0 dBFS` lets a calibration be fitted from meter against dBFS directly,
+   instead of from final cut values, and a step size that is really 0.7 dB shows up as 0.7 rather than being inferred.
 
 2. **`VS1053_METER_FULL_DB` is now 100, and both constants are measured.** Four streams were played on both builds at the
    same time, logging `meter` and `level` every 10 s, and compared over their steady minutes: the pad reported levels
@@ -1085,3 +1084,24 @@ One session, closed on the 16th; built on **espressif32 8.0.0** with the patched
 
    The residual after the trim is within 2.1 dB on all four streams, and three of the four land within 1 dB of the I2S
    cut. The conversion stays in one expression, so a further fit would change `serviceLoudness()` and nothing else.
+
+## Post-Graft Patch Fixes (2026.11.23)
+
+**Files changed**: `audioVS1053Ex.cpp` (+ `.h`). The reasoning and the measurements are in the I2S notes' same-dated
+section; this is what this fork does now.
+
+1. **The bitrate is measured, not read out of `HDAT0`.** That register carries a bitrate only for MP3. Anything else is
+   now `(Δ bytes reaching the ring − Δ ring occupancy) × 8 ÷ Δt` over a 2 s window, smoothed over five, and published
+   **at most once every 10 s and only when the number the badge renders changes** - no range gate and no latch. It
+   replaces `HDAT0 × 8` (the AAC conversion) and its 8,000-640,000 guard, which capped a 2 Mbit FLAC stream below its own
+   bitrate and published 262,944 and then 444,104 for it, latching whichever came first. The 10 s / rendered-value gate
+   is what keeps the log quiet: 1,524,447 and 1,531,261 both read "1.5".
+2. **MP3 keeps `getAudioCurrentTime()`**, which reads the exact frame bitrate from `HDAT1` through the l3id3 / l3id012
+   tables - better than any measurement, including VBR.
+3. **`slow stream, dropouts are possible` is gone**: a ring below one max block is the steady state, which is the
+   decision the I2S fork already made about the same message. The five-second no-bytes-reached-the-ring clock stays.
+4. **`track10s` prints a feed rate in KB/s**, taken from a baseline set at connection start because `m_feedBytes` is
+   cumulative across connections.
+5. **`feed ok: wrote 640 of 1600, DREQ low` is healthy, not starvation.** The feeder loop breaks out when DREQ goes low,
+   so for a partial write that field is the reason it stopped: the chip's FIFO is full and we are ahead of it. Starvation
+   reads `feed stalled: wrote 0 of …` with more than a second since the last accepted byte.

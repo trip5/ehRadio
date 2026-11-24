@@ -1,16 +1,15 @@
 #include "../../core/options.h"
 #if defined(USE_AUDIO_VS1053)
-/*
- *  vs1053_ext.cpp
- *
- *  Created on: Jul 09.2017
- *  Updated on: Oct 22.2023
- *      Author: Wolle
- *  From yoRadio PR226 by nsteplanets Nov 28, 2025
- *  To ehRadio 2026.06.29 with minimal changes
- *  2026.09.13 Changes to VU Meter
- * 
- */
+// vs1053_ext.cpp
+//
+// Created on: Jul 09.2017
+// Updated on: Oct 22.2023
+// Author: Wolle
+//
+// From yoRadio PR226 by nsteplanets Nov 28, 2025
+// Frankstein surgery performed by Trip5 for ehRadio
+// See i2s-frankenstein-surgery-notes.md for more information
+//
 #ifndef VS_PATCH_ENABLE
 #define VS_PATCH_ENABLE  true
 #endif
@@ -23,8 +22,33 @@
 // of the socket's offer, the same rule the I2S path uses: only audio proves the stream is alive.
 static uint32_t s_ringTotal = 0;
 
-/* The next three only affect VS1053 builds: the addon reports its level in dB through SCI_AICTRL3,
-   where every other source reports a linear amplitude. */
+// Bitrate measurement state, in the same file because setDefaults() has to start a window over.  s_brMeasured is an
+// EMA of the decoder's consumption rate in bit/s and s_brPublished is the last value handed to audio_bitrate(), so a
+// sub-kbit wobble does not redraw a badge that would not change.
+static uint32_t s_brLastMs = 0;
+static uint32_t s_brLastRingTotal = 0;
+static uint32_t s_brLastFilled = 0;
+static uint32_t s_brMeasured = 0;
+static uint32_t s_brPublished = 0;
+static uint32_t s_brLastBucket = 0xFFFFFFFFu;   // the bucket last published, so a repeat is never sent
+static uint32_t s_brLastPublishMs = 0;
+static uint32_t s_dbgFeedAtStart = 0;      // m_feedBytes at connection start, for the track10s feed rate
+
+// The number the badge will actually render: formatBitrate3() shows tenths of a Mbit at 1000 kbit and above, and whole
+// kbit below.  Publishing only when this changes is what keeps the log quiet - 1,524,447 and 1,531,261 both read "1.5",
+// and a 1.5 Mbit stream wobbles by several kbit a second on its own.
+static uint32_t brBucket(uint32_t bitrate){
+  const uint32_t kbps = (bitrate + 500u) / 1000u;
+  return (kbps >= 1000u) ? ((kbps + 50u) / 100u) : kbps;
+}
+
+static void bitrateReset(){
+  s_brLastMs = 0; s_brLastRingTotal = 0; s_brLastFilled = 0; s_brMeasured = 0; s_brPublished = 0;
+  s_brLastBucket = 0xFFFFFFFFu; s_brLastPublishMs = 0;
+}
+
+// The next three only affect VS1053 builds: the addon reports its level in dB through SCI_AICTRL3,
+// where every other source reports a linear amplitude.
 #ifndef VU_VS1053_READ_MS
   #define VU_VS1053_READ_MS 33   // ceiling on SCI_AICTRL3 reads, ms. Keeps the VU sample rate constant
                                  // (~30 Hz) and independent of VU_REFRESH_MS and of the panel
@@ -266,7 +290,7 @@ void Audio::initInBuff() {
     changeMaxBlockSize(4096);
 }
 //---------------------------------------------------------------------------------------------------------------------
-/* The ring, taken at a point setup() chooses rather than at the first connecttohost().  Idempotent. */
+// The ring, taken at a point setup() chooses rather than at the first connecttohost().  Idempotent.
 void Audio::reservePsram() {
     initInBuff();
 }
@@ -308,18 +332,18 @@ uint16_t Audio::read_register(uint8_t _reg)
     return result;
 }
 //---------------------------------------------------------------------------------------------------------------------
-/* Same as read_register() but WITHOUT the trailing await_data_request().
-
-   That wait is a busy-wait (see audioVS1053Ex.h) and DREQ stays low for ~17.4 ms per call while the
-   decoder is fed, so read_register() costs a measured 17.3-17.9 ms (max 18.5) - not the "very short
-   delay" the header comment claims.  Dropping it is safe: the wait exists only so the next DATA
-   write does not start before the chip is ready, and sdi_send_buffer() already awaits DREQ itself
-   before every chunk (and once more before entering data mode).  A control-mode read is always
-   legal - DREQ gates writes, not reads - and the 16 bits are transferred before the wait would have
-   happened, so the returned value cannot change.
-
-   Only the VU poll uses this: it runs ~20x/s from the display task, where 17.4 ms a call would burn
-   350 ms of every second spinning on the display core. */
+// Same as read_register() but WITHOUT the trailing await_data_request().
+//
+// That wait is a busy-wait (see audioVS1053Ex.h) and DREQ stays low for ~17.4 ms per call while the
+// decoder is fed, so read_register() costs a measured 17.3-17.9 ms (max 18.5) - not the "very short
+// delay" the header comment claims.  Dropping it is safe: the wait exists only so the next DATA
+// write does not start before the chip is ready, and sdi_send_buffer() already awaits DREQ itself
+// before every chunk (and once more before entering data mode).  A control-mode read is always
+// legal - DREQ gates writes, not reads - and the 16 bits are transferred before the wait would have
+// happened, so the returned value cannot change.
+//
+// Only the VU poll uses this: it runs ~20x/s from the display task, where 17.4 ms a call would burn
+// 350 ms of every second spinning on the display core.
 uint16_t Audio::read_register_nowait(uint8_t _reg)
 {
     uint16_t result=0;
@@ -367,20 +391,20 @@ size_t Audio::sendBytes(uint8_t* data, size_t len){
     if(bytesDecoded) { m_chipDeadStrikes = 0; }
     else if(read_register_nowait(SCI_MODE) == 0 && m_chipDeadStrikes < 255) { m_chipDeadStrikes = m_chipDeadStrikes + 1; }
     #ifdef AUDIO_DEBUG
-    /* The chip is refusing everything: read its own view of the world rather than guess why.  MODE bit SM_SDINEW says
-       the chip is still in new SDI mode, SM_CANCEL that something asked it to end the stream.  read_register_nowait is
-       deliberate - when stalled DREQ is low by definition, so plain read_register would busy-wait 50 ms and stall the
-       feeder it is measuring.  A healthy sample prints once a minute so the log carries its own baseline; the stalled
-       one only when no byte has been accepted for over a second, so ordinary backpressure never prints. */
+        // The chip is refusing everything: read its own view of the world rather than guess why.  MODE bit SM_SDINEW says
+    // the chip is still in new SDI mode, SM_CANCEL that something asked it to end the stream.  read_register_nowait is
+    // deliberate - when stalled DREQ is low by definition, so plain read_register would busy-wait 50 ms and stall the
+    // feeder it is measuring.  A healthy sample prints once a minute so the log carries its own baseline; the stalled
+    // one only when no byte has been accepted for over a second, so ordinary backpressure never prints.
     {
         static uint32_t s_lastReport = 0;
         static uint32_t s_lastOk = 0;
         const bool stalled = (bytesDecoded == 0);
-        /* A stall is a matter of TIME, not of how many calls came back empty.  A healthy FLAC block is 4096 samples -
-           93 ms - and the plugin drains the chip's FIFO in one burst per block, so "50 consecutive empty writes" is
-           crossed by every played block: this line accused FLAC of a fault roughly 700 times in an hour of perfect
-           playback.  m_feedLastMs is the honest clock instead - 0 ms on every played block, 11 s on the one genuine
-           stall ever measured.  The 5 s rate limit stays, so a real stall still prints without flooding. */
+                // A stall is a matter of TIME, not of how many calls came back empty.  A healthy FLAC block is 4096 samples -
+        // 93 ms - and the plugin drains the chip's FIFO in one burst per block, so "50 consecutive empty writes" is
+        // crossed by every played block: this line accused FLAC of a fault roughly 700 times in an hour of perfect
+        // playback.  m_feedLastMs is the honest clock instead - 0 ms on every played block, 11 s on the one genuine
+        // stall ever measured.  The 5 s rate limit stays, so a real stall still prints without flooding.
         const uint32_t sinceLastByte = m_feedLastMs ? (uint32_t)(millis() - m_feedLastMs) : 0xFFFFFFFFu;
         const bool wantStall = stalled && sinceLastByte > 1000u && (uint32_t)(millis() - s_lastReport) > 5000;
         const bool wantOk    = !stalled && (uint32_t)(millis() - s_lastOk) > 60000;
@@ -516,16 +540,16 @@ static void v1053OggFlacTapTag(const uint8_t* q, uint32_t payload, uint32_t have
     if(audio_showstreamtitle) audio_showstreamtitle(title);
 }
 //---------------------------------------------------------------------------------------------------------------------
-/* Ogg FLAC -> native FLAC.  A FLAC radio stream is an Ogg-encapsulated FLAC stream (the log's "format is ogg" followed
-   by codec 5), and the VS1053 FLAC plugin wants the bare bitstream the pages wrap: it plays a native .flac file and
-   produces silence with the pages still in place.  Removing the layer needs no FLAC knowledge at all - each page is a
-   27-byte header, a segment table of p[26] bytes, then that many payload bytes, and page payloads concatenated in
-   order (with the Ogg FLAC mapping header of the first packet dropped) ARE the original stream.
-
-   Zero copy on purpose: a page payload can reach 65 KB while InBuff's block size is 1600-4096, so nothing here waits
-   for a whole page.  It forwards slices straight out of the ring and keeps one number - how much of the current page is
-   left - plus whether the native signature has gone yet.  A zero return is ordinary backpressure from the chip's FIFO,
-   and the state is deliberately left alone so the next call resumes at the same byte. */
+// Ogg FLAC -> native FLAC.  A FLAC radio stream is an Ogg-encapsulated FLAC stream (the log's "format is ogg" followed
+// by codec 5), and the VS1053 FLAC plugin wants the bare bitstream the pages wrap: it plays a native .flac file and
+// produces silence with the pages still in place.  Removing the layer needs no FLAC knowledge at all - each page is a
+// 27-byte header, a segment table of p[26] bytes, then that many payload bytes, and page payloads concatenated in
+// order (with the Ogg FLAC mapping header of the first packet dropped) ARE the original stream.
+//
+// Zero copy on purpose: a page payload can reach 65 KB while InBuff's block size is 1600-4096, so nothing here waits
+// for a whole page.  It forwards slices straight out of the ring and keeps one number - how much of the current page is
+// left - plus whether the native signature has gone yet.  A zero return is ordinary backpressure from the chip's FIFO,
+// and the state is deliberately left alone so the next call resumes at the same byte.
 size_t Audio::feedOggFlac() {
     while(InBuff.bufferFilled() >= 27) {
         if(m_oggPageLeft == 0) {                                                        // at a page boundary
@@ -539,24 +563,24 @@ size_t Audio::feedOggFlac() {
             uint32_t payload = 0;
             for(size_t i = 0; i < segs; i++) payload += p[27 + i];                       // lacing values sum to the payload
             const size_t header = 27 + segs;
-            /* TAG TAP: read the payload before it is forwarded, since the chip will not report a FLAC tag.  Only a
-               page that is wholly in the ring is parsed - a PICTURE block can be tens of KB and waiting stalls. */
+                        // TAG TAP: read the payload before it is forwarded, since the chip will not report a FLAC tag.  Only a
+            // page that is wholly in the ring is parsed - a PICTURE block can be tens of KB and waiting stalls.
             if(payload >= 4 && InBuff.bufferFilled() >= header + 4 && v1053LooksMetadata(p + header, payload)){
                 const size_t have = InBuff.bufferFilled() - header;
                 v1053OggFlacTapTag(p + header, payload, have > payload ? payload : (uint32_t)have);
             }
             if(!m_f_oggSigFwd) {
-                /* First packet: 0x7F 'F' 'L' 'A' 'C', two version bytes, the header-packet count (2 bytes), then the
-                   native stream starting at "fLaC".  Searching for the signature rather than assuming the 9-byte offset
-                   is what the I2S library does, and it tolerates an encoder that pads the mapping header. */
+                                // First packet: 0x7F 'F' 'L' 'A' 'C', two version bytes, the header-packet count (2 bytes), then the
+                // native stream starting at "fLaC".  Searching for the signature rather than assuming the 9-byte offset
+                // is what the I2S library does, and it tolerates an encoder that pads the mapping header.
                 const int window = payload < 64 ? (int)payload : 64;
                 const int idx = specialIndexOf(p + header, "fLaC", window);
                 if(idx >= 0) {
-                    /* Drop the mapping header and keep everything after it IN THIS PAGE.  Setting m_oggPageLeft is
-                       what makes the rest of the page - "fLaC" plus the STREAMINFO block, 42 bytes on the stream this
-                       was measured against - reach the chip on the next pass.  Leaving it at 0 sends the loop back to
-                       "expect a page header" at a byte that says "fLaC", which resyncs one byte at a time straight
-                       past the STREAMINFO and the comment block. */
+                                        // Drop the mapping header and keep everything after it IN THIS PAGE.  Setting m_oggPageLeft is
+                    // what makes the rest of the page - "fLaC" plus the STREAMINFO block, 42 bytes on the stream this
+                    // was measured against - reach the chip on the next pass.  Leaving it at 0 sends the loop back to
+                    // "expect a page header" at a byte that says "fLaC", which resyncs one byte at a time straight
+                    // past the STREAMINFO and the comment block.
                     m_f_oggSigFwd = true;
                     InBuff.bytesWasRead(header + idx);
                     m_oggPageLeft = payload - idx;
@@ -740,17 +764,6 @@ void Audio::setVolume(uint8_t vol){
     write_register(SCI_VOL, value);
     // The least-attenuated channel: what serviceLoudness() needs to undo this write if the meter reads after SCI_VOL.
     m_lastVolReg = (uint8_t)((rL < rR) ? rL : rR);
-/*    uint16_t value;                                         // Value to send to SCI_VOL
-
-    if(vol > 21) vol=21;
-
-    if(vol != curvol){
-        curvol = vol;                                       // #20
-        vol=volumetable[vol];                               // Save for later use
-        value=map(vol, 0, 100, 0xF8, 0x00);                 // 0..100% to one channel
-        value=(value << 8) | value;
-        write_register(SCI_VOL, value);                     // Volume left and right
-    }*/
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setCutDb(float db) {
@@ -811,23 +824,19 @@ void Audio::setTone(int8_t *rtone){                       // Set bass/treble (4 
     }
     write_register(SCI_BASS, value);                        // Volume left and right
 }
-/*
-Name            Bits      Description
-ST AMPLITUDE    15:12      Treble Control in 1.5 dB steps (-8..7, 0 = off)
-ST FREQLIMIT    11:8      Lower limit frequency in 1000 Hz steps (1..15)       // 1000..15000
-SB AMPLITUDE    7:4        Bass Enhancement in 1 dB steps (0..15, 0 = off)
-SB FREQLIMIT    3:0        Lower limit frequency in 10 Hz steps (2..15)        // 20..150
-*/
-/*
-void Audio::setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass){ 
-  if(gainLowPass<0) gainLowPass=0;
-  if(gainLowPass>15) gainLowPass=15;
-  if(gainBandPass<0) gainBandPass=0;
-  if(gainBandPass>13) gainBandPass=13;
-  int8_t rtone[] = {(int8_t)map(gainHighPass, -16, 16, -8, 7), (int8_t)(2+gainBandPass), gainLowPass, (int8_t)(15-gainBandPass)};
-  setTone(rtone);
-}
-*/
+// Name            Bits      Description
+// ST AMPLITUDE    15:12      Treble Control in 1.5 dB steps (-8..7, 0 = off)
+// ST FREQLIMIT    11:8      Lower limit frequency in 1000 Hz steps (1..15)       // 1000..15000
+// SB AMPLITUDE    7:4        Bass Enhancement in 1 dB steps (0..15, 0 = off)
+// SB FREQLIMIT    3:0        Lower limit frequency in 10 Hz steps (2..15)        // 20..150
+// void Audio::setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass){
+// if(gainLowPass<0) gainLowPass=0;
+// if(gainLowPass>15) gainLowPass=15;
+// if(gainBandPass<0) gainBandPass=0;
+// if(gainBandPass>13) gainBandPass=13;
+// int8_t rtone[] = {(int8_t)map(gainHighPass, -16, 16, -8, 7), (int8_t)(2+gainBandPass), gainLowPass, (int8_t)(15-gainBandPass)};
+// setTone(rtone);
+// }
 void Audio::setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass){ 
   gainHighPass = constrain(gainHighPass, -16, 16);
   gainBandPass = constrain(gainBandPass, -16, 16);
@@ -978,19 +987,18 @@ void Audio::showstreamtitle(const char* ml) {
     if(idx1 >= 0){
         if(indexOf(ml, "xml version=", 7) > 0) {
 
-            /* e.g. xmlStreamTitle
-            StreamTitle='<?xml version="1.0" encoding="utf-8"?><RadioInfo><Table><DB_ALBUM_ID>37364</DB_ALBUM_ID>
-            <DB_ALBUM_IMAGE>00000037364.jpg</DB_ALBUM_IMAGE><DB_ALBUM_NAME>Boyfriend</DB_ALBUM_NAME>
-            <DB_ALBUM_TYPE>Single</DB_ALBUM_TYPE><DB_DALET_ARTIST_NAME>DOVE CAMERON</DB_DALET_ARTIST_NAME>
-            <DB_DALET_ITEM_CODE>CD4161</DB_DALET_ITEM_CODE><DB_DALET_TITLE_NAME>BOYFRIEND</DB_DALET_TITLE_NAME>
-            <DB_FK_SITE_ID>2</DB_FK_SITE_ID><DB_IS_MUSIC>1</DB_IS_MUSIC><DB_LEAD_ARTIST_ID>26303</DB_LEAD_ARTIST_ID>
-            <DB_LEAD_ARTIST_NAME>Dove Cameron</DB_LEAD_ARTIST_NAME><DB_RADIO_IMAGE>cidadefm.jpg</DB_RADIO_IMAGE>
-            <DB_RADIO_NAME>Cidade</DB_RADIO_NAME><DB_SONG_ID>120126</DB_SONG_ID><DB_SONG_LYRIC>60981</DB_SONG_LYRIC>
-            <DB_SONG_NAME>Boyfriend</DB_SONG_NAME></Table><AnimadorInfo><TITLE>Cidade</TITLE>
-            <START_TIME_UTC>2022-11-15T22:00:00+00:00</START_TIME_UTC><END_TIME_UTC>2022-11-16T06:59:59+00:00
-            </END_TIME_UTC><SHOW_NAME>Cidade</SHOW_NAME><SHOW_HOURS>22h às 07h</SHOW_HOURS><SHOW_PANEL>0</SHOW_PANEL>
-            </AnimadorInfo></RadioInfo>';StreamUrl='';
-            */
+                        // e.g. xmlStreamTitle
+            // StreamTitle='<?xml version="1.0" encoding="utf-8"?><RadioInfo><Table><DB_ALBUM_ID>37364</DB_ALBUM_ID>
+            // <DB_ALBUM_IMAGE>00000037364.jpg</DB_ALBUM_IMAGE><DB_ALBUM_NAME>Boyfriend</DB_ALBUM_NAME>
+            // <DB_ALBUM_TYPE>Single</DB_ALBUM_TYPE><DB_DALET_ARTIST_NAME>DOVE CAMERON</DB_DALET_ARTIST_NAME>
+            // <DB_DALET_ITEM_CODE>CD4161</DB_DALET_ITEM_CODE><DB_DALET_TITLE_NAME>BOYFRIEND</DB_DALET_TITLE_NAME>
+            // <DB_FK_SITE_ID>2</DB_FK_SITE_ID><DB_IS_MUSIC>1</DB_IS_MUSIC><DB_LEAD_ARTIST_ID>26303</DB_LEAD_ARTIST_ID>
+            // <DB_LEAD_ARTIST_NAME>Dove Cameron</DB_LEAD_ARTIST_NAME><DB_RADIO_IMAGE>cidadefm.jpg</DB_RADIO_IMAGE>
+            // <DB_RADIO_NAME>Cidade</DB_RADIO_NAME><DB_SONG_ID>120126</DB_SONG_ID><DB_SONG_LYRIC>60981</DB_SONG_LYRIC>
+            // <DB_SONG_NAME>Boyfriend</DB_SONG_NAME></Table><AnimadorInfo><TITLE>Cidade</TITLE>
+            // <START_TIME_UTC>2022-11-15T22:00:00+00:00</START_TIME_UTC><END_TIME_UTC>2022-11-16T06:59:59+00:00
+            // </END_TIME_UTC><SHOW_NAME>Cidade</SHOW_NAME><SHOW_HOURS>22h às 07h</SHOW_HOURS><SHOW_PANEL>0</SHOW_PANEL>
+            // </AnimadorInfo></RadioInfo>';StreamUrl='';
 
             idx4 = indexOf(ml, "<DB_DALET_TITLE_NAME>");
             idx5 = indexOf(ml, "</DB_DALET_TITLE_NAME>");
@@ -1099,24 +1107,54 @@ void Audio::loop(){
 
     serviceLoudness();      // ~10 Hz, so the learned cut has a level to work from on this path too
 
-    /* Bitrate for streams that never send an icy-br header.  The decoder already holds the value in HDAT0, and
-       getAudioCurrentTime() is the routine that reads it through the same l3id3/l3id012 tables SD playback has always
-       used.  Its return value is a playback position, which means nothing for a stream - getFilePos() is 0 with no open
-       file - so only its side effect matters: it fills m_avr_bitrate and reports it through audio_bitrate().
-       Retried on a slow tick until it succeeds, because the registers are empty until a few frames have decoded, and
-       never when the server supplied a value of its own. */
-    if(!m_brEstimated && !m_brFromHeader) {
-        static uint32_t s_lastBrTry = 0;
+        // Bitrate for every stream except MP3, measured instead of asked for.  HDAT0 carries a bitrate only for MP3, where
+    // getAudioCurrentTime() reads it exactly through the l3id3/l3id012 tables; for anything else it holds something
+    // else, and the old HDAT0 x 8 estimate published a number with no meaning, once, and never corrected it.
+    //
+    // The ring balance is true by construction: bytes that arrived (s_ringTotal, counted at every bytesWritten) minus
+    // the change in what is still waiting (bufferFilled) is what the decoder consumed, and a real-time stream consumes
+    // at its own bitrate.  Server bursts and ring depth cancel out of the subtraction, and no per-codec table is
+    // needed.  A 2 s window, smoothed over five of them, then published whenever the kbit value would change: no range
+    // gate and no latch - whatever it measures is the number, and it is free to change.
+    if(m_codec != CODEC_MP3 && m_f_running && m_f_stream_ready) {
         const uint32_t nowBr = millis();
-        if(m_f_stream_ready && m_sumBytesDecoded >= 16384 && (uint32_t)(nowBr - s_lastBrTry) >= 2000) {
-            s_lastBrTry = nowBr;
-            getAudioCurrentTime();
-            m_brEstimated = (m_avr_bitrate != 0);
+        if(s_brLastMs == 0) {
+            s_brLastMs = nowBr ? nowBr : 1;
+            s_brLastRingTotal = s_ringTotal;
+            s_brLastFilled = (uint32_t)InBuff.bufferFilled();
+        } else if((uint32_t)(nowBr - s_brLastMs) >= 2000) {
+            const uint32_t dt      = (uint32_t)(nowBr - s_brLastMs);
+            const uint32_t total   = s_ringTotal;
+            const uint32_t filled  = (uint32_t)InBuff.bufferFilled();
+            const uint32_t arrived = total - s_brLastRingTotal;                     // unsigned: a wrap is a wrap
+            const int32_t  gained  = (int32_t)filled - (int32_t)s_brLastFilled;     // ring grew (+) or drained (-)
+            const int64_t  eaten   = (int64_t)arrived - (int64_t)gained;
+            s_brLastMs = nowBr; s_brLastRingTotal = total; s_brLastFilled = filled;
+            if(arrived && eaten > 0) {
+                const uint32_t sample = (uint32_t)((eaten * 8 * 1000) / (int64_t)dt);   // bit/s
+                s_brMeasured = s_brMeasured ? (uint32_t)((s_brMeasured * 4 + sample) / 5) : sample;
+                m_avr_bitrate = s_brMeasured;
+                m_streamBytesSec = s_brMeasured / 8;      // for the display's audio-risk limiter
+                                // A local file knows its own length, so the duration follows from the measured rate.  Streams report
+                // m_audioDataSize 0, which is why this is guarded rather than a division by it.  Before this the
+                // duration of a local FLAC/WAV came from the HDAT0 x 8 estimate, i.e. from a number with no meaning.
+                if(m_audioDataSize) m_audioFileDuration = 8 * ((float)m_audioDataSize / (float)s_brMeasured);
+                const uint32_t bucket = brBucket(s_brMeasured);
+                if(!s_brPublished ||
+                   (bucket != s_brLastBucket && (uint32_t)(nowBr - s_brLastPublishMs) >= 10000u)) {
+                    s_brPublished = s_brMeasured;
+                    s_brLastBucket = bucket;
+                    s_brLastPublishMs = nowBr ? nowBr : 1;
+                    char br[12];
+                    sprintf(br, "%lu", (unsigned long)s_brMeasured);
+                    if(audio_bitrate) audio_bitrate(br);
+                }
+            }
         }
     }
 
-    /* Bookkeeping guard: the PSRAM collapse of 8.47 surfaced here first as a filled length larger than the whole buffer,
-       so one consistency check a second is enough to catch it before the allocator does.  Reported once per boot. */
+        // Bookkeeping guard: the PSRAM collapse of 8.47 surfaced here first as a filled length larger than the whole buffer,
+    // so one consistency check a second is enough to catch it before the allocator does.  Reported once per boot.
     {
         static uint32_t s_lastCheck = 0;
         static bool     s_reported  = false;
@@ -1132,10 +1170,10 @@ void Audio::loop(){
         }
     }
 
-    /* No-progress watchdog.  A local track whose decoder has stopped taking data sits silent for ever: m_sumBytesDecoded
-       stops short of m_audioDataSize, so no end-of-file is declared and nothing advances the playlist.  Five seconds is
-       long enough that ordinary backpressure never trips it, and every firing is logged before the track is closed, so
-       it cannot hide a future bug.  Deliberately no datamode or eof test: a clobbered datamode is one way to get here. */
+        // No-progress watchdog.  A local track whose decoder has stopped taking data sits silent for ever: m_sumBytesDecoded
+    // stops short of m_audioDataSize, so no end-of-file is declared and nothing advances the playlist.  Five seconds is
+    // long enough that ordinary backpressure never trips it, and every firing is logged before the track is closed, so
+    // it cannot hide a future bug.  Deliberately no datamode or eof test: a clobbered datamode is one way to get here.
     if(audiofile && m_f_running && !m_f_paused) {
         static uint32_t s_lastSum = 0, s_sumMovedMs = 0;
         const uint32_t nowMs = millis();
@@ -1223,9 +1261,9 @@ void Audio::loop(){
     }
 }
 //---------------------------------------------------------------------------------------------------------------------
-/* One place that ends a local file, reached from two directions: the reader running out of bytes, and the no-progress
-   watchdog in loop().  Both must do exactly the same thing, or the one that is not used leaves the player stuck in a
-   state the other would have recovered from.  Only ever called from the loop task, like the reader itself. */
+// One place that ends a local file, reached from two directions: the reader running out of bytes, and the no-progress
+// watchdog in loop().  Both must do exactly the same thing, or the one that is not used leaves the player stuck in a
+// state the other would have recovered from.  Only ever called from the loop task, like the reader itself.
 void Audio::endLocalFile(){
     InBuff.resetBuffer();
     setDatamode(AUDIO_NONE);
@@ -1259,11 +1297,11 @@ void Audio::processLocalFile() {
 
     if(!f_stream && m_controlCounter == 100) {
         f_stream = true;
-        /* Per-track byte accounting, measured from the first audio byte.  playAudioData() compares this counter
-           against m_audioDataSize, which is m_contentlength - m_audioDataStart, so the counter has to be
-           audio-relative too: seeding it with m_audioDataStart (as the ancestor does) declares end-of-file exactly one
-           ID3 tag early on every track - 105,331 bytes on a 105,331-byte tag, left unplayed in the ring buffer.
-           Reset before m_f_stream_ready, or the task gets one pass in which the track already looks finished. */
+                // Per-track byte accounting, measured from the first audio byte.  playAudioData() compares this counter
+        // against m_audioDataSize, which is m_contentlength - m_audioDataStart, so the counter has to be
+        // audio-relative too: seeding it with m_audioDataStart (as the ancestor does) declares end-of-file exactly one
+        // ID3 tag early on every track - 105,331 bytes on a 105,331-byte tag, left unplayed in the ring buffer.
+        // Reset before m_f_stream_ready, or the task gets one pass in which the track already looks finished.
         if(m_resumeFilePos){
             InBuff.resetBuffer();
             setFilePos(m_resumeFilePos);
@@ -1454,9 +1492,9 @@ void Audio::processWebStream() {
         if(m_codec == CODEC_OGG){ // log_i("determine correct codec here");
             uint8_t codec = determineOggCodec(InBuff.getReadPtr(), maxFrameSize);
             if(codec == CODEC_FLAC)   {m_codec = CODEC_FLAC;   m_f_oggFlac = true;
-                                       /* Worded "format is flac" and NOT "format is ogg": the core matches these lines
-                                          with strstr, in order, so naming the container here would badge a FLAC stream
-                                          as OGG. */
+                                                                              // Worded "format is flac" and NOT "format is ogg": the core matches these lines
+                                       // with strstr, in order, so naming the container here would badge a FLAC stream
+                                       // as OGG.
                                        AUDIO_INFO("format is flac (ogg container), page layer removed"); return;}
             if(codec == CODEC_OPUS)   {m_codec = CODEC_OPUS; AUDIO_INFO("can't play OPUS"); stopSong(); return;}
             if(codec == CODEC_VORBIS) {m_codec = CODEC_VORBIS; return;}
@@ -1509,10 +1547,9 @@ void Audio::processWebStreamTS() {
     availableBytes = _client->available();
     if(availableBytes){
 
-        /* If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
-           However, the chunk size in some streams is limited to 32768 bytes, although the chunk can be larger. Then the chunk size is
-           calculated again. The data used to calculate (here readedBytes) the chunk size is not part of it.
-        */
+                // If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
+        // However, the chunk size in some streams is limited to 32768 bytes, although the chunk can be larger. Then the chunk size is
+        // calculated again. The data used to calculate (here readedBytes) the chunk size is not part of it.
 
         uint8_t readedBytes = 0;
         uint32_t minBytes = 0;
@@ -1872,16 +1909,16 @@ void Audio::playAudioData() {
     bool lastFrame = false;
     uint32_t bytesToDecode = 0;
 
-    /* "Is this a file?" is evaluated on EVERY pass - it is deliberately not latched.  It used to be a function-static
-       set once, when m_f_firstPlayCall was true, and m_f_firstPlayCall is initialised true in the header and never set
-       back to true anywhere: the FIRST play of a boot decided the branch for the rest of that boot.  Booting into SD
-       mode therefore left every later web stream running the file branch, and m_audioDataSize is 0 for a live stream,
-       so the first pass sent one chunk of real audio (about half a second - the burst heard on every station change)
-       and the second pass saw m_sumBytesDecoded >= m_audioDataSize and set m_f_eof: silence until the next station,
-       because setDefaults() clears m_f_eof and buys exactly one more chunk.  The I2S library re-arms its flag in
-       setDefaults(); depending on a reset like that is exactly what this graft kept losing, so here there is no flag
-       to lose.  A web file (ST_WEBFILE) flips to the file branch only once parseHttpResponseHeader() has run, which is
-       correct - m_audioDataSize means nothing before the header has been parsed. */
+        // "Is this a file?" is evaluated on EVERY pass - it is deliberately not latched.  It used to be a function-static
+    // set once, when m_f_firstPlayCall was true, and m_f_firstPlayCall is initialised true in the header and never set
+    // back to true anywhere: the FIRST play of a boot decided the branch for the rest of that boot.  Booting into SD
+    // mode therefore left every later web stream running the file branch, and m_audioDataSize is 0 for a live stream,
+    // so the first pass sent one chunk of real audio (about half a second - the burst heard on every station change)
+    // and the second pass saw m_sumBytesDecoded >= m_audioDataSize and set m_f_eof: silence until the next station,
+    // because setDefaults() clears m_f_eof and buys exactly one more chunk.  The I2S library re-arms its flag in
+    // setDefaults(); depending on a reset like that is exactly what this graft kept losing, so here there is no flag
+    // to lose.  A web file (ST_WEBFILE) flips to the file branch only once parseHttpResponseHeader() has run, which is
+    // correct - m_audioDataSize means nothing before the header has been parsed.
     const bool f_isFile = (m_playlistFormat == FORMAT_M3U8)     ? false
                         : (getDatamode() == AUDIO_LOCALFILE)    ? true
                         : (m_streamType == ST_WEBFILE)          ? true
@@ -1899,9 +1936,9 @@ void Audio::playAudioData() {
         if(bytesToDecode < InBuff.getMaxBlockSize()) {lastFrame = true;}
         if(m_sumBytesDecoded >= m_audioDataSize && m_sumBytesDecoded != 0) { m_f_eof = true; goto exit; }
     }
-    /* Ogg FLAC is a container path, so the frame-sized gate below does not apply: a page header needs 27 bytes and a
-       payload slice needs whatever is left of the page, both of which are routinely less than a block.  The stripper
-       owns InBuff and m_sumBytesDecoded for this stream, so playAudioData() must not touch either. */
+        // Ogg FLAC is a container path, so the frame-sized gate below does not apply: a page header needs 27 bytes and a
+    // payload slice needs whatever is left of the page, both of which are routinely less than a block.  The stripper
+    // owns InBuff and m_sumBytesDecoded for this stream, so playAudioData() must not touch either.
     if(m_f_oggFlac) { (void)feedOggFlac(); goto exit; }
     if(!lastFrame) if(InBuff.bufferFilled() < InBuff.getMaxBlockSize()) goto exit;
 
@@ -3192,6 +3229,7 @@ uint32_t Audio::stop_mp3client(){
 void Audio::setDefaults(){
     m_dbgDefaultsCalls = m_dbgDefaultsCalls + 1;            // silent-exit counter, see the VU flat report
     m_dbgTrackStartMs = millis() ? millis() : 1;            // arm the per-track report for the connection
+    s_dbgFeedAtStart = m_feedBytes;                         // the feed rate in that report is since this connection
     m_dbgTrackReported = false;
     // initializationsequence
     // [Maleksm graft] coordinate with audio task
@@ -3201,8 +3239,8 @@ void Audio::setDefaults(){
     m_f_paused = false;
     m_sumBytesDecoded = 0;     // per-track counter: the ancestor reset it here and the graft lost the line
     m_f_ID3v1TagFound = false;
-    /* A new connection is not Ogg FLAC until determineOggCodec() says so.  Without these flags a track that
-       follows a FLAC radio stream would be stripped of page headers that are not there. */
+        // A new connection is not Ogg FLAC until determineOggCodec() says so.  Without these flags a track that
+    // follows a FLAC radio stream would be stripped of page headers that are not there.
     m_f_oggFlac   = false;
     m_oggPageLeft = 0;
     m_f_oggSigFwd = false;
@@ -3245,14 +3283,15 @@ void Audio::setDefaults(){
     m_playlistFormat = FORMAT_NONE;
     m_localBitrateSend = false;
     m_audioFileDuration = 0;
-    /* A new connection must not inherit the previous stream's bitrate.  Without these three lines the first estimate
-       of a stream compares against a stale value, marks itself "unchanged" and reports nothing at all. */
+        // A new connection must not inherit the previous stream's bitrate.  Without these three lines the first estimate
+    // of a stream compares against a stale value, marks itself "unchanged" and reports nothing at all.
     m_avr_bitrate = 0;
+    m_streamBytesSec = 0;                                    // no measured rate until the first window
     m_brFromHeader = false;
-    m_brEstimated = false;
-    /* Per-track state the graft dropped.  The ID3 walk does `m_audioDataStart += id3Size`, so without this reset every
-       track inherits the ID3 sizes of all the tracks before it; m_audioDataSize is then short by that amount and the
-       track is declared finished early, leaving its tail in the ring buffer unplayed. */
+    bitrateReset();                                          // a new connection starts its own measurement window
+        // Per-track state the graft dropped.  The ID3 walk does `m_audioDataStart += id3Size`, so without this reset every
+    // track inherits the ID3 sizes of all the tracks before it; m_audioDataSize is then short by that amount and the
+    // track is declared finished early, leaving its tail in the ring buffer unplayed.
     m_audioDataStart = 0;
     m_audioDataSize = 0;
     m_bytesNotDecoded = 0;
@@ -3272,18 +3311,8 @@ void Audio::setVUmeter() {
   write_register(SCI_STATUS, VSstatus | _BV(9));
 }
 
-// VU meter — VS1053 path.  The addon reports a level in dB per channel via SCI_AICTRL3; everything
-// else here is ours.  Measurements are recorded in vs1053-frankenstein-surgery-notes.md.
-//
-// Two deliberate differences from the I2S path, both to make the two read alike:
-//   1. The dB reading is converted to a LINEAR AMPLITUDE before use.  The bar shows
-//      vuLeft/vuThreshold, so feeding it dB compresses the display - loud and quiet passages end up
-//      looking similar, and no choice of dB window fixes that because the curve is the problem.
-//      Amplitude is what the I2S path already produces.
-//   2. The peak hold no longer decays.  Decaying it made the reference chase the signal downward,
-//      so the bar never came back down and crept toward full at a steady volume.  It is now the
-//      loudest reading since the last stop or title change - the same behaviour as I2S, and those
-//      two events zero config.vuThreshold in shared code.
+// VU meter, VS1053 path: the addon reports dB per channel via SCI_AICTRL3.  dB is converted to linear
+// amplitude so the bar matches I2S, and the peak hold never decays - it resets on stop or title change.
 static uint8_t vuDbToAmp(uint8_t db) {
   if(db > VU_VS1053_DB_FULL) db = VU_VS1053_DB_FULL;
   float a = 255.0f * powf(10.0f, (float)((int)db - (int)VU_VS1053_DB_FULL) / 20.0f);
@@ -3291,8 +3320,8 @@ static uint8_t vuDbToAmp(uint8_t db) {
 }
 
 #ifdef AUDIO_DEBUG
-/* Two short lines rather than one long one: the 380-character single line was cut in half by an interleaved
-   [VS1053.VU] log from the other task, and the counters - the whole point of the report - were the lost half. */
+// Two short lines rather than one long one: the 380-character single line was cut in half by an interleaved
+// [VS1053.VU] log from the other task, and the counters - the whole point of the report - were the lost half.
 void Audio::vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR) {
   const uint32_t nowMs = millis();
   const uint32_t age = m_feedLastMs ? (uint32_t)(nowMs - m_feedLastMs) : 0xFFFFFFFFu;
@@ -3301,10 +3330,15 @@ void Audio::vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR) {
   const uint16_t st  = read_register_nowait(SCI_STATUS);
   const uint16_t md  = read_register_nowait(SCI_MODE);
   const uint16_t vol = read_register_nowait(SCI_VOL);
+    // m_feedBytes is cumulative across connections, so the KB/s figure uses a baseline taken when this connection
+  // started.  `feed` keeps its old meaning - a running total - so older captures still compare.
+  const uint32_t spanMs   = (m_dbgTrackStartMs && nowMs > m_dbgTrackStartMs) ? (uint32_t)(nowMs - m_dbgTrackStartMs) : 0;
+  const uint32_t fedSince = m_feedBytes - s_dbgFeedAtStart;
+  const uint32_t feedRate = spanMs ? (uint32_t)(((uint64_t)fedSince * 1000ULL) / ((uint64_t)spanMs * 1024ULL)) : 0;
   sprintf(m_chbuf, "%s: dB %u/%u HDAT1 0x%04X HDAT0 0x%04X STATUS 0x%04X MODE 0x%04X VOL 0x%04X"
-                   " feed %lu last %lu ms buf %u sum %lu/%lu mode %u clen %lu",
+                   " feed %lu %lu KB/s last %lu ms buf %u sum %lu/%lu mode %u clen %lu",
       tag, (unsigned)dbL, (unsigned)dbR, h1, h0, st, md, vol,
-      (unsigned long)m_feedBytes, (unsigned long)age, (unsigned)InBuff.bufferFilled(),
+      (unsigned long)m_feedBytes, (unsigned long)feedRate, (unsigned long)age, (unsigned)InBuff.bufferFilled(),
       (unsigned long)m_sumBytesDecoded, (unsigned long)m_audioDataSize,
       (unsigned)getDatamode(), (unsigned long)m_contentlength);
   if(audio_info) audio_info(m_chbuf);
@@ -3329,10 +3363,10 @@ void Audio::computeVUlevel() {
   if(!VS_PATCH_ENABLE) return;
   if(!_vuInitalized || !config.vuSourceWanted()) return;
 
-  /* Read ceiling.  This is only ever called from get_VUlevel(), i.e. from the display task, so
-     without a gate the VU sample rate would be whatever the panel refresh happens to be - which is
-     how it once ended up at 7.5 Hz.  A millis gate makes it a constant ~30 Hz whatever
-     VU_REFRESH_MS is set to, and independent of the panel. */
+    // Read ceiling.  This is only ever called from get_VUlevel(), i.e. from the display task, so
+  // without a gate the VU sample rate would be whatever the panel refresh happens to be - which is
+  // how it once ended up at 7.5 Hz.  A millis gate makes it a constant ~30 Hz whatever
+  // VU_REFRESH_MS is set to, and independent of the panel.
   static uint32_t lastReadMs = 0;
   uint32_t now = millis();
   if(lastReadMs && (now - lastReadMs) < VU_VS1053_READ_MS) return;
@@ -3350,18 +3384,18 @@ void Audio::computeVUlevel() {
   vuLeft  = vuDbToAmp(dbL);
   vuRight = vuDbToAmp(dbR);
 
-  /* The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the I2S path:
-     Config::vuRefTrack().  A rising-only reference never releases the track's peak, which pins the bar. */
+    // The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the I2S path:
+  // Config::vuRefTrack().  A rising-only reference never releases the track's peak, which pins the bar.
   config.vuRefTrack(vuLeft, vuRight);
 
 #if VU_VS1053_LOG
-  /* VU diagnostics, once a second.  Two questions:
-       - the raw dB range, for choosing VU_VS1053_DB_FULL;
-       - how long the read really takes.  This is the measurement that found the 17.4 ms DREQ
-         busy-wait inside read_register() and led to read_register_nowait(); it stays on as a
-         regression check, because anything in the hundreds of microseconds here means that wait
-         has crept back in.
-         The count per second also confirms the VU_VS1053_READ_MS gate is behaving as expected. */
+    // VU diagnostics, once a second.  Two questions:
+  // - the raw dB range, for choosing VU_VS1053_DB_FULL;
+  // - how long the read really takes.  This is the measurement that found the 17.4 ms DREQ
+  // busy-wait inside read_register() and led to read_register_nowait(); it stays on as a
+  // regression check, because anything in the hundreds of microseconds here means that wait
+  // has crept back in.
+  // The count per second also confirms the VU_VS1053_READ_MS gate is behaving as expected.
   static uint8_t  minDbL = 255, maxDbL = 0, minDbR = 255, maxDbR = 0;
   static uint32_t maxReadUs = 0, sumReadUs = 0, readCount = 0;
   static uint32_t lastLogMs = 0;
@@ -3383,13 +3417,13 @@ void Audio::computeVUlevel() {
 #endif
 
 #ifdef AUDIO_DEBUG
-  /* Four reports, all built by vuDbgReport() so each one is two short lines that survive an interleaved log:
-       - track10s: 10 s after every connection, whether or not the meter ever moved.
-       - vu stuck: the decoder has made no progress for 3 s.  No size heuristic can fake this or hide it.
-       - vu flat:  a collapse - the meter was above 40 dB and is now on the floor - within 3 s.
-       - vu deep:  flat for 20 s with no peak requirement, for a track silent from its first frame.
-     The two flat reports carry no size condition: a fade-out still moves m_sumBytesDecoded, and requiring 64 KB still
-     unplayed disabled them at exactly the end-of-track stall they had to catch. */
+    // Four reports, all built by vuDbgReport() so each one is two short lines that survive an interleaved log:
+  // - track10s: 10 s after every connection, whether or not the meter ever moved.
+  // - vu stuck: the decoder has made no progress for 3 s.  No size heuristic can fake this or hide it.
+  // - vu flat:  a collapse - the meter was above 40 dB and is now on the floor - within 3 s.
+  // - vu deep:  flat for 20 s with no peak requirement, for a track silent from its first frame.
+  // The two flat reports carry no size condition: a fade-out still moves m_sumBytesDecoded, and requiring 64 KB still
+  // unplayed disabled them at exactly the end-of-track stall they had to catch.
   {
     static uint16_t s_flatRuns    = 0;
     static uint8_t  s_peakDb      = 0;
@@ -3412,8 +3446,8 @@ void Audio::computeVUlevel() {
       vuDbgReport("track10s", dbL, dbR);
     }
 
-    /* Gate on "a file is open and the user did not pause it" and on nothing else.  An earlier version also required
-       m_f_running && m_f_stream_ready && !m_f_eof, which meant a wrong flag silenced the very report that names it. */
+        // Gate on "a file is open and the user did not pause it" and on nothing else.  An earlier version also required
+    // m_f_running && m_f_stream_ready && !m_f_eof, which meant a wrong flag silenced the very report that names it.
     if(m_sumBytesDecoded != s_lastSum) {
       s_lastSum = m_sumBytesDecoded;
       s_sumMovedMs = nowMs;
@@ -3426,9 +3460,9 @@ void Audio::computeVUlevel() {
       vuDbgReport("vu stuck", dbL, dbR);
     }
 
-    /* The level triggers keep a narrow end-of-track exclusion: a fade-out is flat at the floor by definition, so
-       without it every track's last seconds print a report.  4 KB is about a quarter second of 128 kbps - small
-       enough never to hide a real stall, which is vu stuck's job and has no condition at all. */
+        // The level triggers keep a narrow end-of-track exclusion: a fade-out is flat at the floor by definition, so
+    // without it every track's last seconds print a report.  4 KB is about a quarter second of 128 kbps - small
+    // enough never to hide a real stall, which is vu stuck's job and has no condition at all.
     const uint32_t remaining = (m_audioDataSize > m_sumBytesDecoded)
                                  ? (uint32_t)(m_audioDataSize - m_sumBytesDecoded) : 0;
     if(remaining > 4096) {
@@ -3450,20 +3484,20 @@ void Audio::computeVUlevel() {
 
 uint16_t Audio::get_VUlevel(uint16_t dimension){
   if(!VS_PATCH_ENABLE || !_vuInitalized) return 0;
-  /* 0 means "nothing cleared", i.e. a FULL bar in this convention, so "nothing to show" answers EMPTY instead -
-     the same rule the I2S path uses. */
+    // 0 means "nothing cleared", i.e. a FULL bar in this convention, so "nothing to show" answers EMPTY instead -
+  // the same rule the I2S path uses.
   if(!config.vuSourceWanted()) return (uint16_t)(((uint16_t)dimension << 8) | dimension);
-  /* This read asserts the chip's SCI select, and the audio task may be holding SDI low mid-chunk; both asserted at
-     once is undefined on this chip and leaves the decoder refusing data for the rest of the boot.  So the read takes
-     the feeder's own mutex - mutex_audioTask, the one performAudioTask() holds around playAudioData() - and skips the
-     sample if it is busy.  The meter polls at ~20 Hz, so a dropped sample is invisible; waiting would not be. */
+    // This read asserts the chip's SCI select, and the audio task may be holding SDI low mid-chunk; both asserted at
+  // once is undefined on this chip and leaves the decoder refusing data for the rest of the boot.  So the read takes
+  // the feeder's own mutex - mutex_audioTask, the one performAudioTask() holds around playAudioData() - and skips the
+  // sample if it is busy.  The meter polls at ~20 Hz, so a dropped sample is invisible; waiting would not be.
   static uint16_t s_last = 0;
   if(mutex_audioTask == nullptr || xSemaphoreTake(mutex_audioTask, pdMS_TO_TICKS(2)) != pdTRUE) return s_last;
   computeVUlevel();
-  /* vuLeft/vuRight are amplitudes, so this is the same map the I2S path uses.  The reference is
-     clamped to 1 because config.vuThreshold is zeroed on stop and on title change while map()
-     divides by (0 - vuThreshold): a zero reference would be an integer division by zero.  With
-     silence both sides are 0, which maps to `dimension` - the correct EMPTY bar. */
+    // vuLeft/vuRight are amplitudes, so this is the same map the I2S path uses.  The reference is
+  // clamped to 1 because config.vuThreshold is zeroed on stop and on title change while map()
+  // divides by (0 - vuThreshold): a zero reference would be an integer division by zero.  With
+  // silence both sides are 0, which maps to `dimension` - the correct EMPTY bar.
   uint16_t ref = config.vuThreshold ? config.vuThreshold : 1;
   long lL = map(vuLeft,  ref, 0, 0, dimension); if(lL < 0) lL = 0;
   long lR = map(vuRight, ref, 0, 0, dimension); if(lR < 0) lR = 0;
@@ -3472,9 +3506,9 @@ uint16_t Audio::get_VUlevel(uint16_t dimension){
   return s_last;
 }
 //---------------------------------------------------------------------------------------------------------------------
-/* The chip decodes in hardware, so there is no PCM here to hand out: a waveform or a Lissajous cannot
-   exist on this path, and the spectrum is synthesised in the widget from the level instead.  Both
-   return false so the widget needs one code path rather than an #if per style. */
+// The chip decodes in hardware, so there is no PCM here to hand out: a waveform or a Lissajous cannot
+// exist on this path, and the spectrum is synthesised in the widget from the level instead.  Both
+// return false so the widget needs one code path rather than an #if per style.
 bool Audio::getWaveform(int16_t *out, uint16_t n){
   (void)out; (void)n;
   return false;
@@ -3628,8 +3662,8 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
 
     uint32_t t = millis();
     if(m_f_Log) AUDIO_INFO("connect to %s on port %d path %s", hostwoext, port, extension);
-    /* Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
-       read timeouts have to stay generous for the stream itself. */
+        // Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
+    // read timeouts have to stay generous for the stream itself.
     res = _client->connect(hostwoext, port, m_f_ssl ? m_connectTimeout_ms_ssl : m_connectTimeout_ms);
     
     if(res){
@@ -3669,10 +3703,10 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
         if(audio_showstreamtitle) audio_showstreamtitle("");
         if(audio_icydescription) audio_icydescription("");
         if(audio_icyurl) audio_icyurl("");
-        /* m_lastHost is deliberately KEPT here.  streamDetection() retries it every 5 s while no data arrives,
-           so erasing it turned every later library-level retry into connecttohost("") - a guaranteed failure
-           for the rest of the session, which left ehRadio's ladder as the only way back.  The I2S backend keeps
-           the host in the same situation (see the "Request %s failed!" branch in I2S_Audio/Audio.cpp). */
+                // m_lastHost is deliberately KEPT here.  streamDetection() retries it every 5 s while no data arrives,
+        // so erasing it turned every later library-level retry into connecttohost("") - a guaranteed failure
+        // for the rest of the session, which left ehRadio's ladder as the only way back.  The I2S backend keeps
+        // the host in the same situation (see the "Request %s failed!" branch in I2S_Audio/Audio.cpp).
     }
     if(hostwoext) {free(hostwoext); hostwoext = NULL;}
     if(extension) {free(extension); extension = NULL;}
@@ -3756,10 +3790,10 @@ bool Audio::httpPrint(const char* host) {
 	}
     else       { _client = static_cast<WiFiClient*>(&client);}
 
-    /* A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
-       The old guard only reconnected when the socket was CLOSED, so a segment request went down the playlist's
-       connection and the far end answered 404 for a path that does not exist there.  Measured on the I2S fork
-       (scastream, 2026.11.16) and mirrored here before it bites. */
+        // A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
+    // The old guard only reconnected when the socket was CLOSED, so a segment request went down the playlist's
+    // connection and the far end answered 404 for a path that does not exist there.  Measured on the I2S fork
+    // (scastream, 2026.11.16) and mirrored here before it bites.
     static char     connHost[160] = {0};
     static uint16_t connPort      = 0;
     static bool     connSsl       = false;
@@ -4132,9 +4166,9 @@ int Audio::read_ID3_Header(uint8_t *data, size_t len) {
         sprintf(m_chbuf, "ID3 version: 2.%i", ID3version);
         if(!m_f_m3u8data) if(audio_info) audio_info(m_chbuf);
 
-        /* Opt-in since the investigation closed: this fires on every ID3 header, which is twice per HLS segment, and
-           it is the highest-frequency line in a stream log.  It earned its place - it proved all three buffers live in
-           PSRAM and never move - so it is switched off rather than deleted.  Define HEAPMAP_LOG to bring it back. */
+                // Opt-in since the investigation closed: this fires on every ID3 header, which is twice per HLS segment, and
+        // it is the highest-frequency line in a stream log.  It earned its place - it proved all three buffers live in
+        // PSRAM and never move - so it is switched off rather than deleted.  Define HEAPMAP_LOG to bring it back.
         #ifdef HEAPMAP_LOG
         FUNCTIONLOG("HeapMap", "chbuf %p %u %s | ibuff %p %u %s | lastHost %p %s | quarantined %u",
             m_chbuf, (unsigned)m_chbufSize, heapq::poolName(m_chbuf),
@@ -4570,19 +4604,10 @@ uint32_t Audio::getAudioCurrentTime(){
     }
     return 0;
   }
-  if(m_codec == CODEC_AAC || m_codec == CODEC_FLAC || m_codec == CODEC_WAV || m_codec == CODEC_M4A){
-    SCIStatus=read_register(SCI_HDAT0);
-    m_avr_bitrate = SCIStatus * 8;
-    m_localBitrateSend = prev_bitrate==m_avr_bitrate;
-    // The AAC conversion here (HDAT0 * 8) has no documented basis, so the range check is the guard against publishing
-    // a nonsense number; zeroing it lets the caller retry rather than latch a bad value.
-    if(m_avr_bitrate < 8000 || m_avr_bitrate > 640000) { m_avr_bitrate = 0; return 0; }
-    sprintf(brbuf, "%lu", m_avr_bitrate);
-    if(audio_bitrate && !m_localBitrateSend) audio_bitrate(brbuf);
-    m_localBitrateSend = true;
-    m_audioFileDuration = 8 * ((float)m_audioDataSize / (m_avr_bitrate));
-    return 8 * ((float)getFilePos() / (m_avr_bitrate));
-  }
+    // No bitrate branch for anything but MP3.  The one that used to be here read HDAT0 and multiplied it by 8 - the AAC
+  // conversion, which this file admits has no documented basis - and on an Ogg FLAC stream that register holds
+  // something else entirely: 262,944 and 444,104 bit/s on two consecutive connections to the same 2 Mbit source.
+  // Anything else is measured now, in Audio::loop(), from the ring balance.
   return 0;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -4961,23 +4986,16 @@ bool Audio::readID3V1Tag(){
 }
 //------------------------------------------------------------------------------------------------------------------
 boolean Audio::streamDetection(uint32_t bytesAvail){
-    static uint32_t tmr_slow = millis();
     static uint32_t tmr_lost = millis();
-    static uint8_t  cnt_slow = 0;
     static uint8_t  cnt_lost = 0;
 
-    /* Nothing left to reconnect to: without this the reconnect below would call connecttohost("") every 5 s
-       forever, spinning a doomed connect plus a log line per attempt. */
+        // Nothing left to reconnect to: without this the reconnect below would call connecttohost("") every 5 s
+    // forever, spinning a doomed connect plus a log line per attempt.
     if(!m_lastHost || m_lastHost[0] == '\0') return false;
 
-    // if within one second the content of the audio buffer falls below the size of an audio frame 100 times,
-    // issue a message
-    if(tmr_slow + 1000 < millis()){
-        tmr_slow = millis();
-        if(cnt_slow > 100) AUDIO_INFO("slow stream, dropouts are possible");
-        cnt_slow = 0;
-    }
-    if(InBuff.bufferFilled() < InBuff.getMaxBlockSize()) cnt_slow++;
+        // The "slow stream, dropouts are possible" message is gone, for the reason the I2S fork already dropped it: a ring
+    // below one max block is the steady state, because the feeder drains whole blocks.  Measured on a healthy 1.4 Mbit
+    // stream it fired three times over a ring that then held 334 KB.  The five-second clock below is the honest test.
     // Liveness is audio reaching the ring.  `bytesAvail` is the socket's offer, measured before the read, so a socket
     // that keeps talking into a ring that never grows would look alive for ever.
     static uint32_t lastRingTotal = 0;

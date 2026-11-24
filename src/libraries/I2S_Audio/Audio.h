@@ -6,7 +6,11 @@
  *  Version 3.1.0n
  *  Updated on: Feb 27.2025, Apr 04.2025 (Maleksm)
  *      Author: Wolle (schreibfaul1)
- *  Some adjustments by Trip5 for ehRadio
+ * 
+ *  Adapted from Maleksm's yoRadio mod v0.9.434m(04.04.25)
+ *  Frankstein surgery performed by Trip5 for ehRadio
+ *  See i2s-frankenstein-surgery-notes.md for more information
+ * 
  */
 #if defined(USE_AUDIO_I2S) || defined(USE_AUDIO_ESP32_DAC)
 
@@ -221,25 +225,29 @@ public:
     uint8_t  getBitsPerSample();
     uint8_t  getChannels();
     uint32_t getBitRate(bool avg = false);
+        // Measured consumption rate in BYTES per second, 0 until one has been measured.  The display's audio-risk limiter
+    // converts ring occupancy into milliseconds with it, which is the only unit in which "can we afford a redraw"
+    // means the same thing for a 128 kbit stream and a 1.7 Mbit one.
+    uint32_t streamBytesPerSecond(){ return m_streamBytesSec; }
     uint32_t getAudioFileDuration();
     uint32_t getAudioCurrentTime();
     uint32_t getTotalPlayingTime();
     void       setDefaults(); 				// free buffers and set defaults
-    /* VU METER */
+        // VU METER
     void     setVUmeter() {};
 //    uint16_t getVUlevel();
     uint16_t get_VUlevel(uint16_t dimension);
-    /* Visualiser capture, shared by the waveform, Lissajous and spectrum styles.  Both return false
-       when there is nothing to give - the meter is off, the window has never been published, or the
-       publisher moved under the read - so the widget has one "is there a spectrum?" path instead of an
-       #if per style, and a torn window is dropped rather than drawn.
-         getWaveform: fills 2 * n int16, interleaved L and R, oldest first and newest last.
-         getSpectrum: fills 2 * n uint8, the low bands for L then the low bands for R. */
+        // Visualiser capture, shared by the waveform, Lissajous and spectrum styles.  Both return false
+    // when there is nothing to give - the meter is off, the window has never been published, or the
+    // publisher moved under the read - so the widget has one "is there a spectrum?" path instead of an
+    // #if per style, and a torn window is dropped rather than drawn.
+    // getWaveform: fills 2 * n int16, interleaved L and R, oldest first and newest last.
+    // getSpectrum: fills 2 * n uint8, the low bands for L then the low bands for R.
     bool     getWaveform(int16_t *out, uint16_t n);
     bool     getSpectrum(uint8_t *bands, uint8_t n);
-    /* Build the spectrum's scratch now, so it is taken before the audio ring; getSpectrum() retries lazily. */
+        // Build the spectrum's scratch now, so it is taken before the audio ring; getSpectrum() retries lazily.
     bool     vuScratchReserve();
-    /* The de-ogger scratch and the ring, taken at boot in the order the table in core/options.h gives. */
+        // The de-ogger scratch and the ring, taken at boot in the order the table in core/options.h gives.
     void     reservePsram();
 //    uint8_t  vuLeft, vuRight;                  // average value of samples, left channel, right channel
     esp_err_t i2s_mclk_pin_select(const uint8_t pin);
@@ -779,12 +787,12 @@ private:
     static const uint8_t m_tsPacketSize  = 188;
     static const uint8_t m_tsHeaderSize  = 4;
 
-    /* Visualiser capture.  VU_CAPTURE_SAMPLES comes from core/options.h, which every includer already
-       pulls in first (Audio.cpp line 11, player.h).  The audio task writes _capWin on every decoded
-       sample pair and, on each published level, rotates the window into _capPub and bumps _capSeq; the
-       display task reads _capPub under that sequence.  The payload is 2 KB, so unlike the one-byte
-       vuLeft/vuRight handover a read can tear, which is what the sequence check exists for.
-       _capSeq == 0 means "never published".  Static, so no heap and no PSRAM requirement. */
+        // Visualiser capture.  VU_CAPTURE_SAMPLES comes from core/options.h, which every includer already
+    // pulls in first (Audio.cpp line 11, player.h).  The audio task writes _capWin on every decoded
+    // sample pair and, on each published level, rotates the window into _capPub and bumps _capSeq; the
+    // display task reads _capPub under that sequence.  The payload is 2 KB, so unlike the one-byte
+    // vuLeft/vuRight handover a read can tear, which is what the sequence check exists for.
+    // _capSeq == 0 means "never published".  Static, so no heap and no PSRAM requirement.
     int16_t  _capWin[2][VU_CAPTURE_SAMPLES];    // rolling window, [0] = left, [1] = right
     int16_t  _capPub[2][VU_CAPTURE_SAMPLES];    // published copy, linearised oldest-first
     uint16_t _capPos = 0;                       // next write index in _capWin
@@ -807,6 +815,7 @@ private:
     uint32_t        h_bitRate=0;                    // current bitrate given fom header
     uint32_t        m_bitRate=0;                    // current bitrate given fom decoder
     uint32_t        m_avr_bitrate = 0;              // average bitrate, median computed by VBR
+    uint32_t        m_streamBytesSec = 0;           // measured consumption, bytes/s: read by the display risk limiter
     int             m_readbytes = 0;                // bytes read
     uint32_t        m_metacount = 0;                // counts down bytes between metadata
     int             m_controlCounter = 0;           // Status within readID3data() and readWaveHeader()
@@ -850,7 +859,7 @@ private:
     uint8_t         m_flacBitsPerSample = 0;        // bps should be 16
     uint8_t         m_flacNumChannels = 0;          // can be read out in the FLAC file header
     uint32_t        m_flacSampleRate = 0;           // can be read out in the FLAC file header
-    uint16_t        m_flacMaxFrameSize = 0;         // can be read out in the FLAC file header
+    uint32_t        m_flacMaxFrameSize = 0;         // STREAMINFO's field is 24 bits, so uint16_t truncated it
     uint16_t        m_flacMaxBlockSize = 0;         // can be read out in the FLAC file header
     uint32_t        m_flacTotalSamplesInStream = 0; // can be read out in the FLAC file header
     uint32_t        m_metaint = 0;                  // Number of databytes between metadata

@@ -567,13 +567,13 @@ private:
     volatile bool     m_dbgTrackReported = true; // true until the next connection arms it
 
 public:
-        // VU METER
+    // VU METER
     void     setVUmeter();
     uint16_t get_VUlevel(uint16_t dimension);
     void     computeVUlevel();
     // Two-line diagnostic report; defined only under AUDIO_DEBUG (a declaration without a definition is legal).
     void     vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR);
-        // No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
+    // No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
     // these return false, which keeps the widget's "is there a spectrum?" path the same on both audio
     // backends.  The spectrum style is still offered on this build - it is drawn from the synthesised
     // band source - and only the waveform and the Lissajous are absent from /visuals.json.

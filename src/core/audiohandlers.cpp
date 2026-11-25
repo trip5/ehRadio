@@ -262,7 +262,12 @@ void AudioHandlers::handleBitrate(const char* info) {
   #ifdef AUDIO_DEBUG
     FUNCTIONLOG("Audio.bitrate", "%s", info);
   #endif
-  config.station.bitrate = atoi(info) / 1000;
+  // "BitRate: N/A" and a bare 0 both arrive here, and atoi() turns either into a bitrate of 0 - which erased a
+  // badge that was already correct.  A station change clears config.station.bitrate in player.cpp, so a zero
+  // carries no information and is dropped.
+  const uint32_t bitsPerSecond = (uint32_t)atoi(info ? info : "");
+  if (!bitsPerSecond) return;
+  config.station.bitrate = bitsPerSecond / 1000;
   display.putRequest(DBITRATE);
   netserver.requestOnChange(BITRATE, 0);
 }

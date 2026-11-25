@@ -1097,7 +1097,8 @@ section; this is what this fork does now.
    bitrate and published 262,944 and then 444,104 for it, latching whichever came first. The 10 s / rendered-value gate
    is what keeps the log quiet: 1,524,447 and 1,531,261 both read "1.5".
 2. **MP3 keeps `getAudioCurrentTime()`**, which reads the exact frame bitrate from `HDAT1` through the l3id3 / l3id012
-   tables - better than any measurement, including VBR.
+   tables - better than any measurement, including VBR. **That held only where the function is called**, and it is
+   called in SD-card mode alone, so this item is what broke web MP3 streams: see 2026.11.25 below.
 3. **`slow stream, dropouts are possible` is gone**: a ring below one max block is the steady state, which is the
    decision the I2S fork already made about the same message. The five-second no-bytes-reached-the-ring clock stays.
 4. **`track10s` prints a feed rate in KB/s**, taken from a baseline set at connection start because `m_feedBytes` is
@@ -1105,3 +1106,20 @@ section; this is what this fork does now.
 5. **`feed ok: wrote 640 of 1600, DREQ low` is healthy, not starvation.** The feeder loop breaks out when DREQ goes low,
    so for a partial write that field is the reason it stopped: the chip's FIFO is full and we are ahead of it. Starvation
    reads `feed stalled: wrote 0 of …` with more than a second since the last accepted byte.
+
+## Post-Graft Patch Fixes (2026.11.25)
+
+**Files changed**: `audioVS1053Ex.cpp`. `sh1106_vs1053_3buttons` flash 2,561,352 (-4), RAM 90,524 unchanged.
+
+**A web MP3 stream with no `icy-br` header showed no bitrate at all.** Reported on
+`https://radio.blagues-courtes.fr/stream`, which answers `Content-Type: audio/mpeg`, `Transfer-Encoding: chunked`,
+`icy-metainterval: 16000`, `icy-name`, and **no `icy-br`** - so neither header nor metadata could supply a number.
+
+The 2026.11.23 item 2 traded the measured path for `getAudioCurrentTime()` on MP3, on the grounds that the frame
+bitrate read out of `HDAT1` is exact. It is - but the function is called from two places, `network.cpp` and
+`netserver.cpp`, and both are inside `config.getMode() == PM_SDCARD`. A web stream never calls it, so MP3 had **no
+publisher at all** while every other codec was measured. The change is one condition: the measured path's
+`m_codec != CODEC_MP3` is gone, so every codec is measured and the badge appears within a window or two.
+
+`getAudioCurrentTime()` keeps its exact value for SD playback, where it is both reachable and better than any
+measurement; the two now agree rather than one silently starving the other.

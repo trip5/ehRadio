@@ -225,7 +225,7 @@ public:
     uint8_t  getBitsPerSample();
     uint8_t  getChannels();
     uint32_t getBitRate(bool avg = false);
-        // Measured consumption rate in BYTES per second, 0 until one has been measured.  The display's audio-risk limiter
+    // Measured consumption rate in BYTES per second, 0 until one has been measured.  The display's audio-risk limiter
     // converts ring occupancy into milliseconds with it, which is the only unit in which "can we afford a redraw"
     // means the same thing for a 128 kbit stream and a 1.7 Mbit one.
     uint32_t streamBytesPerSecond(){ return m_streamBytesSec; }
@@ -237,7 +237,7 @@ public:
     void     setVUmeter() {};
 //    uint16_t getVUlevel();
     uint16_t get_VUlevel(uint16_t dimension);
-        // Visualiser capture, shared by the waveform, Lissajous and spectrum styles.  Both return false
+    // Visualiser capture, shared by the waveform, Lissajous and spectrum styles.  Both return false
     // when there is nothing to give - the meter is off, the window has never been published, or the
     // publisher moved under the read - so the widget has one "is there a spectrum?" path instead of an
     // #if per style, and a torn window is dropped rather than drawn.
@@ -787,7 +787,7 @@ private:
     static const uint8_t m_tsPacketSize  = 188;
     static const uint8_t m_tsHeaderSize  = 4;
 
-        // Visualiser capture.  VU_CAPTURE_SAMPLES comes from core/options.h, which every includer already
+    // Visualiser capture.  VU_CAPTURE_SAMPLES comes from core/options.h, which every includer already
     // pulls in first (Audio.cpp line 11, player.h).  The audio task writes _capWin on every decoded
     // sample pair and, on each published level, rotates the window into _capPub and bumps _capSeq; the
     // display task reads _capPub under that sequence.  The payload is 2 KB, so unlike the one-byte

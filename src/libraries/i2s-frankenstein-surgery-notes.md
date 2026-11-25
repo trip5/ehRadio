@@ -1046,7 +1046,9 @@ numbers that explain it are the ones above; the fork's own notes carry the short
 
 3. **MP3 keeps its exact value.** `getAudioCurrentTime()` reads the frame bitrate out of `HDAT1` through the l3id3 /
    l3id012 tables, better than any measurement for MP3 including VBR, so the measured path skips MP3 and the rest of
-   that function is now `return 0`.
+   that function is now `return 0`. **CORRECTED 2026.11.25:** that function is called in SD-card mode only, so skipping
+   MP3 left a *web* MP3 stream with no publisher at all and no bitrate on the badge. MP3 is measured on both forks now;
+   the exact value still wins wherever the function is reachable. See the VS1053 notes' same-dated section.
 
 4. **`slow stream, dropouts are possible` is gone from the VS1053 fork**, for exactly the reason item 6 of the I2S
    post-graft list gives about the same message here: a ring below one max block is the steady state, because the feeder
@@ -1173,3 +1175,40 @@ was written to scope the sweep from numbers rather than memory, and it stays in 
    of the day and the only two in the libraries without it. `flac_decoder.h`'s restriction list also stopped claiming
    "bits per sample must be 8 or 16", which the 24-bit fix has made untrue, and now says 24 is downshifted to 16. The
    convention and the check that enforces it are in `libraries-note.md`.
+
+## The Bitrate Badge: One Publisher Per Source Class (2026.11.24)
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp`, `src/core/audiohandlers.cpp`. Builds: `ili9488_pcm_1button_full`
+flash 3,155,411 (+132) and `sh1106_vs1053_3buttons` 2,561,356 (+16); RAM unchanged on both.
+
+1. **The regression was mine, and the comment that justified it was false.** Item 6 above removed the publish from
+   `computeAudioTime()` because its guard "wants a local file or a ST_WEBFILE, and a stream is ST_WEBSTREAM". The first
+   half is wrong: `m_streamType = ST_WEBFILE` is set for **any response carrying `content-length:`** (the "stream comes
+   from a fileserver" branch), which is how a great many web streams arrive. Those streams got their badge from that
+   500 ms publish and lost it; chunked ones were unaffected, because they never reached the function - which is exactly
+   the shape of "some streams have no bitrate".
+
+2. **So there are two publishers, and each owns a source class.** `computeAudioTime()` owns a local file and every
+   `ST_WEBFILE` (its 500 ms window is the only one that runs for them); `playChunk()`'s 10 s window owns `ST_WEBSTREAM`
+   only. They are now mutually exclusive by construction rather than by hope, so a stream cannot be published by two
+   windows that disagree by a kbit and make the badge flicker.
+
+3. **MP3 is measured now as well.** The `m_codec != CODEC_MP3` exclusion is gone from the `playChunk()` publisher. The
+   frame header still gives MP3 its exact value at the start through `showCodecParams()`, and the measurement then
+   corrects a VBR stream - but the exclusion's real cost was that for MP3 *nothing republished the badge after anything
+   cleared it*. It also gives the display's risk limiter an MP3 rate instead of leaving it on the 32 KB byte floor.
+
+4. **`handleBitrate()` no longer accepts "N/A" or 0.** It was a blind `atoi()`, and `showCodecParams()` used to emit
+   `BitRate: N/A` whenever the bitrate was not known yet - `atoi("N/A") == 0` - which set `config.station.bitrate` to 0
+   and erased a badge that was already correct. A zero carries no information here: `player.cpp` clears the field on a
+   station change, so dropping it costs nothing.
+
+5. **One rendering rule for both publishers.** `bitrateBucket()` (whole kbit below 1000, tenths of a Mbit above) is a
+   file-static in `Audio.cpp` that both windows call, so neither redraws for a value the three-character field would
+   print identically. `showCodecParams()` now publishes one value - `h_bitRate` if the server sent `icy-br`, else the
+   frame header - instead of up to three lines, one of which was the `N/A`.
+
+6. **A web file now has a rate for the display limiter too.** `computeAudioTime()` writes `m_streamBytesSec` from its
+   own measurement, but only when `m_streamType == ST_WEBFILE`: a `content-length` FLAC stream is the case the limiter
+   exists for, and until now it ran on the 32 KB byte floor. A local file is deliberately left out - its ring is filled
+   from the card, not the network, and a rate there would let the limiter throttle the VU for no reason.

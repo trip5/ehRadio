@@ -961,7 +961,7 @@ or examine the examples in builds/trip5 and make your own!
   #define AUDIO_RISK_ENGAGE_MS 500 // DSP_TASK_DELAY throttles the display (1/4 FPS) if audio buffer falls below this time (relieves audio-display contention)
 #endif
 #ifndef AUDIO_RISK_RELEASE_MS
-  #define AUDIO_RISK_RELEASE_MS 1000 // When the buffer contains more than this time of audio, the throttle is released (see audioRingAtRisk() in display.cpp)
+  #define AUDIO_RISK_RELEASE_MS 3000 // When the buffer contains more than this time of audio, the throttle is released (see audioRingAtRisk() in display.cpp)
 #endif
 #if AUDIO_RISK_RELEASE_MS <= AUDIO_RISK_ENGAGE_MS
   #error define error: AUDIO_RISK_RELEASE_MS must be greater than AUDIO_RISK_ENGAGE_MS

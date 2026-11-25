@@ -130,7 +130,7 @@ size_t AudioBuffer::init() {
     m_buffer = NULL;
     if(psramInit() && m_buffSizePSRAM > 0) {         // PSRAM found, AudioBuffer will be allocated in PSRAM
         m_f_psram = true;
-                // Opportunity, not entitlement: everything the ring competes with is allocated before it (the table in
+        // Opportunity, not entitlement: everything the ring competes with is allocated before it (the table in
         // core/options.h), so the floor covers only what cannot be taken early - the SD File Manager's 69,632-byte
         // assembly buffer, the decoder set, a TLS session, and slack for framebuffer churn.  The decoder set is 192 KB
         // on its own (FLAC sizes s_samplesBuffer at 2 x MAX_BLOCKSIZE x int32_t), and a live https stream measures
@@ -714,7 +714,7 @@ bool Audio::connecttohost(String host){
 }
 //****************************************************************************************
 bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
-    // user and pwd for authentification only, can be empty
+// user and pwd for authentification only, can be empty
 //    https://edge.live.mp3.mdn.newmedia.nacamar.net:8000/ps-charivariwb/livestream.mp3;&user=ps-charivariwb;&pwd=ps-charivariwb-------
 //        |   |                                     |    |                              |
 //        |   |                                     |    |                              |             (query string)
@@ -813,7 +813,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
     timestamp = millis();
 
     AUDIO_INFO("connect to: \"%s\" on port %d path \"/%s\"", h_host + hostwoext_begin, port, h_host + pos_slash + 1);
-        // Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
+    // Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
     // read timeouts have to stay generous for the stream itself.
     res = _client->connect(h_host + hostwoext_begin, port, m_f_ssl ? m_connectTimeout_ms_ssl : m_connectTimeout_ms);
 
@@ -959,7 +959,7 @@ bool Audio::httpPrint(const char* host) {
     strcat(rqh, "Accept-Encoding: identity;q=1,*;q=0\r\n");
     strcat(rqh, "Connection: keep-alive\r\n\r\n");
 
-        // A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
+    // A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
     // The old guard here only reconnected when the socket was CLOSED, so the segment request was written down the
     // playlist's connection: the far end answered 404 for a path that does not exist on that host, no connect was ever
     // logged, and m_lastHost still named the playlist.  Measured on scastream, 2026.11.16.  Reconnect on a target
@@ -2673,6 +2673,12 @@ bool Audio::pauseResume() {
 // pins at ~5,000 for 48 kHz.  s_decodeOnlyCycles brackets the decoder call alone: that is the one that moves.
 static uint32_t s_decodeCycles = 0;
 static uint32_t s_decodeOnlyCycles = 0;
+// One rendering rule for the badge: whole kbit below 1000, tenths of a Mbit above.  Both publishers below use it,
+// so neither can redraw for a value the three-character field would print the same.
+static uint32_t bitrateBucket(uint32_t bitsPerSecond) {
+    const uint32_t kbps = (bitsPerSecond + 500u) / 1000u;
+    return (kbps >= 1000u) ? ((kbps + 50u) / 100u) : kbps;
+}
 
 void Audio::playChunk() {
 
@@ -2874,17 +2880,14 @@ i2swrite:
                 }
             }
             #endif
-                        // Bitrate, measured from the same window: input bytes consumed is what the stream actually carries.  This is
-            // the only place it can be done for a live stream - computeAudioTime() returns early unless the source is a
-            // local file or a WEBFILE, and a stream is ST_WEBSTREAM, which is why the badge used to show the decoder's
-            // one-frame nominal (2.7 for a 24-bit stream that carries 1.7) for ever.  Published only when the number the
-            // badge renders changes - tenths of a Mbit at 1000 kbit and above, whole kbit below - so a 1.5 Mbit stream
-            // does not print a line a second.
-            if(m_codec != CODEC_MP3 && m_sumBytesDecoded > sBrSum) {
+            // Bitrate for a live stream, measured from the same window: input bytes consumed is what the connection
+            // carries.  One publisher per source class - a local file or a ST_WEBFILE is computeAudioTime()'s, which
+            // returns early for exactly this case.  MP3 is measured here too: the frame header gives its exact value
+            // at the start, and this corrects a VBR stream and republishes a badge that a codec-params line cleared.
+            if(m_streamType == ST_WEBSTREAM && m_sumBytesDecoded > sBrSum) {
                 const uint32_t br = (uint32_t)(((uint64_t)(m_sumBytesDecoded - sBrSum) * 8000ULL) / (uint64_t)span);
                 m_streamBytesSec = br / 8;               // for the display's audio-risk limiter
-                const uint32_t kbps = (br + 500u) / 1000u;
-                const uint32_t bucket = (kbps >= 1000u) ? ((kbps + 50u) / 100u) : kbps;
+                const uint32_t bucket = bitrateBucket(br);
                 if(bucket != sBrBucket) {
                     sBrBucket = bucket;
                     char brs[12];
@@ -4180,7 +4183,7 @@ nextRound:
     availableBytes = _client->available();
     if(availableBytes) {
 
-                // If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
+        // If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
         // However, the chunk size in some streams is limited to 32768 bytes, although the chunk can be larger. Then the chunk size is
         // calculated again. The data used to calculate (here readedBytes) the chunk size is not part of it.
         uint8_t readedBytes = 0;
@@ -4256,7 +4259,7 @@ nextRound:
 
     // buffer fill routine  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(true) {                                                  // statement has no effect
-        if(InBuff.bufferFilled() > 60000 && !m_f_stream) {     // waiting for buffer filled
+        if(InBuff.bufferFilled() > 60000 && !m_f_stream) {      // waiting for buffer filled
             m_f_stream = true;                                  // ready to play the audio data
             uint16_t filltime = millis() - m_t0;
             AUDIO_INFO("stream ready");
@@ -4453,7 +4456,7 @@ void Audio::playAudioData() {
     uint32_t bytesToDecode = 0;
     uint32_t decT0 = 0;             // decode timer, declared here because the gotos below jump over later declarations
 
-        // Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
+    // Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
     // setDefaults(), so the latch happened to be correct here, but depending on that re-arm is what the VS1053 graft
     // lost - and with it, every web stream played after an SD track in the same boot.  Deriving the branch from the
     // state that is actually current removes the whole class: a local file is a file, a live stream is not, and a web
@@ -5194,12 +5197,10 @@ void Audio::showCodecParams() {
     AUDIO_INFO("Channels: %u", getChannels());
     AUDIO_INFO("SampleRate: %lu", (long unsigned int)getSampleRate());
     AUDIO_INFO("BitsPerSample: %u", getBitsPerSample());
-//    if(getBitRate()) { AUDIO_INFO("BitRate: %lu", (long unsigned int)getBitRate()); }
-//    if(getBitRate()) { AUDIO_INFO("BitRate: %lu", (long unsigned int)m_bitRate); }
-//    else { AUDIO_INFO("BitRate: N/A"); }
-    if(h_bitRate) {AUDIO_INFO("BitRate: %lu", (long unsigned int)h_bitRate); }
-    if(!h_bitRate) { AUDIO_INFO("BitRate: %lu", (long unsigned int)getBitRate()); }
-    if(!m_bitRate) { AUDIO_INFO("BitRate: N/A"); }
+    // The badge's starting value, before any measurement: the server's icy-br if it sent one, else the frame header
+    // setDecoderItems() just stored.  Zero is "not known yet", and handleBitrate() drops it rather than clearing.
+    const uint32_t brForBadge = h_bitRate ? h_bitRate : m_bitRate;
+    if(brForBadge) { AUDIO_INFO("BitRate: %lu", (long unsigned int)brForBadge); }
 
     if(m_codec == CODEC_AAC) {
         uint8_t answ = AACGetFormat();
@@ -5443,7 +5444,7 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
         printDecodeError(m_decodeError);
         m_f_playing = false; 									// seek for new syncword
         if(m_codec == CODEC_FLAC) {
-                        // These two fail on EVERY frame, so seeking the next syncword only spins: a silent PLAYING loop at frame
+            // These two fail on EVERY frame, so seeking the next syncword only spins: a silent PLAYING loop at frame
             // rate, with the UI showing PLAYING and nothing said.  Refuse the stream the way the two-identity check
             // does, so it ends with a verdict instead.  A 32-bit source is the case this exists for - 24 is the ceiling,
             // because the side channel of a 32-bit stream needs 33 bits and the sample buffer is int32_t.
@@ -5592,6 +5593,7 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
     static uint32_t timeStamp          = 0;
     static uint32_t deltaBytesIn       = 0;
     static uint32_t nominalBitRate     = 0;
+    static uint32_t brBucketPublished  = 0xFFFFFFFFu;
 
     if(m_f_firstCurTimeCall) { // first call
         m_f_firstCurTimeCall = false;
@@ -5602,6 +5604,7 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
         timeStamp = millis();
         deltaBytesIn = 0;
         nominalBitRate = 0;
+        brBucketPublished = 0xFFFFFFFFu;
 
         if(m_codec == CODEC_FLAC && FLACGetAudioFileDuration()){
             m_audioFileDuration = FLACGetAudioFileDuration();
@@ -5630,9 +5633,21 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
 
         sumBitRate += bitRate;
         counter ++;
-                // The badge is NOT fed from here.  This function returns at once for a live stream (the guard above wants a local
-        // file or a WEBFILE, and a stream is ST_WEBSTREAM), so publishing from here covers file playback only and would
-        // duplicate the 10 s measurement in playChunk() - at twice the rate.  One publisher, in playChunk().
+        // The badge's publisher for this source class: this function is the only one that runs for a local file or a
+        // ST_WEBFILE, and a content-length header is what makes a web stream ST_WEBFILE.  A chunked stream never gets
+        // here, so playChunk() owns those and the two can never disagree about the same stream.
+        if(bitRate) {
+            // The risk limiter's rate, from the same measurement, for a web file only: a local file's ring is filled
+            // from the card, not the network, and a rate there would let the limiter throttle the VU needlessly.
+            if(m_streamType == ST_WEBFILE) m_streamBytesSec = bitRate / 8;
+            const uint32_t bucket = bitrateBucket(bitRate);
+            if(bucket != brBucketPublished) {
+                brBucketPublished = bucket;
+                char brs[12];
+                sprintf(brs, "%lu", (unsigned long)bitRate);
+                if(audio_bitrate) audio_bitrate(brs);
+            }
+        }
         if(nominalBitRate){
             m_audioCurrentTime = round(((float)sumBytesIn * 8) / m_avr_bitrate);
         }
@@ -6087,7 +6102,7 @@ void Audio::computeVUlevel(int16_t sample[2]) {
         return maxValue;
     };
 
-        // --- visualiser capture ---------------------------------------------------------------------
+    // --- visualiser capture ---------------------------------------------------------------------
     // Every decoded pair lands in the rolling window before any of the level maths below.  The window
     // is rotated out for the display task on the f_vu tick (see _capturePublish), which is once per
     // 512 calls, so a redraw sees exactly the samples the level it is drawn beside was built from.
@@ -6095,7 +6110,7 @@ void Audio::computeVUlevel(int16_t sample[2]) {
     _capWin[RIGHTCHANNEL][_capPos] = sample[RIGHTCHANNEL];
     if (++_capPos >= VU_CAPTURE_SAMPLES) _capPos = 0;
 
-        // The ladder as it actually behaves.  cnt0 is never incremented, so `if(cnt0 == 64)` never runs
+    // The ladder as it actually behaves.  cnt0 is never incremented, so `if(cnt0 == 64)` never runs
     // and every `if(!cntN)` test below passes on every call: the "every 64th sample" step that the
     // comments further down describe does not exist.  The real cadence is 8 x 8 x 8 = 512 sample pairs
     // per published level, ~86 Hz at 44.1 kHz, and sampleArray[0] holds the last 8 samples rather than
@@ -6244,7 +6259,7 @@ bool Audio::vuScratchReserve() {
 }
 
 static void vuFft(float *d, int n, const float *tw) {
-    // In place, decimation in time, interleaved complex.  tw holds n/2 pairs, tw[2k] = cos(-2.pi.k/n)
+  // In place, decimation in time, interleaved complex.  tw holds n/2 pairs, tw[2k] = cos(-2.pi.k/n)
   // and tw[2k+1] = sin(-2.pi.k/n).
   for (int i = 1, j = 0; i < n; i++) {                  // bit-reversal permutation
     int bit = n >> 1;
@@ -6304,7 +6319,7 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     edgeN = n;
   }
 
-    // The reference the height of a bar is measured against, and it is deliberately the SAME one the
+  // The reference the height of a bar is measured against, and it is deliberately the SAME one the
   // level bars use.  config.vuThreshold is the loudest the stream has been, in units of
   // sample / 128 (computeVUlevel() stores abs(sample >> 7) and keeps the high-water mark), so
   // 256 / vuThreshold puts that loudest content at full scale.  Without it the spectrum would be an
@@ -6317,7 +6332,7 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
   if (gain > 32.0f) gain = 32.0f;
   const float floorDb = VU_SPECTRUM_DB_FLOOR ? (float)VU_SPECTRUM_DB_FLOOR : 60.0f;
 
-    // The held frame: fast attack, slow fall, one time base for both channels.  A single 512-sample
+  // The held frame: fast attack, slow fall, one time base for both channels.  A single 512-sample
   // window is a noisy estimate - a band can swing 10 dB from one window to the next, so the ends of the
   // range pop in and out and a quiet window dims the whole display - so a band keeps the highest value
   // it has seen and falls at VU_SPECTRUM_FALL_MS, the same shape VU_FADE_MS gives the level bars.  It is
@@ -6331,7 +6346,7 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     const int16_t *src = &_capPub[ch][0];
     for (int i = 0; i < N; i++) { vuBuf[i * 2] = (float)src[i]; vuBuf[i * 2 + 1] = 0.0f; }
     if (_capSeq != seq) {
-            // The publisher moved under us.  The transform is still available, so this is one refresh lost,
+      // The publisher moved under us.  The transform is still available, so this is one refresh lost,
       // not a backend without a spectrum: repeat the held frame rather than reporting a failure, which
       // would make the painter switch to its SIMULATED source for that one frame - and on a sparse real
       // spectrum that reads as the whole thing suddenly filling in.  The strict check is what the
@@ -6349,7 +6364,7 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
         const float re = vuBuf[k * 2], im = vuBuf[k * 2 + 1];
         acc += re * re + im * im;
       }
-            // Mean magnitude over the band, in four factors, because the scale of each one matters and a
+      // Mean magnitude over the band, in four factors, because the scale of each one matters and a
       // missing one is invisible until it is on a panel:
       // sqrt            - mean power to amplitude
       // 2 / N           - the transform's own normalisation
@@ -6367,7 +6382,7 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     }
   }
 
-    // Fast attack, slow fall.  The elapsed time is clamped to the fall time, so a stall cannot drop the
+  // Fast attack, slow fall.  The elapsed time is clamped to the fall time, so a stall cannot drop the
   // bars in one step, and the floor is the value this frame actually measured - a band never reads
   // lower than the measurement it came from.
   const uint32_t now = millis();

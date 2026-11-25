@@ -1176,10 +1176,13 @@ was written to scope the sweep from numbers rather than memory, and it stays in 
    "bits per sample must be 8 or 16", which the 24-bit fix has made untrue, and now says 24 is downshifted to 16. The
    convention and the check that enforces it are in `libraries-note.md`.
 
-## The Bitrate Badge: One Publisher Per Source Class (2026.11.24)
+## The Bitrate Badge (2026.11.24)
 
 **Files changed**: `src/libraries/I2S_Audio/Audio.cpp`, `src/core/audiohandlers.cpp`. Builds: `ili9488_pcm_1button_full`
 flash 3,155,411 (+132) and `sh1106_vs1053_3buttons` 2,561,356 (+16); RAM unchanged on both.
+
+**Partly superseded 2026.11.25**: items 2 and 6 divided the work between two windows by source class, which is what
+made an HLS stream publish from a 500 ms slice. There is one publisher again - see the next section.
 
 1. **The regression was mine, and the comment that justified it was false.** Item 6 above removed the publish from
    `computeAudioTime()` because its guard "wants a local file or a ST_WEBFILE, and a stream is ST_WEBSTREAM". The first
@@ -1212,3 +1215,36 @@ flash 3,155,411 (+132) and `sh1106_vs1053_3buttons` 2,561,356 (+16); RAM unchang
    own measurement, but only when `m_streamType == ST_WEBFILE`: a `content-length` FLAC stream is the case the limiter
    exists for, and until now it ran on the 32 KB byte floor. A local file is deliberately left out - its ring is filled
    from the card, not the network, and a rate there would let the limiter throttle the VU for no reason.
+
+## The Bitrate Badge: One Publisher, One Window (2026.11.25)
+
+**Files changed**: `src/libraries/I2S_Audio/Audio.cpp`, `src/core/audiohandlers.cpp`. Builds: `ili9488_pcm_1button_full`
+flash 3,155,319 (-92 vs the 2026.11.24 build) and `sh1106_vs1053_3buttons` 2,561,424 (+72, the `handleBitrate()`
+rounding); RAM unchanged at 110,328 and 90,524.
+
+Reported on `http://stream.revma.ihrhls.com/zc9483/hls.m3u8`: the badge changed every **1-5 s**, often to `1`, `2`
+or `5`, and sometimes went **blank**.
+
+1. **An HLS stream is `ST_WEBFILE`.** Each segment arrives as its own response with a `content-length`, so this is the
+   source class that the 2026.11.24 partition handed to `computeAudioTime()` - the 500 ms window.
+
+2. **A 500 ms window cannot measure a bursty reader.** HLS reads a whole segment in one go and then reads nothing while
+   the ring drains. One window therefore reports the segment (a number several times the stream's real rate) and the
+   next reports a few hundred bits - `1`, `2`, `5` kbit on the badge. The stream's rate is only visible over a span
+   longer than one burst, which is why `playChunk()`'s 10 s window was already correct on chunked streams.
+
+3. **The blank was the same sample, one division later.** `handleBitrate()` did `bitsPerSecond / 1000`, so a 400 bit/s
+   sample became **0 kbit**, and `BitrateWidget::_draw()` draws a blank number for 0 while still drawing the `MP3`
+   label. The 2026.11.24 guard (`if(!bitsPerSecond) return;`) did not catch it because the input was not zero. It now
+   rounds and drops anything that rounds to 0 kbit.
+
+4. **So there is one publisher again, and it is the 10 s window.** `playChunk()`'s report window publishes for every
+   source and every codec - the `m_streamType == ST_WEBSTREAM` gate and the MP3 exclusion are both gone - with an
+   explicit floor of one publish per 10 s on top of the rendered-value gate. `computeAudioTime()` keeps measuring, for
+   the elapsed time and the file duration, and publishes nothing: its comment now says why, so the next person does not
+   restore it a third time. `m_streamBytesSec` comes from the same 10 s window for every source, which also stops the
+   display limiter reacting to a burst.
+
+5. **Why not a median.** Both forks already publish an *average*, not a sample: 10 s of input bytes here, an EMA over
+   five 2 s windows on the VS1053. A median over several 10 s windows would need 30-50 s to show a real bitrate change
+   and would still be built from the same averages - it buys nothing that the window does not already give.

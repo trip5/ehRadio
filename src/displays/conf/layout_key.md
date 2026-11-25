@@ -106,9 +106,10 @@ are handed composed strings.
 **A line has no pace of its own.** `scrolldelay`, `scrolldelta` and `scrolltime` used to sit in every one of these,
 the same numbers in nearly every layout, and they were the only control over how much of the display a scrolling line
 took - which a layout author could neither see nor be trusted with. They are retired: the panel sets the pace, in
-[`dspconf.h`](../dspconf.h) - `SCROLLPX` (pixels per second at fontsize 1, scaled per font size),
-`SCROLL_DUTY` (the share of the display task it may take) and the `SCROLLDELAY_*` holds, all overridable from
-`myoptions.h`. The step size and the redraw pitch are derived from those, so there is no pitch to set. A line declares
+[`dspconf.h`](../dspconf.h) - `SCROLLPX` (pixels per second at fontsize 1, scaled per font size) and the
+`SCROLLDELAY_*` holds - plus `SCROLL_DUTY`, beside `_applyPace()` in `widgets.cpp`, all overridable from `myoptions.h`.
+How far one paint moves and how often it may push are derived there, and the distance is paid by elapsed time, so there
+is no pitch to set and a panel that drops frames does not slow the text. A line declares
 only which KIND it is (`setScrollRole()`: meta, titles, playlist, weather, boot) so it gets the right hold. An old conf
 or layout file that still carries the three values imports fine - they are ignored, not converted.
 
@@ -312,16 +313,16 @@ the two boxes plainly overlap in the vertical band.
   repaints `width x fontsize*8` pixels, so the window is the one number that decides both how much text is visible
   and how heavy the line is.
 - **Scroll speed** is the panel's, not the layout's: `SCROLLPX` is pixels per second **at fontsize 1**, where one column
-  of the smallest glyph is 6 px - so 52 is 8.7 columns a second. Every larger size scales it by **sqrt(fontsize)**, i.e.
-  100 / 141 / 173 / 200 / 224 % for sizes 1..5, and the panel's own width nudges the base up a little (`52` at 128 px
-  wide, `60` at 480) because the same px/s replaces a short row far sooner than a long one. On a 128 px panel the four
-  shipped sizes therefore move at 52 / 74 / 90 / 104 px/s. A linear law ("ms per character") holds every size at one
-  character rate and reads as a crawl at font 1 and a
-  race at font 4; a constant pixel rate makes small text impossible to read.
-- **The step and the pitch are derived**, not set: the step is a whole number of pixels chosen from the panel's duty
-  budget (`SCROLL_DUTY`), and the pitch follows from it so the speed stays exact. A whole-pixel step is deliberate -
-  a fractional one alternates and can owe a tick that moves nothing, which reads as a slow line and a stutter, and the
-  pitch is also what gives a slow panel its settled gap between pushes, i.e. what stops a wide line tearing.
+  of the smallest glyph is 6 px - so 20 is 3.3 columns a second. Every larger size scales it by **sqrt(fontsize)**, i.e.
+  100 / 141 / 173 / 200 / 224 % for sizes 1..5, and the panel's own width nudges the base up a little (`20` at 128 px
+  wide, `30` at 480) because the same px/s replaces a short row far sooner than a long one. On a 128 px panel the four
+  shipped sizes therefore move at 20 / 28 / 35 / 40 px/s. A linear law ("ms per character") holds every size at one
+  character rate and reads as a crawl at font 1 and a race at font 4; a constant pixel rate makes small text impossible
+  to read. **The number is the DELIVERED speed**: the distance is paid by elapsed time, so a panel that drops frames
+  loses smoothness rather than speed.
+- **The step and the paint rate are derived**, not set: `_calcX()` moves however many whole pixels elapsed time owes,
+  capped at one character cell so a stall reads as a pause rather than a jump, and `SCROLL_DUTY` caps how often one line
+  may push - a longer floor means rarer, larger steps, which is what stops a wide line tearing on a slow panel.
 
 ### The two clock transforms: `fullClock` and `seconds`
 

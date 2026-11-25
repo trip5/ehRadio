@@ -1167,6 +1167,10 @@ void VuWidget::_drawBand(uint16_t pos, uint8_t ch, uint16_t h, uint16_t color) {
   #endif
 }
 
+// One frame's cost is clamped before it is smoothed: a stalled pass - a blocked task, a queue wait, a log write - is
+// not this widget's cost, and unclamped a single 234 ms outlier set _intervalMs to ~140 ms and the meter crawled.
+static constexpr uint32_t VU_COST_CLAMP_US = 60000;
+
 void VuWidget::loop(){
   // Duty limiter. The display task runs every DSP_TASK_DELAY (10 ms) and the widget used to redraw on every one,
   // which was wasteful and made the fade look instant on fast panels. VU_REFRESH_MS is the FLOOR on the interval (the
@@ -1190,7 +1194,8 @@ void VuWidget::loop(){
   const uint32_t t0 = micros();
   _draw();   // _draw() itself bails out when the widget is inactive or locked
   const uint32_t cost = micros() - t0;
-  _drawUs = (_drawUs * 3u + cost) / 4u;              // a quarter of every new sample
+  const uint32_t sample = (cost > VU_COST_CLAMP_US) ? VU_COST_CLAMP_US : cost;
+  _drawUs = (_drawUs * 3u + sample) / 4u;            // a quarter of every new sample
 
   // The screensaver's meter reports the split of its frame at three points: the first frame after the
   // fade and the peak markers have settled, then twice more.  A pinned style is what marks this instance

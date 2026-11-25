@@ -13,12 +13,12 @@
 #include <Wire.h>
 
 #ifndef I2CFREQ_HZ
-  #define I2CFREQ_HZ   6000000UL
+  #define I2CFREQ_HZ   1000000UL
 #endif
 
 TwoWire tw = TwoWire(0);
 
-DspCore::DspCore(): Adafruit_SSD1327(DSP_WIDTH, DSP_HEIGHT, &tw, I2C_RST/*, I2CFREQ_HZ*/) {}
+DspCore::DspCore(): Adafruit_SSD1327(DSP_WIDTH, DSP_HEIGHT, &tw, I2C_RST, I2CFREQ_HZ) {}
 
 void DspCore::initDisplay() {
   tw.begin(I2C_SDA, I2C_SCL);

@@ -33,31 +33,25 @@
   #define SCROLLDELAY_BOOT 0
 #endif
 
-// The share of the display task one scrolling line may take, in percent... higher is more smooth.
-// This barely affects the VU FPS so lowering the number results in jitter.
-#ifndef SCROLL_DUTY
-  #define SCROLL_DUTY 90
-#endif
-
-// SCROLLPX is the speed in PIXELS PER SECOND AT FONTSIZE 1: one column of a fontsize-1 glyph is CHARWIDTH = 6 px, so 52
-// is 8.7 of those columns a second.  Every larger size scales it by sqrt(textsize) - 100 / 141 / 173 / 200 / 224 % for
+// SCROLLPX is the speed in PIXELS PER SECOND AT FONTSIZE 1: one column of a fontsize-1 glyph is CHARWIDTH = 6 px, so 20
+// is 3.3 of those columns a second.  Every larger size scales it by sqrt(textsize) - 100 / 141 / 173 / 200 / 224 % for
 // sizes 1..5 - because the cell grows linearly with the size while the eye reads motion in pixels, so a square root
 // keeps small text at a readable pixel speed without racing it.
 //
 // It then grows a little with the PANEL's width, because the same px/s replaces the content of the scrolling row far
-// sooner on a small screen: ~1.8 s on a 110 px row against ~7.7 s on a 460 px one, which reads as too fast and too slow
-// respectively.  The two ends are calibrated on those two panels by eye, and everything in between interpolates:
-// 44 at 128 wide (128x64 / 128x32 OLED, 128x128) 45 at 160, 49 at 240, 52 at 320, 57 at 428, 60 at 480.
-// Affine rather than proportional on purpose - a readable character rate barely depends on the panel, and only the
-// sluggishness term grows with the row.  DSP_WIDTH is the configured width, before rotation, i.e. the space layouts
-// are authored in.
+// sooner on a small screen: 20 at 128 wide (128x64 / 128x32 OLED, 128x128), 26 at 320, 30 at 480, everything between
+// interpolating.  Affine rather than proportional on purpose - a readable character rate barely depends on the panel,
+// and only the sluggishness term grows with the row.  DSP_WIDTH is the configured width, before rotation, i.e. the
+// space layouts are authored in.
 //
-// The step and the redraw pitch are then DERIVED in ScrollWidget::_applyPace().  There is no pitch knob: a step is whole
-// pixels so no tick ever moves zero pixels, and the pitch follows from it to keep the speed exact.
+// THIS NUMBER IS THE DELIVERED SPEED.  How far one paint moves and how often it may push are derived in
+// ScrollWidget::_applyPace(), and _calcX() pays the distance by ELAPSED TIME: a paint moves whatever the wall clock
+// owes, so a panel that drops frames - the audio-risk limiter quarters the display rate while the stream's ring is thin -
+// loses SMOOTHNESS and not speed.  There is no pitch knob, and no per-line pace anywhere in a conf.
 //
 // This can be overridden in myoptions.h and is not to be considered a perfect scale.-
 #ifndef SCROLLPX
-  #define SCROLLPX (44 + (DSP_WIDTH - 128) / 22)
+  #define SCROLLPX (20 + (DSP_WIDTH - 128) / 35)
 #endif
 
 #if defined(DSP_OLED)

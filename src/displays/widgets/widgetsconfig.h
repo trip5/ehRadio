@@ -23,7 +23,8 @@ struct WidgetConfig {
 };
 
 // A line says WHERE it is and how WIDE its window is.  How fast it scrolls, how often it steps and how long it holds
-// before a sweep are the panel's: SCROLLPX / SCROLL_DUTY / SCROLLDELAY_* in dspconf.h, overridable in myoptions.h.
+// before a sweep are the panel's, never a layout's: see ScrollWidget::_applyPace() and dspconf.h, both overridable in
+// myoptions.h.
 struct ScrollConfig {
   WidgetConfig widget;
   uint16_t width;

@@ -215,14 +215,22 @@ class ScrollWidget: public TextWidget {
     bool _doscroll;
     // The pace is DERIVED, never configured.  _speedPxS is pixels per second: SCROLLPX, which is px/s at fontsize 1,
     // scaled by sqrt(textsize), so a bigger font moves faster in px/s while its character rate falls.
-    // _stepPx is how far one step moves, in WHOLE pixels, and _stepMs the pitch that makes those steps add up to that
-    // speed exactly.  There is no sub-pixel accumulator on purpose: a fractional step alternates, and one that rounds to
-    // zero is a tick with no motion - which reads as a slow line and a stutter.  _stepPx is never 0.
+    // The distance is paid by ELAPSED TIME: a paint moves whatever the wall clock owes, so a dropped frame costs
+    // smoothness and never speed.  _paintFloorMs is the shortest gap between pushes and _stepMax the most one may move.
     uint16_t _speedPxS = 0;
-    uint16_t _stepMs = 0;
-    uint16_t _stepPx = 1;
+    uint16_t _paintFloorMs = 0;
+    uint16_t _stepMax = 1;
+    uint32_t _acc = 0;             // pixels owed, x1000
+    uint32_t _lastPaintMs = 0;     // last advance, and the moving gate loop() tests
     uint16_t _stepCostUs = 0;      // measured mean cost of one step - 0 until a step has been timed
     uint8_t  _stepCount = 0;
+    #ifdef WIDGET_DEBUG
+      // Delivered pace, reported every 5 s of MOVING time: px/s and paints/s are what the overhaul is judged on.
+      // _dbgAgeMax is the elapsed time behind the largest step, which is the only thing that separates a long pass
+      // from a stamp gone stale on some other path.
+      uint32_t _dbgMoved = 0, _dbgPaints = 0, _dbgStepSum = 0, _dbgWinMs = 0;
+      uint16_t _dbgSeenMin = 0xFFFF, _dbgSeenMax = 0, _dbgAgeMax = 0;
+    #endif
     ScrollRole_e _role = SCROLL_ROLE_TITLES;
     uint8_t  _speedPct = 100;
     uint32_t _scrolldelay;
@@ -247,8 +255,8 @@ class ScrollWidget: public TextWidget {
     uint16_t _maxVis() const { return (uint16_t)(_width / _charWidth + 2); }
     uint16_t _winBytes() const { return (uint16_t)(_maxVis() * 4 + 1); }   // worst case: 4-byte UTF-8, plus the NUL
     void _setTextParams();
-    bool _calcX();                 // true when the step actually moved the line
-    void _applyPace();             // derive _speedPxS and _stepMs from the panel's defines and this line's geometry
+    bool _calcX();                 // true when the advance actually moved the line
+    void _applyPace();             // derive _speedPxS, the paint floor and the step cap from the panel and this geometry
     void _measureStep(uint32_t us);// fold a timed step in, and re-derive once enough of them are in
     void _drawFrame();
     void _draw();

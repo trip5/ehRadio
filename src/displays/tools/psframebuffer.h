@@ -6,7 +6,8 @@
 #include "../dspfont.h"               // DSP_UNICODE_FONT definition
 #include "../icons.h"                  // ICON_TABLE for icon rendering
 #include "pretext.h"                   // preText() pipeline
-#include "dspstats.h"                  // Core Monitor counters
+#include "dspstats.h"                  // Core Monitor counters, SLOW_WRITE_MS
+#include "../../core/logging.h"        // the slow-write report under WIDGET_DEBUG
 
 // PSRAM framebuffer size tracker — updated by psFrameBuffer on allocation
 extern size_t psramFrameBufferBytes;
@@ -35,6 +36,7 @@ class  psFrameBuffer : public Adafruit_GFX {
     // received - the same guard freeBuffer() applies before it fills the rect - so a widget that was begun but
     // never shown cannot paint its background over whatever shares its band.
     bool painted() { return _painted; }
+    void setTag(const char* t) { _tag = t; }   // names the owner in the slow-write report: "scroll", "clock"
     
     void freeBuffer(){
       _ready = false;
@@ -98,11 +100,28 @@ class  psFrameBuffer : public Adafruit_GFX {
     void display(){
       if(!buffer) return;
       _painted = true;                 // from here the panel shows this window, so it owns those pixels
+      #ifdef WIDGET_DEBUG
+        const uint32_t tS = micros();
+      #endif
       _dspl->startWrite();
+      #ifdef WIDGET_DEBUG
+        const uint32_t tA = micros();
+      #endif
       cmCountPush();
       _dspl->setAddrWindow(_ll, _tt, _ww, _hh);
+      #ifdef WIDGET_DEBUG
+        const uint32_t tW = micros();
+      #endif
       _dspl->writePixels((uint16_t*)buffer,  _ww * _hh);
       _dspl->endWrite();
+      #ifdef WIDGET_DEBUG
+        // Split so a slow push says WHERE: startWrite is a bus lock, setAddrWindow a few commands, writePixels the data.
+        const uint32_t tE = micros();
+        if ((tE - tS) / 1000UL >= SLOW_WRITE_MS)
+          FUNCTIONLOG("Push", "%s slow %lums: %dx%d %upx, start %luus addr %luus data %luus",
+                      _tag, (unsigned long)((tE - tS) / 1000UL), (int)_ww, (int)_hh, (unsigned)(_ww * _hh),
+                      (unsigned long)(tA - tS), (unsigned long)(tW - tA), (unsigned long)(tE - tW));
+      #endif
     }
     void clear(){
       if(!buffer) return;
@@ -113,6 +132,7 @@ class  psFrameBuffer : public Adafruit_GFX {
   private:
     int16_t _ll, _tt, _ww, _hh;
     yoDisplay *_dspl = nullptr;
+    const char* _tag = "fb";
     uint16_t *buffer=nullptr;
     bool _ready = false;
     bool _painted = false;           // true once display() has put this window on the panel
@@ -258,6 +278,7 @@ class  psFrameBuffer : public Adafruit_GFX {
 #else
 struct psFrameBuffer {
   bool ready() { return false; }
+  void setTag(const char* t) {}
   void display() {}
   // No buffer, so there is nothing to count and nowhere to push: the WIDGET_DEBUG probe reads these and reports -1.
   int16_t columnInk(int16_t) { return -1; }

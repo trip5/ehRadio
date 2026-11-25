@@ -256,6 +256,10 @@ QueueHandle_t displayQueue;
   volatile uint32_t cmPushCount     = 0;
   volatile uint8_t  cmDspCore       = 255;  // recorded by the task itself; 255 = not yet run
   volatile uint32_t cmMaxDspWorkUs  = 0;    // longest single display.loop() call; reset by the monitor on print
+  volatile uint32_t cmMaxDspPagerUs = 0;    // ... and that maximum split by stage: the page's widgets,
+  volatile uint32_t cmMaxDspReqUs   = 0;    // the queue request handler (with its worst type), and dsp.loop()
+  volatile uint32_t cmMaxDspIoUs    = 0;
+  volatile uint8_t  cmWorstReqType  = 0xFF;
 #endif
 
 TaskHandle_t dspTaskHandle = NULL;
@@ -1315,12 +1319,26 @@ void Display::loop() {
     _ssHoldUntil = 0;
     if (config.isScreensaver) _screensaverLine();
   }
+  #ifdef CORE_MONITOR
+    const uint32_t dspPagerStart = micros();
+  #endif
   _pager->loop();
+  #ifdef CORE_MONITOR
+    cmNoteDspPager(micros() - dspPagerStart);
+  #endif
   requestParams_t request;
   if (xQueueReceive(displayQueue, &request, DSP_QUEUE_TICKS)) {
+    #ifdef CORE_MONITOR
+      const uint32_t dspReqStart = micros();
+    #endif
     #ifdef USE_SD
       // One pass without dsp.loop(), like the early return further down this switch.
-      if (_ownScreen() && _drawsOverOwnScreen(request.type)) return;
+      if (_ownScreen() && _drawsOverOwnScreen(request.type)) {
+        #ifdef CORE_MONITOR
+          cmNoteDspReq(micros() - dspReqStart, (uint8_t)request.type);
+        #endif
+        return;
+      }
     #endif
     switch (request.type) {
         case NEWMODE: _switchMode((displayMode_e)request.payload); break;
@@ -1497,9 +1515,18 @@ void Display::loop() {
         if (uxQueueMessagesWaiting(displayQueue))
           return;
       }
+    #ifdef CORE_MONITOR
+      cmNoteDspReq(micros() - dspReqStart, (uint8_t)request.type);
+    #endif
   }
 
+  #ifdef CORE_MONITOR
+    const uint32_t dspIoStart = micros();
+  #endif
   dsp.loop();
+  #ifdef CORE_MONITOR
+    cmNoteDspIo(micros() - dspIoStart);
+  #endif
 // #if defined(USE_AUDIO_VS1053)
 // player.computeVUlevel();
 // #endif

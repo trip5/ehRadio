@@ -4600,49 +4600,40 @@ thinks the radio forgot everything. The loader-side wait was not built.
   - **The PACE is the panel's, not a layout's.** `ScrollConfig` is `{ WidgetConfig widget; uint16_t width; }` - the
     retired `scrolldelay`/`scrolldelta`/`scrolltime` were the same numbers in nearly every layout, could only be
     written as literals by the editor, and were the sole control over display bandwidth that an author could not see.
-    `dspconf.h` now owns `SCROLLPX` (**pixels per second at fontsize 1** - one column of the smallest glyph is
-    `CHARWIDTH` = 6 px - scaled by `sqrt(textsize)`, i.e. 100 / 141 / 173 / 200 / 224 % for sizes 1..5, and nudged up
-    with the panel's width: `(42 + (DSP_WIDTH - 128) / 44)`, so 42 at 128 px wide and 50 at 480. The width term is
-    calibrated on both panels by eye, because the same px/s replaces a 110-px row in a couple of seconds and a 460-px
-    row in seven or eight - the small screen reads as racing and the big one as sluggish. Affine, not proportional: a
-    readable character rate barely depends on the panel, only the sluggishness term grows with the row.
-    `SCROLL_PUSH_US_PER_PX` cannot stand in for it - that macro is a bootstrap estimate of step cost, replaced by the
-    measured mean after four steps, and it moves the step/pitch pair, never the speed), `SCROLL_DUTY` (100 - the whole
-    display task may go to one scrolling line. On a slow panel this is a
-    SMOOTHNESS knob rather than an FPS guard, because a cycle slower than any admissible pitch cannot be bought back by
-    the budget; what the budget buys is step resolution, and at 50 a 460-px line moved 2-4 px per paint and read as a
-    stutter while at 90 it moves 1 px. Measured cost of raising it on the 480x320: about 1-2% of the VU's frame),
-    `SCROLL_PUSH_US_PER_PX` (0.02f / 0.95f, an estimate used only until a step is measured), and the five holds
-    `SCROLLDELAY_META`/`_TITLES`/`_PLAYLIST`/`_WEATHER`/`_BOOT`. All of them are `#ifndef`, so `myoptions.h` still
+    `dspconf.h` owns the pace - `SCROLLPX`, its `sqrt(textsize)` scaling, the width nudge, `SCROLL_DUTY`,
+    `SCROLL_PUSH_US_PER_PX` and the five holds - and **its comment block there is the reference for all of them**,
+    including why each number is what it is. This file deliberately does not repeat the values: it did once, the copy
+    went stale, and the pace is the thing that changes most. What a reader of THIS file needs is the two paragraphs
+    below: `SCROLLPX` is a DELIVERED speed, and `SCROLL_DUTY` is now only a cap on how much of the display task one line
+    may take - it no longer buys step resolution, because the step follows elapsed time.
+    All of them are `#ifndef`, so `myoptions.h` still
     overrides everything; `SCROLLTIME` and `SCROLLSTEP_MS` are gone - `options.h` warns once if an override still
     defines either - because **there is no pitch knob**. A line says only WHICH KIND it is - `setScrollRole()`, called
     at each construction in `display.cpp` (the screensaver line is `SCROLL_ROLE_WEATHER` at 75%, which is exact now
     instead of a delta truncation) - and `init()` derives the rest.
-    **The size term is the square root of the cell.** "ms per character" is linear in the size, so every size runs one
-    character rate and it crawls at font 1 while racing at font 4; a constant pixel rate goes the other way and makes
-    small text unreadable. Pixel speed proportional to `sqrt(cell)` sits between them, and `_applyPace()` computes
-    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`. A QUADRATIC normalised at font 1 was tried and
-    reverted: it allows font 1 only 81 % of font 2's px/s, i.e. 1.6x its character rate.
-    **A perfect scroll is impossible on this hardware, and chasing it costs a day - do not.** A line can only paint on
-    a display-task pass (`DSP_TASK_DELAY`, 10 ms) and the panel needs the push it gets, so the derived pitch never
-    lands on that grid. Paying the distance from the clock makes the speed exact but the STEP uneven, and the lean a
-    push leaves at the panel is as wide as the step - the text then flickers; carrying the paint deadline instead keeps
-    the step constant but spends the remainder as a regular pulse; counting passes makes both exact and can only reach
-    `(1000 / pass) x (step / passes)`, which at font 1 on a 12 ms grid needs a 3-px step. So the delivered speed is
-    NOMINAL - 70-100 % of `SCROLLPX` - and the value is dialled by eye against real panels rather than derived.
-    **The step is WHOLE pixels and the pitch is derived from it.** A fractional step alternates its distance and can
-    owe a tick that moves nothing at all - which reads as a slow line AND as a stutter, and that is exactly what the
-    fractional version shipped first did on a monochrome panel. So `_applyPace()` chooses
-    `step = max(1, ceil(speed * dutyMin / 1000))` pixels from the duty budget and then `pitch = ceil(1000 * step / speed)`,
-    which keeps the speed exact, the cadence even, `pitch >= dutyMin` (so the budget holds) and the slow panel's settled
-    gap - the tear fix - intact. `_calcX()` therefore has no accumulator at all, and `_measureStep()` replaces the cost
-    estimate with the measured mean after four steps, re-deriving the step and the pitch together. **The duty test
-    mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest admissible pitch is
-    `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a 2.2 s pitch, the 1 s
-    cap clipped it, and the step became `speed x 1 s`, a station name crossing in three jumps. The second slip was a
-    stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every size to
-    0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling". Three
-    units meet in this one function (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **The size term is the square root of the cell; the reasoning is in `dspconf.h`.** `_applyPace()` computes
+    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`.
+    **The pace is paid by ELAPSED TIME, so the frame rate cannot change the speed.** `_calcX()` keeps `_acc` (pixels
+    owed, x1000) and charges it `speed x the real ms since _lastPaintMs`; one paint moves however many WHOLE pixels that
+    owes, capped at one character cell (`_stepMax`) so a genuine stall is a pause rather than a jump. `_applyPace()`
+    derives only `_speedPxS`, `_paintFloorMs` (the duty share of the measured push cost - the shortest gap between two
+    pushes) and `_stepMax`; `_measureStep()` still replaces the cost estimate with the measured mean after four steps.
+    A sweep OPENS with one pixel on purpose: a paint that owes nothing yet hands the slot back and would never start the
+    line. `scrollWanted()`/`loop()` gate on the hold while parked and on `_paintFloorMs` while moving, both through
+    `_scrolldelay`, so the accumulator's stamp is never consumed by a delay test.
+    **The design this replaced, and why it had to go.** The pitch used to be an interval (`pitch = ceil(1000 * step /
+    speed)`) and the widget could only act on a display-task pass, so the DELIVERED interval was `ceil(pitch / pass) x
+    pass`. That is invisible at a fixed 10 ms pass, but `audioRingAtRisk()` sleeps `DSP_TASK_DELAY * 4` while the ring is
+    thin, so a 40 ms pass delivered half to a quarter of `SCROLLPX` - the reported "the scroll speed varies and
+    AUDIO_RISK changes it". Dropping frames now costs smoothness alone. The step dithers by one pixel (2, 3, 3, 2)
+    rather than alternating with zero; that dither is the one thing to judge on real panels. The older note that "a
+    perfect scroll is impossible here, do not chase it" was about a constant step on a fixed pass and no longer applies.
+    **The duty test mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest
+    admissible gap is `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a
+    2.2 s gap and the cap turned the step into `speed x 1 s`, a station name crossing in three jumps. The second slip
+    was a stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every
+    size to 0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling".
+    Three units meet in `_applyPace()` (px/s, ms, µs); each is named at the line it is used on for that reason.
     **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
     Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
     chunks". It was never a rendering fault, and four candidates were withdrawn by measurement before the arithmetic
@@ -5362,7 +5353,11 @@ the audio core publishes levels at. `_redrawMs` (the limiter's timestamp) is del
 maths' time base): while they were shared, a skipped frame showed up as a doubled `dt` in the fade.
 `VU_SAMPLE_REFRESH_DIV` is gone — it was a fixed guess at which styles were heavy and by how much, and it covered only
 two of them. On TFT the blit is inside `_draw()` and counted; on OLED the panel flush is paid afterwards by the display
-task, so the figure measured there is the widget's own cost. **While the startup services are downloading** the floor is
+task, so the figure measured there is the widget's own cost. **Each sample is clamped at 60 ms (`VU_COST_CLAMP_US`)
+before it is smoothed.** The figure is wall-clock, so a stalled pass - a blocked task, a full display queue, a log write
+to a busy client - is not this widget's cost: unclamped, one 234 ms read on a 480x320 pulled the mean to ~69 ms,
+`interval` to 140 ms, and the meter ran at 7 FPS until the mean recovered. `ScrollWidget::_measureStep()` clamps for
+the same reason. **While the startup services are downloading** the floor is
 multiplied by `VU_STARTUP_SERVICES_DIV` (4), so every style redraws a quarter as often for that window — the updater
 holds up to three TLS sessions on the network core and the audio stream is usually already up. The gate is
 [`startup.servicesBusy()`](src/core/startup.h:19), set by the services task around its own downloads: **not**
@@ -5713,6 +5708,38 @@ Emits to serial + telnet every 5 seconds:
     playlist is exactly that case.
   - `glyphs` exceeds `preText` calls by the number of spaces and control codepoints, which `preText()` answers before it
     starts counting.
+  - `max stage pager / req / dsp` on the same line is that maximum split into the three parts of one pass: the page's
+    widgets, the queue request handler (`type` is the worst one's own request type, 255 = none yet), and `dsp.loop()`.
+    A total cannot say whether a long pass was drawing or blocking; these three can. They are wall-clock like the total,
+    so a preempted task shows up in whichever stage it was in - compare the three, do not read them as CPU time.
+  - **`DSP_TASK_PRIORITY` must be ABOVE every other task pinned to `DSP_TASK_CORE_ID`** (above `NETSERVER_PRIORITY`, 2,
+    in practice). At equal priority FreeRTOS round-robins them every 10 ms tick, so a panel write that begins late in a
+    slice finishes in the next one: the measured symptom was `pager` peaks of 93 / 107 / 124 / 257 / 340 ms - near
+    multiples of the tick - with the write's own bus lock and command phase still in microseconds. Raising it to 4
+    removed every slow write on a 480x320 build. A pass that long also preempts the Arduino loop, so `Max Main Loop
+    Time` rises to the length of the display's own worst pass; that is expected, not a second fault.
+  - **A slow panel write is a real unit of measurement.** `psFrameBuffer::display()` and the monochrome flush report
+    themselves above `SLOW_WRITE_MS` (30 ms) under `WIDGET_DEBUG`, with the `startWrite` / `setAddrWindow` / data split
+    and, for a framebuffer, its window size and pixel count. That is what separates "we drew too much" from "the bus or
+    driver stalled": a slow write of a small window is a stall, of a big one is work.
+  - **A monochrome panel's flush cost is the panel's, not ours.** On an SH1106 the flush is ~7 ms when little changes and
+    30-140 ms when a wide line repaints (a fontsize-2 scroll sweeps the whole buffer), and that worst case does not scale
+    with the I2C clock (measured flat across 400 kHz / 800 kHz / 1 MHz while the average roughly tripled). It is a wait
+    inside `Adafruit_SH110X::display()`, it reads as the whole display pausing, and there is nothing to fix at our layer.
+  - **`I2CFREQ_HZ` must be an in-spec I2C rate.** It was `4000000UL` in `displaySH1106.cpp` and `displaySSD1306.cpp` and
+    `6000000UL` in `displaySSD1327.cpp`, inherited from yoRadio; an older Arduino core clamped them, the ESP32 3.x driver
+    does not. 1000000 is the fastest legal value (fast-mode-plus, not an overclock) and is measurably the best average on
+    an SH1106: the flush cost roughly halves at each step up, 26-36 ms at 400 kHz, 18-30 at 800 kHz, 8-16 at 1 MHz, while
+    the worst-case spikes are flat and so do not discriminate. **SSD1327's macro never reaches its constructor** - the
+    argument is commented out there - so that panel runs at the library default until it is uncommented.
+  - **I2C may be pushed to its legal limit where SPI may not, because the failure modes differ.** An over-fast I2C is
+    acknowledged: a NACK or timeout comes back to the driver, and the display drivers `ERRORLOG` and halt on a failed
+    `begin()`, so a wrong rate shows as a dead or visibly garbled panel. An over-fast SPI is not acknowledged, which is
+    why `DEF_SPI_FREQ` stays at 40 MHz (see below) while `I2CFREQ_HZ` goes to 1 MHz.
+  - **`DEF_SPI_FREQ` stays at 40000000UL on the ILI9488.** 80 MHz was measured at `DSP_TASK_PRIORITY 4` and made no
+    difference at all (`max stage pager` 15.8-16.8 ms, `VU draw` 7.63-7.71 ms against 16.0-17.0 and 7.68-7.78 at 40 MHz),
+    so the panel write is **not bandwidth-bound** - what remains is per-transaction and per-window overhead. 40 MHz is
+    already a 4x overclock of a ~10 MHz interface, and 80 MHz would only widen the window for silent data corruption.
 - **Core layout**: `Core layout: core0 (Audio+Net+TCP), core1 (Main+Disp)` — built at compile time from the `CORE_0` /
   `CORE_1` string macros in `options.h`, which concatenate `+Audio`, `+Net`, `+TCP` and `+Disp` according to where
   `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE` and `DSP_TASK_CORE_ID` are assigned. Only defined on a

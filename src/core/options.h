@@ -214,7 +214,7 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 /* Tweaks to Scrolls (see dspconf.h for more) */
 // #define SCROLLDELAY 5000 // ms, the delay scrolls are held for before moving (will not affect all scrolls)
-// #define SCROLLPX (52 + (DSP_WIDTH - 128) / 44) // px/s at fontsize 1, widened a little per panel; see dspconf.h
+// #define SCROLLPX (20 + (DSP_WIDTH - 128) / 35) // fontsize 1 speed: 20 px/s on small displays, up to 30 px/s on wider displays
 
 /* Big displays (480x320) get a bigger boot logo ( but can be disabled with #define BIG_BOOT_LOGO false)*/
 #if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ST7796
@@ -294,9 +294,9 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 /* Override SPI, I2C Speeds and Addresses with myoptions.h */
-// may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL
+// may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL (higher is not better for this one)
 // #define DEF_SPI_FREQ 8000000UL // defaults usually OK; may range from 8000000UL (8 MHz) to 80000000UL (80 MHz); check your datasheet before changing! set to 0 for factory default (will override codebase default)
-// #define I2CFREQ_HZ   400000UL // OLED driver default is 4000000UL (4 MHz); lower e.g. to 400000UL (400 kHz) if display is glitchy; range: 100000UL (100 kHz) to 4000000UL (4 MHz)
+// #define I2CFREQ_HZ   400000UL // OLED driver default is 1000000UL (1 MHz which is highest in I2C spec); lower e.g. to 800000UL (800 kHz) or 400000UL (400 kHz) if display is glitchy
 // #define SCREEN_ADDRESS 0x3C // see datasheet for address or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
 
 
@@ -936,7 +936,7 @@ or examine the examples in builds/trip5 and make your own!
 /* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
 /* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
 #ifndef DSP_TASK_PRIORITY
-  #define DSP_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), below audio-critical tasks (3)
+  #define DSP_TASK_PRIORITY 4 // highest priority to keep display smooth
 #endif
 #ifndef NETSERVER_TASK_PRIORITY
   #define NETSERVER_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), same tier as display

@@ -13,7 +13,7 @@
 #include <Wire.h>
 
 #ifndef I2CFREQ_HZ
-  #define I2CFREQ_HZ   4000000UL
+  #define I2CFREQ_HZ   1000000UL
 #endif
 
 TwoWire I2CSH1106 = TwoWire(0);

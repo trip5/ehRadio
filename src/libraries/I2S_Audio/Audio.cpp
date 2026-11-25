@@ -2673,8 +2673,8 @@ bool Audio::pauseResume() {
 // pins at ~5,000 for 48 kHz.  s_decodeOnlyCycles brackets the decoder call alone: that is the one that moves.
 static uint32_t s_decodeCycles = 0;
 static uint32_t s_decodeOnlyCycles = 0;
-// One rendering rule for the badge: whole kbit below 1000, tenths of a Mbit above.  Both publishers below use it,
-// so neither can redraw for a value the three-character field would print the same.
+// The badge's rendering rule: whole kbit below 1000, tenths of a Mbit above.  The publisher below gates on it, so a
+// measurement that would print the same three characters does not cost a redraw.
 static uint32_t bitrateBucket(uint32_t bitsPerSecond) {
     const uint32_t kbps = (bitsPerSecond + 500u) / 1000u;
     return (kbps >= 1000u) ? ((kbps + 50u) / 100u) : kbps;
@@ -2812,6 +2812,7 @@ i2swrite:
         static uint32_t sFramesMs = 0;
         static uint32_t sBrSum    = 0;            // m_sumBytesDecoded when the last bitrate window opened
         static uint32_t sBrBucket = 0xFFFFFFFFu;  // the bucket last published, so a repeat is never sent
+        static uint32_t sBrLastPublishMs = 0;     // when that publish happened: nothing arrives faster than the interval
         const uint32_t nowMs = millis();
         // A stall leaves no writes, so no report, so the counters keep their old values into the NEXT stream: measured
         // 2026.11.14, the first window after a station change read `of 115523` with `smp 2048/103424`.  setDefaults()
@@ -2822,7 +2823,7 @@ i2swrite:
             m_i2sFramesOut  = 0; m_i2sWriteUs    = 0; m_i2sWriteShort = 0;
             m_decodeUs      = 0; m_smpDecoded    = 0; s_decodeCycles  = 0; s_decodeOnlyCycles = 0;
             m_audioGapMaxUs = 0; m_silRuns       = 0; m_silMaxRun     = 0;
-            sBrSum = m_sumBytesDecoded; sBrBucket = 0xFFFFFFFFu;
+            sBrSum = m_sumBytesDecoded; sBrBucket = 0xFFFFFFFFu; sBrLastPublishMs = 0;
         }
         m_i2sFramesOut += (uint32_t)(i2s_bytesConsumed / (size_t)sampleSize);
         if(sFramesMs == 0) { sFramesMs = nowMs; }
@@ -2880,16 +2881,18 @@ i2swrite:
                 }
             }
             #endif
-            // Bitrate for a live stream, measured from the same window: input bytes consumed is what the connection
-            // carries.  One publisher per source class - a local file or a ST_WEBFILE is computeAudioTime()'s, which
-            // returns early for exactly this case.  MP3 is measured here too: the frame header gives its exact value
-            // at the start, and this corrects a VBR stream and republishes a badge that a codec-params line cleared.
-            if(m_streamType == ST_WEBSTREAM && m_sumBytesDecoded > sBrSum) {
+            // The one bitrate publisher, for every source and every codec: the whole 10 s window's input bytes.  It has
+            // to be this window - an HLS stream arrives in bursts, and a 500 ms slice of it reads 1-5 kbit in a gap and
+            // the whole segment in the next, which is what the badge used to show.  10 s averages the bursts away.
+            if(m_sumBytesDecoded > sBrSum) {
                 const uint32_t br = (uint32_t)(((uint64_t)(m_sumBytesDecoded - sBrSum) * 8000ULL) / (uint64_t)span);
                 m_streamBytesSec = br / 8;               // for the display's audio-risk limiter
                 const uint32_t bucket = bitrateBucket(br);
-                if(bucket != sBrBucket) {
+                // At most one publish per 10 s, and only when the badge would print something else.
+                if(bucket != sBrBucket &&
+                   (!sBrLastPublishMs || (uint32_t)(nowMs - sBrLastPublishMs) >= 10000u)) {
                     sBrBucket = bucket;
+                    sBrLastPublishMs = nowMs ? nowMs : 1;
                     char brs[12];
                     sprintf(brs, "%lu", (unsigned long)br);
                     if(audio_bitrate) audio_bitrate(brs);
@@ -5593,7 +5596,6 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
     static uint32_t timeStamp          = 0;
     static uint32_t deltaBytesIn       = 0;
     static uint32_t nominalBitRate     = 0;
-    static uint32_t brBucketPublished  = 0xFFFFFFFFu;
 
     if(m_f_firstCurTimeCall) { // first call
         m_f_firstCurTimeCall = false;
@@ -5604,7 +5606,6 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
         timeStamp = millis();
         deltaBytesIn = 0;
         nominalBitRate = 0;
-        brBucketPublished = 0xFFFFFFFFu;
 
         if(m_codec == CODEC_FLAC && FLACGetAudioFileDuration()){
             m_audioFileDuration = FLACGetAudioFileDuration();
@@ -5633,21 +5634,9 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
 
         sumBitRate += bitRate;
         counter ++;
-        // The badge's publisher for this source class: this function is the only one that runs for a local file or a
-        // ST_WEBFILE, and a content-length header is what makes a web stream ST_WEBFILE.  A chunked stream never gets
-        // here, so playChunk() owns those and the two can never disagree about the same stream.
-        if(bitRate) {
-            // The risk limiter's rate, from the same measurement, for a web file only: a local file's ring is filled
-            // from the card, not the network, and a rate there would let the limiter throttle the VU needlessly.
-            if(m_streamType == ST_WEBFILE) m_streamBytesSec = bitRate / 8;
-            const uint32_t bucket = bitrateBucket(bitRate);
-            if(bucket != brBucketPublished) {
-                brBucketPublished = bucket;
-                char brs[12];
-                sprintf(brs, "%lu", (unsigned long)bitRate);
-                if(audio_bitrate) audio_bitrate(brs);
-            }
-        }
+        // Not published: a 500 ms window is shorter than an HLS burst, so on a segment-based stream it reports a few
+        // hundred bits in a gap and the whole segment in the next read.  playChunk() publishes the same quantity over
+        // the full 10 s window, which is the only span that can tell a burst from the stream's real rate.
         if(nominalBitRate){
             m_audioCurrentTime = round(((float)sumBytesIn * 8) / m_avr_bitrate);
         }

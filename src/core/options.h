@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.11.22"
+#define RADIOVERSION "2026.11.26"
 
 /*******************************************************
  
@@ -936,20 +936,21 @@ or examine the examples in builds/trip5 and make your own!
 /* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
 /* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
 #ifndef DSP_TASK_PRIORITY
-  #define DSP_TASK_PRIORITY 4 // highest priority to keep display smooth
+  #define DSP_TASK_PRIORITY 5 // highest priority to keep display smooth
 #endif
 #ifndef NETSERVER_TASK_PRIORITY
-  #define NETSERVER_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), same tier as display
+  #define NETSERVER_TASK_PRIORITY 2 // 2 is above Arduino loop() (1)
 #endif
 #ifndef NET_TASK_PRIORITY
-  #define NET_TASK_PRIORITY 3 // highest: WiFi search, stream retry, OTA download
+  #define NET_TASK_PRIORITY 3 // high: WiFi search, stream retry, OTA download
 #endif
 #ifndef PLAYBACK_TASK_PRIORITY
-  #define PLAYBACK_TASK_PRIORITY 3 // highest: stream connection / playback start
+  #define PLAYBACK_TASK_PRIORITY 3 // high: stream connection / playback start
 #endif
 #ifndef LOW_TASK_PRIORITY
   #define LOW_TASK_PRIORITY 1 // lowest: background/deferrable tasks (round-robin with loop())
 #endif
+// AsyncTCP priorities are in options_overrides.h
 
 /* --- VISUAL TWEAKS --- */
 // Since the audio buffer can never technically fill up (most streams prevent reading-ahead excessively),

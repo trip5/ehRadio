@@ -418,7 +418,7 @@ There are notes in the `libraries` folder regarding some of the "Frankenstein" o
 
 | Date       | Release Notes    |
 | ---------- | ---------------- |
-| 2026.11.23 `dev` | Fixes to: WebUI, scrolling text |
+| 2026.11.26 | Fixes to: WebUI, bug fixes to display issues (priority, scroll timing, bitrate) |
 | 2026.11.22 | Update to `espressif 8.0.0`, FLAC possible, decoding improvements (I2S and VS1053), dBcut replaces ovol (with Auto options) |
 | 2026.11.09 | ***Breaking changes*** LittleFS (not SPIFFS), SD File Manager (and fixes to SD Mode), SDMMC, Playlist Validator, major work on layouts & screen fonts & themes & VU (for all displays & changeable while running, theme/layout editor added), screensaver VU & info text, fixes to: SSD1322 & SSD1327 & NV3007 added (thanks kle7rx!), `ROTATE_90` for square displays, WebUI (options added, fixed for Firefox), IR (mute/power added), recovery from network stack crashes and Wi-fi and stream reconnects, library change: `elims/PsychicMqttClient` & MQTT/HA improved, LCD displays removed, HLS AAC streams fixed, icons prettier, many patches to the audio libraries, boot time shorter |
 | 2026.08.19 | Stability and bug fixes (SD Offline), documentation |

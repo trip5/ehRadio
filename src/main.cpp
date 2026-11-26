@@ -308,9 +308,7 @@ void loop() {
           pc ? (unsigned)(ph * 100UL / pc) : 0U,
           (unsigned)(pu * perSec), d ? (float)pu / (float)d : 0.0f,
           dp / 1000.0f, dr / 1000.0f, (unsigned)dt, di / 1000.0f);
-      #ifndef CONFIG_FREERTOS_UNICORE
-        FUNCTIONLOG("Core.monitor", "Core layout: core0 " CORE_0 ", core1 " CORE_1);
-      #endif
+      FUNCTIONLOG("Core.monitor", "Core layout: core0 " CORE_0 ", core1 " CORE_1);
       FUNCTIONLOG("Core.monitor", "High Water Mark (free bytes in stacks): Main: %u, Display: %u, Netserver: %u",
           (unsigned)uxTaskGetStackHighWaterMark(NULL),
           (unsigned)(dspTaskHandle ? uxTaskGetStackHighWaterMark(dspTaskHandle) : 0),

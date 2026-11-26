@@ -7,6 +7,8 @@ on:
       - completed
   push:
     branches: [ 'main' ]
+  # Start a manual run on main: the github-pages environment only accepts deployments from
+  # the default branch, so a dispatch from another branch builds the site but cannot publish.
   workflow_dispatch:
 
 env:
@@ -173,14 +175,38 @@ jobs:
           fi
           if [ "$PRESERVE_PUBLISHED" = true ]; then
             mkdir -p docs/manifests
-            python3 - <<'PY'
-          import json, os, urllib.request
+            # Pages answers 503 while a deployment is in flight, so retry, then fall back to the
+            # committed manifest: an unavailable published copy must not fail the whole deploy.
+            LOCAL_ASSETS="$LOCAL_ASSETS" python3 - <<'PY'
+          import json, os, shutil, time, urllib.request
           base = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          local = os.environ.get("LOCAL_ASSETS", "")
+
+          def fetch(path, dest):
+              error = None
+              for attempt in (1, 2, 3):
+                  try:
+                      urllib.request.urlretrieve(base + path, dest)
+                      return None
+                  except Exception as exc:
+                      error = exc
+                      time.sleep(2 * attempt)
+              return error
+
           with open("docs/firmware-info.json", encoding="utf-8") as file:
               for variant in json.load(file).get("variants", []):
                   path = variant["manifest"]
                   os.makedirs(os.path.dirname(f"docs/{path}"), exist_ok=True)
-                  urllib.request.urlretrieve(base + path, f"docs/{path}")
+                  dest = f"docs/{path}"
+                  error = fetch(path, dest)
+                  if error is None:
+                      continue
+                  fallback = os.path.join(local, path)
+                  if os.path.exists(fallback):
+                      shutil.copy2(fallback, dest)
+                      print(f"::warning title=Manifest not refreshed::{path} unavailable ({error}), used the committed copy")
+                  else:
+                      print(f"::warning title=Manifest missing::{path} unavailable ({error}) and not committed")
           PY
           fi
 
@@ -283,6 +309,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build-deploy
+    # always() is required, not cosmetic: a skipped firmware-gate makes the implicit success()
+    # false here even when build-deploy passed, which silently skipped this job on 2026-11-23.
+    if: always() && needs.build-deploy.result == 'success'
     steps:
       - name: Deploy to GitHub Pages
         id: deployment

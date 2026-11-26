@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define RADIOVERSION "2026.11.22"
+#define RADIOVERSION "2026.11.26"
 
 /*******************************************************
  
@@ -214,7 +214,7 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 /* Tweaks to Scrolls (see dspconf.h for more) */
 // #define SCROLLDELAY 5000 // ms, the delay scrolls are held for before moving (will not affect all scrolls)
-// #define SCROLLPX (52 + (DSP_WIDTH - 128) / 44) // px/s at fontsize 1, widened a little per panel; see dspconf.h
+// #define SCROLLPX (20 + (DSP_WIDTH - 128) / 35) // fontsize 1 speed: 20 px/s on small displays, up to 30 px/s on wider displays
 
 /* Big displays (480x320) get a bigger boot logo ( but can be disabled with #define BIG_BOOT_LOGO false)*/
 #if DSP_MODEL==DSP_ILI9488 || DSP_MODEL==DSP_ILI9486 || DSP_MODEL==DSP_ST7796
@@ -294,9 +294,9 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 
 /* Override SPI, I2C Speeds and Addresses with myoptions.h */
-// may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL
+// may not work for all display drivers, especially if custom libraries are included. ie. ILI9488 which is fixed to 40000000UL (higher is not better for this one)
 // #define DEF_SPI_FREQ 8000000UL // defaults usually OK; may range from 8000000UL (8 MHz) to 80000000UL (80 MHz); check your datasheet before changing! set to 0 for factory default (will override codebase default)
-// #define I2CFREQ_HZ   400000UL // OLED driver default is 4000000UL (4 MHz); lower e.g. to 400000UL (400 kHz) if display is glitchy; range: 100000UL (100 kHz) to 4000000UL (4 MHz)
+// #define I2CFREQ_HZ   400000UL // OLED driver default is 1000000UL (1 MHz which is highest in I2C spec); lower e.g. to 800000UL (800 kHz) or 400000UL (400 kHz) if display is glitchy
 // #define SCREEN_ADDRESS 0x3C // see datasheet for address or scan it https://create.arduino.cc/projecthub/abdularbi17/how-to-scan-i2c-address-in-arduino-eaadda
 
 
@@ -936,26 +936,36 @@ or examine the examples in builds/trip5 and make your own!
 /* Priority scale for all pinned tasks (FreeRTOS: higher number = more CPU, preempts lower tasks) */
 /* Arduino loop() runs at priority 1. Priority 0 = idle-level (starved by any other task — do not use). */
 #ifndef DSP_TASK_PRIORITY
-  #define DSP_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), below audio-critical tasks (3)
+  #define DSP_TASK_PRIORITY 5 // highest priority to keep display smooth
 #endif
 #ifndef NETSERVER_TASK_PRIORITY
-  #define NETSERVER_TASK_PRIORITY 2 // 2 = above Arduino loop() (1), same tier as display
+  #define NETSERVER_TASK_PRIORITY 2 // 2 is above Arduino loop() (1)
 #endif
 #ifndef NET_TASK_PRIORITY
-  #define NET_TASK_PRIORITY 3 // highest: WiFi search, stream retry, OTA download
+  #define NET_TASK_PRIORITY 3 // high: WiFi search, stream retry, OTA download
 #endif
 #ifndef PLAYBACK_TASK_PRIORITY
-  #define PLAYBACK_TASK_PRIORITY 3 // highest: stream connection / playback start
+  #define PLAYBACK_TASK_PRIORITY 3 // high: stream connection / playback start
 #endif
 #ifndef LOW_TASK_PRIORITY
   #define LOW_TASK_PRIORITY 1 // lowest: background/deferrable tasks (round-robin with loop())
 #endif
+// AsyncTCP priorities are in options_overrides.h
 
 /* --- VISUAL TWEAKS --- */
 // Since the audio buffer can never technically fill up (most streams prevent reading-ahead excessively),
 // the visual buffer bar should look "full" when the buffer is near to maximum potential (250KB is ~6 seconds at 320kbps)
 #ifndef BUFFERBAR_VISUAL_FULL_KB
   #define BUFFERBAR_VISUAL_FULL_KB 250
+#endif
+#ifndef AUDIO_RISK_ENGAGE_MS
+  #define AUDIO_RISK_ENGAGE_MS 500 // DSP_TASK_DELAY throttles the display (1/4 FPS) if audio buffer falls below this time (relieves audio-display contention)
+#endif
+#ifndef AUDIO_RISK_RELEASE_MS
+  #define AUDIO_RISK_RELEASE_MS 3000 // When the buffer contains more than this time of audio, the throttle is released (see audioRingAtRisk() in display.cpp)
+#endif
+#if AUDIO_RISK_RELEASE_MS <= AUDIO_RISK_ENGAGE_MS
+  #error define error: AUDIO_RISK_RELEASE_MS must be greater than AUDIO_RISK_ENGAGE_MS
 #endif
 // The next bits are all related to the VU meter... values have been chosen carefully but you may wish to change them
 #ifndef VU_REFRESH_MS
@@ -1158,61 +1168,32 @@ or examine the examples in builds/trip5 and make your own!
 
 /* ============================== DEBUG ============================== */
 
-/* Enable all the debug logs with #define ALL_DEBUG_LOGS */
-/* Note that turning on all logs can make the serial log very noisy (and every print to serial adds milliseconds of delay to running code! */
-/* So it is highly recommended to NEVER use ALL_DEBUG_LOGS or any debug includes in a "final" build! */
-/* Even when serial monitor is not connected,*/
-/* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. */
+/* Note that turning on many logs can make the serial log very noisy - and every print to serial adds milliseconds of delay to running code! */
+/* So it is highly recommended to NEVER include any debug logging includes in a "final" build! Even when serial monitor is not connected! */
+/* Also note the log prints a lot of diagnostic data that should not be interpreted as errors. A lot of output is diagnostic data. */
 
-#ifdef ALL_DEBUG_LOGS
-  #ifndef WARNINGS_LOG
-   #define WARNINGS_LOG // This enables showing non-fatal warning-level errors
-  #endif
-  #ifndef CONFIG_KEY_DEBUG
-    #define CONFIG_KEY_DEBUG // This shows every Prefs key and the value written to it
-  #endif
-  #ifndef METADATA_LOG
-    #define METADATA_LOG // This enables showing ID3 and Icy Metadata in the logs - useful to debug titles not being printed by handleShowStreamTitle()
-  #endif
-  #ifndef NETSERVER_DEBUG
-   #define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
-  #endif
-  #ifndef CORE_MONITOR
-    #define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s), includes LittleFS information
-  #endif
-  #ifndef BOOTLOG_TIME
-    #define BOOTLOG_TIME // Prefixes every BOOT log line with the time since boot, e.g. "[BOOT]          00600ms: ..." (the bootLogX progress lines the dots extend are left alone)
-  #endif
-  #ifndef WIDGET_DEBUG
-    #define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
-  #endif
-  #ifndef AUDIO_DEBUG
-    #define AUDIO_DEBUG // Per-track chatter from the audio library: tag and file sizes, syncword positions, the 10 s ring arithmetic, the codec/rate report - plus the ID3 frame walk and the library's own diagnostic lines
-  #endif
-  #ifndef VU_VS1053_LOG
-    #define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
-  #endif
-#endif
+//#define WARNINGS_LOG // This enables showing non-fatal warning-level errors
+//#define CORE_MONITOR // This shows the ESP32 CPU Core Monitor in serial and telnet (updated every 5s), includes LittleFS information (adds 1 s to boot time)
+//#define BOOTLOG_TIME // Prefixes every BOOT log line with the time since boot, e.g. "[BOOT]          00600ms: ..." (the bootLogX progress lines the dots extend are left alone) (adds 1 s to boot time)
+//#define CONFIG_KEY_DEBUG // This shows every Prefs key and the value written to it (adds 1 s to boot time)
+//#define METADATA_LOG // This enables showing ID3 and Icy Metadata in the logs - useful to debug titles not being printed by handleShowStreamTitle()
+//#define NETSERVER_DEBUG // This enables Netserver logging: GET client requests and sending files in chunks
+//#define WIDGET_DEBUG // This shows the Widget's Text (and the VU draw cost) in logging
+//#define AUDIO_DEBUG // Per-track chatter from the audio library: tag and file sizes, syncword positions, the 10 s ring arithmetic, the codec/rate report - plus the ID3 frame walk and the library's own diagnostic lines
+//#define VU_VS1053_LOG true // The 1 Hz "raw dB ... read us avg" sampler line
+//#define HEAPMAP_LOG // The [HeapMap] line: which pool TextId3 buffers really live in, plus the quarantine count, printed on every ID3 header (twice per HLS segment).  It proves all three buffers are PSRAM and never move.
 
-/* The [HeapMap] line: which pool TextId3 buffers really live in, plus the quarantine count, printed on every ID3
-   header (twice per HLS segment).  It is what proved all three buffers are PSRAM and never move, so it is kept but
-   switched off - uncomment in myoptions.h to bring it back.  Deliberately NOT part of ALL_DEBUG_LOGS: it is far too
-   frequent to enable by accident. */
-//#define HEAPMAP_LOG
-
+ // Set to true to enable ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
 #ifndef ESPFILEUPDATER_VERBOSE
-  #ifdef ALL_DEBUG_LOGS
-    #define ESPFILEUPDATER_VERBOSE true // This enables ESPFileUpdater's debug log in serial.  Only add if you really want to watch serial log for what may be causing fetch errors.
-  #else
-    #define ESPFILEUPDATER_VERBOSE false // it needs a value
-  #endif
+  #define ESPFILEUPDATER_VERBOSE false // requires a default
 #endif
 
 /* Print the previous boot's crash at boot (only useful if the binar)*/
 // BOOTLOG the last core dump's task, PC, backtrace and ELF SHA into the serial log.
 // ESP-IDF writes that dump itself (provided the partition file allocates for it):
-#define COREDUMP_SUMMARY_AT_BOOT
-// the coredump from crash-reboots are always available from netserver at endpoint /coredump
+#define COREDUMP_SUMMARY_AT_BOOT // the coredump from crash-reboots are always available from netserver at endpoint /coredump
+
+//#define CORS_DEBUG // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
 
 #ifndef FS_REQUIRED_FREE_SPACE
   #define FS_REQUIRED_FREE_SPACE 150 // KB that must stay free in LittleFS: netserver aborts search and curated downloads below it
@@ -1223,9 +1204,6 @@ or examine the examples in builds/trip5 and make your own!
 #endif
 #ifndef CORE_MONITOR_ETC_LOOPS
   #define CORE_MONITOR_ETC_LOOPS 5 // Show LittleFS + PSRAM info every N core monitor cycles (default: 5, every 25s)
-#endif
-#ifdef CORS_DEBUG
- // This enables CORS policy: 'Access-Control-Allow-Origin' (for testing)
 #endif
 
 /* CPU CORE NAMES: Name the Cores for what they do... */

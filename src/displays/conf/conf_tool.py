@@ -521,8 +521,8 @@ def trim_scroll_conf(val):
     """ScrollConfig keeps only its WIDGET group and `width`: the pace fields are retired, not converted.
 
     A scrolling line no longer carries a scrolldelay, a scrolldelta or a scrolltime.  A layout says WHERE a line is
-    and how WIDE its window is; the panel says how fast anything moves (SCROLLPX, in pixels per second at fontsize 1,
-    SCROLL_DUTY and the SCROLLDELAY_* holds, all in dspconf.h).  Every historical shape therefore collapses to
+    and how WIDE its window is; the panel says how fast anything moves (SCROLLPX and the SCROLLDELAY_* holds in
+    dspconf.h, SCROLL_DUTY beside _applyPace() in widgets.cpp).  Every historical shape therefore collapses to
     `{{ offset, top, fontsize, align }, width }`:
 
         {{ 1, 1, 2, WA_LEFT }, 126, 5000, 2, 35 }              ->  {{ 1, 1, 2, WA_LEFT }, 126 }

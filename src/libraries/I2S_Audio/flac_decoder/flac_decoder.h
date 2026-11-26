@@ -8,10 +8,11 @@
  *
  *  Restrictions:
  *  blocksize must not exceed 24576 bytes
- *  bits per sample must be 8 or 16
+ *  bits per sample must be 8, 16 or 24 (24 is downshifted to 16 on output)
  *  num Channels must be 1 or 2
  *
- *
+ * Frankstein surgery performed by Trip5 for ehRadio
+ * See i2s-frankenstein-surgery-notes.md for more information
  */
 #pragma once
 #pragma GCC optimize ("Ofast")
@@ -19,42 +20,48 @@
 #include <Arduino.h>
 #include <vector>
 
-/* ---- decode-cost profiling -----------------------------------------------------------------------------------
-   Splits the per-frame cost between residual bit-reading and the linear-prediction restore.  MICROSECONDS, not
-   cycles: a frame takes about 90 ms of CPU.  These figures are per FLAC frame, while "cyc/frame" on the i2s line is
-   per PCM sample-frame - 4096 of them make one. */
+// ---- decode-cost profiling -----------------------------------------------------------------------------------
+// Splits the per-frame cost between residual bit-reading and the linear-prediction restore.  MICROSECONDS, not
+// cycles: a frame takes about 90 ms of CPU.  These figures are per FLAC frame, while "cyc/frame" on the i2s line is
+// per PCM sample-frame - 4096 of them make one.
 #ifndef FLAC_PROFILE
   #define FLAC_PROFILE 1
 #endif
+// What the 16-bit output path is actually producing, read and reset once per i2s window: the bit depth the decoder
+// believes, the last frame's channel assignment and sample-size code, and the largest sample magnitude before and after
+// the downshift.  The frame CRC is read and discarded, so a mis-parse is invisible in every other counter - these are
+// the numbers that separate a wrong shift from a wrong parse.
+void FLACGetOutputStats(uint8_t* bits, uint8_t* asgn, uint8_t* ssw, int32_t* peakRaw, int32_t* peakOut, uint32_t* blocks);
+
 #if FLAC_PROFILE
   void FLACProfileGet(uint32_t* residUs, uint32_t* lpcUs, uint32_t* frames);   // reads and resets
   void FLACProfileReset(void);   // drop what a stream left behind, so no other codec's report can print it
 #endif
 
-/* ---- Ogg de-ogger --------------------------------------------------------------------------------------------
-   Sits in the web-stream write path, in front of the ring, for EVERY stream.  It reads the first 27 bytes of a
-   connection and decides once:
-
-     OggS with a 0x7F 'F' 'L' 'A' 'C' mapping header  -> Ogg FLAC: pass pages through verbatim until the first audio
-                                                        packet, then drop page headers and lacing tables, so the
-                                                        decoder sees unbroken native FLAC frames
-     anything else                                    -> passthrough for the rest of the connection
-
-   Passing pages through until the audio phase keeps parseFlacFirstPacket() and parseMetaDataBlockHeader() on their
-   path, so title, bitrate, rate and depth parse as before.  Output never exceeds input: returns the bytes written to
-   dst, or -1 when dstRoom < len. */
+// ---- Ogg de-ogger --------------------------------------------------------------------------------------------
+// Sits in the web-stream write path, in front of the ring, for EVERY stream.  It reads the first 27 bytes of a
+// connection and decides once:
+//
+// OggS with a 0x7F 'F' 'L' 'A' 'C' mapping header  -> Ogg FLAC: pass pages through verbatim until the first audio
+// packet, then drop page headers and lacing tables, so the
+// decoder sees unbroken native FLAC frames
+// anything else                                    -> passthrough for the rest of the connection
+//
+// Passing pages through until the audio phase keeps parseFlacFirstPacket() and parseMetaDataBlockHeader() on their
+// path, so title, bitrate, rate and depth parse as before.  Output never exceeds input: returns the bytes written to
+// dst, or -1 when dstRoom < len.
 int32_t FLACDeOgg(uint8_t* dst, int32_t dstRoom, const uint8_t* src, int32_t len);
 bool    FLACDeOggStripping(void);   // true once page headers are being dropped
 void    FLACDeOggReset(void);       // a new connection
 void    FLACDeOggReserve(void);     // allocate the metadata capture early, before the audio ring takes the big block
-/* The filter's state as one short line, for the once-a-second report while the ring is not growing.  The state is
-   file-static in flac_decoder.cpp, so it cannot be read from the reader; a filter that is eating the stream is
-   otherwise invisible, because the framing counters advance on what came off the socket. */
+// The filter's state as one short line, for the once-a-second report while the ring is not growing.  The state is
+// file-static in flac_decoder.cpp, so it cannot be read from the reader; a filter that is eating the stream is
+// otherwise invisible, because the framing counters advance on what came off the socket.
 void    FLACDeOggDebug(char* out, size_t room);
-/* Comment captures offered to the parser; the reader prints its `deogg:` line when this changes. */
+// Comment captures offered to the parser; the reader prints its `deogg:` line when this changes.
 uint32_t FLACDeOggCommentCount(void);
-/* The title a captured comment packet produced, or NULL.  Reading it consumes it.  Owned here, not by the decoder,
-   whose own title buffer is freed during setDecoderItems. */
+// The title a captured comment packet produced, or NULL.  Reading it consumes it.  Owned here, not by the decoder,
+// whose own title buffer is freed during setDecoderItems.
 const char* FLACDeOggTitle(void);
 using namespace std;
 
@@ -220,7 +227,7 @@ int8_t           decodeSubframe(uint8_t sampleDepth, uint8_t ch, int32_t* bytesL
 int8_t           decodeFixedPredictionSubframe(uint8_t predOrder, uint8_t sampleDepth, uint8_t ch, int32_t* bytesLeft);
 int8_t           decodeLinearPredictiveCodingSubframe(int32_t lpcOrder, int32_t sampleDepth, uint8_t ch, int32_t* bytesLeft);
 int8_t           decodeResiduals(uint8_t warmup, uint8_t ch, int32_t* bytesLeft);
-void             restoreLinearPrediction(uint8_t ch, uint8_t shift);
+void             restoreLinearPrediction(uint8_t ch, int32_t shift);   // signed: a negative quantiser shift means <<
 int32_t          FLAC_specialIndexOf(uint8_t* base, const char* str, int32_t baselen, bool exact = false);
 char*            flac_x_ps_malloc(uint16_t len);
 char*            flac_x_ps_calloc(uint16_t len, uint8_t size);

@@ -45,6 +45,26 @@ extern const char batterytxtFmt[] PROGMEM;
   #undef DSP_TASK_DELAY
   #define DSP_TASK_DELAY 10
 #endif
+
+// Audio-risk display limiter: the display task shares core 1 with the audio task, so while the ring is thin it
+// wakes a quarter as often - engaged below AUDIO_RISK_ENGAGE_MS, released above AUDIO_RISK_RELEASE_MS (options.h).
+// Measured in TIME, never bytes; until a rate exists a 32 KB floor stands in for it.
+static bool s_audioAtRisk = false;
+static bool audioRingAtRisk() {
+  const uint32_t bytes = player.inBufferFilled();
+  const uint32_t bps   = player.streamBytesPerSecond();
+  const uint32_t ms    = bps ? (uint32_t)(((uint64_t)bytes * 1000ULL) / bps)
+                             : (bytes < 32u * 1024u ? 0u : 1000u);
+  const bool risk = s_audioAtRisk ? (ms < AUDIO_RISK_RELEASE_MS) : (ms < AUDIO_RISK_ENGAGE_MS);
+  if (risk != s_audioAtRisk) {
+    s_audioAtRisk = risk;
+    #ifdef AUDIO_DEBUG
+      FUNCTIONLOG("Audio.risk", "%s: %u bytes = %u ms buffered at %u B/s",
+                  risk ? "engaged" : "released", (unsigned)bytes, (unsigned)ms, (unsigned)bps);
+    #endif
+  }
+  return s_audioAtRisk;
+}
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
 static constexpr uint32_t DSQ_CRITICAL_WAIT = 2000;  // ms; how long SDINDEXSTART/SDINDEXDONE keep retrying a full queue
 // ms; how long the screensaver's info line stays blank after a track change starts.  The request that starts the
@@ -236,6 +256,10 @@ QueueHandle_t displayQueue;
   volatile uint32_t cmPushCount     = 0;
   volatile uint8_t  cmDspCore       = 255;  // recorded by the task itself; 255 = not yet run
   volatile uint32_t cmMaxDspWorkUs  = 0;    // longest single display.loop() call; reset by the monitor on print
+  volatile uint32_t cmMaxDspPagerUs = 0;    // ... and that maximum split by stage: the page's widgets,
+  volatile uint32_t cmMaxDspReqUs   = 0;    // the queue request handler (with its worst type), and dsp.loop()
+  volatile uint32_t cmMaxDspIoUs    = 0;
+  volatile uint8_t  cmWorstReqType  = 0xFF;
 #endif
 
 TaskHandle_t dspTaskHandle = NULL;
@@ -258,7 +282,8 @@ static void loopDspTask(void * pvParameters) {
     #endif
     // The task reports its own core, so the Core Monitor can never name the wrong core.
     cmCountDspLoop((uint8_t)xPortGetCoreID());
-    vTaskDelay(pdMS_TO_TICKS(DSP_TASK_DELAY));
+    // A quarter of the wake rate while the audio ring cannot afford the display's slices.
+    vTaskDelay(pdMS_TO_TICKS(DSP_TASK_DELAY * (audioRingAtRisk() ? 4 : 1)));
   }
   vTaskDelete(NULL);
 }
@@ -289,13 +314,8 @@ static uint32_t normalizeBufferbarValue(uint32_t rawValue, uint32_t maxValue) {
   return min(rawValue, maxValue);
 }
 
-// Every MOVE goes through this, so no call site can forget the `{ }` rule (declared above _switchMode()
-// because C++ needs it first).  `{ }` yields to the VU.
-//
-// There is no "restore" variant any more.  `width = -1` was retired in favour of writing the widget's own
-// coordinates, so a move that means "stay where the conf put you" IS
-// a move to those coordinates - which is also what brings the clock back from the screensaver's random
-// spot, the job the negative-width branch used to do through moveBack().
+// Every MOVE goes through this, so no call site can forget the `{ }` rule; `{ }` yields to the VU.  "Stay put" is
+// written as the widget's own coordinates, which is also how the clock returns from the screensaver.
 static inline bool moveZeroed(const MoveConfig& m) { return m.x == 0 && m.y == 0 && m.width == 0; }
 static inline void applyMove(Widget* w, const MoveConfig& m) {
   if (!w || moveZeroed(m)) return;
@@ -839,13 +859,9 @@ void Display::_showDialog(const char *title) {
   _meta->setText(title);
 }
 
-// The one way a big number goes on screen.  VOL, NUMBERS and SDCHANGE all come through here, so the widget-sharing
-// behaviour cannot drift apart again and a layout can be checked from the volume screen alone.
-
-// dialogPage=true switches to the dialog page: the panel is wiped and the number is the only thing on it, with the
-// header on the meta line.  false is the volume overlay - the number is drawn over the live player page, where the
-// row tidy-up below is what keeps it legible.  A negative value blanks the widget, which is how the card-change
-// screen starts before its counter exists (SDFILEINDEX fills it in later). */
+// The one way a big number goes on screen, so VOL, NUMBERS and SDCHANGE cannot drift apart.  dialogPage=true wipes
+// the panel and puts the number on the meta line; false draws it over the live player page.  A negative value blanks
+// the widget, which is how the card-change screen starts before its counter exists.
 void Display::_showNumbers(const char* header, int32_t value, const char* fmt, bool dialogPage, uint32_t fieldmax) {
   // The shared rows first, in both variants: several layouts put the number on a row the weather, IP, battery or
   // RSSI line normally uses, and those widgets draw themselves on request rather than through the page pass.
@@ -1188,13 +1204,8 @@ bool Display::_ownScreen() const {
   return false;
 }
 
-// The clock hides with no time source, when the layout omits it, when it yields to the VU, and while a screen the
-// display owns is up.  The clock is only advanced in PLAYER and SCREENSAVER, so one left in a holding pattern's
-// layout is painted once and then sits frozen - which is what the manager exposed (the player stop that mode causes
-// re-un-hid it) and what the card-change wait screen shows when the index is valid and no counter ever appears.
-// _layoutChange() redraws the full clock when the mode leaves.  While the panel is the screensaver's, the answer is
-// _screensaverWidgets()'s to give: it is the place that locks the clock for the meter, and a settings change from
-// the WebUI must not unlock one that was put away.
+// Hides the clock with no time source, when the layout omits it, when it yields to the VU, and while the display
+// owns the screen.  In the screensaver the answer is _screensaverWidgets()'s: it locked the clock, so it unlocks it.
 bool Display::_clockHidden() {
   if (config.isScreensaver) return _ssMeterUp;
   const bool noTimeSource = (network.status == SDOFFLINE && !config.isRTCFound());
@@ -1265,11 +1276,7 @@ void Display::_layoutChange(bool played) {
 
 #ifdef USE_SD
 // Requests that draw a player-page widget directly, which a page switch cannot stop: a page knows only its own
-// widgets, so nothing tells the clock or the footer that they are no longer on screen.  Dropped while a screen the
-// display owns is up (_ownScreen): the manager, and for the same reason the card-change wait screen, which is also
-// a holding pattern where the count is the only thing that should change.  Arriving late matters here - the title,
-// the IP line, the RSSI and battery icons and the VU all have their own refresh paths, and none of them is gated on
-// the mode.  _switchMode(PLAYER) re-derives the state from the live player on the way out.
+// widgets.  Dropped while a screen the display owns is up; _switchMode(PLAYER) re-derives the state on the way out.
 bool Display::_drawsOverOwnScreen(displayRequestType_e type) const {
   if (type == DRAWVOL) return !(_mode == VOL || _mode == NUMBERS);
   switch (type) {
@@ -1312,12 +1319,26 @@ void Display::loop() {
     _ssHoldUntil = 0;
     if (config.isScreensaver) _screensaverLine();
   }
+  #ifdef CORE_MONITOR
+    const uint32_t dspPagerStart = micros();
+  #endif
   _pager->loop();
+  #ifdef CORE_MONITOR
+    cmNoteDspPager(micros() - dspPagerStart);
+  #endif
   requestParams_t request;
   if (xQueueReceive(displayQueue, &request, DSP_QUEUE_TICKS)) {
+    #ifdef CORE_MONITOR
+      const uint32_t dspReqStart = micros();
+    #endif
     #ifdef USE_SD
       // One pass without dsp.loop(), like the early return further down this switch.
-      if (_ownScreen() && _drawsOverOwnScreen(request.type)) return;
+      if (_ownScreen() && _drawsOverOwnScreen(request.type)) {
+        #ifdef CORE_MONITOR
+          cmNoteDspReq(micros() - dspReqStart, (uint8_t)request.type);
+        #endif
+        return;
+      }
     #endif
     switch (request.type) {
         case NEWMODE: _switchMode((displayMode_e)request.payload); break;
@@ -1494,14 +1515,21 @@ void Display::loop() {
         if (uxQueueMessagesWaiting(displayQueue))
           return;
       }
+    #ifdef CORE_MONITOR
+      cmNoteDspReq(micros() - dspReqStart, (uint8_t)request.type);
+    #endif
   }
 
-  dsp.loop();
-/*
-  #if defined(USE_AUDIO_VS1053)
-  player.computeVUlevel();
+  #ifdef CORE_MONITOR
+    const uint32_t dspIoStart = micros();
   #endif
-*/
+  dsp.loop();
+  #ifdef CORE_MONITOR
+    cmNoteDspIo(micros() - dspIoStart);
+  #endif
+// #if defined(USE_AUDIO_VS1053)
+// player.computeVUlevel();
+// #endif
 }
 
 // dBm -> a 0..100 reading for the numeric signal form: 2% per dB from -100 (0%) up to -50 (100%), and 100% above
@@ -1699,13 +1727,8 @@ void Display::_ssHoldLine(uint32_t ms) {
   _ssHoldUntil = millis() + ms;
 }
 
-// The info line's text, joined with the shared scroll mark (scrollMark(): " * ", or the holiday icon), and it is
-// one state or the other, never both: while something is playing the line describes what is playing - the station
-// name and the two title lines - and the weather is left out, because a single-row strip that mixes a forecast
-// into a track name pushes the track off it.  Over silence there is nothing to describe, so the weather is the
-// whole line.  That is the same split _ssStripH() refuses the strip on: either half being absent leaves nothing
-// to show.  Every empty part is skipped outright rather than left as a bare separator, which is why they all go
-// through one append.
+// The info line's text, joined with the shared scroll mark.  Playing means station and titles with no weather; over
+// silence it is the weather alone.  Empty parts are skipped, never left as a bare separator.
 void Display::_screensaverLine() {
   if (!_sstext) return;
   // A track change blanks the line and holds it: _ssHoldLine() sets the deadline, Display::loop() clears it.
@@ -2293,13 +2316,8 @@ uint8_t Display::getThemeCount() { return themeCount(); }
 uint8_t Display::getSystemFontCount() { return (uint8_t)_systemFontCount; }
 uint8_t Display::getClockFontCount()  { return (uint8_t)_clockFontCount;  }
 
-// Live system font switch.  Re-resolving every widget string is the obligation here: the resolver memo is
-// keyed on the font pointer, so a new pointer invalidates it for free, but the strings already sitting in the
-// widgets were resolved with the
-// old one.  There is no way to re-resolve them in place - a widget keeps only the resolved copy -
-// so the widgets are re-initialised, which is exactly what APPLYSTATE does: it re-runs each
-// widget's init() and its setText() with the source text.  Metrics cannot move (all system fonts
-// are validated onto the 6x8 class at boot), so no layout re-measurement is needed.
+// Live system font switch.  The widget strings were resolved against the old font pointer and cannot be
+// re-resolved in place, so APPLYSTATE re-inits each widget.  Metrics cannot move: all fonts are 6x8 at boot.
 void Display::applySystemFont(uint8_t id) {
   if (id >= _systemFontCount) id = 0;
   config.store.systemFontId = id;

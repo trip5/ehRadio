@@ -250,13 +250,14 @@ input[type=range] { overflow: hidden; border: solid 2px var(--meter-outline); bo
 #pleheader .grabbable { width: 40px; text-align: center; padding: 8px 8px; }
 #pleheader .space { width: 30px; text-align: right; padding: 8px 10px; }
 #pleheader .space input { margin: 0; }
-#pleheader .pledbcut { width: 62px; }
 #pleditorcontent::-webkit-scrollbar { width: 5px; height: 8px; background-color: var(--scrollbar-track); }
 #pleditorcontent::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
 #pleditorcontent { flex: 1 1 auto; overflow-y: scroll; height: 0px; border: var(--list-outline) 2px solid; box-sizing: border-box; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); scrollbar-width: thin;
   background-color: var(--panel-background); background-image: repeating-linear-gradient(to bottom, var(--list-bars) 0 32px, var(--panel-background) 32px 64px); background-attachment: local; }
 #pleditorcontent li:nth-child(odd), #pleditorcontent li:nth-child(odd) input, #pleditorcontent li:nth-child(odd) span { background: var(--list-bars); }
 .grabbable { cursor: copy; cursor: -moz-grab; cursor: -webkit-copy; }
+/* only row handles drag, so only they give up scrolling */
+#pleditorcontent .grabbable { touch-action: none; }
 .pleitem { display: flex; background: var(--panel-background); width: 100%; }
 .pleitem span { display: flex; flex-direction: column; justify-content: center; text-align: right; color: var(--editor-cell-text); width: 40px; padding: 0 8px; font-size: 14px; border: var(--editor-grid) 1px solid; }
 .pleitem input { font-family: Times, "Times New Roman", serif; background: var(--panel-background); color: var(--list-names); height: 32px; line-height: 32px; text-indent: 8px;
@@ -265,7 +266,7 @@ input[type=range] { overflow: hidden; border: solid 2px var(--meter-outline); bo
 .plecheck input { line-height: 10px; height: auto; }
 .plename { flex: 13 1 0; min-width: 80px; }
 .pleurl { flex: 7 1 0; min-width: 40px; color: var(--list-urls)!important; }
-.pledbcut { width: 53px!important; font-size: 16px!important; }
+.pledbcut { width: 53px; font-size: 16px!important; }
 .pleitem span.pleplay { width: 32px!important; padding: 0; text-align: center; font-size: 12px!important; cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { /* mouse only */
   .pleitem span.pleplay:hover { background: var(--list-active-bg)!important; color: var(--icon-active-glyph); border-color: var(--icons-outline); }
@@ -424,11 +425,6 @@ table.stations .importantmessage { color: var(--heading-text) !important; font-s
 #updateprogress::-webkit-progress-value { background-color: var(--meter-fill); border-radius: 15px 0 0 15px; }
 #updateprogress::-moz-progress-bar { background-color: var(--meter-fill); border-radius: 15px; }
 .onlineupdatebutton { max-width: 100%; width: 100%; margin: 0; font-family: Times, "Times New Roman", serif; }
-#settingspopup.ir { width: 180px; }
-#settingspopup.ir .button { padding: 8px 8px; }
-#settingsbuttonir { display: none; }
-#settingspopup.ir #settingsbuttonwifi { min-width: 104px; width: 104px; display: inline-block; }
-#settingspopup.ir #settingsbuttonir { min-width: 60px; width: 60px; display: inline-block; margin-left: 0; float: right; }
 .fb.tool { padding: 4px 12px; font-size: 14px; font-weight: normal; min-width: 100px; margin-top: 30px; }
 body.switching .gb, body.switching #playlist { opacity: 0.5; pointer-events: none; }
 @keyframes spinner { 0% { transform: rotate(0deg);  } 100% { transform: rotate(360deg); } }
@@ -537,7 +533,7 @@ body.sdman #progresstext.upload #progresspct { font-size: 200%; }
   .plecheck { width: 30px!important;  }
   .plename { width: auto!important; flex: 5 1 0!important; min-width: 80px!important; }
   .pleurl { width: auto!important; flex: 2 1 0!important; min-width: 40px!important; }
-  .pledbcut { width: 2.5em!important; font-size: 14px!important; }
+  .pledbcut { width: 3.5em!important; font-size: 14px!important; }
   #previewinfo { line-height: 20px; height: 20px; font-size: 14px; text-align: center; color: var(--caption-text); margin-bottom: 4px; }
   /* SD MANAGER */
   body.sdman .sdico, body.sdman .sdload { flex: 0 0 32px; }

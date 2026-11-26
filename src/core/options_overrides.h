@@ -49,7 +49,7 @@ in options.h so they stay out of each other's way!
   #define CONFIG_ASYNC_TCP_USE_WDT 1 // library task subscribes to the task WDT (0 = disable)
 #endif
 #ifndef CONFIG_ASYNC_TCP_PRIORITY
-  #define CONFIG_ASYNC_TCP_PRIORITY 4 // library default is 10 (2 is same as audio task, 3 is highest, 4 puts it above everything else)
+  #define CONFIG_ASYNC_TCP_PRIORITY 4 // library default is 10 (4 puts it above everything else except display)
 #endif
 // AsyncTCP's event task stack.  **This is WORDS, not bytes** - xTaskCreateUniversal passes it straight to
 // xTaskCreate, so the library default of 8192 * 2 is 16384 words = 64 KB, not 16 KB.  A boot log with CORE_MONITOR

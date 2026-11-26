@@ -6,7 +6,11 @@
  *  Version 3.1.0n
  *  Updated on: Mar 29.2025, Apr 04.2025 (Maleksm)
  *      Author: Wolle (schreibfaul1)
- *  Some adjustments by Trip5 for ehRadio
+ * 
+ *  Adapted from Maleksm's yoRadio mod v0.9.434m(04.04.25)
+ *  Frankstein surgery performed by Trip5 for ehRadio
+ *  See i2s-frankenstein-surgery-notes.md for more information
+ * 
  */
 #include "../../core/options.h"
 #if VS1053_CS==255
@@ -20,33 +24,14 @@
 #include "opus_decoder/opus_decoder.h"
 #include "vorbis_decoder/vorbis_decoder.h"
 //----------------------------------------------------------------------------------------------------------------------
-// The de-ogger in front of the ring - see flac_decoder.h.  EVERY web stream passes through it, and it decides from
-// the first 27 bytes whether this connection is Ogg FLAC; anything else (MP3, AAC, a playlist, a page-less file) is
-// copied straight through after that single look.  Reads are capped so the capture buffer always fits in the free
-// space of the ring, and the scratch buffer is PSRAM, allocated once.
-// 16384, not 4096.  This is the most the de-ogger will take off the socket in one call, and the audio iteration
-// that calls it may not come round again for a whole frame - at 48 kHz a FLAC frame is 4096 samples, 85 ms.  With
-// a 4 KB cap that ceiling is about 200 KB/s on paper, against the ~150 KB/s a 1.2 Mbit/s stream needs, which is no
-// margin at all; measured 2026.11.14 as the ring draining on distorsion while the decoder sat at 30% duty.
-// 16 KB is one FLAC max block, so a single read can serve a frame, and the scratch buffer grows by 12 KB of PSRAM.
+// The de-ogger in front of the ring; every web stream passes through it.  One FLAC max block, so a single socket
+// read can serve a whole frame - at 4096 a 1.2 Mbit stream outran it.
 static constexpr int32_t DEOGG_READ_MAX = 16384;
-// How many socket reads ONE audio pass may perform.  One read per pass makes the pass rate the ceiling: the decoder
-// can only ever see what a single pass moved, which is why a stream whose ring sits on the read-ahead gate plays at
-// 80% of real time (edge1.sr.se/p2-flac, block 4608, ring pinned at 16-22 KB, measured 2026.11.14).  Reading again
-// while the socket still holds data and the ring still has room lets one pass move several blocks - the same lever as
-// lowering the gate, but without ever handing the decoder a partial frame.
+// Socket reads one audio pass may perform.  More than one lets a pass move several blocks when the ring is gated.
 static constexpr uint8_t DEOGG_FILL_PASSES = 4;
 static uint8_t* s_deOggBuf = nullptr;
-// CONSUMED and PRODUCED are different numbers and both matter.  The de-ogger can swallow bytes without emitting
-// them (the 27-byte capture, a page header, a lacing table), so the caller must advance chunkSize/byteCounter by
-// what came off the socket and InBuff by what actually reached the ring.  Feeding the produced count into the
-// framing accounting desynchronises every chunked stream on its first short read - measured 2026.11.14, nothing
-// played at all.  `maxConsume` is the caller's own limit (chunk remaining, content length, ring space); `room` is
-// the contiguous space at dst.  There is NO reserve kept back for the de-ogger any more: FLACDeOgg() forwards each
-// byte as it captures it, so it can never emit more than it consumed and `room` bytes are enough.  The reserve that
-// used to be here was 400 bytes of ring space, and because the ring hands out only the contiguous space to its end,
-// a write pointer within 400 bytes of that end could never read again nor advance - a permanent stall on every
-// stream, seconds after the de-ogger armed.  Measured 2026.11.14.
+// CONSUMED and PRODUCED differ: page headers and lacing are swallowed, so the caller counts the socket by what was
+// consumed and InBuff by what was produced.  `room` needs no reserve - one cost a permanent stall.
 static int32_t readThroughDeOgg(WiFiClient* cl, uint8_t* dst, int32_t room, int32_t maxConsume, int32_t* consumed){
     *consumed = 0;
     if(!s_deOggBuf){
@@ -78,37 +63,21 @@ static int32_t readThroughDeOgg(WiFiClient* cl, uint8_t* dst, int32_t room, int3
     }
     return out < 0 ? 0 : out;
 }
-/*
-#ifdef SDFATFS_USED
-  fs::SDFATFS SD_SDFAT;
-#endif
-#ifndef DMA_BUFCOUNT
-  #define DMA_BUFCOUNT  8
-#endif
-#ifndef DMA_BUFLEN
-  #define DMA_BUFLEN  512   //  (512)
-#endif
-*/
-
 #if defined(ESP_ARDUINO_3)
   #include "soc/io_mux_reg.h"
 #endif
 //****************************************************************************************
-/* Read-ahead targets for web streams, in bytes of InBuff occupancy.
-   These are NOT the buffer's capacity - that is m_buffSizePSRAM (UINT16_MAX * 10, about 640 KB), which is far
-   larger than any segment.  These thresholds are what the stream paths use as "enough buffered to stop reading
-   ahead", so they decide how much audio stands between a stalled network read and silence on the DAC.
-
-   At 128 kbit/s (16 KB/s) the HLS target below is about 2.5 s of audio.  A blocking HTTP response-header read of
-   ~100 ms per segment is harmless at that depth and only becomes audible when the buffer is nearly empty at the
-   moment the read blocks.  Raise these to trade live latency for immunity; override with -D from the build flags. */
+// Read-ahead targets for web streams, in bytes of InBuff occupancy.
+// These are NOT the buffer's capacity - that is m_buffSizePSRAM (UINT16_MAX * 10, about 640 KB), which is far
+// larger than any segment.  These thresholds are what the stream paths use as "enough buffered to stop reading
+// ahead", so they decide how much audio stands between a stalled network read and silence on the DAC.
+//
+// At 128 kbit/s (16 KB/s) the HLS target below is about 2.5 s of audio.  A blocking HTTP response-header read of
+// ~100 ms per segment is harmless at that depth and only becomes audible when the buffer is nearly empty at the
+// moment the read blocks.  Raise these to trade live latency for immunity; override with -D from the build flags.
 #ifndef HLS_BUFFER_TARGET_BYTES
-  // HLS: keep reading ahead until this much is buffered.  This is the number that decides how much audio stands
-  // between a stalled read and silence on the DAC, and it is the ONLY reason the ring's depth is ever small - the
-  // ring itself has room for ~630 KB.  Measured behaviour at 40000: occupancy sat at ~56 KB and crept down, because
-  // the gate stopped the read the moment it was satisfied.  HLS playlists advertise two to three segments ahead, so
-  // there is no reason to sit that shallow.  At 128 kbit/s, 200000 is about 12 s; at 320 kbit/s, about 5 s.  Raise
-  // it for immunity from network stalls, lower it for less latency behind the live edge.
+  // HLS read-ahead, and the only reason the ring sits shallow: ~12 s at 128 kbit/s, ~5 s at 320.  Raise it for
+  // stall immunity, lower it for less latency behind the live edge.
   #define HLS_BUFFER_TARGET_BYTES 200000
 #endif
 #ifndef WEBSTREAM_BUFFER_TARGET_BYTES
@@ -161,11 +130,11 @@ size_t AudioBuffer::init() {
     m_buffer = NULL;
     if(psramInit() && m_buffSizePSRAM > 0) {         // PSRAM found, AudioBuffer will be allocated in PSRAM
         m_f_psram = true;
-        /* Opportunity, not entitlement: everything the ring competes with is allocated before it (the table in
-           core/options.h), so the floor covers only what cannot be taken early - the SD File Manager's 69,632-byte
-           assembly buffer, the decoder set, a TLS session, and slack for framebuffer churn.  The decoder set is 192 KB
-           on its own (FLAC sizes s_samplesBuffer at 2 x MAX_BLOCKSIZE x int32_t), and a live https stream measures
-           79-95 KB in PSRAM because mbedTLS allocates externally since the espressif32 8.0.0 patch. */
+        // Opportunity, not entitlement: everything the ring competes with is allocated before it (the table in
+        // core/options.h), so the floor covers only what cannot be taken early - the SD File Manager's 69,632-byte
+        // assembly buffer, the decoder set, a TLS session, and slack for framebuffer churn.  The decoder set is 192 KB
+        // on its own (FLAC sizes s_samplesBuffer at 2 x MAX_BLOCKSIZE x int32_t), and a live https stream measures
+        // 79-95 KB in PSRAM because mbedTLS allocates externally since the espressif32 8.0.0 patch.
         static constexpr size_t PSRAM_RESERVE_SDFM    = 65536 + 4096;
         static constexpr size_t PSRAM_RESERVE_DECODER = 256 * 1024;
         static constexpr size_t PSRAM_RESERVE_TLS     = 96 * 1024;
@@ -462,8 +431,8 @@ void Audio::initInBuff() {
     changeMaxBlockSize(1600); // default size mp3 or aac
 }
 //****************************************************************************************
-/* The tail of the PSRAM order: the de-ogger scratch and the ring, taken at a point setup() chooses rather than at
-   the first connecttohost().  Idempotent - initInBuff() guards itself. */
+// The tail of the PSRAM order: the de-ogger scratch and the ring, taken at a point setup() chooses rather than at
+// the first connecttohost().  Idempotent - initInBuff() guards itself.
 void Audio::reservePsram() {
     initInBuff();   // the de-ogger scratch (16.5 + 8 KB) first, then the ring - see initInBuff
 }
@@ -580,6 +549,7 @@ void Audio::setDefaults() {
     m_audioDataSize = 0;
     m_avr_bitrate = 0; 				// the same as m_bitRate if CBR, median if VBR
     m_bitRate = 0; 				// Bitrate still unknown
+    m_streamBytesSec = 0;           // a new stream has no measured rate yet
     h_bitRate = 0; 				// Bitrate from header still unknown
     m_bytesNotDecoded = 0; 			// counts all not decodable bytes
     m_chunkcount = 0;      			// for chunked streams
@@ -744,7 +714,7 @@ bool Audio::connecttohost(String host){
 }
 //****************************************************************************************
 bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
-    // user and pwd for authentification only, can be empty
+// user and pwd for authentification only, can be empty
 //    https://edge.live.mp3.mdn.newmedia.nacamar.net:8000/ps-charivariwb/livestream.mp3;&user=ps-charivariwb;&pwd=ps-charivariwb-------
 //        |   |                                     |    |                              |
 //        |   |                                     |    |                              |             (query string)
@@ -843,8 +813,8 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
     timestamp = millis();
 
     AUDIO_INFO("connect to: \"%s\" on port %d path \"/%s\"", h_host + hostwoext_begin, port, h_host + pos_slash + 1);
-    /* Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
-       read timeouts have to stay generous for the stream itself. */
+    // Bounded by the connect timeouts, not the read timeouts: this call blocks the main task, and the
+    // read timeouts have to stay generous for the stream itself.
     res = _client->connect(h_host + hostwoext_begin, port, m_f_ssl ? m_connectTimeout_ms_ssl : m_connectTimeout_ms);
 
     if(pos_slash > 0) h_host[pos_slash] = '/';
@@ -989,11 +959,11 @@ bool Audio::httpPrint(const char* host) {
     strcat(rqh, "Accept-Encoding: identity;q=1,*;q=0\r\n");
     strcat(rqh, "Connection: keep-alive\r\n\r\n");
 
-    /* A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
-       The old guard here only reconnected when the socket was CLOSED, so the segment request was written down the
-       playlist's connection: the far end answered 404 for a path that does not exist on that host, no connect was ever
-       logged, and m_lastHost still named the playlist.  Measured on scastream, 2026.11.16.  Reconnect on a target
-       change instead, and never send a request for one host down another's socket. */
+    // A segment lives on its OWN host - usually a different CDN edge, and often https while the playlist was plain http.
+    // The old guard here only reconnected when the socket was CLOSED, so the segment request was written down the
+    // playlist's connection: the far end answered 404 for a path that does not exist on that host, no connect was ever
+    // logged, and m_lastHost still named the playlist.  Measured on scastream, 2026.11.16.  Reconnect on a target
+    // change instead, and never send a request for one host down another's socket.
     static char     connHost[160] = {0};
     static uint16_t connPort      = 0;
     static bool     connSsl       = false;
@@ -1788,7 +1758,7 @@ int Audio::read_FLAC_Header(uint8_t* data, size_t len) {
         AUDIO_INFO("FLAC maxBlockSize: %u", m_flacMaxBlockSize);
         vTaskDelay(2);
         m_flacMaxFrameSize = bigEndian(data + 10, 3);
-        if(m_flacMaxFrameSize) { AUDIO_INFO("FLAC maxFrameSize: %u", m_flacMaxFrameSize); }
+        if(m_flacMaxFrameSize) { AUDIO_INFO("FLAC maxFrameSize: %u", (unsigned)m_flacMaxFrameSize); }
         else { AUDIO_INFO("FLAC maxFrameSize: N/A"); }
         if(m_flacMaxFrameSize > InBuff.getMaxBlockSize()) {
             AUDIO_ERROR("FLAC maxFrameSize too large!");
@@ -2291,13 +2261,12 @@ int Audio::read_M4A_Header(uint8_t* data, size_t len) {
         return length;
     };
 
-    /*
-         ftyp
-           | - moov  -> trak -> ... -> mp4a contains raw block parameters
-           |    L... -> ilst  contains artist, composer ....
-         free (optional) // jump to another atoms at the end of mdat
-           |
-         mdat contains the audio data                                                      */
+        // ftyp
+    // | - moov  -> trak -> ... -> mp4a contains raw block parameters
+    // |    L... -> ilst  contains artist, composer ....
+    // free (optional) // jump to another atoms at the end of mdat
+    // |
+    // mdat contains the audio data
 
     static size_t headerSize = 0;
     static size_t retvalue = 0;
@@ -2700,18 +2669,16 @@ bool Audio::pauseResume() {
 //****************************************************************************************
 #include <esp_cpu.h>   // esp_cpu_get_cycle_count(): the only clock that excludes other tasks' slices
 
-/* Two counters for the current i2s report window, and why one of them is useless on its own.
- *
- * s_decodeCycles brackets sendBytes(), which blocks in i2s_write() waiting for the DMA and yields to the other tasks
- * meanwhile.  The cycle counter is free-running - it advances while this task is blocked and while anyone else holds
- * the core - so per output frame it can never read much below clock/rate: 4,900-4,912 measured against 240 MHz /
- * 48 kHz = 5,000.  It is pinned, which is why three builds a whole -O level apart all read the same number.
- *
- * s_decodeOnlyCycles brackets the decoder call alone, with the write and every wait outside it, so it is the figure
- * that actually moves when the decoder's code changes.  Read `dcyc` against `us/frame` x clock; read plain
- * `cyc/frame` only to spot frames the decoder never produced. */
+// s_decodeCycles brackets sendBytes(), which blocks in i2s_write() and yields, so it cannot read below clock/rate and
+// pins at ~5,000 for 48 kHz.  s_decodeOnlyCycles brackets the decoder call alone: that is the one that moves.
 static uint32_t s_decodeCycles = 0;
 static uint32_t s_decodeOnlyCycles = 0;
+// The badge's rendering rule: whole kbit below 1000, tenths of a Mbit above.  The publisher below gates on it, so a
+// measurement that would print the same three characters does not cost a redraw.
+static uint32_t bitrateBucket(uint32_t bitsPerSecond) {
+    const uint32_t kbps = (bitsPerSecond + 500u) / 1000u;
+    return (kbps >= 1000u) ? ((kbps + 50u) / 100u) : kbps;
+}
 
 void Audio::playChunk() {
 
@@ -2843,6 +2810,9 @@ i2swrite:
     // CPU shortage - it is constant, load-independent, and evenly spaced, which is the reported symptom exactly.
     if(i2s_bytesConsumed) {
         static uint32_t sFramesMs = 0;
+        static uint32_t sBrSum    = 0;            // m_sumBytesDecoded when the last bitrate window opened
+        static uint32_t sBrBucket = 0xFFFFFFFFu;  // the bucket last published, so a repeat is never sent
+        static uint32_t sBrLastPublishMs = 0;     // when that publish happened: nothing arrives faster than the interval
         const uint32_t nowMs = millis();
         // A stall leaves no writes, so no report, so the counters keep their old values into the NEXT stream: measured
         // 2026.11.14, the first window after a station change read `of 115523` with `smp 2048/103424`.  setDefaults()
@@ -2853,6 +2823,7 @@ i2swrite:
             m_i2sFramesOut  = 0; m_i2sWriteUs    = 0; m_i2sWriteShort = 0;
             m_decodeUs      = 0; m_smpDecoded    = 0; s_decodeCycles  = 0; s_decodeOnlyCycles = 0;
             m_audioGapMaxUs = 0; m_silRuns       = 0; m_silMaxRun     = 0;
+            sBrSum = m_sumBytesDecoded; sBrBucket = 0xFFFFFFFFu; sBrLastPublishMs = 0;
         }
         m_i2sFramesOut += (uint32_t)(i2s_bytesConsumed / (size_t)sampleSize);
         if(sFramesMs == 0) { sFramesMs = nowMs; }
@@ -2895,6 +2866,39 @@ i2swrite:
                 }
             }
             #endif
+            #ifdef AUDIO_DEBUG
+                        // What the 16-bit output path is producing.  The frame CRC is read and never checked, so a mis-parse shows up
+            // in none of the counters above; these three say whether the samples are the right width and magnitude.
+            // bits 24 with a peak of roughly 8 million falling to 32 thousand is correct; a peak of 32 thousand BEFORE
+            // the shift means there was no shift; a peak clipped at 32767 means the samples are wrong at the source.
+            if(m_codec == CODEC_FLAC){
+                uint8_t fb = 0, fa = 0, fs = 0; int32_t pRaw = 0, pOut = 0; uint32_t fBlocks = 0;
+                FLACGetOutputStats(&fb, &fa, &fs, &pRaw, &pOut, &fBlocks);
+                if(fBlocks){
+                    AUDIO_INFO("flac out: bits %u asgn %u ss %u peak %ld -> %ld over %u blocks",
+                        (unsigned)fb, (unsigned)fa, (unsigned)fs,
+                        (long)pRaw, (long)pOut, (unsigned)fBlocks);
+                }
+            }
+            #endif
+            // The one bitrate publisher, for every source and every codec: the whole 10 s window's input bytes.  It has
+            // to be this window - an HLS stream arrives in bursts, and a 500 ms slice of it reads 1-5 kbit in a gap and
+            // the whole segment in the next, which is what the badge used to show.  10 s averages the bursts away.
+            if(m_sumBytesDecoded > sBrSum) {
+                const uint32_t br = (uint32_t)(((uint64_t)(m_sumBytesDecoded - sBrSum) * 8000ULL) / (uint64_t)span);
+                m_streamBytesSec = br / 8;               // for the display's audio-risk limiter
+                const uint32_t bucket = bitrateBucket(br);
+                // At most one publish per 10 s, and only when the badge would print something else.
+                if(bucket != sBrBucket &&
+                   (!sBrLastPublishMs || (uint32_t)(nowMs - sBrLastPublishMs) >= 10000u)) {
+                    sBrBucket = bucket;
+                    sBrLastPublishMs = nowMs ? nowMs : 1;
+                    char brs[12];
+                    sprintf(brs, "%lu", (unsigned long)br);
+                    if(audio_bitrate) audio_bitrate(brs);
+                }
+            }
+            sBrSum = m_sumBytesDecoded;
             m_i2sFramesOut  = 0;
             m_i2sWriteUs    = 0;
             m_i2sWriteShort = 0;
@@ -3659,43 +3663,12 @@ const char* Audio::m3u8redirection(uint8_t* codec) {
 }
 //****************************************************************************************
 uint64_t Audio::m3u8_findMediaSeqInURL() { // We have no clue what the media sequence is
-/*
-myList:     #EXTM3U
-            #EXT-X-VERSION:3
-            #EXT-X-TARGETDURATION:4
-            #EXT-X-MEDIA-SEQUENCE:227213779
-            #EXT-X-DISCONTINUITY-SEQUENCE:0
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316100954"
-            media-ur748eh1d_b192000_227213779.aac
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316100957"
-            media-ur748eh1d_b192000_227213780.aac
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101000"
-            media-ur748eh1d_b192000_227213781.aac
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101003"
-            media-ur748eh1d_b192000_227213782.aac
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101006"
-            media-ur748eh1d_b192000_227213783.aac
-            #EXTINF:3.008,
-            #MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101009"
-            media-ur748eh1d_b192000_227213784.aac
-
-result:     m_linesWithSeqNr[0] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316100954"media-ur748eh1d_b192000_227213779.aac
-            m_linesWithSeqNr[1] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316100957"media-ur748eh1d_b192000_227213780.aac
-            m_linesWithSeqNr[2] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101000"media-ur748eh1d_b192000_227213781.aac
-            m_linesWithSeqNr[3] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101003"media-ur748eh1d_b192000_227213782.aac
-            m_linesWithSeqNr[4] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101006"media-ur748eh1d_b192000_227213783.aac
-            m_linesWithSeqNr[5] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DATA="20250316101009"media-ur748eh1d_b192000_227213784.aac */
+// Each segment URL follows its own #EXTINF line, so the pair is joined here into one string.
 
     std::vector<char*> m_linesWithSeqNr;
     bool addNextLine = false;
     int idx = -1;
     for(uint16_t i = 0; i < m_playlistContent.size(); i++) {
-    //  log_w("pl%i = %s", i, m_playlistContent[i]);
         if(!startsWith(m_playlistContent[i], "#EXTINF:") && addNextLine) {
             m_linesWithSeqNr[idx] = x_ps_realloc(m_linesWithSeqNr[idx], strlen(m_linesWithSeqNr[idx]) + strlen(m_playlistContent[i]) + 1);
             if(!m_linesWithSeqNr[idx]) { log_e("realloc failed"); return UINT64_MAX; }
@@ -3707,10 +3680,6 @@ result:     m_linesWithSeqNr[0] = #EXTINF:3.008,#MY-USER-CHUNK-DATA-1:ON-TEXT-DA
             addNextLine = true;
         }
     }
-
-    // for (uint16_t i = 0; i < m_linesWithSeqNr.size(); i++) {
-    //     log_w("m_linesWithSeqNr[%i] = %s", i, m_linesWithSeqNr[i]);
-    // }
 
     if(m_linesWithSeqNr.size() < 2) {
         log_e("not enough lines with \"#EXTINF:\" found");
@@ -4217,10 +4186,9 @@ nextRound:
     availableBytes = _client->available();
     if(availableBytes) {
 
-        /* If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
-           However, the chunk size in some streams is limited to 32768 bytes, although the chunk can be larger. Then the chunk size is
-           calculated again. The data used to calculate (here readedBytes) the chunk size is not part of it.
-        */
+        // If the m3u8 stream uses 'chunked data transfer' no content length is supplied. Then the chunk size determines the audio data to be processed.
+        // However, the chunk size in some streams is limited to 32768 bytes, although the chunk can be larger. Then the chunk size is
+        // calculated again. The data used to calculate (here readedBytes) the chunk size is not part of it.
         uint8_t readedBytes = 0;
         uint32_t minAvBytes = 0;
         if(m_f_chunked && chunkSize == byteCounter) {chunkSize += chunkedDataTransfer(&readedBytes); goto exit;}
@@ -4294,7 +4262,7 @@ nextRound:
 
     // buffer fill routine  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(true) {                                                  // statement has no effect
-        if(InBuff.bufferFilled() > 60000 && !m_f_stream) {     // waiting for buffer filled
+        if(InBuff.bufferFilled() > 60000 && !m_f_stream) {      // waiting for buffer filled
             m_f_stream = true;                                  // ready to play the audio data
             uint16_t filltime = millis() - m_t0;
             AUDIO_INFO("stream ready");
@@ -4491,12 +4459,12 @@ void Audio::playAudioData() {
     uint32_t bytesToDecode = 0;
     uint32_t decT0 = 0;             // decode timer, declared here because the gotos below jump over later declarations
 
-    /* Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
-       setDefaults(), so the latch happened to be correct here, but depending on that re-arm is what the VS1053 graft
-       lost - and with it, every web stream played after an SD track in the same boot.  Deriving the branch from the
-       state that is actually current removes the whole class: a local file is a file, a live stream is not, and a web
-       file becomes one only after parseHttpResponseHeader() has set ST_WEBFILE (before that, m_audioDataSize is 0 and
-       means nothing). */
+    // Same rule as the VS1053 twin: evaluated on EVERY pass, never latched.  This library re-arms m_f_firstPlayCall in
+    // setDefaults(), so the latch happened to be correct here, but depending on that re-arm is what the VS1053 graft
+    // lost - and with it, every web stream played after an SD track in the same boot.  Deriving the branch from the
+    // state that is actually current removes the whole class: a local file is a file, a live stream is not, and a web
+    // file becomes one only after parseHttpResponseHeader() has set ST_WEBFILE (before that, m_audioDataSize is 0 and
+    // means nothing).
     const bool f_isFile = (m_playlistFormat == FORMAT_M3U8) ? false
                         : (m_dataMode == AUDIO_LOCALFILE)   ? true
                         : (m_streamType == ST_WEBFILE)      ? true
@@ -5108,19 +5076,7 @@ void Audio::showstreamtitle(const char* ml) {
 
     if(idx1 >= 0) {
         if(indexOf(ml, "xml version=", 7) > 0) {
-            /* e.g. xmlStreamTitle
-                  StreamTitle='<?xml version="1.0" encoding="utf-8"?><RadioInfo><Table><DB_ALBUM_ID>37364</DB_ALBUM_ID>
-                  <DB_ALBUM_IMAGE>00000037364.jpg</DB_ALBUM_IMAGE><DB_ALBUM_NAME>Boyfriend</DB_ALBUM_NAME>
-                  <DB_ALBUM_TYPE>Single</DB_ALBUM_TYPE><DB_DALET_ARTIST_NAME>DOVE CAMERON</DB_DALET_ARTIST_NAME>
-                  <DB_DALET_ITEM_CODE>CD4161</DB_DALET_ITEM_CODE><DB_DALET_TITLE_NAME>BOYFRIEND</DB_DALET_TITLE_NAME>
-                  <DB_FK_SITE_ID>2</DB_FK_SITE_ID><DB_IS_MUSIC>1</DB_IS_MUSIC><DB_LEAD_ARTIST_ID>26303</DB_LEAD_ARTIST_ID>
-                  <DB_LEAD_ARTIST_NAME>Dove Cameron</DB_LEAD_ARTIST_NAME><DB_RADIO_IMAGE>cidadefm.jpg</DB_RADIO_IMAGE>
-                  <DB_RADIO_NAME>Cidade</DB_RADIO_NAME><DB_SONG_ID>120126</DB_SONG_ID><DB_SONG_LYRIC>60981</DB_SONG_LYRIC>
-                  <DB_SONG_NAME>Boyfriend</DB_SONG_NAME></Table><AnimadorInfo><TITLE>Cidade</TITLE>
-                  <START_TIME_UTC>2022-11-15T22:00:00+00:00</START_TIME_UTC><END_TIME_UTC>2022-11-16T06:59:59+00:00
-                  </END_TIME_UTC><SHOW_NAME>Cidade</SHOW_NAME><SHOW_HOURS>22h às 07h</SHOW_HOURS><SHOW_PANEL>0</SHOW_PANEL>
-                  </AnimadorInfo></RadioInfo>';StreamUrl='';
-            */
+            // Some stations send an XML blob inside StreamTitle; the two tag pairs below are read out of it.
 
             idx4 = indexOf(ml, "<DB_DALET_TITLE_NAME>");
             idx5 = indexOf(ml, "</DB_DALET_TITLE_NAME>");
@@ -5172,7 +5128,7 @@ void Audio::showstreamtitle(const char* ml) {
         }
         else sTit = strdup(ml);
 
-        /* Quick-ignore common placeholder titles (e.g. StreamTitle='-' or empty) before further processing */
+                // Quick-ignore common placeholder titles (e.g. StreamTitle='-' or empty) before further processing
         {
           if (!sTit || strlen(sTit) <= 12) { x_ps_free(&sTit); return; }
           uint8_t _pos_tmp = 12;
@@ -5244,12 +5200,10 @@ void Audio::showCodecParams() {
     AUDIO_INFO("Channels: %u", getChannels());
     AUDIO_INFO("SampleRate: %lu", (long unsigned int)getSampleRate());
     AUDIO_INFO("BitsPerSample: %u", getBitsPerSample());
-//    if(getBitRate()) { AUDIO_INFO("BitRate: %lu", (long unsigned int)getBitRate()); }
-//    if(getBitRate()) { AUDIO_INFO("BitRate: %lu", (long unsigned int)m_bitRate); }
-//    else { AUDIO_INFO("BitRate: N/A"); }
-    if(h_bitRate) {AUDIO_INFO("BitRate: %lu", (long unsigned int)h_bitRate); }
-    if(!h_bitRate) { AUDIO_INFO("BitRate: %lu", (long unsigned int)getBitRate()); }
-    if(!m_bitRate) { AUDIO_INFO("BitRate: N/A"); }
+    // The badge's starting value, before any measurement: the server's icy-br if it sent one, else the frame header
+    // setDecoderItems() just stored.  Zero is "not known yet", and handleBitrate() drops it rather than clearing.
+    const uint32_t brForBadge = h_bitRate ? h_bitRate : m_bitRate;
+    if(brForBadge) { AUDIO_INFO("BitRate: %lu", (long unsigned int)brForBadge); }
 
     if(m_codec == CODEC_AAC) {
         uint8_t answ = AACGetFormat();
@@ -5493,8 +5447,20 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
         printDecodeError(m_decodeError);
         m_f_playing = false; 									// seek for new syncword
         if(m_codec == CODEC_FLAC) {
-        //    if(m_decodeError == ERR_FLAC_BITS_PER_SAMPLE_TOO_BIG) stopSong();
-        //    if(m_decodeError == ERR_FLAC_RESERVED_CHANNEL_ASSIGNMENT) stopSong();
+            // These two fail on EVERY frame, so seeking the next syncword only spins: a silent PLAYING loop at frame
+            // rate, with the UI showing PLAYING and nothing said.  Refuse the stream the way the two-identity check
+            // does, so it ends with a verdict instead.  A 32-bit source is the case this exists for - 24 is the ceiling,
+            // because the side channel of a 32-bit stream needs 33 bits and the sample buffer is int32_t.
+            if(m_decodeError == ERR_FLAC_BITS_PER_SAMPLE_TOO_BIG) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "FLAC depth above 24 bits");
+                stopSong();
+                return 0;
+            }
+            if(m_decodeError == ERR_FLAC_RESERVED_CHANNEL_ASSIGNMENT) {
+                setRefuse(STREAM_REFUSE_UNSUPPORTED, "unknown FLAC channel assignment");
+                stopSong();
+                return 0;
+            }
         }
         if(m_codec == CODEC_OPUS) {
             if(m_decodeError == ERR_OPUS_HYBRID_MODE_UNSUPPORTED) stopSong();
@@ -5668,6 +5634,9 @@ void Audio::computeAudioTime(uint16_t bytesDecoderIn, uint16_t bytesDecoderOut) 
 
         sumBitRate += bitRate;
         counter ++;
+        // Not published: a 500 ms window is shorter than an HLS burst, so on a segment-based stream it reports a few
+        // hundred bits in a gap and the whole segment in the next read.  playChunk() publishes the same quantity over
+        // the full 10 s window, which is the only span that can tell a burst from the stream's real rate.
         if(nominalBitRate){
             m_audioCurrentTime = round(((float)sumBytesIn * 8) / m_avr_bitrate);
         }
@@ -5992,20 +5961,7 @@ bool Audio::setFilePos(uint32_t pos) {
 }
 //****************************************************************************************
 bool Audio::audioFileSeek(const float speed) {
-    // 0.5 is half speed
-    // 1.0 is normal speed
-    // 1.5 is one and half speed
-//     if((speed > 1.5f) || (speed < 0.25f)) return false;
-
-//     uint32_t srate = getSampleRate() * speed;
-// #if ESP_IDF_VERSION_MAJOR == 5
-//     I2Sstop(m_i2s_num);
-//     m_i2s_std_cfg.clk_cfg.sample_rate_hz = srate;
-//     i2s_channel_reconfig_std_clock(m_i2s_tx_handle, &m_i2s_std_cfg.clk_cfg);
-//     I2Sstart(m_i2s_num);
-// #else
-//     i2s_set_sample_rates((i2s_port_t)m_i2s_num, srate);
-// #endif
+    // 0.5 half speed, 1.0 normal, 1.5 one and a half.  Never implemented: reclocking here was disabled.
     return true;
 }
 //****************************************************************************************
@@ -6135,24 +6091,24 @@ void Audio::computeVUlevel(int16_t sample[2]) {
         return maxValue;
     };
 
-    /* --- visualiser capture ---------------------------------------------------------------------
-       Every decoded pair lands in the rolling window before any of the level maths below.  The window
-       is rotated out for the display task on the f_vu tick (see _capturePublish), which is once per
-       512 calls, so a redraw sees exactly the samples the level it is drawn beside was built from. */
+    // --- visualiser capture ---------------------------------------------------------------------
+    // Every decoded pair lands in the rolling window before any of the level maths below.  The window
+    // is rotated out for the display task on the f_vu tick (see _capturePublish), which is once per
+    // 512 calls, so a redraw sees exactly the samples the level it is drawn beside was built from.
     _capWin[LEFTCHANNEL][_capPos]  = sample[LEFTCHANNEL];
     _capWin[RIGHTCHANNEL][_capPos] = sample[RIGHTCHANNEL];
     if (++_capPos >= VU_CAPTURE_SAMPLES) _capPos = 0;
 
-    /* The ladder as it actually behaves.  cnt0 is never incremented, so `if(cnt0 == 64)` never runs
-       and every `if(!cntN)` test below passes on every call: the "every 64th sample" step that the
-       comments further down describe does not exist.  The real cadence is 8 x 8 x 8 = 512 sample pairs
-       per published level, ~86 Hz at 44.1 kHz, and sampleArray[0] holds the last 8 samples rather than
-       a decimated history.
-       This is long-standing upstream behaviour - the same code, with the same stale comments, is in
-       every other audio library generation in this workspace - and it is deliberately NOT fixed here.
-       Adding the missing cnt0++ would put a 64:1 decimation in front of the meter and retune its
-       attack and decay, which is a visible change to a known feature that would need its own hardware
-       A/B.  See .github/code-issues.md. */
+    // The ladder as it actually behaves.  cnt0 is never incremented, so `if(cnt0 == 64)` never runs
+    // and every `if(!cntN)` test below passes on every call: the "every 64th sample" step that the
+    // comments further down describe does not exist.  The real cadence is 8 x 8 x 8 = 512 sample pairs
+    // per published level, ~86 Hz at 44.1 kHz, and sampleArray[0] holds the last 8 samples rather than
+    // a decimated history.
+    // This is long-standing upstream behaviour - the same code, with the same stale comments, is in
+    // every other audio library generation in this workspace - and it is deliberately NOT fixed here.
+    // Adding the missing cnt0++ would put a 64:1 decimation in front of the meter and retune its
+    // attack and decay, which is a visible change to a known feature that would need its own hardware
+    // A/B.  See .github/code-issues.md.
     if(cnt0 == 64) { cnt0 = 0; cnt1++; }
     if(cnt1 == 8) { cnt1 = 0; cnt2++; }
     if(cnt2 == 8) { cnt2 = 0; cnt3++; }
@@ -6179,50 +6135,48 @@ void Audio::computeVUlevel(int16_t sample[2]) {
         f_vu = false;
         vuLeft = (avg(sampleArray[LEFTCHANNEL][3]));
         vuRight = (avg(sampleArray[RIGHTCHANNEL][3]));
-        /* The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the VS1053
-           path: Config::vuRefTrack().  A local high-water mark that never released kept the bar pinned on
-           compressed material. */
+                // The meter's reference - raise on a peak, release slowly - from ONE implementation shared with the VS1053
+        // path: Config::vuRefTrack().  A local high-water mark that never released kept the bar pinned on
+        // compressed material.
         config.vuRefTrack(vuLeft, vuRight);
-        /* Publish the window on the same tick as the level, so the two never describe different
-           audio.  Costs one 2 KB rotation per 512 samples, which is a fraction of a percent of this
-           task. */
+                // Publish the window on the same tick as the level, so the two never describe different
+        // audio.  Costs one 2 KB rotation per 512 samples, which is a fraction of a percent of this
+        // task.
         _capturePublish();
     }
     cnt1++;
 }
 //****************************************************************************************
 uint16_t Audio::get_VUlevel(uint16_t dimension){
-  /* The return packs the length CLEARED from the loud end of each bar, 8 bits a channel - so 0 means "nothing cleared",
-     i.e. a FULL bar, and `dimension` means empty.  "Nothing to show" must therefore answer EMPTY, not 0:
-     config.vuThreshold is zeroed by Config::setTitle() on every title change and by _play() on every start, and the
-     shape the VS1053 path already uses: clamp the reference (it is also map()'s divisor) and let silence map to
-     `dimension`. */
+    // The return packs the length CLEARED from the loud end of each bar, 8 bits a channel - so 0 means "nothing cleared",
+  // i.e. a FULL bar, and `dimension` means empty.  "Nothing to show" must therefore answer EMPTY, not 0:
+  // config.vuThreshold is zeroed by Config::setTitle() on every title change and by _play() on every start, and the
+  // shape the VS1053 path already uses: clamp the reference (it is also map()'s divisor) and let silence map to
+  // `dimension`.
   if(!config.vuSourceWanted()) return (uint16_t)(((uint16_t)dimension << 8) | dimension);
   const uint16_t ref = config.vuThreshold ? config.vuThreshold : 1;
   uint8_t L = (uint8_t)map(vuLeft, ref, 0, 0, dimension);
   uint8_t R = (uint8_t)map(vuRight, ref, 0, 0, dimension);
   return (L << 8) | R;
-/*
-    // avg 0 ... 127
-    if(!m_f_running) return 0;
-    vuLeft = vuLeft * 1.6;
-    vuRight = vuRight * 1.6;
-    return (vuLeft << 8) + vuRight;
-*/
+// // avg 0 ... 127
+// if(!m_f_running) return 0;
+// vuLeft = vuLeft * 1.6;
+// vuRight = vuRight * 1.6;
+// return (vuLeft << 8) + vuRight;
 }
 //****************************************************************************************
-/* ---- Visualiser capture -----------------------------------------------------------------------
-   The audio task publishes here and the display task reads.  The payload is 2 KB rather than the
-   single byte vuLeft/vuRight hand over, so a read can land mid-copy; the sequence number goes odd
-   before the copy and even after it, and every reader compares the value across its own copy and
-   drops the frame when it moved.  One stale frame at 30 Hz is invisible, a spliced trace is not. */
+// ---- Visualiser capture -----------------------------------------------------------------------
+// The audio task publishes here and the display task reads.  The payload is 2 KB rather than the
+// single byte vuLeft/vuRight hand over, so a read can land mid-copy; the sequence number goes odd
+// before the copy and even after it, and every reader compares the value across its own copy and
+// drops the frame when it moved.  One stale frame at 30 Hz is invisible, a spliced trace is not.
 void Audio::_capturePublish() {
   const uint16_t tail = VU_CAPTURE_SAMPLES - _capPos;   // samples from _capPos to the end of the ring
   __sync_synchronize();
   _capSeq = _capSeq + 1;                                // odd: a publish is in progress
   for (int ch = 0; ch < 2; ch++) {
-    /* Two copies rather than a modulo per sample: the ring is linearised here, so readers get the
-       window oldest-first and never have to rotate it themselves. */
+        // Two copies rather than a modulo per sample: the ring is linearised here, so readers get the
+    // window oldest-first and never have to rotate it themselves.
     memcpy(&_capPub[ch][0],    &_capWin[ch][_capPos], (size_t)tail * sizeof(int16_t));
     memcpy(&_capPub[ch][tail], &_capWin[ch][0],       (size_t)_capPos * sizeof(int16_t));
   }
@@ -6230,7 +6184,7 @@ void Audio::_capturePublish() {
   _capSeq = _capSeq + 1;                                // even again: the copy above is complete
 }
 
-/* Interleaved L/R, oldest first and newest last, which is the order both sample styles want. */
+// Interleaved L/R, oldest first and newest last, which is the order both sample styles want.
 bool Audio::getWaveform(int16_t *out, uint16_t n) {
   if (!out || !n || n > VU_CAPTURE_SAMPLES) return false;
   if (!config.vuSourceWanted()) return false;
@@ -6244,33 +6198,29 @@ bool Audio::getWaveform(int16_t *out, uint16_t n) {
   return (_capSeq == seq);                              // false when the publisher moved under us
 }
 //****************************************************************************************
-/* ---- Spectrum ---------------------------------------------------------------------------------
-   A self-contained radix-2 FFT rather than ESP-DSP's.  The framework ships esp-dsp as a prebuilt
-   library (libespressif__esp-dsp.a) with the headers but no sources and no examples, and the only
-   sizing contract available is ambiguous: dsps_fft2r_init_fc32() documents table_size as "size of the
-   buffer in float words" but range-checks it against CONFIG_DSP_MAX_FFT_SIZE, which is a count of FFT
-   points.  Getting that wrong is an out-of-bounds table access on the audio board, so it is not worth
-   guessing at.  Everything below is sized by construction, adds no flash, and runs on the display
-   task where ~1 ms per frame is free.  Swapping in the optimised kernel later touches only this
-   block: the window, the band maths and the return contract all stay. */
+// ---- Spectrum ---------------------------------------------------------------------------------
+// A self-contained radix-2 FFT rather than ESP-DSP's.  The framework ships esp-dsp as a prebuilt
+// library (libespressif__esp-dsp.a) with the headers but no sources and no examples, and the only
+// sizing contract available is ambiguous: dsps_fft2r_init_fc32() documents table_size as "size of the
+// buffer in float words" but range-checks it against CONFIG_DSP_MAX_FFT_SIZE, which is a count of FFT
+// points.  Getting that wrong is an out-of-bounds table access on the audio board, so it is not worth
+// guessing at.  Everything below is sized by construction, adds no flash, and runs on the display
+// task where ~1 ms per frame is free.  Swapping in the optimised kernel later touches only this
+// block: the window, the band maths and the return contract all stay.
 static const float VU_TWO_PI = 6.283185307179586f;
 
-/* PSRAM-preferred scratch for the transform.  Boards with PSRAM have megabytes of it and internal RAM is
-   what actually runs short - the boot-time updater's concurrent TLS sessions can take it down to a few
-   KB, which is the window in which a boot can fail, so 8 KB of scratch is worth relocating.  Only the
-   display task ever touches these buffers, so PSRAM's latency is not in the decode path.  Falls back to
-   internal RAM where there is no PSRAM, and counts what came from PSRAM so the [PSRAM] boot log can
-   show it (vuPsramBytes, declared in core/config.h). */
+// PSRAM-preferred scratch: internal RAM is what runs short, and only the display task touches it.  Falls back
+// to internal RAM, counting what came from PSRAM for the boot log.
 static void* vuScratchAlloc(size_t bytes) {
   void *p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
   if (p) { vuPsramBytes += (uint32_t)bytes; return p; }
   return heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
 }
 
-/* One set of tables and one scratch buffer, allocated once and kept for the life of the device.  Static
-   POINTERS rather than static arrays on purpose: arrays would be internal RAM, and this 8 KB belongs in
-   PSRAM where the board has it.  Built by vuScratchReserve(), which reservePsram() calls at boot - before
-   the audio ring takes the largest contiguous block - and again from getSpectrum() as a fallback. */
+// One set of tables and one scratch buffer, allocated once and kept for the life of the device.  Static
+// POINTERS rather than static arrays on purpose: arrays would be internal RAM, and this 8 KB belongs in
+// PSRAM where the board has it.  Built by vuScratchReserve(), which reservePsram() calls at boot - before
+// the audio ring takes the largest contiguous block - and again from getSpectrum() as a fallback.
 static float *vuTw = nullptr, *vuHann = nullptr, *vuBuf = nullptr;
 static bool   vuScratchReady = false;
 
@@ -6281,8 +6231,8 @@ bool Audio::vuScratchReserve() {
   vuHann = (float*)vuScratchAlloc((size_t)N * sizeof(float));
   vuBuf  = (float*)vuScratchAlloc((size_t)N * 2 * sizeof(float));
   if (!vuTw || !vuHann || !vuBuf) {
-    /* No scratch: the spectrum cannot run and the caller falls back to the simulated source.  Free
-       whatever did land so this does not accumulate on a device that is out of memory. */
+        // No scratch: the spectrum cannot run and the caller falls back to the simulated source.  Free
+    // whatever did land so this does not accumulate on a device that is out of memory.
     if (vuTw)   { free(vuTw);   vuTw   = nullptr; }
     if (vuHann) { free(vuHann); vuHann = nullptr; }
     if (vuBuf)  { free(vuBuf);  vuBuf  = nullptr; }
@@ -6298,8 +6248,8 @@ bool Audio::vuScratchReserve() {
 }
 
 static void vuFft(float *d, int n, const float *tw) {
-  /* In place, decimation in time, interleaved complex.  tw holds n/2 pairs, tw[2k] = cos(-2.pi.k/n)
-     and tw[2k+1] = sin(-2.pi.k/n). */
+  // In place, decimation in time, interleaved complex.  tw holds n/2 pairs, tw[2k] = cos(-2.pi.k/n)
+  // and tw[2k+1] = sin(-2.pi.k/n).
   for (int i = 1, j = 0; i < n; i++) {                  // bit-reversal permutation
     int bit = n >> 1;
     for (; j & bit; bit >>= 1) j ^= bit;
@@ -6326,9 +6276,9 @@ static void vuFft(float *d, int n, const float *tw) {
   }
 }
 
-/* Low bands for L, then the low bands for R.  The band edges are log-spaced and cached per band count,
-   so the painter's N decides both the count and the edges and a narrow box shows fewer bands with the
-   right edges rather than the same bands stretched. */
+// Low bands for L, then the low bands for R.  The band edges are log-spaced and cached per band count,
+// so the painter's N decides both the count and the edges and a narrow box shows fewer bands with the
+// right edges rather than the same bands stretched.
 bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
   const int N = VU_CAPTURE_SAMPLES;
   if (!bands || !n || n > VU_SPECTRUM_MAX_CHANNELS) return false;
@@ -6336,9 +6286,9 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
   const uint32_t seq = _capSeq;
   if (!seq || (seq & 1)) return false;                  // never published, or a publish is in flight
 
-  /* The tables and the scratch come from vuScratchReserve() - built at boot, when the ring is still
-     ahead of them, and built here only if that reserve never ran or failed.  The band edges are per
-     band count and belong to this function. */
+    // The tables and the scratch come from vuScratchReserve() - built at boot, when the ring is still
+  // ahead of them, and built here only if that reserve never ran or failed.  The band edges are per
+  // band count and belong to this function.
   static int     edgeBin[VU_SPECTRUM_MAX_CHANNELS + 1];
   static uint8_t edgeN = 0;
   if (!vuScratchReserve()) return false;
@@ -6358,24 +6308,24 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     edgeN = n;
   }
 
-  /* The reference the height of a bar is measured against, and it is deliberately the SAME one the
-     level bars use.  config.vuThreshold is the loudest the stream has been, in units of
-     sample / 128 (computeVUlevel() stores abs(sample >> 7) and keeps the high-water mark), so
-     256 / vuThreshold puts that loudest content at full scale.  Without it the spectrum would be an
-     absolute dBFS meter: music sits 20-40 dB down, the hot zone never lights, and the I2S path would
-     look nothing like the synthesised one on the VS1053, which is fed the calibrated level directly.
-     Clamped because a stream that has barely been audible gives an absurd gain, and 256 means
-     "never calibrated": gain 1, which is honest until the meter has seen something. */
+  // The reference the height of a bar is measured against, and it is deliberately the SAME one the
+  // level bars use.  config.vuThreshold is the loudest the stream has been, in units of
+  // sample / 128 (computeVUlevel() stores abs(sample >> 7) and keeps the high-water mark), so
+  // 256 / vuThreshold puts that loudest content at full scale.  Without it the spectrum would be an
+  // absolute dBFS meter: music sits 20-40 dB down, the hot zone never lights, and the I2S path would
+  // look nothing like the synthesised one on the VS1053, which is fed the calibrated level directly.
+  // Clamped because a stream that has barely been audible gives an absurd gain, and 256 means
+  // "never calibrated": gain 1, which is honest until the meter has seen something.
   float gain = 256.0f / (float)(config.vuThreshold ? config.vuThreshold : 256);
   if (gain < 1.0f)  gain = 1.0f;
   if (gain > 32.0f) gain = 32.0f;
   const float floorDb = VU_SPECTRUM_DB_FLOOR ? (float)VU_SPECTRUM_DB_FLOOR : 60.0f;
 
-  /* The held frame: fast attack, slow fall, one time base for both channels.  A single 512-sample
-     window is a noisy estimate - a band can swing 10 dB from one window to the next, so the ends of the
-     range pop in and out and a quiet window dims the whole display - so a band keeps the highest value
-     it has seen and falls at VU_SPECTRUM_FALL_MS, the same shape VU_FADE_MS gives the level bars.  It is
-     also the answer to a dropped frame below. */
+  // The held frame: fast attack, slow fall, one time base for both channels.  A single 512-sample
+  // window is a noisy estimate - a band can swing 10 dB from one window to the next, so the ends of the
+  // range pop in and out and a quiet window dims the whole display - so a band keeps the highest value
+  // it has seen and falls at VU_SPECTRUM_FALL_MS, the same shape VU_FADE_MS gives the level bars.  It is
+  // also the answer to a dropped frame below.
   static uint8_t  hold[VU_SPECTRUM_MAX_CHANNELS * 2];
   static uint8_t  holdN = 0;
   static uint32_t holdMs = 0;
@@ -6385,11 +6335,11 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     const int16_t *src = &_capPub[ch][0];
     for (int i = 0; i < N; i++) { vuBuf[i * 2] = (float)src[i]; vuBuf[i * 2 + 1] = 0.0f; }
     if (_capSeq != seq) {
-      /* The publisher moved under us.  The transform is still available, so this is one refresh lost,
-         not a backend without a spectrum: repeat the held frame rather than reporting a failure, which
-         would make the painter switch to its SIMULATED source for that one frame - and on a sparse real
-         spectrum that reads as the whole thing suddenly filling in.  The strict check is what the
-         WAVEFORM needs, where a spliced window is visible; a spliced spectrum is not. */
+      // The publisher moved under us.  The transform is still available, so this is one refresh lost,
+      // not a backend without a spectrum: repeat the held frame rather than reporting a failure, which
+      // would make the painter switch to its SIMULATED source for that one frame - and on a sparse real
+      // spectrum that reads as the whole thing suddenly filling in.  The strict check is what the
+      // WAVEFORM needs, where a spliced window is visible; a spliced spectrum is not.
       if (!holdValid || holdN != n) return false;       // nothing held yet: let the caller simulate
       memcpy(bands, hold, (size_t)n * 2);
       return true;
@@ -6403,16 +6353,16 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
         const float re = vuBuf[k * 2], im = vuBuf[k * 2 + 1];
         acc += re * re + im * im;
       }
-      /* Mean magnitude over the band, in four factors, because the scale of each one matters and a
-         missing one is invisible until it is on a panel:
-           sqrt            - mean power to amplitude
-           2 / N           - the transform's own normalisation
-           2 / 32768       - the int16 sample range down to 0..1, and the Hann window's 0.5 coherent
-                             gain back up, so a full-scale sine in one bin reads exactly 1.0
-           gain            - the meter's reference above
-         Leaving out the 32768 is what pinned every band at 255 on the first hardware run: the samples
-         went in raw, so a full-scale sine came out at +84 dB and clamped.  A quiet or short element
-         still simply lands at the bottom, which is how the bars behave. */
+      // Mean magnitude over the band, in four factors, because the scale of each one matters and a
+      // missing one is invisible until it is on a panel:
+      // sqrt            - mean power to amplitude
+      // 2 / N           - the transform's own normalisation
+      // 2 / 32768       - the int16 sample range down to 0..1, and the Hann window's 0.5 coherent
+      // gain back up, so a full-scale sine in one bin reads exactly 1.0
+      // gain            - the meter's reference above
+      // Leaving out the 32768 is what pinned every band at 255 on the first hardware run: the samples
+      // went in raw, so a full-scale sine came out at +84 dB and clamped.  A quiet or short element
+      // still simply lands at the bottom, which is how the bars behave.
       const float mag = sqrtf(acc / (float)(k1 - k0)) * (2.0f / N) * (2.0f / 32768.0f) * gain;
       float db = 20.0f * log10f(mag + 1e-9f);
       if (db < -floorDb) db = -floorDb;
@@ -6421,9 +6371,9 @@ bool Audio::getSpectrum(uint8_t *bands, uint8_t n) {
     }
   }
 
-  /* Fast attack, slow fall.  The elapsed time is clamped to the fall time, so a stall cannot drop the
-     bars in one step, and the floor is the value this frame actually measured - a band never reads
-     lower than the measurement it came from. */
+  // Fast attack, slow fall.  The elapsed time is clamped to the fall time, so a stall cannot drop the
+  // bars in one step, and the floor is the value this frame actually measured - a band never reads
+  // lower than the measurement it came from.
   const uint32_t now = millis();
   const uint16_t fall = VU_SPECTRUM_FALL_MS ? (uint16_t)VU_SPECTRUM_FALL_MS : 1;
   uint32_t dt = holdMs ? (now - holdMs) : fall;
@@ -6460,26 +6410,12 @@ void Audio::setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass
     if(gainHighPass > 0) m_gain2 = map(gainHighPass, 0, 16, 0, 8);
     else m_gain2 = gainHighPass;
 
-//    m_gain0 = gainLowPass;
-//    m_gain1 = gainBandPass;
-//    m_gain2 = gainHighPass;
-
     // gain, attenuation (set in digital filters)
     int db = max(m_gain0, max(m_gain1, m_gain2));
     m_corr = pow10f((float)db / 24);
 
     IIR_calculateCoefficients(m_gain0, m_gain1, m_gain2);
-/*
-//          This will cause a clicking sound when adjusting the EQ.
-//          Because when the EQ is adjusted, the IIR filter will be cleared and played,
-//          mixed in the audio data frame, and a click-like sound will be produced.
-
-          int16_t tmp[2]; tmp[0] = 0; tmp[1]= 0;
-
-          IIR_filterChain0(tmp, true ); // flush the filter
-          IIR_filterChain1(tmp, true ); // flush the filter
-          IIR_filterChain2(tmp, true ); // flush the filter
-*/
+    // Flushing the chains here clicks: the step lands inside the next audio frame.
 }
 //****************************************************************************************
 void Audio::forceMono(bool m) { // #100 mono option
@@ -6487,8 +6423,6 @@ void Audio::forceMono(bool m) { // #100 mono option
 }
 //****************************************************************************************
 void Audio::setBalance(int8_t bal) { // bal -16...16
-//    if(bal < -16) bal = -16;
-//    if(bal > 16) bal = 16;
     m_balance = bal;
 
     computeLimit();
@@ -6511,37 +6445,12 @@ uint8_t Audio::getI2sPort() { return m_i2s_num; }
 void Audio::computeLimit() {    	// is calculated when the volume or balance changes
     float  l = 1, r = 1;		// v = 1; 	// assume 100%
 
-    /* balance is left -16...+16 right */
-    /* TODO: logarithmic scaling of balance, too? */
+        // balance is left -16...+16 right
+        // TODO: logarithmic scaling of balance, too?
     if(m_balance < 0) { r -= (float)abs(m_balance) / 16; }
     else if(m_balance > 0) { l -= (float)(m_balance) / 16; }
 
-/* Probably maleksm's mod to yoRadio here:
-
-//    if(m_balance < 0) r = (double)(m_vol - m_vol * abs(m_balance) / 16);
-//    if(m_balance > 0) l = (double)(m_vol - m_vol * m_balance / 16);
-//    m_limit_right = r / 254;
-//    m_limit_left = l / 254;
-
-//    float v = (float)m_vol /254; 		// linnear
-//    float step = (float)m_vol /254;
-//    uint16_t  l = 0, r = 0;
-
-//    if(m_balance < 0) r = (abs(m_balance) * 16);
-//    else if(m_balance > 0)  l = m_balance * 16;
-
-    m_limit_left = m_vol * l / 254;
-    m_limit_right = m_vol * r / 254;
-
-*/
-
-    // Cubic polynomial volume curve for perceptual loudness
-    // dB = -112t³ + 172t² - 60  (where t = vol/VOLUME_SCALE)
-    // This produces a smooth loudness curve matching human hearing:
-    //   t=0.0 →  -∞ dB (true silence)
-    //   t=0.5 → -31 dB (2.8% amplitude)
-    //   t=0.8 →  -7 dB (43% amplitude)
-    //   t=1.0 →   0 dB (full scale)
+    // Cubic loudness curve: dB = -112t³ + 172t² - 60, t = vol/VOLUME_SCALE.  Silence at 0, 0 dB at 1.
 
     float volOut = 0.0f;
     if (m_vol > 0) {
@@ -6551,20 +6460,10 @@ void Audio::computeLimit() {    	// is calculated when the volume or balance cha
     }
     m_limit_left = volOut * l * m_cutLin;
     m_limit_right = volOut * r * m_cutLin;
-
-/* Below: Maleksm edits? */
-
-//            v = (double)pow(m_vol, 2) / pow(254, 2); 	// square (default)
-//            v = (double)m_vol / 254; 				// linnear
-
-//    m_limit_left = l * v;
-//    m_limit_right = r * v;
-
-    // log_i("m_limit_left %f,  m_limit_right %f ",m_limit_left, m_limit_right);
 }
 //****************************************************************************************
 void Audio::Gain(int16_t* sample) {
-    /* important: these multiplications must all be signed ints, or the result will be invalid */
+        // important: these multiplications must all be signed ints, or the result will be invalid
     sample[LEFTCHANNEL]  *= m_limit_left ;
     sample[RIGHTCHANNEL] *= m_limit_right;
 }
@@ -6610,16 +6509,6 @@ uint32_t Audio::inBufferFilled() {
     // current audio input buffer fillsize in bytes
     return InBuff.bufferFilled();
 }
-/*
-//uint32_t Audio::inBufferFree() {
-//    // current audio input buffer free space in bytes
-//    return InBuff.freeSpace();
-//}
-
-//uint32_t Audio::inBufferSize() {
-//    // current audio input buffer size in bytes
-//    return InBuff.getBufsize();
-//}	*/
 //****************************************************************************************
 //            ***     D i g i t a l   b i q u a d r a t i c     f i l t e r     ***
 //****************************************************************************************
@@ -7401,19 +7290,19 @@ void Audio::seek_m4a_stsz() {
     // and then go through each sample by its size. The stsz atom can be behind the audio block. Therefore, searching
     // for the stsz atom is only applicable to local files.
 
-    /* atom hierarchy (example)_______________________________________________________________
-
-      ftyp -> moov -> trak -> tkhd
-              free    udta    mdia -> mdhd
-              mdat                    hdlr
-              mvhd                    minf -> smhd
-                                              dinf
-                                              stbl -> stsd
-                                                      stts
-                                                      stsc
-                                                      stsz -> determine and return the position and number of entries
-                                                      stco
-__________________________________________________________________________________________*/
+        // atom hierarchy (example)_______________________________________________________________
+    //
+    // ftyp -> moov -> trak -> tkhd
+    // free    udta    mdia -> mdhd
+    // mdat                    hdlr
+    // mvhd                    minf -> smhd
+    // dinf
+    // stbl -> stsd
+    // stts
+    // stsc
+    // stsz -> determine and return the position and number of entries
+    // stco
+    // __________________________________________________________________________________________
 
     struct m4a_Atom {
         int  pos;
@@ -7595,17 +7484,17 @@ int32_t Audio::mp3_correctResumeFilePos(uint32_t resumeFilePos) {
     // the beginning of a new MP3 frame is likely.
 
     const int16_t bitrateTab[3][3][15] PROGMEM = { {
-        /* MPEG-1 */
+                // MPEG-1
         { 0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448 }, /* Layer 1 */
         { 0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384 }, /* Layer 2 */
         { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 }, /* Layer 3 */
         }, {
-        /* MPEG-2 */
+                // MPEG-2
         { 0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256 }, /* Layer 1 */
         { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 }, /* Layer 2 */
         { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 }, /* Layer 3 */
         }, {
-        /* MPEG-2.5 */
+                // MPEG-2.5
         { 0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256 }, /* Layer 1 */
         { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 }, /* Layer 2 */
         { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 }, /* Layer 3 */

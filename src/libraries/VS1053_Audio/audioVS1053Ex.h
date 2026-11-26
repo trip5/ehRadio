@@ -4,6 +4,11 @@
  *  Created on: Jul 09.2017
  *  Updated on: Oct 22.2023
  *      Author: Wolle
+ * 
+ *  From yoRadio PR226 by nsteplanets Nov 28, 2025
+ *  Frankstein surgery performed by Trip5 for ehRadio
+ *  See i2s-frankenstein-surgery-notes.md for more information
+ *
  */
 
 #ifndef _vs1053_ext
@@ -315,12 +320,12 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     uint32_t        m_audioFileDuration = 0;
     size_t          m_audioDataSize = 0;            //
     uint32_t        m_avr_bitrate = 0;
+    uint32_t        m_streamBytesSec = 0;           // measured consumption, bytes/s: read by the display risk limiter
     bool            m_localBitrateSend = true;
-    /* Per-stream bitrate estimate.  A stream that never sends an icy-br header has no other route to a number on this
-       board: this library has no showCodecParams() to ask the chip, and the one routine that can read the value out of
-       the decoder, getAudioCurrentTime(), has SD-only callers.  m_brFromHeader keeps the server's own value final. */
-    volatile bool   m_brFromHeader = false;         // an icy-br: header supplied the bitrate - do not overwrite it
-    volatile bool   m_brEstimated  = false;         // an estimate has succeeded for this connection
+        // Bitrate.  HDAT0 carries one only for MP3, where getAudioCurrentTime() reads it exactly; for every other codec the
+    // value is measured in Audio::loop() from the ring balance, so there is nothing to estimate and nothing to latch.
+    // m_brFromHeader records that an icy-br: header supplied the first value, which the measurement then corrects.
+    volatile bool   m_brFromHeader = false;         // an icy-br: header supplied the initial bitrate
     uint32_t        m_audioDataStart = 0;           // in bytes
     int             m_id3Size=0;                    // length id3 tag
     bool            m_f_ssl=false;
@@ -382,9 +387,9 @@ protected:
     inline void DCS_LOW()  {(dcs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << (dcs_pin - 32) : GPIO.out_w1tc = 1 << dcs_pin;}
     inline void CS_HIGH()  {( cs_pin&0x20) ? GPIO.out1_w1ts.data = 1 << ( cs_pin - 32) : GPIO.out_w1ts = 1 <<  cs_pin;}
     inline void CS_LOW()   {( cs_pin&0x20) ? GPIO.out1_w1tc.data = 1 << ( cs_pin - 32) : GPIO.out_w1tc = 1 <<  cs_pin;}
-    /* Bounded wait for DREQ.  This used to spin for ever, so a decoder that stopped accepting data (DREQ stuck low)
-       hung the caller instead of reporting a problem - and both send paths and stopSong() call it.  50 ms is two
-       orders of magnitude above the longest legitimate wait, so a false answer always means the chip is wedged. */
+        // Bounded wait for DREQ.  This used to spin for ever, so a decoder that stopped accepting data (DREQ stuck low)
+    // hung the caller instead of reporting a problem - and both send paths and stopSong() call it.  50 ms is two
+    // orders of magnitude above the longest legitimate wait, so a false answer always means the chip is wedged.
     inline bool await_data_request(uint32_t timeoutUs = 50000) {
         const uint32_t start = micros();
         while(!digitalRead(dreq_pin)) {
@@ -454,7 +459,7 @@ public:
     //Audio ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, uint8_t spi = VSPI, uint8_t mosi = 23, uint8_t miso = 19, uint8_t sclk = 18);
     Audio ( uint8_t _cs_pin, uint8_t _dcs_pin, uint8_t _dreq_pin, SPIClass *spi=&SPI);
     ~Audio();
-    /* The input ring, taken at a point setup() chooses instead of at the first connecttohost().  Idempotent. */
+        // The input ring, taken at a point setup() chooses instead of at the first connecttohost().  Idempotent.
     void     reservePsram();
 
     void     begin() ;                                  // Begin operation.  Sets pins correctly and prepares SPI bus.
@@ -471,6 +476,9 @@ public:
     uint8_t  printVersion();                            // Returns version of vs1053 chip
     uint32_t printChipID();                             // Returns chipID of vs1053 chip
     uint32_t getBitRate();                              // average br from WRAM register
+        // Measured consumption in BYTES per second, 0 until known - the display's audio-risk limiter converts ring
+    // occupancy to milliseconds with it.  Same name and meaning as the I2S fork, so display.cpp needs no #if.
+    uint32_t streamBytesPerSecond(){ return m_streamBytesSec; }
     void     softReset() ;                              // Do a soft reset
     void     loop();
     void     setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl);
@@ -559,16 +567,16 @@ private:
     volatile bool     m_dbgTrackReported = true; // true until the next connection arms it
 
 public:
-    /* VU METER */
+    // VU METER
     void     setVUmeter();
     uint16_t get_VUlevel(uint16_t dimension);
     void     computeVUlevel();
     // Two-line diagnostic report; defined only under AUDIO_DEBUG (a declaration without a definition is legal).
     void     vuDbgReport(const char* tag, uint8_t dbL, uint8_t dbR);
-    /* No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
-       these return false, which keeps the widget's "is there a spectrum?" path the same on both audio
-       backends.  The spectrum style is still offered on this build - it is drawn from the synthesised
-       band source - and only the waveform and the Lissajous are absent from /visuals.json. */
+    // No PCM ever reaches this chip, so the sample-based visualiser styles cannot exist here: both of
+    // these return false, which keeps the widget's "is there a spectrum?" path the same on both audio
+    // backends.  The spectrum style is still offered on this build - it is drawn from the synthesised
+    // band source - and only the waveform and the Lissajous are absent from /visuals.json.
     bool     getWaveform(int16_t *out, uint16_t n);
     bool     getSpectrum(uint8_t *bands, uint8_t n);
     bool     eofHeader;

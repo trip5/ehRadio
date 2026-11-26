@@ -1,9 +1,9 @@
 """
 pre_patch.py - complain early, and only when something is actually wrong.
 
-Runs before the framework script. It writes nothing and changes nothing: its whole job is to
-notice that builds/patch/<mcu>/liblwip.a was built from a different ESP-IDF or a different
-package sdkconfig than the one now installed, because that is the failure mode that links
+Runs before the framework script, firmware builds only. It writes nothing and changes nothing: its
+whole job is to notice that builds/patch/<mcu>/liblwip.a was built from a different ESP-IDF or a
+different package sdkconfig than the one now installed, because that is the failure mode that links
 without a single warning and then misbehaves on the device.
 
 Silent when no patch exists, so a fresh clone and every build of an unpatched tree log
@@ -15,8 +15,17 @@ import hashlib
 import re
 from pathlib import Path
 
+from SCons.Script import COMMAND_LINE_TARGETS
+
 PREFIX = "Patch"
 PATCH_ROOT = Path(env.subst("$PROJECT_DIR")) / "builds" / "patch"
+FILESYSTEM_TARGETS = {"buildfs", "uploadfs"}
+
+
+def _filesystem_only_build():
+    # A run that only packs LittleFS never links, so the patch cannot matter.
+    targets = list(COMMAND_LINE_TARGETS)
+    return bool(targets) and all(target in FILESYSTEM_TARGETS for target in targets)
 
 
 def _warn(message):
@@ -128,4 +137,5 @@ def main():
         print(f"{PREFIX}: {mcu} liblwip.a {actual_sha[:12]} ({info.get('changes', 'no changes')})")
 
 
-main()
+if not _filesystem_only_build():
+    main()

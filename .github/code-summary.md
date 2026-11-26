@@ -62,8 +62,9 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   orphan `#endif` closes the include guard early and fails every translation unit), a build of every `[env:...]`
   in every contributor folder (`pio run -e <env>` inside a scratch copy at `.build_all/`, which is deleted
   afterwards so the live root `platformio.ini`/`myoptions.h` and `use_build.py`'s locks are never touched), then
-  the metadata generation. `pr-check.yml` runs it **without** `--no-build` on PRs into `main`; `--no-build` exists
-  only for the two release workflows, and `--check` stops after the two validation phases.
+  the metadata generation. `pr-check.yml` runs it with `--no-build` in `Release metadata check`, so that gate
+  proves the metadata was regenerated locally instead of compiling a second time; the compile gate for a release
+  is `build-release-firmware.yml` on the tag. `--check` stops after the two validation phases.
 - Both release workflows also produce one `<board_env>_filesystem.bin` per board: `pio run -e <env> -t buildfs`, then
   the image is copied out of `$BUILD_DIR/littlefs.bin` and deduplicated with an `fs_done` map, exactly like the
   bootloader and partitions. Content is identical across variants, so one image per partition layout is enough. If
@@ -73,8 +74,15 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   the `littlefs` row) and writes a non-standard `filesystem` entry (`path`, `offset`, `size`) into every manifest.
   ESP Web Tools ignores it; `docs/flasher.html` uses it to write the WebUI filesystem when "Full reinstall" is ticked,
   which is why that path skips the first-boot format and the later download of the web files.
-- `.github/workflows/build-deploy-page.yml` deploys Pages on `release.published`, and on branch/manual runs it preserves
-  the currently published `firmware-info.json` and manifests instead of overwriting them from `builds/*/web_assets`.
+- `.github/workflows/build-deploy-page.yml` deploys Pages on a push to `main`, on completion of either firmware
+  workflow, and on manual dispatch. A `firmware-gate` job runs first and skips the deploy while a firmware workflow
+  is queued or running (push runs only) or while the advertised `firmware-info.json` version has no release carrying
+  every `<fw_env>.bin` in `firmware.txt`, so the page cannot advertise firmware that is not published. The `deploy`
+  job's condition reads `always() && needs.build-deploy.result == 'success'` because a skipped `firmware-gate`
+  otherwise makes the implicit `success()` false and silently skips the publish. On branch/manual runs the workflow
+  preserves the currently published `firmware-info.json` and manifests instead of overwriting them from
+  `builds/*/web_assets`; those downloads are retried and fall back to the committed manifest, because Pages answers
+  503 while a deployment is in flight and that used to fail the whole job.
 - `.github/workflows/update-timezones.json-automatically.yml` checks out using `DEPLOY_KEY` and pushes over SSH to
   `dev`, enabling ruleset bypass configured for Deploy keys.
 
@@ -102,9 +110,8 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - `AUDIOLOG(category, ...)`: callback-safe logging wrapper for stack-sensitive audio callback contexts.
   - `WARNINGLOG(...)`: warning-category wrapper (`[Warning]`), the middle level - see the two-level rule below.
   - `WARNINGS_LOG` is the switch for that level, and it is a plain flag like every other debug switch here:
-    `#ifdef WARNINGS_LOG` / `#ifndef WARNINGS_LOG`, listed in `options.h` inside the `ALL_DEBUG_LOGS` block. So
     `[Warning]` lines exist only in a debug build, which is the point: a shipped log carries `[ERROR]` and nothing
-    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h` (or `ALL_DEBUG_LOGS`). Two traps.
+    else, and whoever needs the warnings defines `WARNINGS_LOG` in `myoptions.h`. Two traps.
     (1) A flag is on whether it is 1 or 0, so `#define WARNINGS_LOG 0` *enables* it - the way to leave it off is
     simply not to define it. (2) The test sits in the body of `warningLog()` in `logging.cpp`, not around the macro in
     `logging.h`: that header is included by translation units that cannot see `options.h`, where the flag would be
@@ -138,23 +145,22 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   the two `[SD]` trace lines (`connecttoFS`, `play pos ... card n/m`) are behind `SD_PLAY_TRACE_MS`, which now defaults
   to **0** - set it to e.g. 30000 in `myoptions.h` for a soak, since that pair is what says whether the card reader or
   the decoder stopped. `CONFIG_KEY_DEBUG` does the same for the `[Config.key]` value dumps in `config.h`.
-  - `BOOTLOG_TIME` (defaulted in `options.h` under `ALL_DEBUG_LOGS`, set in `myoptions.h` for debug builds) makes every
-    `BOOTLOG` line carry the time since boot, zero-padded to five digits, between the 16-character category field and
-    the message: `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false
-    in that one file alone while the rest of the build has the macro - a silent feature loss with a green build. Only
-    `bootLog()` stamps, selected by category plus newline (`appendNewline && category == "BOOT"`), because `bootLogX()`
-    writes no newline and a stamp there would land mid-line; the value is `millis()` at emit time and self-widens past
-    100 s, and telnet receives the same composed line. Boot logs are the boot-timing measurement: consecutive deltas
+  - `BOOTLOG_TIME` (set in `myoptions.h` for debug builds) makes every `BOOTLOG` line carry the time since boot,
+    zero-padded to five digits, between the 16-character category field and the message:
+    `[BOOT]          00600ms: <message>`. `logging.cpp` must include `options.h` or the `#ifdef` is false in that one
+    file alone while the rest of the build has the macro - a silent feature loss with a green build. Only `bootLog()`
+    stamps, selected by category plus newline (`appendNewline && category == "BOOT"`), because `bootLogX()` writes no
+    newline and a stamp there would land mid-line; the value is `millis()` at emit time and self-widens past 100 s,
+    and telnet receives the same composed line. Boot logs are the boot-timing measurement: consecutive deltas
     attribute a slow boot to its stages. It is also the switch for the three stage timing logs (`BOOTTIMELOG`,
     `LITTLEFSTIMELOG`, `CONFIGTIMELOG`): undefined, their bodies compile to nothing, so the build has no stage lines and
     loses the `[BOOT] ...ms:` prefixes too. Measured: 216 bytes, 52 of them call sites, which stay as empty functions in
     the off build.
-  - `ESPFILEUPDATER_VERBOSE` is derived in `options.h`, immediately after `ESPFILEUPDATER_DEBUG` is settled there, not
-    in `logging.h`. It lived in `logging.h` once, where the library files that include that header without `options.h`
-    (`FT6336.cpp`, `es8311.cpp`, the four `audioVS1053Ex.cpp` variants) resolved it to `false` while the core resolved
-    it to `true` - one macro with two values in one build. All six call sites pass it to
-    `ESPFileUpdater::checkAndUpdate()` and include `options.h`; a seventh that forgets now fails to compile rather than
-    quietly logging nothing.
+  - `ESPFILEUPDATER_VERBOSE` is defaulted to `false` in `options.h`. It lived in `logging.h` once, where the library
+    files that include that header without `options.h` (`FT6336.cpp`, `es8311.cpp`, the four `audioVS1053Ex.cpp` variants)
+    resolved it to `false` while the core resolved it to `true` - one macro with two values in one build. All six call
+    sites pass it to `ESPFileUpdater::checkAndUpdate()` and include `options.h`; a seventh that forgets now fails to compile
+    rather than quietly logging nothing.
   - Boot stage attribution: `BOOTTIMELOG(name)` closes each block of `setup()` with the stage's cost, e.g.
     `[BOOT]          01950ms: checkLittleFSandVer                    377ms` - the timestamp is the running total to the end
     of that stage and the message is that stage's share. The init paths announce completion with `BOOTLOGX` progress
@@ -215,9 +221,10 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   It then erases the dump, or every later boot would report the same crash again. `COREDUMP_KEEP_DUMP` (options.h)
   leaves it in flash for `esp-coredump`, and `COREDUMP_SUMMARY_AT_BOOT` (on by default) is the switch for the feature;
   both it and `CONFIG_ESP_COREDUMP_*` must hold or the file compiles to empty stubs.
-- `main.cpp` calls it right after the 1 second pre-log delay, inside the same `CORE_DEBUG_LEVEL`/`ALL_DEBUG_LOGS` guard,
-  and that delay also fires when a dump is waiting (after a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT
-  reason, not `ESP_RST_POWERON`). The block runs early in `setup()`, so the crash is logged before the rest of the boot.
+- `main.cpp` calls it right after the 1 second pre-log delay, inside the same
+  `CORE_DEBUG_LEVEL`/`BOOTLOG_TIME`/`CONFIG_KEY_DEBUG` guard and that delay also fires when a dump is waiting (after
+  a crash `esp_reset_reason()` is `ESP_RST_PANIC` or a WDT reason, not `ESP_RST_POWERON`). The block runs early in
+  `setup()`, so the crash is logged before the rest of the boot.
 - The summary API exists only in the ELF core-dump build of the IDF libraries, so `crashreport.cpp` is guarded by `#if
   defined(COREDUMP_SUMMARY_AT_BOOT) && CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF`; both
   sdkconfig macros are 1 here, and the map file confirms `esp_core_dump_get_summary` links in from
@@ -274,7 +281,9 @@ is defined. They share their defect classes, and the same bug has repeatedly app
 - `post_patch.py` shadows the folder with `env.Prepend(LIBPATH=[builds/patch/<mcu>])` — the builder resolves `-llwip`
   by name through `LIBPATH`, so the prepended directory wins — and prints one `Patch linked: liblwip.a <sha> (N
   archive(s) ...)` line after the link. `pre_patch.py` compares `patch-info.txt` against the live package (IDF version,
-  `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are silent/no-ops when no archive exists.
+  `sdkconfig` hash, archive hash) and warns if the patch is stale. Both are silent/no-ops when no archive exists, and
+  both key off SCons `COMMAND_LINE_TARGETS` to skip a run whose only targets are `buildfs`/`uploadfs`, since packing
+  LittleFS never links.
 - Reverting is deleting a directory. Two measurement traps: the firmware
   **byte count does not change** when the window does (`ili9488` was 3158691 either way), so compare binary hashes or
   count `firmware.map` references instead; and `TCP_RECVMBOX_SIZE` (6) caps in-flight data at ~8.6 KB, so a window-only
@@ -388,8 +397,15 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   after the board/PSRAM guards. The display framebuffer and VU canvas lines are TFT-only (an OLED build has neither);
   the WebUI cache is opportunistic and falls back to LittleFS, so it is headroom rather than a hard requirement.
 - Buffer bar visual mapping:
-  - `BUFFERBAR_VISUAL_FULL_PERCENT` controls where input-buffer fill is rendered as visually full.
-  - default `82` means 82% raw fill maps to 100% bar width; set `100` to keep direct 1:1 mapping.
+  - `BUFFERBAR_VISUAL_FULL_KB` is the byte count at which `player.inBufferFilled()` renders as a full bar
+    (`1024 * 250`); the widget's `setValue()` is clamped to it by `normalizeBufferbarValue()` in `display.cpp`.
+  - It is a fixed byte count on purpose: the bar shows fill, not listening time, so it saturates at a different
+    number of seconds on every bitrate. (An earlier entry here said `BUFFERBAR_VISUAL_FULL_PERCENT`, default 82 -
+    that macro no longer exists.)
+- Audio-risk display limiter (`audioRingAtRisk()` in `display.cpp`): `DSP_TASK_DELAY` is multiplied by 4 while the
+  ring holds less than `AUDIO_RISK_ENGAGE_MS` of audio, released above `AUDIO_RISK_RELEASE_MS` (250 / 750 in
+  `options.h`, guarded by a `#error` if the two are inverted). Measured in time, not bytes; until a stream has
+  measured `streamBytesPerSecond()`, a 32 KB floor stands in.
 
 ### `src/core/options_overrides.h` (the force-included config)
 - **Why it exists**: third-party libraries are their own translation units and never include `options.h`, so a value
@@ -2631,9 +2647,6 @@ thinks the radio forgot everything. The loader-side wait was not built.
   the battery payload is `volt: NmV, percentage: N%` with nothing else. `Battery::formatStatusLine()` and the WebUI's
   three status spans (`battery_charging` / `battery_discharging` / `battery_idle`) are gone; the older description of
   "charge/discharge inference with candidate windows" and `applyPowerPolicy()` never existed in this code.
-- Logging note:
-  - battery status/debug/inference messages now use centralized logging macros (including `BATTERY_DEBUG` paths),
-    replacing direct serial/telnet prints.
 
 ## `src/core/backlightcontrols.h` / `backlightcontrols.cpp`
 - `backlightcontrols.h` declares `class BacklightControls` (real class under `BRIGHTNESS_PIN` + `DSP_DIMMING_ENABLED`
@@ -3274,7 +3287,8 @@ thinks the radio forgot everything. The loader-side wait was not built.
     inherits a 40px-wide, 8px-padded, 1px-bordered span box - override every one of those or the element will not be
     the size that was asked for.**
   - **THE WEB FILES ARE NOT IN THE FIRMWARE BINARY.** `board_build.filesystem = littlefs` and the gzip scripts run
-    ONLY for filesystem targets, so `pio run -e <env>` builds the FIRMWARE and nothing else - an edit to
+    ONLY for filesystem targets - `builds/platformio_pre_gzip_www.py` tests SCons `COMMAND_LINE_TARGETS` for
+    `buildfs`/`uploadfs` - so `pio run -e <env>` builds the FIRMWARE and nothing else - an edit to
     `data/www/*.html`, `*.js` or `*.css` is invisible until `-t buildfs` (and `uploadfs` to flash it). The two are a
     pair and are flashed separately. A build that reports no compilation and an unchanged flash size after a web edit
     is telling you the web edit is not in it.
@@ -4171,12 +4185,30 @@ thinks the radio forgot everything. The loader-side wait was not built.
   small JSON reply, no state change - and stage two reconnects only if the answer has not arrived within
   `WS_PROBE_GRACE_MS` (5 s). Any frame clears `wsProbeAt`, so an answered probe is just traffic and costs one
   round-trip per idle half-minute.
-- **An abandoned socket is detached before it is closed.** `wsDropAndReopen()` nulls `onopen`/`onclose`/`onmessage`
-  and then calls `close()`, because `close()` towards a vanished peer can take the browser's whole retransmission
-  budget; a still-attached `onclose` would also arm the retry timer, leaving two chains running.
-- **A returning tab reconnects at once.** `wsWakeReconnect()` is bound to `visibilitychange` (visible only), `online`
-  and `focus`, and acts only on a socket that is CLOSING or CLOSED - never on one already CONNECTING, where a second
-  socket would cost the device heap for nothing - clearing `wserrcnt` so the ladder restarts at its fast end.
+- **`initWebSocket()` is the ONLY place a socket is created, and it tears the old one down first.** It nulls
+  `onopen`/`onclose`/`onmessage`, calls `close()` and clears the global before constructing. That is not tidiness. The
+  wake listeners are registered while the shell's `<head>` (`index_html` in `netserver.h`) is still parsing, and
+  Firefox Android fires `focus`/`visibilitychange` for a NEW document before `load`: a wake trigger opened socket A,
+  `load` opened socket B, and A stayed attached. A's `onOpen` ran `continueLoading` and set `loaded`; the page's burst
+  then went to B while B was still CONNECTING, `send()` threw `InvalidStateError`, and the throw abandoned the rest of
+  the burst - the settings page kept the groups it never unhid and the player page never sent `getindex`, so no
+  playlist and no now-playing. B's own `onOpen` could not repair it, because `continueLoading` returns early on
+  `loaded`. Edge mobile and the desktop browsers never fired the event early enough to lose that race, which is why it
+  looked Firefox-mobile-only.
+- **Stale events are ignored.** `onOpen`, `onClose` and `onMessage` all begin with `if (event.target !== websocket)
+  return;`, so a replaced socket can neither arm a retry nor blank the bars nor touch the page. Order stops mattering,
+  which is what makes the teardown above safe to rely on.
+- **A page's request burst does not depend on the connection's timing.** Each page's load records its request set with
+  `wsSetPageBurst(...)` - the player's `getindex`, the settings page's `get*` set, AP mode's `getactive` - and asks for
+  it with `wsRequestPageState()`, which sends only while the socket is OPEN. `onOpen` asks for the same set on every
+  open, so a burst whose fetch resolved during a connect is served by the open that follows, and a reconnect
+  REPOPULATES the page instead of leaving it as it was before the drop. Deliberately state-only: replaying an action
+  (`reboot`, `format`, a delete) after a reconnect would be worse than losing the press, so those stay direct sends.
+- **A returning tab reconnects at once, and nothing else does.** `wsWakeReconnect()` is bound to `visibilitychange`
+  (visible only), `online` and `focus`; it does nothing until `loaded` is true - before that `onLoad` is the only
+  opener and an early event has nothing to repair - and it replaces only a socket whose `readyState` is 3 (CLOSED).
+  CLOSING is already on its way to `onClose`, and minting a socket on top of it is the other way a phone ends up
+  holding two. It clears `wserrcnt` so the ladder restarts at its fast end.
 - **The RSSI graphic is the connection indicator.** `wsMarkDown()` calls `setRssiBars(0)` from `onClose` and from the
   watchdog, so a dead page reads as a page with no signal. Nothing writes a label: the tooltip is a hover target over
   an area that is not visible at zero bars, so a "Disconnected" caption there could never be read. Coming back needs
@@ -4222,8 +4254,20 @@ thinks the radio forgot everything. The loader-side wait was not built.
     reboot. Browser-side: sends `mdnsname=`, swaps the button row for a status message, then polls the new `.local` host
     with `redirectWhenReady` (8s timeout, 500ms post-ready grace). If mdnsValue is empty, saves silently without
     redirect.
-- consolidated with `data/www/dragpl.js`
-  - Playlist drag-and-drop reorder behavior.
+- **Playlist row reordering (folded in from the former `data/www/dragpl.js`) is one Pointer Events path for mouse and
+  touch, started by MOVEMENT and never by a timer.** `pointerdown` on a `.grabbable` handle arms `pressHandle`,
+  `pointermove` starts the drag once either axis passes `DRAG_START_PX` (6 px), `pointerup` drops through
+  `elementFromPoint` (so pointer capture cannot hide the real target) and `pointercancel` cleans up. `pointerdown` also
+  calls `preventDefault()`, and the handle carries no `draggable` attribute, because Firefox Android's long-press
+  gesture owns a held touch: it starts a native drag on a `draggable` element and cancels the pointer stream, so a
+  timer-gated grab can never complete there. That is why BOTH earlier designs - HTML5 DnD plus hand-rolled touch
+  events, and then a 1 s long press on pointer events - did nothing at all on that browser while working everywhere
+  else: `startDrag()` was never reached, and the row never even dimmed. `#pleditorcontent .grabbable` sets
+  `touch-action: none`, whose price is that a swipe beginning on the number column no longer scrolls the list; the row
+  body still does. `startDrag`, `setIndicator`, `doDrop`, `handleAutoScroll` and `updateIndices` are unchanged and
+  shared - they take plain `clientX`/`clientY`, so mouse and touch run the same code. Confirmed on Firefox Android,
+  Chrome Android and desktop after the threshold change (2026.11.23). A temporary `?dbgdrag=1` overlay traced the
+  event stream while this was being found and is deliberately gone: a timer-gated grab was the fault, not the events.
 
 ## `data/www/options.js`
 - Settings page behavior.
@@ -4556,49 +4600,40 @@ thinks the radio forgot everything. The loader-side wait was not built.
   - **The PACE is the panel's, not a layout's.** `ScrollConfig` is `{ WidgetConfig widget; uint16_t width; }` - the
     retired `scrolldelay`/`scrolldelta`/`scrolltime` were the same numbers in nearly every layout, could only be
     written as literals by the editor, and were the sole control over display bandwidth that an author could not see.
-    `dspconf.h` now owns `SCROLLPX` (**pixels per second at fontsize 1** - one column of the smallest glyph is
-    `CHARWIDTH` = 6 px - scaled by `sqrt(textsize)`, i.e. 100 / 141 / 173 / 200 / 224 % for sizes 1..5, and nudged up
-    with the panel's width: `(42 + (DSP_WIDTH - 128) / 44)`, so 42 at 128 px wide and 50 at 480. The width term is
-    calibrated on both panels by eye, because the same px/s replaces a 110-px row in a couple of seconds and a 460-px
-    row in seven or eight - the small screen reads as racing and the big one as sluggish. Affine, not proportional: a
-    readable character rate barely depends on the panel, only the sluggishness term grows with the row.
-    `SCROLL_PUSH_US_PER_PX` cannot stand in for it - that macro is a bootstrap estimate of step cost, replaced by the
-    measured mean after four steps, and it moves the step/pitch pair, never the speed), `SCROLL_DUTY` (100 - the whole
-    display task may go to one scrolling line. On a slow panel this is a
-    SMOOTHNESS knob rather than an FPS guard, because a cycle slower than any admissible pitch cannot be bought back by
-    the budget; what the budget buys is step resolution, and at 50 a 460-px line moved 2-4 px per paint and read as a
-    stutter while at 90 it moves 1 px. Measured cost of raising it on the 480x320: about 1-2% of the VU's frame),
-    `SCROLL_PUSH_US_PER_PX` (0.02f / 0.95f, an estimate used only until a step is measured), and the five holds
-    `SCROLLDELAY_META`/`_TITLES`/`_PLAYLIST`/`_WEATHER`/`_BOOT`. All of them are `#ifndef`, so `myoptions.h` still
+    `dspconf.h` owns the pace - `SCROLLPX`, its `sqrt(textsize)` scaling, the width nudge, `SCROLL_DUTY`,
+    `SCROLL_PUSH_US_PER_PX` and the five holds - and **its comment block there is the reference for all of them**,
+    including why each number is what it is. This file deliberately does not repeat the values: it did once, the copy
+    went stale, and the pace is the thing that changes most. What a reader of THIS file needs is the two paragraphs
+    below: `SCROLLPX` is a DELIVERED speed, and `SCROLL_DUTY` is now only a cap on how much of the display task one line
+    may take - it no longer buys step resolution, because the step follows elapsed time.
+    All of them are `#ifndef`, so `myoptions.h` still
     overrides everything; `SCROLLTIME` and `SCROLLSTEP_MS` are gone - `options.h` warns once if an override still
     defines either - because **there is no pitch knob**. A line says only WHICH KIND it is - `setScrollRole()`, called
     at each construction in `display.cpp` (the screensaver line is `SCROLL_ROLE_WEATHER` at 75%, which is exact now
     instead of a delta truncation) - and `init()` derives the rest.
-    **The size term is the square root of the cell.** "ms per character" is linear in the size, so every size runs one
-    character rate and it crawls at font 1 while racing at font 4; a constant pixel rate goes the other way and makes
-    small text unreadable. Pixel speed proportional to `sqrt(cell)` sits between them, and `_applyPace()` computes
-    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`. A QUADRATIC normalised at font 1 was tried and
-    reverted: it allows font 1 only 81 % of font 2's px/s, i.e. 1.6x its character rate.
-    **A perfect scroll is impossible on this hardware, and chasing it costs a day - do not.** A line can only paint on
-    a display-task pass (`DSP_TASK_DELAY`, 10 ms) and the panel needs the push it gets, so the derived pitch never
-    lands on that grid. Paying the distance from the clock makes the speed exact but the STEP uneven, and the lean a
-    push leaves at the panel is as wide as the step - the text then flickers; carrying the paint deadline instead keeps
-    the step constant but spends the remainder as a regular pulse; counting passes makes both exact and can only reach
-    `(1000 / pass) x (step / passes)`, which at font 1 on a 12 ms grid needs a 3-px step. So the delivered speed is
-    NOMINAL - 70-100 % of `SCROLLPX` - and the value is dialled by eye against real panels rather than derived.
-    **The step is WHOLE pixels and the pitch is derived from it.** A fractional step alternates its distance and can
-    owe a tick that moves nothing at all - which reads as a slow line AND as a stutter, and that is exactly what the
-    fractional version shipped first did on a monochrome panel. So `_applyPace()` chooses
-    `step = max(1, ceil(speed * dutyMin / 1000))` pixels from the duty budget and then `pitch = ceil(1000 * step / speed)`,
-    which keeps the speed exact, the cadence even, `pitch >= dutyMin` (so the budget holds) and the slow panel's settled
-    gap - the tear fix - intact. `_calcX()` therefore has no accumulator at all, and `_measureStep()` replaces the cost
-    estimate with the measured mean after four steps, re-deriving the step and the pitch together. **The duty test
-    mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest admissible pitch is
-    `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a 2.2 s pitch, the 1 s
-    cap clipped it, and the step became `speed x 1 s`, a station name crossing in three jumps. The second slip was a
-    stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every size to
-    0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling". Three
-    units meet in this one function (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **The size term is the square root of the cell; the reasoning is in `dspconf.h`.** `_applyPace()` computes
+    `100 * sqrt(ts)` exactly, by integer search - no table, no `sqrtf`.
+    **The pace is paid by ELAPSED TIME, so the frame rate cannot change the speed.** `_calcX()` keeps `_acc` (pixels
+    owed, x1000) and charges it `speed x the real ms since _lastPaintMs`; one paint moves however many WHOLE pixels that
+    owes, capped at one character cell (`_stepMax`) so a genuine stall is a pause rather than a jump. `_applyPace()`
+    derives only `_speedPxS`, `_paintFloorMs` (the duty share of the measured push cost - the shortest gap between two
+    pushes) and `_stepMax`; `_measureStep()` still replaces the cost estimate with the measured mean after four steps.
+    A sweep OPENS with one pixel on purpose: a paint that owes nothing yet hands the slot back and would never start the
+    line. `scrollWanted()`/`loop()` gate on the hold while parked and on `_paintFloorMs` while moving, both through
+    `_scrolldelay`, so the accumulator's stamp is never consumed by a delay test.
+    **The design this replaced, and why it had to go.** The pitch used to be an interval (`pitch = ceil(1000 * step /
+    speed)`) and the widget could only act on a display-task pass, so the DELIVERED interval was `ceil(pitch / pass) x
+    pass`. That is invisible at a fixed 10 ms pass, but `audioRingAtRisk()` sleeps `DSP_TASK_DELAY * 4` while the ring is
+    thin, so a 40 ms pass delivered half to a quarter of `SCROLLPX` - the reported "the scroll speed varies and
+    AUDIO_RISK changes it". Dropping frames now costs smoothness alone. The step dithers by one pixel (2, 3, 3, 2)
+    rather than alternating with zero; that dither is the one thing to judge on real panels. The older note that "a
+    perfect scroll is impossible here, do not chase it" was about a constant step on a fixed pass and no longer applies.
+    **The duty test mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest
+    admissible gap is `costUs * 100 / (SCROLL_DUTY * 1000)` - without that 1000 a ~2 ms monochrome step asked for a
+    2.2 s gap and the cap turned the step into `speed x 1 s`, a station name crossing in three jumps. The second slip
+    was a stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every
+    size to 0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling".
+    Three units meet in `_applyPace()` (px/s, ms, µs); each is named at the line it is used on for that reason.
     **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
     Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
     chunks". It was never a rendering fault, and four candidates were withdrawn by measurement before the arithmetic
@@ -5318,7 +5353,11 @@ the audio core publishes levels at. `_redrawMs` (the limiter's timestamp) is del
 maths' time base): while they were shared, a skipped frame showed up as a doubled `dt` in the fade.
 `VU_SAMPLE_REFRESH_DIV` is gone — it was a fixed guess at which styles were heavy and by how much, and it covered only
 two of them. On TFT the blit is inside `_draw()` and counted; on OLED the panel flush is paid afterwards by the display
-task, so the figure measured there is the widget's own cost. **While the startup services are downloading** the floor is
+task, so the figure measured there is the widget's own cost. **Each sample is clamped at 60 ms (`VU_COST_CLAMP_US`)
+before it is smoothed.** The figure is wall-clock, so a stalled pass - a blocked task, a full display queue, a log write
+to a busy client - is not this widget's cost: unclamped, one 234 ms read on a 480x320 pulled the mean to ~69 ms,
+`interval` to 140 ms, and the meter ran at 7 FPS until the mean recovered. `ScrollWidget::_measureStep()` clamps for
+the same reason. **While the startup services are downloading** the floor is
 multiplied by `VU_STARTUP_SERVICES_DIV` (4), so every style redraws a quarter as often for that window — the updater
 holds up to three TLS sessions on the network core and the audio stream is usually already up. The gate is
 [`startup.servicesBusy()`](src/core/startup.h:19), set by the services task around its own downloads: **not**
@@ -5337,8 +5376,7 @@ and draw time and prints them every 5 s like the Core Monitor: `[VU.Widget] Box 
 avg / 2.31ms peak, interval 33ms, 12.0 fills/frame, free heap 93000`. `fills/frame` counts `_fillLocal()` and
 `_drawBand()` calls (not the blit) and is what shows whether a style is drawing rects it does not need; the draw time
 shows whether the box is simply too big for the panel. The members and the log are both behind `#ifdef WIDGET_DEBUG`, so
-a normal build pays nothing for either. The `WIDGET_DEBUG` line in `options.h`'s `ALL_DEBUG_LOGS` block used to read
-`#ifdef WIDGET_DEBUG`, a define that could never take effect; it is now `#ifndef`, matching its siblings.
+a normal build pays nothing for either.
 
 ### Colours on OLED
 
@@ -5639,8 +5677,7 @@ ones that are still raw literals are marked as **words** (x4), which is where th
 
 ### CORE_MONITOR debug feature (opt-in)
 
-Enabled by `ALL_DEBUG_LOGS`, or directly with `#define CORE_MONITOR` in `myoptions.h` — `options.h` only defines it
-inside the `ALL_DEBUG_LOGS` block. The counters and helpers in `src/displays/tools/dspstats.h` compile to nothing when
+Enabled with `#define CORE_MONITOR` in `myoptions.h` only. The counters and helpers in `src/displays/tools/dspstats.h` compile to nothing when
 it is not defined, so a build without the monitor pays nothing for them.
 
 Emits to serial + telnet every 5 seconds:
@@ -5671,6 +5708,38 @@ Emits to serial + telnet every 5 seconds:
     playlist is exactly that case.
   - `glyphs` exceeds `preText` calls by the number of spaces and control codepoints, which `preText()` answers before it
     starts counting.
+  - `max stage pager / req / dsp` on the same line is that maximum split into the three parts of one pass: the page's
+    widgets, the queue request handler (`type` is the worst one's own request type, 255 = none yet), and `dsp.loop()`.
+    A total cannot say whether a long pass was drawing or blocking; these three can. They are wall-clock like the total,
+    so a preempted task shows up in whichever stage it was in - compare the three, do not read them as CPU time.
+  - **`DSP_TASK_PRIORITY` must be ABOVE every other task pinned to `DSP_TASK_CORE_ID`** (above `NETSERVER_PRIORITY`, 2,
+    in practice). At equal priority FreeRTOS round-robins them every 10 ms tick, so a panel write that begins late in a
+    slice finishes in the next one: the measured symptom was `pager` peaks of 93 / 107 / 124 / 257 / 340 ms - near
+    multiples of the tick - with the write's own bus lock and command phase still in microseconds. Raising it to 4
+    removed every slow write on a 480x320 build. A pass that long also preempts the Arduino loop, so `Max Main Loop
+    Time` rises to the length of the display's own worst pass; that is expected, not a second fault.
+  - **A slow panel write is a real unit of measurement.** `psFrameBuffer::display()` and the monochrome flush report
+    themselves above `SLOW_WRITE_MS` (30 ms) under `WIDGET_DEBUG`, with the `startWrite` / `setAddrWindow` / data split
+    and, for a framebuffer, its window size and pixel count. That is what separates "we drew too much" from "the bus or
+    driver stalled": a slow write of a small window is a stall, of a big one is work.
+  - **A monochrome panel's flush cost is the panel's, not ours.** On an SH1106 the flush is ~7 ms when little changes and
+    30-140 ms when a wide line repaints (a fontsize-2 scroll sweeps the whole buffer), and that worst case does not scale
+    with the I2C clock (measured flat across 400 kHz / 800 kHz / 1 MHz while the average roughly tripled). It is a wait
+    inside `Adafruit_SH110X::display()`, it reads as the whole display pausing, and there is nothing to fix at our layer.
+  - **`I2CFREQ_HZ` must be an in-spec I2C rate.** It was `4000000UL` in `displaySH1106.cpp` and `displaySSD1306.cpp` and
+    `6000000UL` in `displaySSD1327.cpp`, inherited from yoRadio; an older Arduino core clamped them, the ESP32 3.x driver
+    does not. 1000000 is the fastest legal value (fast-mode-plus, not an overclock) and is measurably the best average on
+    an SH1106: the flush cost roughly halves at each step up, 26-36 ms at 400 kHz, 18-30 at 800 kHz, 8-16 at 1 MHz, while
+    the worst-case spikes are flat and so do not discriminate. **SSD1327's macro never reaches its constructor** - the
+    argument is commented out there - so that panel runs at the library default until it is uncommented.
+  - **I2C may be pushed to its legal limit where SPI may not, because the failure modes differ.** An over-fast I2C is
+    acknowledged: a NACK or timeout comes back to the driver, and the display drivers `ERRORLOG` and halt on a failed
+    `begin()`, so a wrong rate shows as a dead or visibly garbled panel. An over-fast SPI is not acknowledged, which is
+    why `DEF_SPI_FREQ` stays at 40 MHz (see below) while `I2CFREQ_HZ` goes to 1 MHz.
+  - **`DEF_SPI_FREQ` stays at 40000000UL on the ILI9488.** 80 MHz was measured at `DSP_TASK_PRIORITY 4` and made no
+    difference at all (`max stage pager` 15.8-16.8 ms, `VU draw` 7.63-7.71 ms against 16.0-17.0 and 7.68-7.78 at 40 MHz),
+    so the panel write is **not bandwidth-bound** - what remains is per-transaction and per-window overhead. 40 MHz is
+    already a 4x overclock of a ~10 MHz interface, and 80 MHz would only widen the window for silent data corruption.
 - **Core layout**: `Core layout: core0 (Audio+Net+TCP), core1 (Main+Disp)` — built at compile time from the `CORE_0` /
   `CORE_1` string macros in `options.h`, which concatenate `+Audio`, `+Net`, `+TCP` and `+Disp` according to where
   `AUDIO_CORE`, `NETWORK_CORE`, `CONFIG_ASYNC_TCP_RUNNING_CORE` and `DSP_TASK_CORE_ID` are assigned. Only defined on a

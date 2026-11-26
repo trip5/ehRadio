@@ -348,7 +348,6 @@
 /* --- Debug? --- */
 /* A normal build prints [ERROR] (something is broken) and nothing else.  Everything below, the [Warning] level
    included, is extra detail and is off unless you ask for it. */
-//#define ALL_DEBUG_LOGS         // turns on every switch below at once - very noisy, and every print costs ms
 //#define CORE_MONITOR           // CPU core load plus heap, PSRAM and LittleFS, every 5s
 //#define BOOTLOG_TIME           // prefix BOOT lines with the time since power-on
 //#define WIDGET_DEBUG           // widget text and the VU draw cost

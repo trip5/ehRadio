@@ -189,26 +189,26 @@ jobs:
         run: pio run
 
   # -------------------------------------------------------------------------
-  # Job 6: Build every contributor firmware
-  # Runs for PRs targeting 'main' when code changed. This is the full set the
-  # release workflow builds, produced by the same script used locally, so a folder that no
-  # longer compiles cannot reach main. The light 'compile' job above stays for contributor
-  # PRs against dev.
+  # Job 6: Release metadata check
+  # Runs for PRs targeting 'main' when code changed. It does NOT compile.
   #
-  # This job covers the release metadata too: prepare_releases.py regenerates
-  # builds/releases/ only after every environment has built, so a non-empty git status here
-  # means the metadata is stale. git status rather than git diff, because a new
-  # contributor's manifest is untracked and untracked files never appear in a diff.
+  # prepare_releases.py regenerates builds/releases/ only after every environment has built,
+  # so fresh committed metadata is the evidence that the local full run happened - and that
+  # is all this job asks. The maintainer runs that build on their own machine before every PR
+  # into 'main', and build-release-firmware.yml compiles every environment again on the tag,
+  # which is where a compile break is caught: at release time, not at merge time.
+  # 'Build all firmware' used to compile here as well, repeating the same seven-minute build
+  # on a cold runner for up to 90 minutes.
   #
-  # NO PR JOB MAY PASS --no-build. That flag exists for the two release workflows, whose
-  # next step compiles the same environments. Here it would make the gate cosmetic.
+  # git status rather than git diff, because a new contributor's manifest is untracked and
+  # untracked files never appear in a diff.
   # -------------------------------------------------------------------------
-  build-all:
-    name: Build all firmware
+  release-metadata:
+    name: Release metadata check
     runs-on: ubuntu-latest
     needs: [branch-guard, changes]
     if: github.base_ref == 'main' && (needs.changes.outputs.code == 'true' || contains(github.event.pull_request.labels.*.name, 'force-build'))
-    timeout-minutes: 90
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -217,25 +217,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Cache PlatformIO packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: pio-all-${{ runner.os }}-${{ hashFiles('builds/trip5/platformio.ini', 'builds/prepare_releases.py') }}
-          restore-keys: |
-            pio-all-${{ runner.os }}-
-
-      - name: Install PlatformIO
-        run: pip install platformio==6.2.0
-
-      - name: Build every contributor firmware
-        # -u plus PYTHONUNBUFFERED, because a piped stdout is block-buffered: without this the
-        # per-folder progress lines only appear when the process exits.
-        # The exit code of THIS step is the gate - any failed environment fails it. Never add
-        # continue-on-error or '|| true' here, which would disarm the build check.
-        env:
-          PYTHONUNBUFFERED: '1'
-        run: python3 -u builds/prepare_releases.py --yes
+      - name: Regenerate the release metadata without compiling
+        # The exit code of THIS step is part of the gate: a config the tool rejects must fail
+        # the merge. Never add continue-on-error or '|| true' here.
+        run: python3 builds/prepare_releases.py --yes --no-build
 
       - name: Check builds/releases is committed
         run: |

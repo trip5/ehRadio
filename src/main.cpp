@@ -73,10 +73,10 @@ void setup() {
   bootHeapSnapshot("setup-start");
   {
     const bool dumpedCrash = crashDumpAvailable();
-    #if (CORE_DEBUG_LEVEL > 0) || defined(ALL_DEBUG_LOGS)
+    #if (CORE_DEBUG_LEVEL > 0) || defined(BOOTLOG_TIME) || defined(CONFIG_KEY_DEBUG)
       if (dumpedCrash || esp_reset_reason() == ESP_RST_POWERON || esp_reset_reason() == ESP_RST_EXT) {
         delay(1000);
-        BOOTLOG("1 second delay after cold boot to ensure serial logs are available (CORE_DEBUG_LEVEL > 0 or ALL_DEBUG_LOGS)...");
+        BOOTLOG("1 second delay after cold boot to ensure serial logs are available (CORE_DEBUG_LEVEL > 0 or BOOTLOG_TIME or CONFIG_KEY_DEBUG)...");
       }
     #else
       // And a del
@@ -277,6 +277,11 @@ void loop() {
       uint32_t m = cmMainCount;      cmMainCount = 0;
       uint32_t mx = cmMaxMainLoop;   cmMaxMainLoop = 0;
       uint32_t dw = cmMaxDspWorkUs;  cmMaxDspWorkUs = 0;
+      // The same maximum split by stage, so a long pass is attributed rather than guessed at.
+      uint32_t dp = cmMaxDspPagerUs; cmMaxDspPagerUs = 0;
+      uint32_t dr = cmMaxDspReqUs;   cmMaxDspReqUs = 0;
+      uint32_t di = cmMaxDspIoUs;    cmMaxDspIoUs = 0;
+      uint8_t  dt = cmWorstReqType;  cmWorstReqType = 0xFF;
       uint32_t gl = cmGlyphCount;    cmGlyphCount = 0;
       uint32_t pc = cmPreTextCalls;  cmPreTextCalls = 0;
       uint32_t ph = cmPreTextHits;   cmPreTextHits = 0;
@@ -298,13 +303,12 @@ void loop() {
           mx / 1000.0f, dw / 1000.0f, cmMaxIter / 1000.0f, (unsigned)ESP.getFreeHeap());
       cmMaxIter = 0;
       // What the display task did with the time: work units per second, and the preText hit rate.
-      FUNCTIONLOG("Core.monitor", "DspTask work/s: glyphs %u, fills %u, preText %u (hit %u%%), fb flushes %u (%.2f/loop)",
+      FUNCTIONLOG("Core.monitor", "DspTask work/s: glyphs %u, fills %u, preText %u (hit %u%%), fb flushes %u (%.2f/loop), max stage pager %.1fms, req %.1fms (type %u), dsp %.1fms",
           (unsigned)(gl * perSec), (unsigned)(fi * perSec), (unsigned)(pc * perSec),
           pc ? (unsigned)(ph * 100UL / pc) : 0U,
-          (unsigned)(pu * perSec), d ? (float)pu / (float)d : 0.0f);
-      #ifndef CONFIG_FREERTOS_UNICORE
-        FUNCTIONLOG("Core.monitor", "Core layout: core0 " CORE_0 ", core1 " CORE_1);
-      #endif
+          (unsigned)(pu * perSec), d ? (float)pu / (float)d : 0.0f,
+          dp / 1000.0f, dr / 1000.0f, (unsigned)dt, di / 1000.0f);
+      FUNCTIONLOG("Core.monitor", "Core layout: core0 " CORE_0 ", core1 " CORE_1);
       FUNCTIONLOG("Core.monitor", "High Water Mark (free bytes in stacks): Main: %u, Display: %u, Netserver: %u",
           (unsigned)uxTaskGetStackHighWaterMark(NULL),
           (unsigned)(dspTaskHandle ? uxTaskGetStackHighWaterMark(dspTaskHandle) : 0),

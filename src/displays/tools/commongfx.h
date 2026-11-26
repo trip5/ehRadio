@@ -5,7 +5,8 @@
 #include "../icons.h"                 // icon bitmaps + ICON_TABLE
 #include "../dspfont.h"               // DSP_UNICODE_FONT definition
 #include "pretext.h"
-#include "dspstats.h"                 // Core Monitor counters
+#include "dspstats.h"                 // Core Monitor counters, SLOW_WRITE_MS
+#include "../../core/logging.h"       // the slow-write report under WIDGET_DEBUG
 
 // Define missing macros for SSD1306x32 if not already defined
 #ifndef CHARWIDTH
@@ -33,8 +34,18 @@ class DspCore: public yoDisplay {
     void printClock(){}
     #ifdef DSP_OLED
       inline void loop(bool force=false){
+        #ifdef WIDGET_DEBUG
+          const uint32_t t0 = micros();
+        #endif
         cmCountPush();                // one panel push per display() call
         display();
+        #ifdef WIDGET_DEBUG
+          // The monochrome panel's flush: the whole buffer goes out here, so this is its panel write.
+          const uint32_t dt = micros() - t0;
+          if (dt / 1000UL >= SLOW_WRITE_MS)
+            FUNCTIONLOG("Push", "flush slow %lums: %dx%d buffer",
+                        (unsigned long)(dt / 1000UL), (int)width(), (int)height());
+        #endif
       }
       inline void drawLogo(uint16_t top) {
         #if (DSP_HEIGHT>40)

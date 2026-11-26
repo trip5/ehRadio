@@ -9,35 +9,28 @@ if(params.size>0){
   if(params.has('host')) hostname=params.get('host');
 }
 var websocket;
-var wserrcnt = 0;          /* consecutive failed attempts; a session that actually ran clears it */
+var wserrcnt = 0;  // failed attempts; cleared by a good session
 var wstimeout;
-var wsopenedAt = 0;        /* when the live socket opened - decides whether a close counts as a failure */
-var wsLastMsg = 0;         /* Date.now() of the last frame received: the watchdog's clock */
-var wsProbeAt = 0;         /* Date.now() of the liveness question the watchdog asked, 0 = none outstanding */
+var wsopenedAt = 0;  // open time; tells if a close was a failure
+var wsLastMsg = 0;  // last frame received, the watchdog clock
+var wsProbeAt = 0;  // probe sent at; 0 = none outstanding
 var wsWatch = null;
+var wsPageBurst = null;  // this page request set; re-issued on open
 var loaded = false;
 var currentItem = 0;
 
-/* Reconnect cadence.  These are gaps BETWEEN attempts, and a powered-off radio does not refuse a connection - it
-   swallows the SYN until the browser's own connect timeout expires - so a long gap costs far more than the number
-   suggests.  2 s covers the tail of a reboot, 10 s is one minute of someone watching the page, and 30 s is the
-   resting probe once the radio is plainly gone.  The jitter keeps several open tabs off the same instant: a reload
-   storm is a known device-side heap problem, so nothing here should arrive in lockstep. */
+// retry gaps: after a reboot, then slow
 const WS_RETRY_FAST_MS  = 2000;
 const WS_RETRY_FAST_MAX = 4;
 const WS_RETRY_MID_MS   = 10000;
 const WS_RETRY_MID_MAX  = 12;
 const WS_RETRY_SLOW_MS  = 30000;
 const WS_JITTER         = 0.25;
-/* A session shorter than this is a failure that merely got as far as opening, so it keeps climbing the ladder - a
-   device stuck in a boot loop must not be retried every 2 s for ever.  A session that lived means the link was good. */
+// a short session keeps climbing the ladder
 const WS_SESSION_OK_MS  = 10000;
-/* The device broadcasts NRSSI every 2 s while it is up (network.cpp ticks at 1 s and sends on every second one), so
-   this is fifteen missed heartbeats - wider than any gap the firmware can legitimately make. */
+// 15 missed NRSSI heartbeats at 2 s each
 const WS_SILENCE_MS     = 30000;
-/* Silence is not proof on its own: NRSSI is only sent while network.status is CONNECTED, so a device serving its own
-   access point (SOFT_AP, first-time setup) sends nothing at all on an idle page.  The page therefore proves the socket
-   dead by asking one cheap question and giving the answer this long to arrive before it throws a working link away. */
+// SOFT_AP sends no NRSSI, so probe first
 const WS_PROBE_GRACE_MS = 5000;
 
 window.addEventListener('load', onLoad);
@@ -53,8 +46,7 @@ function updateBitinfo(){
   var bi = getId('bitinfo'); if(bi) bi.textContent = txt;
 }
 
-// RSSI bars.  The device thresholds the raw dBm with RSSI_STEPS and sends the bar count, so no scale lives in the WebUI
-// Bars past the level are recoloured rather than hidden, so the graphic never changes size - behavior is the same as display widget
+// rssi bars: counts are thresholded on device
 function setRssiBars(level){
   var svg = getId('rssibars');
   if(!svg) return;
@@ -73,66 +65,9 @@ function ensureFunctionLoaded(functionName, src, callback){
   loadJS(src, callback);
 }
 
+// the only socket opener; tears the old one down
 function initWebSocket() {
   clearTimeout(wstimeout);
-  console.log('Trying to open a WebSocket connection...');
-  websocket = new WebSocket(`ws://${hostname}/ws`);
-  websocket.onopen    = onOpen;
-  websocket.onclose   = onClose;
-  websocket.onmessage = onMessage;
-}
-function onLoad(event) { initWebSocket(); }
-
-/* How long to wait before the next attempt, given n consecutive failures.  A step ladder rather than one number:
-   the fast end has to outlast a reboot, and the slow end has to be short enough that a radio switched back on is
-   picked up promptly - which is what the old 120000 ms step could not do. */
-function wsRetryDelay(n) {
-  const base = (n <= WS_RETRY_FAST_MAX) ? WS_RETRY_FAST_MS
-             : (n <= WS_RETRY_MID_MAX)  ? WS_RETRY_MID_MS
-                                        : WS_RETRY_SLOW_MS;
-  return Math.round(base * (1 + WS_JITTER * (Math.random() * 2 - 1)));
-}
-
-/* The RSSI graphic carries the connection state as well as the signal: no bars at all is what it already draws for
-   "no level", so a dead page looks like a page with no signal rather than one that is alive.  Coming back needs no
-   code at all - the device's own NRSSI broadcast repaints the bars within about two seconds of a reconnect. */
-function wsMarkDown() {
-  setRssiBars(0);
-}
-
-/* Silence is the only evidence a dead socket gives: an idle connection to a peer that vanished is not an error, so
-   onclose may never fire at all and the page sits on a link that died minutes ago.  Compared on the wall clock, so a
-   tab the browser throttled to one tick a minute still decides on the time that actually passed.
-   Two stages, because silence alone cannot tell a dead device from a quiet one: ask first, reconnect only if the
-   question goes unanswered.  The answer is ordinary traffic, so it resets the clock like any other frame. */
-function wsStartWatch() {
-  wsStopWatch();
-  wsLastMsg = Date.now();
-  wsProbeAt = 0;
-  wsWatch = setInterval(function(){
-    if (!websocket || websocket.readyState !== 1) return;
-    if (Date.now() - wsLastMsg <= WS_SILENCE_MS) { wsProbeAt = 0; return; }
-    if (!wsProbeAt) {
-      // getmute is one small JSON reply and changes nothing on the device.
-      console.log('WebSocket silent, asking the device if it is there...');
-      wsProbeAt = Date.now();
-      try { websocket.send('getmute=1'); } catch (e) {}
-      return;
-    }
-    if (Date.now() - wsProbeAt < WS_PROBE_GRACE_MS) return;
-    console.log('WebSocket silent and unanswered, reconnecting...');
-    wsDropAndReopen();
-    wsMarkDown();
-  }, 1000);
-}
-function wsStopWatch() {
-  if (wsWatch !== null) { clearInterval(wsWatch); wsWatch = null; }
-}
-
-/* Abandons a socket that may be half-open.  close() towards a peer that is gone can take the browser's whole
-   retransmission budget, so the old socket is detached and left to die: with no handlers it cannot also fire onClose
-   and arm the retry timer, which would leave two chains running. */
-function wsDropAndReopen() {
   wsStopWatch();
   if (websocket) {
     websocket.onopen = null;
@@ -141,37 +76,89 @@ function wsDropAndReopen() {
     try { websocket.close(); } catch (e) {}
     websocket = null;
   }
-  initWebSocket();
+  console.log('Trying to open a WebSocket connection...');
+  websocket = new WebSocket(`ws://${hostname}/ws`);
+  websocket.onopen    = onOpen;
+  websocket.onclose   = onClose;
+  websocket.onmessage = onMessage;
+}
+function onLoad(event) { initWebSocket(); }
+
+// page state, re-asked on open; never actions
+function wsSetPageBurst(list) { wsPageBurst = list; }
+function wsRequestPageState() {
+  if (!wsPageBurst || !websocket || websocket.readyState !== 1) return;
+  for (let i = 0; i < wsPageBurst.length; i++) {
+    try { websocket.send(wsPageBurst[i]); } catch (e) {}
+  }
 }
 
-/* A returning user is the case worth optimising: the radio is back on, the tab comes to the front, and the ladder
-   may still be half a minute from its next probe.  Only a socket that is CLOSING or CLOSED is reopened - an attempt
-   already in flight is the fastest thing that can happen anyway, and a second socket would cost the device heap. */
+// retry delay ladder by failure count
+function wsRetryDelay(n) {
+  const base = (n <= WS_RETRY_FAST_MAX) ? WS_RETRY_FAST_MS
+             : (n <= WS_RETRY_MID_MAX)  ? WS_RETRY_MID_MS
+                                        : WS_RETRY_SLOW_MS;
+  return Math.round(base * (1 + WS_JITTER * (Math.random() * 2 - 1)));
+}
+
+// no bars = no signal or no socket
+function wsMarkDown() {
+  setRssiBars(0);
+}
+
+// silence: probe, then reconnect if unanswered
+function wsStartWatch() {
+  wsStopWatch();
+  wsLastMsg = Date.now();
+  wsProbeAt = 0;
+  wsWatch = setInterval(function(){
+    if (!websocket || websocket.readyState !== 1) return;
+    if (Date.now() - wsLastMsg <= WS_SILENCE_MS) { wsProbeAt = 0; return; }
+    if (!wsProbeAt) {
+      // probe: one small reply, changes nothing
+      console.log('WebSocket silent, asking the device if it is there...');
+      wsProbeAt = Date.now();
+      try { websocket.send('getmute=1'); } catch (e) {}
+      return;
+    }
+    if (Date.now() - wsProbeAt < WS_PROBE_GRACE_MS) return;
+    console.log('WebSocket silent and unanswered, reconnecting...');
+    initWebSocket();  // opener closes this socket on entry
+    wsMarkDown();
+  }, 1000);
+}
+function wsStopWatch() {
+  if (wsWatch !== null) { clearInterval(wsWatch); wsWatch = null; }
+}
+
+// wake events reconnect only after load, only CLOSED
 function wsWakeReconnect() {
-  if (!websocket) { wserrcnt = 0; initWebSocket(); return; }
-  if (websocket.readyState === 0 || websocket.readyState === 1) return;
+  if (!loaded) return;
+  if (websocket && websocket.readyState !== 3) return;
   wserrcnt = 0;
-  wsDropAndReopen();
+  initWebSocket();
 }
 window.addEventListener('online', wsWakeReconnect);
 window.addEventListener('focus', wsWakeReconnect);
 document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible') wsWakeReconnect(); });
 
 function onOpen(event) {
+  if (event.target !== websocket) return;   // a socket that has already been replaced
   console.log('Connection opened');
   wsopenedAt = Date.now();
   wsStartWatch();
-  continueLoading(playMode); //playMode in variables.js
+  continueLoading(playMode);  // first load only: builds page, sets burst
   loaded = true;
+  wsRequestPageState();  // state request; also repairs after reconnect
 }
 function onClose(event) {
+  if (event.target !== websocket) return;   // a socket that has already been replaced
   wsStopWatch();
-  /* A session that actually ran was not a failed attempt, so it clears the ladder.  The counter is NOT cleared on
-     open, because a device that opens and dies again a second later has to keep walking away from the fast end. */
+  // a session that lived clears the ladder
   if (wsopenedAt && Date.now() - wsopenedAt > WS_SESSION_OK_MS) wserrcnt = 0;
   wsopenedAt = 0;
   wserrcnt++;
-  /* The timer is armed BEFORE the page is told, so the retry chain never depends on an element existing. */
+  // arm the timer before touching the page
   wstimeout=setTimeout(initWebSocket, wsRetryDelay(wserrcnt));
   wsMarkDown();
 }
@@ -187,11 +174,12 @@ function showById(show,hide){
   hide.forEach(item=>{ getId(item).classList.add('hidden'); });
 }
 function onMessage(event) {
-  wsLastMsg = Date.now();   // any frame proves the socket is alive, even one we cannot parse
-  wsProbeAt = 0;            // ...and it also answers the watchdog's question
+  if (event.target !== websocket) return;   // a socket that has already been replaced
+  wsLastMsg = Date.now();  // any frame proves the socket is alive
+  wsProbeAt = 0;  // and answers the probe
   try{
     const data = JSON.parse(escapeData(event.data));
-    /*ir*/
+    // ir
     if(typeof data.ircode !== 'undefined'){
       getId('protocol').innerText=data.protocol;
       classEach('irrecordvalue', function(el){ if(el.hasClass("active")) el.innerText='0x'+data.ircode.toString(16).toUpperCase(); });
@@ -201,9 +189,9 @@ function onMessage(event) {
       classEach('irrecordvalue', function(el,i){ var val = data.irvals[i]; if(val>0) el.innerText='0x'+val.toString(16).toUpperCase(); else el.innerText=""; });
       return;
     }
-    /*end ir*/
+    // end ir
     
-    /*online update*/
+    // online update
     if(typeof data.onlineupdateavailable !== 'undefined') {
       const btn = getId('check_online_update');
       if(btn) {
@@ -243,14 +231,14 @@ function onMessage(event) {
         btn.disabled = true;
       }
     }
-    /*end online update*/
+    // end online update
     
     if(typeof data.redirect !== 'undefined'){
       getId("mdnsnamerow").innerHTML=`<h3 style="line-height: 37px;color: #aaa; margin: 0 auto;">${t('msg_redirecting', 'Redirecting to {0}', data.redirect)}</h3>`;
       setTimeout(function(){ window.location.href=data.redirect; }, 4000);
       return;
     }
-    /* playlist validator progress */
+    // playlist validator progress
     if(typeof data.plvalidate !== 'undefined'){
       handleValidationMessage(data.plvalidate);
       return;
@@ -262,24 +250,13 @@ function onMessage(event) {
       _modeKnown = true;
       classEach('modeitem', function(el){ el.classList.add('hidden') });
       if(modesd) { getId('toggleplaylist').classList.add('sd-mode'); showById(['modesd', 'sdmanbtn', 'shuffle'],['plsvg']); } else { getId('toggleplaylist').classList.remove('sd-mode'); showById(['modeweb','plsvg','bitinfo'],['sdmanbtn','shuffle']); }
-      /* if sdslider is ever fixed, it will be hidden without the next line to unhide it */
+      // sdslider needs this line if fixed
       // if(modesd) { showById(['volslider', 'sdslider'],[]); } else { showById(['volslider'],['sdslider']); }
       showById(['volslider'],[]);
       getId('toggleplaylist').classList.remove('active');
-      /* This notice means one thing only: the mode has CHANGED, so a switch has started.  The device sends it before
-         it verifies or indexes the card, so the page blanks, shows the loader and locks HERE - and does not fetch,
-         because anything the device could answer now is either the list being left behind or one that is still being
-         rewritten.  The fetch waits for playlistready (below).  The first report after a page load only establishes
-         which mode we are on; it is not a switch, so it must not lock anything. */
+      // mode changed: a switch started, lock the page
       if (modeChanged) { setModeSwitching(true); return; }
-      /* THE MODE DID NOT CHANGE WHILE THE PAGE WAS WAITING, which means the device REFUSED the switch.  There is
-         exactly one refusal that matters: SD mode with no card in the slot.  config.changeMode() logs "SD card not
-         found", sends this very report, and returns WITHOUT changing the mode - so the page sat on its spinner until
-         the 3-minute backstop ran out, which is the "stuck" it was reported as.  Only the first report after a page
-         load is innocent, and _modeKnown is what marks it; if a switch is still outstanding (_switching) the wait
-         ends HERE instead of running out the clock.  The device has already shown why it refused, on the display, and
-         a card-less device is refused again by the SD File Manager itself - so the page says nothing, drops the lock
-         and shows the list it still has.  A no-op switch (asking for the mode we are already in) lands here too. */
+      // refused switch: drop the lock, keep the list
       if (_switching) {
         setModeSwitching(false);
         generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
@@ -287,12 +264,7 @@ function onMessage(event) {
       return;
     }
     if(typeof data.playlistready !== 'undefined') {
-      /* One signal, two states.  false: a rebuild is walking the card right now, so blank, show the loader and LOCK -
-         the list must not be visible or playable while the card is being walked, which is exactly what used to
-         happen (a stream started mid-rebuild put a reader on the card alongside the walker, and an SPI card cannot
-         take that).  true: the list is ready, so unlock and fetch.  It arrives whether or not a build produced
-         anything - the page waits for the device to STOP TRYING, never for a build to succeed - and it is also sent
-         when a client connects, so a page opened mid-switch ends up with a list either way. */
+      // playlistready: false = rebuilding, true = unlock
       if (data.playlistready === false) { setModeSwitching(true); return; }
       setModeSwitching(false);
       generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
@@ -343,7 +315,7 @@ function onMessage(event) {
         populateTZDropdown(timezoneData);
       }
       
-      // If timezoneData not loaded yet, store for later application
+      // not loaded yet: apply later
       if (!timezoneData) {
         pendingTZData = { tz_name: data.tz_name, tzposix: data.tzposix };
       } else if (select && input) {
@@ -352,7 +324,7 @@ function onMessage(event) {
           select.selectedIndex = i;
           input.value = select.options[i].value;
         } else {
-          // Just show the raw POSIX and keep the label in memory
+          // show raw POSIX, keep the label
           const fallbackOption = new Option(data.tz_name, data.tzposix, true, true);
           select.appendChild(fallbackOption);
           select.selectedIndex = select.options.length - 1;
@@ -371,11 +343,11 @@ function onMessage(event) {
         }
       }
       
-      // Store locale data for pending application after locales json files loads
+      // keep locale data for later
       if (data.locale_webui && data.locale_disp) {
         pendingLocaleData = { locale_webui: data.locale_webui, locale_disp: data.locale_disp };
         
-        // If localesData already loaded, apply immediately
+        // apply now if locales are loaded
         if (localesData) {
           applyPendingLocaleData();
         }
@@ -385,14 +357,14 @@ function onMessage(event) {
     
     if(typeof data.payload !== 'undefined'){
       data.payload.forEach(item=> {
-        // battery string: volt and percentage only, there is no charge state to report
+        // battery: voltage and percentage only
         if(item.id === 'battery' && typeof item.value === 'string'){
           var m = /volt: (\d+)mV, percentage: (\d+)%/.exec(item.value);
           if(m){
             var volt = m[1], perc = m[2];
             setupElement('battery_volt', volt);
             setupElement('battery_perc', perc);
-            // The player row shows the percentage; the settings page shows voltage and percentage
+            // player shows %, settings shows both
             const compact = getId('battery');
             if (compact) compact.innerText = perc + '%';
             const wrap = getId('batteryinfo');
@@ -404,7 +376,7 @@ function onMessage(event) {
           return; // Skip normal setupElement for 'battery' id
         }
         setupElement(item.id, item.value);
-        // Update slider max if provided (e.g. volume max from device config)
+        // set slider max from device
         if (typeof item.max !== 'undefined') {
           var el = getId(item.id);
           if (el && el.type === 'range') { el.max = item.max; fillSlider(el); }
@@ -418,12 +390,7 @@ function onMessage(event) {
           websocket.send('getindex=1');
           return;
         }
-      /* The server reports the settings groups in BOTH directions: "group_x" offers a group and
-         "hide_group_x" withdraws it.  The conditions for the layout-driven groups (VU, buffer bar,
-         weather) come from the active layout, so they can flip while this page is open - the withdrawal
-         is what stops a row for a widget the new layout dropped from lingering until a reload.
-         The token has to be INTERPRETED, not applied: classEach() does querySelectorAll('.'+name), so
-         passing "hide_group_x" through as a class name would silently match nothing. */
+      // group_x shows, hide_group_x hides; never a class
       if(typeof data.act !== 'undefined'){
         data.act.forEach(showclass=> {
           if (showclass.startsWith('hide_')) classEach(showclass.slice(5), function(el) { el.classList.add("hidden"); });
@@ -431,13 +398,13 @@ function onMessage(event) {
         });
         return;
       }
-      // Apply maxVol to volume slider if present in flat config data
+      // apply maxVol to volume slider
       if (typeof data.maxVol !== 'undefined') {
         var volSlider = getId('volume');
         if (volSlider) { volSlider.max = data.maxVol; fillSlider(volSlider); }
       }
       Object.keys(data).forEach(key=>{
-        // The Settings page is the only place that asks for GETSCREEN, so its reply also carries the stored theme id: apply it here
+        // GETSCREEN also carries the theme id
         if (key === 'themeId') document.documentElement.setAttribute('data-theme', data[key]);
         setupElement(key, data[key]);
       });
@@ -498,17 +465,17 @@ function setupElement(id,value){
     updateBitinfo();
     return;
   }
-  if(id === 'rssi'){              // the dBm reading, kept only for the bars' tooltip
+  if(id === 'rssi'){  // dBm for the tooltip only
     var rtt = getId('rssititle');
     if(rtt && value !== '' && value !== null && typeof value !== 'undefined')
       rtt.textContent = t('lbl_rssi', 'RSSI') + ': ' + value + t('unit_dbm', 'dBm');
     return;
   }
-  if(id === 'rssibars'){          // the bar count the device derived from RSSI_STEPS
+  if(id === 'rssibars'){  // bar count from the device
     setRssiBars(value);
     return;
   }
-  if(id === 'mutebutton'){        // lit state comes only from the device, so a refused command cannot leave it wrong
+  if(id === 'mutebutton'){  // mute state comes from device only
     const btn = getId(id);
     if(btn) btn.classList.toggle('active', !!value);
     return;
@@ -527,7 +494,7 @@ function setupElement(id,value){
       element.innerText=value;
     }
     if(element.type==='text' || element.type==='number' || element.type==='password'){
-      // Skip battref - it's now a calibration input for measured voltage, not ADC reference
+      // battref is calibration, not ADC reference
       if (element.id !== 'battref') {
         element.value=value;
       }
@@ -549,20 +516,15 @@ function setupElement(id,value){
     }
   }
 }
-/***--- playlist ---***/
+// --- playlist ---
 
-/* THE playlist grammar - the mirror of Utility::parsePlaylistLine() in utility.cpp.  Change one, change both.
-   NEW:  "<name with spaces> <url> <value>"     OLD: "<name>\t<url>\t<value>"
-   The new shape is read from the right, because the name is the only field that can contain spaces and
-   the value is the only one that cannot.  "dB12" is a measurement; a bare 0 or any other number means the
-   station has not been measured, which is what every value from a ka-radio or yoRadio file becomes. */
+// playlist grammar mirrors Utility::parsePlaylistLine()
 function cutFromToken(tok){
   const m = /^[dD][bB](\d{1,2})$/.exec((tok || '').trim());
   if(!m) return -1;
   return Math.max(0, Math.min(24, parseInt(m[1], 10)));
 }
-/* Read a cut out of anything a JSON key may hold, and answer "unknown" rather than 0 when it cannot.  JSON has a
-   key to carry the meaning, so 2, "2" and "dB2" are all the same measurement; "" and null are not measured. */
+// dBcut: 2, "2" and "dB2" all mean the same
 function readCut(v){
   if(v === null || v === undefined) return -1;
   const s = String(v).trim();
@@ -595,7 +557,7 @@ function parsePlaylistLine(line){
 function formatPlaylistLine(name, url, dBcut){
   return name + ' ' + url + ' ' + ((dBcut < 0) ? '0' : ('dB' + dBcut));
 }
-/* The number in a row's own input: '' when the station has not been measured. */
+// row's cut, empty = not measured
 function editorCutValue(inputs){
   const raw = (inputs[3].value || '').replace(/^\s+|\s+$/g, '');
   if(raw === '') return -1;
@@ -617,7 +579,7 @@ function initPLEditor(){
   ple.innerHTML="";
   pllines = getId('playlist').querySelectorAll('li');
   pllines.forEach((item,index)=>{
-    html+=`<li class="pleitem" id="${'plitem'+index}"><span class="grabbable" draggable="true">${("00"+(index+1)).slice(-3)}</span>
+    html+=`<li class="pleitem" id="${'plitem'+index}"><span class="grabbable">${("00"+(index+1)).slice(-3)}</span>
       <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
       <input class="pleinput plename" type="text" value="${quoteattr(item.dataset.name)}" maxlength="140" />
       <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="140" />
@@ -626,9 +588,7 @@ function initPLEditor(){
       <span class="pleinput plestatus"></span>
       </li>`;
   });
-  /* One delegated listener on the container, which survives every innerHTML rebuild. Only the playing
-     row is audible, so only that row talks to the device; the 250 ms debounce keeps a typed number
-     from sending one command per keystroke. */
+  // one delegated listener survives rebuilds
   if(!ple._dbcutBound){
     ple._dbcutBound = true;
     ple.addEventListener('input', (ev)=>{
@@ -668,8 +628,7 @@ function handlePlaylistData(fileData) {
   if(!modesd){ initPLEditor(); syncDbcutToDevice(); }
 }
 
-/* The cut is live on the device but only TEMPORARY.  Save uploads the file and Undo re-fetches it, and
-   both land here, so re-pushing the file's value for the playing row covers Save, Undo and a reload. */
+// cut is live but temporary; re-push the file value
 function sendDbcut(row, dBcut){
   if(modesd || !websocket || websocket.readyState !== 1) return;
   websocket.send(`dBcut=${row},${dBcut}`);
@@ -680,15 +639,11 @@ function syncDbcutToDevice(){
   if(!item) return;
   const el = item.querySelector('.pledbcut');
   if(!el) return;
-  if((el.value || '').trim() === '') return;            // not measured: the device keeps learning it
+  // not measured: device keeps learning it
   sendDbcut(currentItem, Math.max(0, Math.min(24, parseInt(el.value) || 0)));
 }
 
-/* The playlist's stripes are a background pattern on the scroll box whose bands are 39px - one single-line
-   row. A wrapped name makes its row taller than that, so instead of calibrating the pattern the offset is
-   set from where the list actually ends: background-attachment: local keeps the pattern with the rows while
-   the list scrolls, and the offset puts the colour the next row would have had under the last one, so the
-   empty space reads as the list continuing. Re-run on resize, which is what rewraps the names. */
+// stripe bands are 39px; re-run on resize
 function alignPlaylistStripes() {
   const ul = getId('playlist');
   if (!ul) return;
@@ -696,22 +651,17 @@ function alignPlaylistStripes() {
   if (!rows.length) { ul.style.backgroundPositionY = '0px'; return; }
   const last = rows[rows.length - 1];
   const end = last.offsetTop + last.offsetHeight;
-  const shift = (rows.length % 2) ? band : 0;   // an odd number of rows leaves an even colour next
+  const shift = (rows.length % 2) ? band : 0;  // odd row count needs a shift
   ul.style.backgroundPositionY = (((end - shift) % cycle + cycle) % cycle) + 'px';
 }
 window.addEventListener('resize', alignPlaylistStripes);
 
-/* ---- a mode switch: the icon, the blanked list, the loader and the lock, all at once ---------------------- */
+// --- mode switch: icon, blank, lock ---
 
-/* Entering SD mode verifies the card and can rebuild the whole index, which is minutes on a big card.  For all of
-   that the player page must not keep showing the mode being left - the streaming playlist was exactly the wrong
-   thing - and must not accept a press that belongs to that mode.  So the list is blanked to the same spinner
-   generatePlaylist uses and the whole page is locked, from the click (or from the device's first notice, for a
-   switch started on the box itself) until the device says the mode is settled.  The backstop only exists so a
-   device that never answers cannot leave the page dead. */
+// SD verify/rebuild is slow: lock with a backstop
 var _switching = false;
 var _switchTimer = null;
-var _modeKnown = false;            // has the device told us which mode we are on yet (first report != a switch)
+var _modeKnown = false;  // first report is not a switch
 var SWITCH_BACKSTOP_MS = 180000;   // 3 minutes
 
 function setModeSwitching(on){
@@ -721,7 +671,7 @@ function setModeSwitching(on){
   if (!_switching) return;
   const pl = getId('playlist');
   if (pl) pl.innerHTML = '<div class="plloader"><span class="loader"></span></div>';
-  const ple = getId('pleditorcontent');       // the editor must not offer the mode we are leaving either
+  const ple = getId('pleditorcontent');  // editor must not offer the old mode
   if (ple) ple.innerHTML = '';
   _switchTimer = window.setTimeout(function(){
     _switchTimer = null;
@@ -755,7 +705,7 @@ function plAdd(){
   let cnt=ple.getElementsByTagName('li');
   plitem.attr('class', 'pleitem');
   plitem.attr('id', 'plitem'+(cnt.length));
-  plitem.innerHTML = '<span class="grabbable" draggable="true">'+("00"+(cnt.length+1)).slice(-3)+'</span>\
+  plitem.innerHTML = '<span class="grabbable">'+("00"+(cnt.length+1)).slice(-3)+'</span>\
       <span class="pleinput plecheck"><input type="checkbox" /></span>\
       <input class="pleinput plename" type="text" value="" maxlength="140" />\
       <input class="pleinput pleurl" type="text" value="" maxlength="140" />\
@@ -801,7 +751,7 @@ function undoPlaylistChanges(){
   clearImportReviewFlags();
   generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
   uncheckSelectAll();
-  if (validatorMode) setValidatorMode(false);   // in the Validator, Undo discards and returns to the editor
+  if (validatorMode) setValidatorMode(false);  // Validator: Undo returns to editor
 }
 
 function loadCuratedForReview(mode) {
@@ -822,8 +772,7 @@ function loadCuratedForReview(mode) {
       setImportReviewFlags(mode);
     }, 300);
   } else {
-    // Replace mode: wait for editor to open and load current playlist first
-    // then clear and import (prevents race condition)
+    // replace: wait, clear, then import
     setTimeout(() => {
       doPlImportCurated('pl_import.json', mode);
       // Show warning banner
@@ -868,7 +817,7 @@ function submitPlaylist(){
   let fileuploadinput=getId("file-upload");
   fileuploadinput.files = container.files;
   doPlUpload(fileuploadinput);
-  // In the Validator, Save stays in the overlay and returns to the editor; elsewhere it closes as before.
+  // Validator: Save returns to editor
   if (validatorMode) setValidatorMode(false);
   else toggleTarget(0, 'pleditorwrap');
 }
@@ -889,7 +838,7 @@ function doPlUpload(finput) {
 }
 
 function doPlImportCurated(localPath, mode) {
-  // Load local file from ESP32 filesystem (for curated playlists)
+  // load a local file (curated lists)
   const importMode = mode || 'replace';
   console.log('[doPlImportCurated] Loading local file:', localPath, 'mode:', importMode);
   fetch(localPath + '?' + Date.now())
@@ -912,7 +861,7 @@ function doPlImportCurated(localPath, mode) {
     })
     .catch(error => {
       console.error('[doPlImportCurated] Error loading file:', error);
-      // Silently clear flags if file doesn't exist (e.g., after fresh flash)
+      // no file: clear flags silently
       sessionStorage.removeItem('pl_import_review');
       sessionStorage.removeItem('pl_import_mode');
       if (getId('plImportWarning')) getId('plImportWarning').classList.add('hidden');
@@ -949,10 +898,10 @@ function doPlImport(finput) {
 
 function parseAndAddJSON(content, targetCallback, mode = 'replace') {
   try {
-    // Handle JSONL/NDJSON (missing opening/closing brackets and commas)
+    // JSONL/NDJSON: no brackets or commas
     content = content.trim();
     if (!content.startsWith('[')) {
-      // JSONL format: multiple objects on separate lines, need commas between them
+      // one object per line: add commas
       const lines = content.split('\n').filter(line => line.trim());
       content = '[\n' + lines.join(',\n') + '\n]';
     }
@@ -968,7 +917,7 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
       // Extract name (try name first, then title)
       const name = item.name || item.title || '';
       
-      // Extract URL with fallback chain: url_resolved -> url -> host+file+port
+      // url: resolved, then url, then host
       let url = '';
       if (item.url_resolved) {
         url = item.url_resolved;
@@ -992,8 +941,7 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
           }
         }
       }
-      // Only a dBcut key is ours.  A ka-radio or yoRadio `dbcut` is foreign, so the station is left
-      // unmeasured (-1) and the device decides for itself.
+      // only our dBcut counts; foreign ones stay unmeasured
       const dbcut = (item.dBcut === undefined) ? -1 : Math.max(0, Math.min(24, parseInt(item.dBcut, 10) || 0));
       // If no name, generate from URL
       const finalName = name || (url ? urlToName(url) : '');
@@ -1019,7 +967,7 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
 }
 
 function urlToName(url) {
-  // Convert URL to readable name: drop protocol, port, convert special chars to hyphens
+  // derive a name from the URL
   let name = url.replace(/^https?:\/\//, ''); // Drop protocol
   name = name.replace(/:\d+/, ''); // Drop port number
   name = name.replace(/[=&?]/g, '-'); // Convert query chars to hyphens
@@ -1038,8 +986,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
   lines.forEach(line => {
     line = line.trim();
     if (!line) return;
-    // dbcut holds the cut this import produced: -1 means the source carried no measurement we trust,
-    // which is the default for every row of a ka-radio or yoRadio file.
+    // -1 = source carried no usable measurement
     let name = '', url = '', dbcut = -1;
     
     // Try tab-delimited first
@@ -1054,7 +1001,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
           dbcut = -1;
         }
       } else if (parts.length === 2) {
-        // 2 fields: one is URL, one is name (order does not matter)
+        // two fields: URL and name
         let urlIdx = -1, nameIdx = -1;
         for (let i = 0; i < 2; i++) {
           if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
@@ -1069,7 +1016,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
           dbcut = -1;
         }
       } else if (parts.length >= 3) {
-        // 3+ fields: Find URL (required), dbcut (optional), and name from remaining fields
+        // three or more: URL, cut, name
         let urlIdx = -1;
         for (let i = 0; i < parts.length; i++) {
           if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
@@ -1081,8 +1028,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx !== -1) {
           url = parts[urlIdx];
           
-          // Third field, optional.  Our "dB<n>" token is a measurement; a bare number is a foreign dbcut,
-          // so it is recognised as the value field but the station stays unmeasured.
+          // dB<n> is ours; a bare number is foreign
           let dbcutIdx = -1;
           for (let i = 0; i < parts.length; i++) {
             if (i === urlIdx) continue; // Skip URL field
@@ -1096,7 +1042,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
             }
           }
           
-          // Name is FIRST field that's not URL or dbcut
+          // name is the first non-URL, non-cut field
           for (let i = 0; i < parts.length; i++) {
             if (i !== urlIdx && i !== dbcutIdx && parts[i]) {
               name = parts[i];
@@ -1108,7 +1054,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         }
       }
     } else if (/\s{2,}/.test(line)) {
-      // Two-or-more-space-delimited: split by 2+ consecutive spaces
+      // split on two or more spaces
       const parts = line.split(/\s{2,}/).map(p => p.trim()).filter(p => p);
       
       if (parts.length === 1) {
@@ -1119,7 +1065,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
           dbcut = -1;
         }
       } else if (parts.length === 2) {
-        // 2 fields: one is URL, one is name (order does not matter)
+        // two fields: URL and name
         let urlIdx = -1, nameIdx = -1;
         for (let i = 0; i < 2; i++) {
           if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
@@ -1134,7 +1080,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
           dbcut = -1;
         }
       } else if (parts.length >= 3) {
-        // 3+ fields: Find URL (required), name is first non-URL field, rest are ignored
+        // three or more: URL, then name
         let urlIdx = -1;
         for (let i = 0; i < parts.length; i++) {
           if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
@@ -1156,7 +1102,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         }
       }
     } else {
-      // Single-space-delimited: find URL (contains . and / or ://)
+      // split on single spaces, find the URL
       const tokens = line.split(/\s+/);
       let urlIdx = -1;
       
@@ -1174,7 +1120,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
         if (urlIdx > 0) {
           // URL not first, so name is first token
           name = tokens[0];
-          // The value is the LAST token: "dB<n>" is ours, a bare number is a foreign dbcut
+          // the last token is the value
           const lastToken = tokens[tokens.length - 1];
           const lastNum = parseInt(lastToken, 10);
           const tagged = /^[dD][bB]\d{1,2}$/.test(lastToken);
@@ -1183,7 +1129,7 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
             dbcut = tagged ? cutFromToken(lastToken) : -1;
           }
         } else {
-          // URL is first: everything after URL is the name (no dbcut)
+          // name is everything after the URL
           const nameTokens = [];
           for (let i = urlIdx + 1; i < tokens.length; i++) {
             nameTokens.push(tokens[i]);
@@ -1228,7 +1174,7 @@ function getExistingURLs() {
   const items = document.getElementById('pleditorcontent').getElementsByTagName('li');
   for (let i = 0; i < items.length; i++) {
     const inputs = items[i].getElementsByTagName('input');
-    const url = inputs[2].value; // URL is third input (after checkbox and name)
+    const url = inputs[2].value;  // URL is the third input
     if (url) urls.add(url);
   }
   return urls;
@@ -1240,7 +1186,7 @@ function addStationToEditor(name, url, dbcut) {
   const plitem = document.createElement('li');
   plitem.className = 'pleitem';
   plitem.id = 'plitem' + cnt;
-  plitem.innerHTML = `<span class="grabbable" draggable="true">${("00"+(cnt+1)).slice(-3)}</span>
+  plitem.innerHTML = `<span class="grabbable">${("00"+(cnt+1)).slice(-3)}</span>
     <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
     <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="140" />
     <input class="pleinput pleurl" type="text" value="${url}" maxlength="140" />
@@ -1308,8 +1254,7 @@ const SHARE_BODY_FALLBACK_HEADER =
 
 Attach that file to this message (drag it into the box below) and it can still be submitted.`;
 
-// GitHub refuses a request URL past 8192 characters with "Whoa there! Your request URL is too long."  The playlist
-// travels percent-encoded inside that URL, so the finished URL is what has to be measured, not the playlist.
+// GitHub caps the request URL at 8192 characters
 const MAX_SHARE_URL_LENGTH = 8192;
 
 function shareIssueUrl(body){
@@ -1321,7 +1266,7 @@ function shareIssueUrl(body){
 }
 
 function openShareUrl(url){
-  // A clicked anchor is not treated as a popup, unlike window.open after a download has started.
+  // a click on an anchor is not a popup
   const link = document.createElement('a');
   link.href = url;
   link.target = '_blank';
@@ -1354,7 +1299,7 @@ function sharePlaylist() {
     csvData += formatPlaylistLine(name, url, dBcut) + '\r\n';
   }
 
-  // The downloaded file keeps CRLF; the body does not, because each row's \r\n costs 3 more characters of the URL.
+  // file keeps CRLF, body does not
   const inlineBody = SHARE_BODY_CORE + '\n\nPLAYLIST_START/\n' + csvData.replace(/\r\n/g, '\n') + '\n/PLAYLIST_END';
   const inlineUrl = shareIssueUrl(inlineBody);
 
@@ -1363,7 +1308,7 @@ function sharePlaylist() {
     return;
   }
 
-  // Over the cap: open the attach request first, so the download does not consume the click that opens the tab.
+  // over the cap: open the tab first
   openShareUrl(shareIssueUrl(SHARE_BODY_FALLBACK_HEADER + '\n\n' + SHARE_BODY_CORE));
   downloadCSV(csvData);
 }
@@ -1380,7 +1325,7 @@ function downloadCSV(csvContent) {
   document.body.removeChild(link);
   URL.revokeObjectURL(link.href);
 }
-/***--- eof playlist ---***/
+// --- end playlist ---
 let pleditorTimeout = null;
 function toggleTarget(el, id){
   const target = getId(id);
@@ -1389,14 +1334,13 @@ function toggleTarget(el, id){
     if(modesd) return;
     // Clear any active preview states
     classEach('pleitem', function(el){ el.classList.remove('active') });
-    // If opening editor (not closing), refresh playlist first to ensure fresh data
+    // opening: refresh the list first
     if(target && target.classList.contains('hidden')) {
-      // Cancel any pending timeout to prevent race conditions
+      // cancel a pending timeout
       if(pleditorTimeout) { clearTimeout(pleditorTimeout); pleditorTimeout = null; }
       // Don't toggle visibility yet, wait for fresh data
       generatePlaylist(`http://${hostname}/data/playlist.csv`+"?"+new Date().getTime());
-      // generatePlaylist will call handlePlaylistData, which will call initPLEditor
-      // Then we toggle visibility after a brief delay to let data load
+      // this fetch re-enters initPLEditor; show after
       pleditorTimeout = setTimeout(() => {
         target.classList.remove("hidden");
         getId(target.dataset.target).classList.add("active");
@@ -1404,9 +1348,9 @@ function toggleTarget(el, id){
         resetValidatorMode();     // the editor always opens in editor mode
         updateGearIcon();
       }, 200);
-      return; // Exit early, don't run the normal toggle below
+      return;  // do not run the toggle below
     }
-    // If closing editor, cancel any pending timeout and close immediately
+    // closing: cancel the timeout, close now
     if(pleditorTimeout) { clearTimeout(pleditorTimeout); pleditorTimeout = null; }
     // Clear import review flags when closing editor
     clearImportReviewFlags();
@@ -1415,17 +1359,14 @@ function toggleTarget(el, id){
     target.classList.toggle("hidden");
     getId(target.dataset.target).classList.toggle("active");
   }
-  // Both belong AFTER the hide: the gear reads whether the editor is open, and closing must strip the validator
-  // class or the next open comes up already in Validator (and the toggle then flips straight back).
+  // after the hide: the gear reads editor state
   if(id=='pleditorwrap'){
     if(!pleditorOpen()) resetValidatorMode();
     updateGearIcon();
   }
 }
-/***--- playlist validator ---***/
-/* The editor DOM is reused, so the mode is one class on #pleditorwrap plus a gear that morphs in place.  Each
-   icon shows the mode you are IN: the list icon in the editor, the check icon in the Validator, and the ordinary
-   settings gear when the editor is closed.  Icons are placeholders and easy to swap. */
+// --- playlist validator ---
+// editor mode is one class plus a morphing gear
 var validatorMode = false;
 var validatorRunning = false;
 var GEAR_ICON = null;
@@ -1440,7 +1381,7 @@ function pleditorOpen(){
 }
 function updateGearIcon(){
   const g = getId('settingsbtn'); if(!g) return;
-  if(GEAR_ICON === null) GEAR_ICON = g.innerHTML;   // captured while it still is the settings gear
+  if(GEAR_ICON === null) GEAR_ICON = g.innerHTML;  // captured while still the gear
   if(!pleditorOpen()){ g.innerHTML = GEAR_ICON; return; }
   g.innerHTML = validatorMode ? ICON_VALIDATOR : ICON_EDITOR;
 }
@@ -1449,11 +1390,11 @@ function setValidateButton(running){
   b.textContent = running ? t('btn_cancel') : t('btn_pl_validate', 'Check All Streams');
 }
 function clearValidationStatus(){
-  // Rows only: the header carries .plestatus too, and a document-wide selector blanked its "Status" label.
+  // rows only: the header has .plestatus too
   const box = getId('pleditorcontent');
   if(box) box.querySelectorAll('.plestatus').forEach(function(el){ el.textContent=''; el.classList.remove('pass','fail'); });
 }
-/* Back to a clean editor: drop both classes, restore the title, clear the marks and the running state. */
+// back to a clean editor
 function resetValidatorMode(){
   validatorMode = false;
   validatorRunning = false;
@@ -1498,7 +1439,7 @@ function handleValidationMessage(pv){
     st.classList.toggle('pass', pass);
     st.classList.toggle('fail', !pass);
     if(!pass){
-      // Keep the row easy to remove: tick its checkbox, and mark the Name so a saved list records the fault.
+      // tick the row and mark its name
       const cb = li.getElementsByClassName('plcb')[0]; if(cb) cb.checked = true;
       const nm = li.getElementsByClassName('plename')[0];
       if(nm){
@@ -1539,8 +1480,7 @@ function submitWiFi(){
     xhr.open("POST",`http://${hostname}/upload`,true);
     xhr.send(formData);
     fileuploadinput.value = '';
-    // The device imports the file and restarts, so poll /ready like every other reboot rather than guessing a
-    // fixed delay: the page comes back the moment the startup services are up, and never sooner.
+    // device restarts: poll /ready like every reboot
     rebootSystem(t('msg_settings_saved', 'Settings saved. Rebooting...'));
   }
 }
@@ -1566,11 +1506,7 @@ function applyCommonPageMeta(){
 function changeMode(el){
   const cmd = el.dataset.command;
   el.classList.add('hidden');
-  /* The two mode icons are a pair, and this is the only place a switch starts, so flip them HERE - blank the list,
-     put the loader in it and lock the page in the same tick, before the request is even sent.  These branches used
-     to be the wrong way round: each hid the icon just pressed and then showed that same icon again, so the flip
-     never happened locally and only the device's playermode message ever did it - which arrives after the card has
-     been verified, or after it has been indexed. */
+  // this is where a switch starts: flip the icons
   if(cmd=='sd') getId('modesd').classList.remove('hidden');
   else getId('modeweb').classList.remove('hidden');
   setModeSwitching(true);
@@ -1590,8 +1526,7 @@ function playPreview(root) {
   
   sendStationAction(stationName, streamUrl, false);
 }
-/* A touch screen never fires :hover, so a button carrying .hold keeps its hover colours for a moment after the
-   press - long enough to be seen, short enough not to become a permanent highlight.  A second press restarts it. */
+// .hold keeps the hover colour briefly
 const HOLD_MS = 2000;
 function holdPressed(el){
   el.classList.add('pressed');
@@ -1613,8 +1548,9 @@ function continueLoading(mode){
         applyCommonPageMeta();
         if (newVerAvailable) getId('update_available').classList.remove('hidden');
         document.querySelectorAll('input[type="range"]').forEach(sl => { fillSlider(sl); });
-        websocket.send('getindex=1');
-        // Check if we need to load curated playlist for review
+        wsSetPageBurst(['getindex=1']);
+        wsRequestPageState();
+        // curated review, if pending
         if (sessionStorage.getItem('pl_import_review') === 'true') {
           const mode = sessionStorage.getItem('pl_import_mode') || 'replace';
           console.log('[Curated] Loading playlist for review, mode:', mode);
@@ -1638,17 +1574,11 @@ function continueLoading(mode){
           if (timezoneData) {
             populateTZDropdown(timezoneData);
           }
-          websocket.send('getsystem=1');
-          websocket.send('getscreen=1');
-          websocket.send('getscreensaver=1');
-          websocket.send('getlocale=1');
-          websocket.send('getweather=1');
-          websocket.send('getmqtt=1');
-          websocket.send('getcontrols=1');
+          // this page request set, re-asked on open
+          wsSetPageBurst(['getsystem=1','getscreen=1','getscreensaver=1','getlocale=1','getweather=1','getmqtt=1',
+                          'getcontrols=1','getactive=1','getbattery=1','getmute=1']);
           getWiFi(`http://${hostname}/data/wifi.csv`);
-          websocket.send('getactive=1');
-          websocket.send('getbattery=1');
-          websocket.send('getmute=1');
+          wsRequestPageState();
           classEach("reset", function(el){ el.innerHTML='<svg viewBox="0 0 16 16" class="fill"><path d="M8 3v5a36.973 36.973 0 0 1-2.324-1.166A44.09 44.09 0 0 1 3.417 5.5a52.149 52.149 0 0 1 2.26-1.32A43.18 43.18 0 0 1 8 3z"/><path d="M7 5v1h4.5C12.894 6 14 7.106 14 8.5S12.894 11 11.5 11H1v1h10.5c1.93 0 3.5-1.57 3.5-3.5S13.43 5 11.5 5h-4z"/></svg>'; });
           initDangerZone();
         });
@@ -1686,7 +1616,8 @@ function continueLoading(mode){
         });
         applyCommonPageMeta();
         getWiFi(`http://${hostname}/data/wifi.csv`);
-        websocket.send('getactive=1');
+        wsSetPageBurst(['getactive=1']);
+        wsRequestPageState();
       });
     });
   }
@@ -1703,8 +1634,7 @@ function continueLoading(mode){
     if(target.id === 'dangerzone_sw2') { toggleDangerZoneSwitch('dangerzone_sw2'); event.preventDefault(); event.stopPropagation(); return; }
     if(target.id === 'dangerzone_sw3') { toggleDangerZoneSwitch('dangerzone_sw3'); event.preventDefault(); event.stopPropagation(); return; }
     let command = target.dataset.command;
-    // The holder may be a wrapper - a button's label is often a div of its own - so a press that lands on a plain
-    // child still resolves to the element that carries the command.
+    // resolve to the nearest [data-command] holder
     if (!command) {
       const holder = target.closest('[data-command]');
       if (holder) { target = holder; command = holder.dataset.command; }
@@ -1715,7 +1645,7 @@ function continueLoading(mode){
         switch(command){
           case "toggle": toggleTarget(target, target.dataset.target); break;
           case "settings":
-            // While the playlist editor is open the gear is the Validator toggle; otherwise it opens settings.
+            // gear toggles Validator while editing
             if(pleditorOpen()){ setValidatorMode(!validatorMode); }
             else window.location.href=`http://${hostname}/settings.html`;
             break;
@@ -1728,13 +1658,12 @@ function continueLoading(mode){
           case "plundo": undoPlaylistChanges(); break;
           case "plshare": sharePlaylist(); break;
           case "fwupdate": window.location.href=`http://${hostname}/update.html`; break;
-          // In a new tab: the editor is used beside the settings page, and the device serves both from one server
+          // new tab: used beside settings
           case "editor": window.open(`http://${hostname}/editor.html`, '_blank'); break;
           case "webboard": window.location.href=`http://${hostname}/webboard`; break;
           case "setupir": window.location.href=`http://${hostname}/ir.html`; break;
           case "search": window.location.href=`http://${hostname}/search.html`; break;
-          // The page opens the mode itself, then replaces itself with "/"; when the mode is up the device
-          // redirects it to "/" anyway.
+          // page redirects itself to / when ready
           case "sdfilemanager": window.location.href=`http://${hostname}/sdmanager.html`; break;
           case "applyweather": applyWeather(); break;
           case "applytz": applyTZ(); break;
@@ -1985,9 +1914,9 @@ function abortHandler(event) {
 let dragged, id, index, indexDrop, list;
 let scrollInterval = null;
 let lastX = 0, lastY = 0;
-let touchTimeout = null;
 let startX = 0, startY = 0;
-const LONG_PRESS_DELAY = 1000;
+let pressHandle = null;    // handle held; the drag starts on movement
+const DRAG_START_PX = 6;
 
 function getLi(el) {
 	while (el && el !== document.body && el !== null) {
@@ -2047,7 +1976,7 @@ function updateIndices() {
 }
 
 function startDrag(target) {
-	if (validatorMode) return;   // the Validator has no reordering - the rows are not draggable there
+	if (validatorMode) return;  // no reordering in the Validator
 	const li = getLi(target);
 	if (li) {
 		dragged = li;
@@ -2104,82 +2033,56 @@ function doDrop(target) {
 	dragged = null;
 }
 
-document.addEventListener("dragstart", (e) => {
-	if (e.target.classList.contains('grabbable')) {
-		startDrag(e.target);
-	}
-});
-
-document.addEventListener("dragover", (e) => {
-	e.preventDefault();
-	handleAutoScroll(e.clientX, e.clientY);
-	const targetLi = getLi(e.target);
-	setIndicator(e, targetLi);
-});
-
-document.addEventListener("drop", (e) => {
-	doDrop(e.target);
-});
-
-document.addEventListener("dragend", (e) => {
+// one pointer path for mouse and touch
+function endDrag() {
+	pressHandle = null;
 	stopAutoScroll();
 	if (dragged) dragged.classList.remove('dragging');
 	clearIndicators();
 	dragged = null;
+}
+
+document.addEventListener("pointerdown", (e) => {
+	const handle = e.target.closest ? e.target.closest('.grabbable') : null;
+	if (!handle || !getLi(handle)) return;
+	if (e.pointerType === 'mouse' && e.button !== 0) return;
+	if (e.cancelable) e.preventDefault();   // keeps the browser's long press out
+	pressHandle = handle;
+	startX = e.clientX;
+	startY = e.clientY;
+	try { handle.setPointerCapture(e.pointerId); } catch (err) {}
 });
 
-// Prevent browser context menu on long press
+document.addEventListener("pointermove", (e) => {
+	if (dragged) {
+		handleAutoScroll(e.clientX, e.clientY);
+		setIndicator(e, getLi(document.elementFromPoint(e.clientX, e.clientY)));
+		return;
+	}
+	if (!pressHandle) return;
+	if (Math.abs(e.clientX - startX) <= DRAG_START_PX && Math.abs(e.clientY - startY) <= DRAG_START_PX) return;
+	const handle = pressHandle;
+	pressHandle = null;
+	startDrag(handle);
+	setIndicator(e, getLi(document.elementFromPoint(e.clientX, e.clientY)));   // mark at once
+});
+
+document.addEventListener("pointerup", (e) => {
+	const target = document.elementFromPoint(e.clientX, e.clientY);
+	pressHandle = null;
+	if (dragged) doDrop(target);
+});
+
+document.addEventListener("pointercancel", () => {
+	if (!dragged) { pressHandle = null; return; }   // nothing started, nothing to undo
+	endDrag();
+});
+
+// long press must not open the browser menu
 document.addEventListener("contextmenu", (e) => {
-	if (e.target.classList.contains('grabbable') || getLi(e.target)) {
+	const onHandle = e.target.closest && e.target.closest('.grabbable');
+	if (onHandle || getLi(e.target)) {
 		e.preventDefault();
 		return false;
-	}
-});
-
-// Mobile/Touch Support
-document.addEventListener("touchstart", (e) => {
-	if (e.target.classList.contains('grabbable')) {
-		// Prevent text selection and context menu
-		e.preventDefault();
-		const touch = e.touches[0];
-		startX = touch.clientX;
-		startY = touch.clientY;
-		const target = e.target;
-		touchTimeout = setTimeout(() => {
-			startDrag(target);
-			if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback when grab starts
-		}, LONG_PRESS_DELAY);
-	}
-}, { passive: false });
-
-document.addEventListener("touchmove", (e) => {
-	const touch = e.touches[0];
-	if (touchTimeout && !dragged) {
-		const moveX = Math.abs(touch.clientX - startX);
-		const moveY = Math.abs(touch.clientY - startY);
-		if (moveX > 10 || moveY > 10) {
-			clearTimeout(touchTimeout);
-			touchTimeout = null;
-		}
-	}
-	if (dragged) {
-		e.preventDefault(); // Prevent scrolling
-		handleAutoScroll(touch.clientX, touch.clientY);
-		const target = document.elementFromPoint(touch.clientX, touch.clientY);
-		const targetLi = getLi(target);
-		setIndicator(e, targetLi);
-	}
-}, { passive: false });
-
-document.addEventListener("touchend", (e) => {
-	if (touchTimeout) {
-		clearTimeout(touchTimeout);
-		touchTimeout = null;
-	}
-	if (dragged) {
-		stopAutoScroll();
-		const touch = e.changedTouches[0];
-		const target = document.elementFromPoint(touch.clientX, touch.clientY);
-		doDrop(target);
 	}
 });

@@ -246,6 +246,13 @@ If you connect the VS1053's audio jack directly to an amplifier (where the audio
 
 So, either do not connect an amplifier directly to the VS1053 or be sure to add isolation using EI14 600:600Ω transformers.
 
+#### Note for Audiophiles
+
+Nothing here can do more than 16 bits.
+The I2S decoder downgrades 24-bit FLAC to 16-bit internally; the VS1053 does that on-board.
+
+32-bit streams are likely impossible.
+
 ---
 
 ## Audio Amplification

@@ -235,6 +235,7 @@ void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, u
   #ifdef PSFBUFFER
     if (_fb) _fb->freeBuffer();
     else     _fb = new psFrameBuffer(dsp.width(), dsp.height());
+    if (_fb) _fb->setTag("scroll");
     // The window starts as the whole span and the first _syncWindow() narrows it to the text once the
     // text is known.  `align` places the TEXT inside the window, in _realLeft(true); centring the window
     // on the screen instead is what made `left` inert for a centred scroll.  Narrowing is safe because a
@@ -242,6 +243,8 @@ void ScrollWidget::init(ScrollConfig conf, uint16_t fgcolor, uint16_t bgcolor, u
     _syncWindow(true);
   #endif
   // Last, once _width and _textheight are known: the pace depends on the window's area.
+  _acc = 0;
+  _lastPaintMs = millis();
   _applyPace();
 }
 
@@ -263,8 +266,15 @@ void ScrollWidget::setScrollRole(ScrollRole_e role, uint8_t speedPct) {
   _applyPace();
 }
 
-// Work out how fast a line moves, how far it steps and how often, from the panel's numbers (dspconf.h) and this line's
-// own geometry.  Called from init(), from setScrollRole(), and once more after the first steps have been measured.
+// The share of the display task one scrolling line may take, in percent... higher is more smooth.
+// The most of the display task one scrolling line may take, in percent.  It is a cap on the paint RATE and nothing more:
+// with the distance paid by elapsed time it cannot make the text faster, so raising it buys nothing measurable (99 and 90
+// were indistinguishable), while lowering it only makes the paints rarer, so each one jumps further.
+#ifndef SCROLL_DUTY
+  #define SCROLL_DUTY 90
+#endif
+// Work out how fast a line moves, how far one paint may move and how often it may push, from the panel's numbers
+// (dspconf.h) and this line's own geometry.  Called from init(), setScrollRole(), and once after the first measurements.
 void ScrollWidget::_applyPace() {
   // Speed.  SCROLLPX is px/s at fontsize 1, and sqrt(textsize) scales it: a cell is 6 x textsize px, so a pixel speed
   // proportional to the cell's square root makes a bigger font move faster in px/s while its character rate falls.
@@ -278,33 +288,24 @@ void ScrollWidget::_applyPace() {
   px = px * pct / 100UL;
   if (!px) px = 1;
   _speedPxS = (uint16_t)(px > 0xFFFFUL ? 0xFFFFUL : px);
-  // Step and pitch.  A step is WHOLE pixels on purpose: a fractional one alternates (1, 1, 1, 2...) and can owe a
-  // tick that moves nothing at all, which reads both as a slow line and as a stutter.  So the step comes from the
-  // panel's budget and the pitch follows from it, which keeps the speed exact and the cadence even:
+  // The paint floor is the panel's budget for one push - the duty share of the measured cost - and it no longer sets
+  // the pace: elapsed time does, in _calcX(), so a panel that skips frames does not slow the text down.
   //
-  //   dutyMin = cost * 100 / (SCROLL_DUTY * 1000)      ms - shortest pitch the budget allows (cost is in us)
-  //   step    = max(1, ceil(speed * dutyMin / 1000))   whole pixels, never 0
-  //   pitch   = ceil(1000 * step / speed)              ms - >= dutyMin by construction
-  //
-  // That last line is also what paces a slow panel: the 480x320's meta line cannot afford better than ~3 px per
-  // 35 ms, and the settled gap between those pushes is what stops the band being caught mid-refresh.
+  //   dutyMin = cost * 100 / (SCROLL_DUTY * 1000)      ms - shortest gap the budget allows (cost is in us)
   uint32_t costUs = _stepCostUs;
   if (!costUs) costUs = (uint32_t)((float)((uint32_t)_width * (uint32_t)_textheight) * SCROLL_PUSH_US_PER_PX);
   uint32_t dutyMin = costUs * 100UL / ((uint32_t)(SCROLL_DUTY ? SCROLL_DUTY : 100) * 1000UL);
-  if (dutyMin < 1) dutyMin = 1;
-  uint32_t step = (px * dutyMin + 999UL) / 1000UL;      // ceil(speed * dutyMin / 1000)
-  if (step < 1) step = 1;
-  uint32_t pitch = (1000UL * step + px - 1) / px;       // ceil, ms
-  if (pitch < 1)    pitch = 1;
-  if (pitch > 1000) pitch = 1000;       // a whole second per step is the slowest a line can be and still be one
-  _stepPx = (uint16_t)(step > 0xFFFFUL ? 0xFFFFUL : step);
-  _stepMs = (uint16_t)pitch;
+  if (dutyMin < 1)    dutyMin = 1;
+  if (dutyMin > 1000) dutyMin = 1000;
+  _paintFloorMs = (uint16_t)dutyMin;
+  // One paint never crosses more than a character cell, so a real stall is a pause rather than a jump.
+  _stepMax = _charWidth ? (uint16_t)_charWidth : 1;
   _startscrolldelay = scrollHoldFor(_role);
 }
 
 // The estimate only has to be in the right order of magnitude, because the first few steps replace it with what this
-// panel actually costs.  A running mean, then ONE re-derivation - the speed is unchanged by it, so the motion does not
-// jump; only the step size and the pitch move together.
+// panel actually costs.  A running mean, then ONE re-derivation - the speed is untouched by it, so the motion does not
+// jump; only the paint floor moves.
 #define SCROLL_MEASURE_STEPS 4
 void ScrollWidget::_measureStep(uint32_t us) {
   if (_stepCount >= SCROLL_MEASURE_STEPS) return;
@@ -481,8 +482,8 @@ bool ScrollWidget::_scrollReady() const {
 // parked and the step interval while it is mid-sweep.
 bool ScrollWidget::scrollWanted() const {
   if (!_scrollReady()) return false;
-  const uint16_t fbl = _fb->ready() ? 0 : _config.offset;
-  const uint16_t wait = (_x == fbl) ? _startscrolldelay : _stepMs;
+  // Parked: the hold.  Moving: the paint floor, which is the shortest gap this panel can afford.
+  const uint16_t wait = (_x == (_fb->ready() ? 0 : _config.offset)) ? _startscrolldelay : _paintFloorMs;
   return (uint32_t)(millis() - _scrolldelay) > wait;
 }
 
@@ -492,9 +493,10 @@ bool ScrollWidget::scrollWanted() const {
 void ScrollWidget::scrollTurn() {
   if (!_scrollReady() || dsp.getScrollId() != NULL) return;
   _scrolldelay = millis();
-  // A slow speed on a short pitch owes zero pixels on some steps.  Spend the step and draw nothing: the page has
-  // already moved its round-robin past this line, so the slot goes to the next one and no frame is wasted pushing a
-  // window that did not change.
+  // A sweep OPENS with one pixel: the hold is not distance owed, and a paint that owes nothing yet would give the
+  // slot back and never start the line.
+  if (_x == (_fb->ready() ? 0 : _config.offset)) { _lastPaintMs = millis(); _acc = 1000; }
+  // Nothing owed yet: the turn is given back without a push, so no frame is spent on an unchanged window.
   if (!_calcX()) return;
   if (_active) {
     const uint32_t t0 = micros();
@@ -509,13 +511,20 @@ void ScrollWidget::loop() {
   // Only the OWNER steps here.  A line that wants the slot waits for Page::loop() to hand it over, so two lines can
   // never race for it and a line that has just finished a sweep cannot take it back before the others get a turn.
   if (!_doscroll || _config.textsize == 0 || dsp.getScrollId() != this) return;
-  uint16_t fbl = _fb->ready()?0:_config.offset;
-  if (_checkDelay(_x == fbl ? _startscrolldelay : _stepMs, _scrolldelay)) {
-    if (_calcX() && _active) {
-      const uint32_t t0 = micros();
-      _draw();
-      _measureStep(micros() - t0);
-    }
+  const uint16_t fbl = _fb->ready()?0:_config.offset;
+  if (_x == fbl) {
+    // Parked: the hold is not distance owed, so the accumulator follows the clock and the sweep opens with one pixel.
+    _lastPaintMs = millis();
+    _acc = 0;
+    if (!_checkDelay(_startscrolldelay, _scrolldelay)) return;
+    _acc = 1000;
+  } else if (!_checkDelay(_paintFloorMs, _scrolldelay)) {
+    return;
+  }
+  if (_calcX() && _active) {
+    const uint32_t t0 = micros();
+    _draw();
+    _measureStep(micros() - t0);
   }
 }
 
@@ -576,6 +585,9 @@ void ScrollWidget::_draw() {
       _fb->display();
     #endif
     } else {
+      #ifdef WIDGET_DEBUG
+        const uint32_t tD0 = micros();
+      #endif
       dsp.fillRect(_config.offset, _config.top, _width, _textheight, _bgcolor);
       dsp.setCursor(_x + hiddenChars * _charWidth, _config.top);
       dsp.setClipping({_config.offset, _config.top, _width, _textheight});
@@ -584,6 +596,14 @@ void ScrollWidget::_draw() {
       dsp.resetUTF8();
       dsp.print(" ");
       dsp.clearClipping();
+      #ifdef WIDGET_DEBUG
+        // No framebuffer on this build: the paint IS the panel write, so it is timed like one.
+        const uint32_t tD = micros() - tD0;
+        if (tD / 1000UL >= SLOW_WRITE_MS)
+          FUNCTIONLOG("Push", "scroll-dsp slow %lums: %u glyphs in %ux%u",
+                      (unsigned long)(tD / 1000UL), (unsigned)utf8_strlen(_window),
+                      (unsigned)_width, (unsigned)_textheight);
+      #endif
     }
     _spanPainted();
   } else {
@@ -618,15 +638,43 @@ void ScrollWidget::_draw() {
   }
 }
 
-// One step of _stepPx whole pixels.  Returns false only when the line is not scrolling.
+// Advance by whatever the wall clock owes since the last paint, so the speed is exact at ANY pass rate and a dropped
+// frame costs smoothness alone.  False when nothing is owed yet: no push is spent on an unchanged window.
 bool ScrollWidget::_calcX() {
   if (!_doscroll || _config.textsize == 0) return false;
-  const uint16_t d = _stepPx;
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - _lastPaintMs;   // every ms of wall time is charged exactly once
+  _lastPaintMs = now;
+  _acc += (uint32_t)_speedPxS * elapsed;         // px x1000
+  #ifdef WIDGET_DEBUG
+    _dbgWinMs += elapsed;
+  #endif
+  uint32_t d = _acc / 1000;
+  _acc -= d * 1000;
   if (!d) return false;
-  _x -= d;
+  if (d > _stepMax) { d = _stepMax; _acc = 0; }  // a stall is a pause, not a jump
+  #ifdef WIDGET_DEBUG
+    _dbgMoved += d; _dbgPaints++; _dbgStepSum += d;
+    if (d < _dbgSeenMin) _dbgSeenMin = (uint16_t)d;
+    if (d > _dbgSeenMax) {
+      _dbgSeenMax = (uint16_t)d;
+      _dbgAgeMax = (uint16_t)(elapsed > 60000UL ? 60000UL : elapsed);
+    }
+    if (_dbgPaints && _dbgWinMs >= 5000) {
+      FUNCTIONLOG("Widgets.pace", "role=%u %lupx/s, %lu paints (%.1f/s), step %u..%u age %ums mean %.1f, floor %ums",
+                  (unsigned)_role, (unsigned long)(_dbgMoved * 1000UL / _dbgWinMs),
+                  (unsigned long)_dbgPaints, (float)_dbgPaints * 1000.0f / (float)_dbgWinMs,
+                  (unsigned)_dbgSeenMin, (unsigned)_dbgSeenMax, (unsigned)_dbgAgeMax,
+                  _dbgPaints ? (float)_dbgStepSum / (float)_dbgPaints : 0.0f, (unsigned)_paintFloorMs);
+      _dbgWinMs = 0; _dbgMoved = 0; _dbgPaints = 0; _dbgStepSum = 0;
+      _dbgSeenMin = 0xFFFF; _dbgSeenMax = 0; _dbgAgeMax = 0;
+    }
+  #endif
+  _x -= (int16_t)d;
   uint16_t fbl = _fb->ready()?0:_config.offset;
   if (-_x > _textwidth + _sepwidth - fbl) {
     _x = fbl;
+    _acc = 0;
     dsp.setScrollId(NULL);
   } else {
     dsp.setScrollId(this);
@@ -677,19 +725,6 @@ void ScrollWidget::_syncWindow(bool force){
       _fb->freeBuffer();                       // erases the old window - the only pixels this line owns
       _fb->begin(&dsp, x, _config.top, w, _textheight, _bgcolor);
       _winx = x; _winw = w;
-      #ifdef WIDGET_DEBUG
-        // JITTER PROBE (temporary): re-making a window ERASES THE PANEL (freeBuffer -> fillRect) with no push behind
-        // it, then allocates and zero-fills in PSRAM, and only then does _draw() paint and push - an erase, a gap and a
-        // redraw, which is the reported shape.  Prints only when it actually happens, so a quiet log is an answer too.
-        static uint16_t winMakes = 0;
-        static uint32_t winMakesMs = 0;
-        const uint32_t nowMk = millis();
-        SERIALLOG("[JT] winmake n=%u top=%u rect=%u,%u %ux%u since=%ums",
-                  ++winMakes, _config.top, x, _config.top, w, _textheight,
-                  winMakesMs ? (unsigned)(nowMk - winMakesMs) : 0u);
-        SERIALLOGLF();
-        winMakesMs = nowMk;
-      #endif
     }
   #endif
 }
@@ -701,6 +736,8 @@ void ScrollWidget::_reset(){
   if(!_present) return;
   dsp.setScrollId(NULL);
   _scrolldelay = millis();
+  _lastPaintMs = millis();
+  _acc = 0;
   _syncWindow(true);
   _x = _fb && _fb->ready()?0:_config.offset;
 }
@@ -1118,6 +1155,7 @@ void ClockWidget::init(WidgetConfig wconf, uint16_t fgcolor, uint16_t bgcolor){
   #ifdef PSFBUFFER
     if (_fb) _fb->freeBuffer();
     else     _fb = new psFrameBuffer(dsp.width(), dsp.height());
+    if (_fb) _fb->setTag("clock");
     _begin();
   #endif
 }

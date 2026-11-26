@@ -37,7 +37,17 @@
 //                    the display's counterpart to Max Main Loop Time, and the
 //                    two together say whether a stall came from the drawing or
 //                    from somewhere else.
+//   cmMaxDspPagerUs / cmMaxDspReqUs / cmMaxDspIoUs   that same maximum split by
+//                    stage - the page's widgets, the queue request handler
+//                    (cmWorstReqType names its worst one), and dsp.loop().
+//                    The bare total says how long; these say which part.
 // ==========================================================================
+
+// A panel write slower than this is reported in WIDGET_DEBUG builds - the one measurement that separates "we drew too
+// much" from "the bus stalled": a slow write of a small window is a stall, a slow write of a big one is work.
+#ifndef SLOW_WRITE_MS
+  #define SLOW_WRITE_MS 30
+#endif
 
 #ifdef CORE_MONITOR
   extern volatile uint32_t cmDspLoopCount;
@@ -48,12 +58,22 @@
   extern volatile uint32_t cmPushCount;
   extern volatile uint8_t  cmDspCore;
   extern volatile uint32_t cmMaxDspWorkUs;
+  extern volatile uint32_t cmMaxDspPagerUs;
+  extern volatile uint32_t cmMaxDspReqUs;
+  extern volatile uint32_t cmMaxDspIoUs;
+  extern volatile uint8_t  cmWorstReqType;
 
   // The task passes its own core in, so the figure can never be mislabelled even if the task is pinned elsewhere.
   static inline void cmCountDspLoop(uint8_t core) { cmDspLoopCount = cmDspLoopCount + 1; cmDspCore = core; }
   // How long one display.loop() call took.  A micros() wrap inside a call would read as a huge value, so anything
   // past the halfway point is rejected rather than recorded as a bogus maximum.
   static inline void cmNoteDspWork(uint32_t us) { if (us < 0x80000000UL && us > cmMaxDspWorkUs) cmMaxDspWorkUs = us; }
+  // The same per stage, so a long pass can be attributed instead of guessed at.  Wrap guard as above.
+  static inline void cmNoteDspPager(uint32_t us) { if (us < 0x80000000UL && us > cmMaxDspPagerUs) cmMaxDspPagerUs = us; }
+  static inline void cmNoteDspReq(uint32_t us, uint8_t type) {
+    if (us < 0x80000000UL && us > cmMaxDspReqUs) { cmMaxDspReqUs = us; cmWorstReqType = type; }
+  }
+  static inline void cmNoteDspIo(uint32_t us) { if (us < 0x80000000UL && us > cmMaxDspIoUs) cmMaxDspIoUs = us; }
   // volatile counters, so `x = x + 1` rather than `++`: the latter is deprecated in C++20 and GCC 14 says so
   static inline void cmCountGlyph()       { cmGlyphCount = cmGlyphCount + 1; }
   static inline void cmCountPreTextCall() { cmPreTextCalls = cmPreTextCalls + 1; }
@@ -63,6 +83,9 @@
 #else
   static inline void cmCountDspLoop(uint8_t core) { }
   static inline void cmNoteDspWork(uint32_t us)   { }
+  static inline void cmNoteDspPager(uint32_t us)  { }
+  static inline void cmNoteDspReq(uint32_t us, uint8_t type) { }
+  static inline void cmNoteDspIo(uint32_t us)     { }
   static inline void cmCountGlyph()       { }
   static inline void cmCountPreTextCall() { }
   static inline void cmCountPreTextHit()  { }

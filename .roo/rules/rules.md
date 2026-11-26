@@ -24,3 +24,6 @@ The `.github/` directory is the single source of truth for all AI assistant rule
 - **A comment in source must never name a plan file.** `plans/` is working memory: it is not distributed and will be
   deleted sooner or later, so "see `plans/ovol-fix-and-live-edit.md` §13.21" is a dead pointer for anyone reading the
   code. State the fact the reader needs; keep the investigation and its history in the plan.
+- **Keep a source comment to a phrase: five to thirty words, `//`, never a paragraph.** The reasoning behind a non-obvious
+  guard, the measured numbers and the history belong in `code-summary.md`, not beside the code. Comments in `.html` and `.js`
+  files should be five to ten words.

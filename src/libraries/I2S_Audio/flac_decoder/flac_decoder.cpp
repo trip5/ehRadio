@@ -8,6 +8,8 @@
  *
  * Author: Wolle
  *
+ * Frankstein surgery performed by Trip5 for ehRadio
+ * See i2s-frankenstein-surgery-notes.md for more information
  */
 #include "flac_decoder.h"
 #include "vector"
@@ -21,6 +23,12 @@ using namespace std;
 static uint32_t s_pfResidUs = 0;
 static uint32_t s_pfLpcUs   = 0;
 static uint32_t s_pfFrames  = 0;
+// Output-path statistics, read and reset by the i2s report.  Cheap enough to leave on: three instructions a sample.
+static int32_t  s_dbgPeakRaw = 0;      // largest |sample| before the 16-bit downshift
+static int32_t  s_dbgPeakOut = 0;      // largest |sample| after it
+static uint32_t s_dbgBlocks  = 0;
+static uint8_t  s_dbgAsgn    = 255;    // last frame's channel assignment
+static uint8_t  s_dbgSsw     = 255;    // last frame's sample-size code (0 = take it from STREAMINFO)
 void FLACProfileGet(uint32_t* residUs, uint32_t* lpcUs, uint32_t* frames){
     *residUs = s_pfResidUs; *lpcUs = s_pfLpcUs; *frames = s_pfFrames;
     s_pfResidUs = 0; s_pfLpcUs = 0; s_pfFrames = 0;
@@ -35,6 +43,14 @@ void FLACProfileReset(void){
 
 FLACFrameHeader_t*   FLACFrameHeader;
 FLACMetadataBlock_t* FLACMetadataBlock;
+
+// Read and reset, once per i2s window.  Down here because it reads FLACMetadataBlock, which is declared just above.
+void FLACGetOutputStats(uint8_t* bits, uint8_t* asgn, uint8_t* ssw, int32_t* peakRaw, int32_t* peakOut, uint32_t* blocks){
+    *bits = FLACMetadataBlock ? FLACMetadataBlock->bitsPerSample : 0;
+    *asgn = s_dbgAsgn; *ssw = s_dbgSsw;
+    *peakRaw = s_dbgPeakRaw; *peakOut = s_dbgPeakOut; *blocks = s_dbgBlocks;
+    s_dbgPeakRaw = 0; s_dbgPeakOut = 0; s_dbgBlocks = 0;
+}
 
 vector<uint32_t> s_flacSegmTableVec;
 vector<int32_t>  coefs;
@@ -130,11 +146,11 @@ static bool      s_dgContPage      = false;
 // Reassemblies since the last reset, reported in the reader's `deogg:` line.
 static uint32_t  s_dgReassembled   = 0;
 
-/* Does this run start an Ogg FLAC metadata packet?  Only the mapping header (0x7F 'F' 'L' 'A' 'C') or a block header
-   (type 0..6 with a non-zero length) qualify; everything else is AUDIO, because a false metadata deletes a whole frame
-   from the ring while a false AUDIO only costs one resync.  Vorbis and Opus are refused by NAME: their headers start
-   0x01/0x03/0x05 + "vorbis" or "Opus...", which reads as a valid block header and sent a Vorbis stream into the FLAC
-   comment parser - a LoadProhibited on every preview of that station. */
+// Does this run start an Ogg FLAC metadata packet?  Only the mapping header (0x7F 'F' 'L' 'A' 'C') or a block header
+// (type 0..6 with a non-zero length) qualify; everything else is AUDIO, because a false metadata deletes a whole frame
+// from the ring while a false AUDIO only costs one resync.  Vorbis and Opus are refused by NAME: their headers start
+// 0x01/0x03/0x05 + "vorbis" or "Opus...", which reads as a valid block header and sent a Vorbis stream into the FLAC
+// comment parser - a LoadProhibited on every preview of that station.
 static bool dgLooksLikeMetadata(const uint8_t* p, uint32_t n){
     if(n >= 5 && p[0] == 0x7F && p[1] == 'F' && p[2] == 'L' && p[3] == 'A' && p[4] == 'C') return true;
     if(n >= 7 && (p[0] == 0x01 || p[0] == 0x03 || p[0] == 0x05) && !memcmp(p + 1, "vorbis", 6)) return false;
@@ -270,8 +286,8 @@ static void FLACOfferCommentPacket(const uint8_t* p, int32_t len){
 }
 
 int32_t FLACDeOgg(uint8_t* dst, int32_t dstRoom, const uint8_t* src, int32_t len){
-    /* ONE BYTE IN, AT MOST ONE BYTE OUT: output may never exceed input, which is why the caller reads the full
-       `room`.  writeSpace() is contiguous-only, so a reserve subtracted from it latches the reader permanently. */
+        // ONE BYTE IN, AT MOST ONE BYTE OUT: output may never exceed input, which is why the caller reads the full
+    // `room`.  writeSpace() is contiguous-only, so a reserve subtracted from it latches the reader permanently.
     if(dstRoom < len) return -1;                // callers cap `len` at the space they actually have
     int32_t out = 0, i = 0;
     while(i < len){
@@ -665,7 +681,7 @@ int32_t FLACFindSyncWord(unsigned char *buf, int32_t nBytes) {
         return i;
     }
     else{
-         /* find byte-aligned sync code - need 14 matching bits */
+                  // find byte-aligned sync code - need 14 matching bits
         for (i = 0; i < nBytes - 1; i++) {
             if ((buf[i + 0] & 0xFF) == 0xFF  && (buf[i + 1] & 0xFC) == 0xF8) { // <14> Sync code '11111111111110xx'
                 if(i) FLACDecoderReset();
@@ -1268,6 +1284,10 @@ int8_t FLACDecodeNative(uint8_t *inbuf, int32_t *bytesLeft, int16_t *outbuf){
     while(s_flacStatus == DECODE_FRAME){// Read a ton of header fields, and ignore most of them
         int32_t ret = flacDecodeFrame (inbuf, bytesLeft);
         if(ret != 0) return ret;
+                // Hand back after the header and decode the subframes on the next call.  This is the mechanism that lets a
+        // frame larger than the buffer be decoded - the next call starts a fresh buffer at the subframe data - so it
+        // must not be "optimised" away: dropping the check would decode truncated frames instead.  Every frame costs
+        // two calls, about 12 a second on a 48 kHz stream.  Only meaningful while MAX_BLOCKSIZE <= m_frameSizeFLAC.
         if(*bytesLeft < MAX_BLOCKSIZE) return FLAC_DECODE_FRAMES_LOOP; // need more data
         sbl += bl - *bytesLeft;
     }
@@ -1287,12 +1307,23 @@ int8_t FLACDecodeNative(uint8_t *inbuf, int32_t *bytesLeft, int16_t *outbuf){
         if(s_numOfOutSamples < s_flacOutBuffSize + s_offset) blockSize = s_numOfOutSamples - s_offset;
         else blockSize = s_flacOutBuffSize;
 
+        s_dbgAsgn = FLACFrameHeader->chanAsgn;
+        s_dbgSsw  = FLACFrameHeader->sampleSizeCode;
+        s_dbgBlocks++;
         for (int32_t i = 0; i < blockSize; i++) {
             for (int32_t j = 0; j < FLACMetadataBlock->numChannels; j++) {
                 int32_t val = s_samplesBuffer[j][i + s_offset];
+                // Peak before and after the downshift: a wrong shift and a wrong parse look identical without them.
+                { const int32_t a = val < 0 ? -val : val; if(a > s_dbgPeakRaw) s_dbgPeakRaw = a; }
                 if (FLACMetadataBlock->bitsPerSample == 8) val += 128;
-                // A 24-bit source is scaled to the 16-bit output path here rather than being refused upstream.
-                if (FLACMetadataBlock->bitsPerSample > 16) val >>= (FLACMetadataBlock->bitsPerSample - 16);
+                                // A 24-bit source is scaled to the 16-bit output path here rather than being refused upstream.  Rounded,
+                // not truncated: a bare >> floors every sample by up to one output step (~-96 dBFS, inaudible, but not
+                // what a conversion should do).  Half of the dropped range added before the shift is the textbook form.
+                if (FLACMetadataBlock->bitsPerSample > 16) {
+                    const uint8_t drop = FLACMetadataBlock->bitsPerSample - 16;
+                    val = (val + (1 << (drop - 1))) >> drop;
+                }
+                { const int32_t a = val < 0 ? -val : val; if(a > s_dbgPeakOut) s_dbgPeakOut = a; }
                 outbuf[2*i+j] = val;
             }
         }
@@ -1335,11 +1366,11 @@ int8_t flacDecodeFrame(uint8_t *inbuf, int32_t *bytesLeft){
     FLACFrameHeader->sampleRateCode = readUint(4, bytesLeft);
     FLACFrameHeader->chanAsgn = readUint(4, bytesLeft);
     FLACFrameHeader->sampleSizeCode = readUint(3, bytesLeft);
-    /* Verdicts before anything acts on these codes.  A desynced stream produces bytes that look like a frame header,
-       and the reserved values are the cheapest proof that this is not one.  Without this the decoder believed a
-       garbage header and follow-on code populated STREAMINFO from it: a 48000 Hz stereo stream became
-       `decoder: 96000 Hz, 1 ch, 8 bits -> I2S clock 96000 Hz` mid-playback on 2026.11.14 - an audible rate change
-       driven entirely by junk.  Channel assignment 11..15 and sample sizes 3 and 7 are reserved by the format. */
+        // Verdicts before anything acts on these codes.  A desynced stream produces bytes that look like a frame header,
+    // and the reserved values are the cheapest proof that this is not one.  Without this the decoder believed a
+    // garbage header and follow-on code populated STREAMINFO from it: a 48000 Hz stereo stream became
+    // `decoder: 96000 Hz, 1 ch, 8 bits -> I2S clock 96000 Hz` mid-playback on 2026.11.14 - an audible rate change
+    // driven entirely by junk.  Channel assignment 11..15 and sample sizes 3 and 7 are reserved by the format.
     if(FLACFrameHeader->chanAsgn > 10)       return ERR_FLAC_RESERVED_CHANNEL_ASSIGNMENT;
     if(FLACFrameHeader->sampleSizeCode == 3 ||
        FLACFrameHeader->sampleSizeCode == 7) return ERR_FLAC_BITS_PER_SAMPLE_UNKNOWN;
@@ -1356,11 +1387,11 @@ int8_t flacDecodeFrame(uint8_t *inbuf, int32_t *bytesLeft){
         if(FLACFrameHeader->sampleSizeCode == 5) FLACMetadataBlock->bitsPerSample = 20;
         if(FLACFrameHeader->sampleSizeCode == 6) FLACMetadataBlock->bitsPerSample = 24;
     }
-    /* 24-bit is accepted and narrowed at the write-out below, not refused.  mscp4.live-streams.nl's lounge.ogg is a
-       24-bit Ogg FLAC stream, and the VS1053's FLAC plugin plays it (that path never looks at a sample depth), so
-       this decoder was the only thing that could not.  It has no reason to refuse either: the sample buffers are
-       int32_t and decodeSubframe()/the prediction path already take the depth as a parameter, so 24-bit frames
-       decode exactly - only the read-out into the 16-bit output narrows.  Above 24 is still refused. */
+        // 24-bit is accepted and narrowed at the write-out below, not refused.  mscp4.live-streams.nl's lounge.ogg is a
+    // 24-bit Ogg FLAC stream, and the VS1053's FLAC plugin plays it (that path never looks at a sample depth), so
+    // this decoder was the only thing that could not.  It has no reason to refuse either: the sample buffers are
+    // int32_t and decodeSubframe()/the prediction path already take the depth as a parameter, so 24-bit frames
+    // decode exactly - only the read-out into the 16-bit output narrows.  Above 24 is still refused.
     if(FLACMetadataBlock->bitsPerSample > 24) return ERR_FLAC_BITS_PER_SAMPLE_TOO_BIG;
     if(FLACMetadataBlock->bitsPerSample < 8 ) return ERR_FLAC_BITS_PER_SAMPLE_UNKNOWN;
     if(!FLACMetadataBlock->sampleRate){
@@ -1434,9 +1465,9 @@ uint64_t FLACGetTotoalSamplesInStream(){
 //----------------------------------------------------------------------------------------------------------------------
 uint8_t FLACGetBitsPerSample(){
     if(!FLACMetadataBlock) return 0;
-    /* The depth the OUTPUT samples have, not the depth the stream declares.  24-bit frames are shifted down on the way
-       out, so publishing 24 here would make setBitsPerSample() refuse the stream outright (it accepts 8 and 16) and
-       make the rest of the library treat the output as one byte per sample. */
+        // The depth the OUTPUT samples have, not the depth the stream declares.  24-bit frames are shifted down on the way
+    // out, so publishing 24 here would make setBitsPerSample() refuse the stream outright (it accepts 8 and 16) and
+    // make the rest of the library treat the output as one byte per sample.
     return FLACMetadataBlock->bitsPerSample > 16 ? 16 : FLACMetadataBlock->bitsPerSample;
 }
 //----------------------------------------------------------------------------------------------------------------------
@@ -1634,16 +1665,32 @@ int8_t decodeResiduals(uint8_t warmup, uint8_t ch, int32_t* bytesLeft) {
     return ERR_FLAC_NONE;
 }
 //----------------------------------------------------------------------------------------------------------------------
-void restoreLinearPrediction(uint8_t ch, uint8_t shift) {
+// The accumulator has to be wider than sample x coefficient x order, or it wraps and every LPC subframe comes out as
+// noise.  For a 16-bit source the sum lands just under int32 (2^15 samples x 2^15 coefficients, with the quantiser shift
+// keeping it in range), which is why int32 looked safe for years; for a 24-bit source it is 2^23 x 2^15 = 2^38 and it
+// overflows on every frame - audible as static, invisible everywhere else, because the bitstream is consumed correctly
+// and no counter can see a value that is wrong rather than missing.  The reference decoder carries this in 64 bits.
+// `shift` is signed by definition (readSignedInt(5) in the LPC path): a negative value means shift left.
+void restoreLinearPrediction(uint8_t ch, int32_t shift) {
     #if FLAC_PROFILE
         const uint32_t pf0 = (uint32_t)micros();
     #endif
-    for (int32_t i = coefs.size(); i < s_numOfOutSamples; i++) {
-        int32_t sum = 0;
-        for (int32_t j = 0; j < coefs.size(); j++){
-            sum += s_samplesBuffer[ch][i - 1 - j] * coefs[j];
+    if(FLACMetadataBlock && FLACMetadataBlock->bitsPerSample > 16) {
+        for (int32_t i = coefs.size(); i < s_numOfOutSamples; i++) {
+            int64_t sum = 0;
+            for (int32_t j = 0; j < coefs.size(); j++){
+                sum += (int64_t)s_samplesBuffer[ch][i - 1 - j] * (int64_t)coefs[j];
+            }
+            s_samplesBuffer[ch][i] += (shift >= 0) ? (int32_t)(sum >> shift) : (int32_t)(sum << -shift);
         }
-        s_samplesBuffer[ch][i] += (sum >> shift);
+    } else {
+        for (int32_t i = coefs.size(); i < s_numOfOutSamples; i++) {
+            int32_t sum = 0;
+            for (int32_t j = 0; j < coefs.size(); j++){
+                sum += s_samplesBuffer[ch][i - 1 - j] * coefs[j];
+            }
+            s_samplesBuffer[ch][i] += (shift >= 0) ? (sum >> shift) : (sum << -shift);
+        }
     }
     #if FLAC_PROFILE
         s_pfLpcUs += (uint32_t)(micros() - pf0);

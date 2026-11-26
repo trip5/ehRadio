@@ -4,6 +4,9 @@
  *
  *  Created on: 26.10.2018
  *  Updated on: 09.09.2024
+ *
+ * Frankstein surgery performed by Trip5 for ehRadio
+ * See i2s-frankenstein-surgery-notes.md for more information
  */
 #include "mp3_decoder.h"
 /* clip to range [-2^n, 2^n - 1] */

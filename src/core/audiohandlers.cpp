@@ -262,7 +262,12 @@ void AudioHandlers::handleBitrate(const char* info) {
   #ifdef AUDIO_DEBUG
     FUNCTIONLOG("Audio.bitrate", "%s", info);
   #endif
-  config.station.bitrate = atoi(info) / 1000;
+  // "BitRate: N/A" and a bare 0 both arrive here, and atoi() turns either into a bitrate of 0 - which erased a
+  // badge that was already correct.  Rounding rather than truncating closes the other half: a sub-kbit sample used
+  // to divide to 0 and blank the number while still passing the truthiness test.
+  const uint32_t kbps = ((uint32_t)atoi(info ? info : "") + 500u) / 1000u;
+  if (!kbps) return;
+  config.station.bitrate = kbps;
   display.putRequest(DBITRATE);
   netserver.requestOnChange(BITRATE, 0);
 }

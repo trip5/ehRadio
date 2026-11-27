@@ -958,15 +958,6 @@ or examine the examples in builds/trip5 and make your own!
 #ifndef BUFFERBAR_VISUAL_FULL_KB
   #define BUFFERBAR_VISUAL_FULL_KB 250
 #endif
-#ifndef AUDIO_RISK_ENGAGE_MS
-  #define AUDIO_RISK_ENGAGE_MS 500 // DSP_TASK_DELAY throttles the display (1/4 FPS) if audio buffer falls below this time (relieves audio-display contention)
-#endif
-#ifndef AUDIO_RISK_RELEASE_MS
-  #define AUDIO_RISK_RELEASE_MS 3000 // When the buffer contains more than this time of audio, the throttle is released (see audioRingAtRisk() in display.cpp)
-#endif
-#if AUDIO_RISK_RELEASE_MS <= AUDIO_RISK_ENGAGE_MS
-  #error define error: AUDIO_RISK_RELEASE_MS must be greater than AUDIO_RISK_ENGAGE_MS
-#endif
 // The next bits are all related to the VU meter... values have been chosen carefully but you may wish to change them
 #ifndef VU_REFRESH_MS
   #define VU_REFRESH_MS 33 // Redraw ceiling for the VU widget, 33 is ~30 Hz - the audio core only produces 30-50 levels/s

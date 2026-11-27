@@ -225,10 +225,6 @@ public:
     uint8_t  getBitsPerSample();
     uint8_t  getChannels();
     uint32_t getBitRate(bool avg = false);
-    // Measured consumption rate in BYTES per second, 0 until one has been measured.  The display's audio-risk limiter
-    // converts ring occupancy into milliseconds with it, which is the only unit in which "can we afford a redraw"
-    // means the same thing for a 128 kbit stream and a 1.7 Mbit one.
-    uint32_t streamBytesPerSecond(){ return m_streamBytesSec; }
     uint32_t getAudioFileDuration();
     uint32_t getAudioCurrentTime();
     uint32_t getTotalPlayingTime();
@@ -815,7 +811,6 @@ private:
     uint32_t        h_bitRate=0;                    // current bitrate given fom header
     uint32_t        m_bitRate=0;                    // current bitrate given fom decoder
     uint32_t        m_avr_bitrate = 0;              // average bitrate, median computed by VBR
-    uint32_t        m_streamBytesSec = 0;           // measured consumption, bytes/s: read by the display risk limiter
     int             m_readbytes = 0;                // bytes read
     uint32_t        m_metacount = 0;                // counts down bytes between metadata
     int             m_controlCounter = 0;           // Status within readID3data() and readWaveHeader()

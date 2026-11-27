@@ -227,9 +227,11 @@ class ScrollWidget: public TextWidget {
     #ifdef WIDGET_DEBUG
       // Delivered pace, reported every 5 s of MOVING time: px/s and paints/s are what the overhaul is judged on.
       // _dbgAgeMax is the elapsed time behind the largest step, which is the only thing that separates a long pass
-      // from a stamp gone stale on some other path.
+      // from a stamp gone stale on some other path.  _dbgClamps counts steps cut to one character cell, which is the
+      // only way this code loses speed: it drops the rest of the debt, so a nonzero count explains a delivered px/s
+      // below _speedPxS.
       uint32_t _dbgMoved = 0, _dbgPaints = 0, _dbgStepSum = 0, _dbgWinMs = 0;
-      uint16_t _dbgSeenMin = 0xFFFF, _dbgSeenMax = 0, _dbgAgeMax = 0;
+      uint16_t _dbgSeenMin = 0xFFFF, _dbgSeenMax = 0, _dbgAgeMax = 0, _dbgClamps = 0;
     #endif
     ScrollRole_e _role = SCROLL_ROLE_TITLES;
     uint8_t  _speedPct = 100;

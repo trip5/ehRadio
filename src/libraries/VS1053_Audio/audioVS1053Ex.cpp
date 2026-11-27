@@ -1135,7 +1135,6 @@ void Audio::loop(){
                 const uint32_t sample = (uint32_t)((eaten * 8 * 1000) / (int64_t)dt);   // bit/s
                 s_brMeasured = s_brMeasured ? (uint32_t)((s_brMeasured * 4 + sample) / 5) : sample;
                 m_avr_bitrate = s_brMeasured;
-                m_streamBytesSec = s_brMeasured / 8;      // for the display's audio-risk limiter
                 // A local file knows its own length, so the duration follows from the measured rate.  Streams report
                 // m_audioDataSize 0, which is why this is guarded rather than a division by it.  Before this the
                 // duration of a local FLAC/WAV came from the HDAT0 x 8 estimate, i.e. from a number with no meaning.
@@ -3287,7 +3286,6 @@ void Audio::setDefaults(){
         // A new connection must not inherit the previous stream's bitrate.  Without these three lines the first estimate
     // of a stream compares against a stale value, marks itself "unchanged" and reports nothing at all.
     m_avr_bitrate = 0;
-    m_streamBytesSec = 0;                                    // no measured rate until the first window
     m_brFromHeader = false;
     bitrateReset();                                          // a new connection starts its own measurement window
         // Per-track state the graft dropped.  The ID3 walk does `m_audioDataStart += id3Size`, so without this reset every

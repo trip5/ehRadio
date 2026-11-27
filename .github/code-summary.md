@@ -402,10 +402,11 @@ is defined. They share their defect classes, and the same bug has repeatedly app
   - It is a fixed byte count on purpose: the bar shows fill, not listening time, so it saturates at a different
     number of seconds on every bitrate. (An earlier entry here said `BUFFERBAR_VISUAL_FULL_PERCENT`, default 82 -
     that macro no longer exists.)
-- Audio-risk display limiter (`audioRingAtRisk()` in `display.cpp`): `DSP_TASK_DELAY` is multiplied by 4 while the
-  ring holds less than `AUDIO_RISK_ENGAGE_MS` of audio, released above `AUDIO_RISK_RELEASE_MS` (250 / 750 in
-  `options.h`, guarded by a `#error` if the two are inverted). Measured in time, not bytes; until a stream has
-  measured `streamBytesPerSecond()`, a 32 KB floor stands in.
+- **The audio-risk display limiter was removed on 2026.11.27.** It multiplied `DSP_TASK_DELAY` by 4 while the audio
+  ring was thin (`AUDIO_RISK_ENGAGE_MS` / `AUDIO_RISK_RELEASE_MS`, `audioRingAtRisk()`, and the
+  `streamBytesPerSecond()` rate that only it read). `DSP_TASK_PRIORITY 5` gives the display the slices it needed, so
+  the throttle had nothing left to win and made the VU and scroll visibly stutter. `loopDspTask()` sleeps plain
+  `DSP_TASK_DELAY` again. The boot-phase slowdown, which is a different mechanism, is untouched.
 
 ### `src/core/options_overrides.h` (the force-included config)
 - **Why it exists**: third-party libraries are their own translation units and never include `options.h`, so a value
@@ -4623,9 +4624,10 @@ thinks the radio forgot everything. The loader-side wait was not built.
     `_scrolldelay`, so the accumulator's stamp is never consumed by a delay test.
     **The design this replaced, and why it had to go.** The pitch used to be an interval (`pitch = ceil(1000 * step /
     speed)`) and the widget could only act on a display-task pass, so the DELIVERED interval was `ceil(pitch / pass) x
-    pass`. That is invisible at a fixed 10 ms pass, but `audioRingAtRisk()` sleeps `DSP_TASK_DELAY * 4` while the ring is
-    thin, so a 40 ms pass delivered half to a quarter of `SCROLLPX` - the reported "the scroll speed varies and
-    AUDIO_RISK changes it". Dropping frames now costs smoothness alone. The step dithers by one pixel (2, 3, 3, 2)
+    pass`. That is invisible at a fixed 10 ms pass, but the audio-risk limiter (since removed, 2026.11.27) slept
+    `DSP_TASK_DELAY * 4` while the ring was thin, so a 40 ms pass delivered half to a quarter of `SCROLLPX` - the
+    reported "the scroll speed varies and AUDIO_RISK changes it". Dropping frames now costs smoothness alone. The step
+    dithers by one pixel (2, 3, 3, 2)
     rather than alternating with zero; that dither is the one thing to judge on real panels. The older note that "a
     perfect scroll is impossible here, do not chase it" was about a constant step on a fixed pass and no longer applies.
     **The duty test mixes units and that is where it went wrong twice**: the cost is MICROseconds, so the shortest
@@ -4634,6 +4636,17 @@ thinks the radio forgot everything. The loader-side wait was not built.
     was a stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every
     size to 0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling".
     Three units meet in `_applyPace()` (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **Reading `Widgets.pace` when someone reports a steppy line.** One line per 5 s of MOVING time:
+    `role=0 41px/s of 41px/s, 205 paints (40.9/s), step 1..2 (0 clamps) age 49ms mean 1.0, floor 6ms`. Delivered px/s
+    beside the COMMANDED `_speedPxS` answers "is it behind?" on its own, and `clamps` counts the steps cut to one
+    character cell - the only path in `_calcX()` that loses speed, because it drops the rest of the debt, and it fires
+    when a paint gap exceeds `charWidth x 1000 / speedPxS` ms.
+    - delivered == commanded, `0 clamps`, and `floor` well below `1000 / paints/s`: the pacing did its job, so a
+      steppy line is the panel's push time or the panel, not this code.
+    - `clamps > 0` with `age` at or past that gap: the display task missed passes and the text paused by design.
+    - `floor` close to `1000 / paints/s`: the duty budget is binding, so the line steps less often and further - that
+      is steppiness in the rendering, and `SCROLL_DUTY` is the knob (higher = more, smaller steps at more panel cost).
+    - `paints/s x mean` disagreeing with delivered px/s: a stamp is stale on another path, not a pacing fault.
     **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
     Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
     chunks". It was never a rendering fault, and four candidates were withdrawn by measurement before the arithmetic

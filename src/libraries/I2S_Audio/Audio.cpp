@@ -549,7 +549,6 @@ void Audio::setDefaults() {
     m_audioDataSize = 0;
     m_avr_bitrate = 0; 				// the same as m_bitRate if CBR, median if VBR
     m_bitRate = 0; 				// Bitrate still unknown
-    m_streamBytesSec = 0;           // a new stream has no measured rate yet
     h_bitRate = 0; 				// Bitrate from header still unknown
     m_bytesNotDecoded = 0; 			// counts all not decodable bytes
     m_chunkcount = 0;      			// for chunked streams
@@ -2886,7 +2885,6 @@ i2swrite:
             // the whole segment in the next, which is what the badge used to show.  10 s averages the bursts away.
             if(m_sumBytesDecoded > sBrSum) {
                 const uint32_t br = (uint32_t)(((uint64_t)(m_sumBytesDecoded - sBrSum) * 8000ULL) / (uint64_t)span);
-                m_streamBytesSec = br / 8;               // for the display's audio-risk limiter
                 const uint32_t bucket = bitrateBucket(br);
                 // At most one publish per 10 s, and only when the badge would print something else.
                 if(bucket != sBrBucket &&

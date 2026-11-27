@@ -320,7 +320,6 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     uint32_t        m_audioFileDuration = 0;
     size_t          m_audioDataSize = 0;            //
     uint32_t        m_avr_bitrate = 0;
-    uint32_t        m_streamBytesSec = 0;           // measured consumption, bytes/s: read by the display risk limiter
     bool            m_localBitrateSend = true;
         // Bitrate.  HDAT0 carries one only for MP3, where getAudioCurrentTime() reads it exactly; for every other codec the
     // value is measured in Audio::loop() from the ring balance, so there is nothing to estimate and nothing to latch.
@@ -476,9 +475,6 @@ public:
     uint8_t  printVersion();                            // Returns version of vs1053 chip
     uint32_t printChipID();                             // Returns chipID of vs1053 chip
     uint32_t getBitRate();                              // average br from WRAM register
-        // Measured consumption in BYTES per second, 0 until known - the display's audio-risk limiter converts ring
-    // occupancy to milliseconds with it.  Same name and meaning as the I2S fork, so display.cpp needs no #if.
-    uint32_t streamBytesPerSecond(){ return m_streamBytesSec; }
     void     softReset() ;                              // Do a soft reset
     void     loop();
     void     setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl);

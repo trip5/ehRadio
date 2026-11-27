@@ -652,7 +652,12 @@ bool ScrollWidget::_calcX() {
   uint32_t d = _acc / 1000;
   _acc -= d * 1000;
   if (!d) return false;
-  if (d > _stepMax) { d = _stepMax; _acc = 0; }  // a stall is a pause, not a jump
+  if (d > _stepMax) {           // a stall is a pause, not a jump: the rest of the debt is dropped
+    d = _stepMax; _acc = 0;
+    #ifdef WIDGET_DEBUG
+      _dbgClamps++;             // the only way this code loses speed, so the count is what explains a low px/s
+    #endif
+  }
   #ifdef WIDGET_DEBUG
     _dbgMoved += d; _dbgPaints++; _dbgStepSum += d;
     if (d < _dbgSeenMin) _dbgSeenMin = (uint16_t)d;
@@ -661,13 +666,15 @@ bool ScrollWidget::_calcX() {
       _dbgAgeMax = (uint16_t)(elapsed > 60000UL ? 60000UL : elapsed);
     }
     if (_dbgPaints && _dbgWinMs >= 5000) {
-      FUNCTIONLOG("Widgets.pace", "role=%u %lupx/s, %lu paints (%.1f/s), step %u..%u age %ums mean %.1f, floor %ums",
-                  (unsigned)_role, (unsigned long)(_dbgMoved * 1000UL / _dbgWinMs),
+      // Delivered vs COMMANDED px/s answers "is it behind?" on its own; clamps is the count of steps cut to one cell.
+      // paints/s x mean step must equal delivered px/s - if it does not, a stamp is stale somewhere else.
+      FUNCTIONLOG("Widgets.pace", "role=%u %lupx/s of %upx/s, %lu paints (%.1f/s), step %u..%u (%u clamps) age %ums mean %.1f, floor %ums",
+                  (unsigned)_role, (unsigned long)(_dbgMoved * 1000UL / _dbgWinMs), (unsigned)_speedPxS,
                   (unsigned long)_dbgPaints, (float)_dbgPaints * 1000.0f / (float)_dbgWinMs,
-                  (unsigned)_dbgSeenMin, (unsigned)_dbgSeenMax, (unsigned)_dbgAgeMax,
+                  (unsigned)_dbgSeenMin, (unsigned)_dbgSeenMax, (unsigned)_dbgClamps, (unsigned)_dbgAgeMax,
                   _dbgPaints ? (float)_dbgStepSum / (float)_dbgPaints : 0.0f, (unsigned)_paintFloorMs);
       _dbgWinMs = 0; _dbgMoved = 0; _dbgPaints = 0; _dbgStepSum = 0;
-      _dbgSeenMin = 0xFFFF; _dbgSeenMax = 0; _dbgAgeMax = 0;
+      _dbgSeenMin = 0xFFFF; _dbgSeenMax = 0; _dbgAgeMax = 0; _dbgClamps = 0;
     }
   #endif
   _x -= (int16_t)d;

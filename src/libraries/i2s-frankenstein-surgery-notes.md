@@ -1101,8 +1101,9 @@ numbers that explain it are the ones above; the fork's own notes carry the short
    and no longer fit a 2 MB board. No station in the list sends 32-bit FLAC, and the wall for the 24-bit one we do have
    is the input path, not the decoder - so refusing clearly is worth more than half-supporting it.
 
-10. **The display throttles itself while the audio ring is starving.** `loopDspTask()`'s `DSP_TASK_DELAY` is multiplied
-    by four while the ring holds less than **250 ms** of audio and released above **750 ms**. The evidence is the
+10. **RETIRED 2026.11.27, see that section. The display throttles itself while the audio ring is starving.**
+    `loopDspTask()`'s `DSP_TASK_DELAY` is multiplied by four while the ring holds less than **250 ms** of audio and
+    released above **750 ms**. The evidence is the
     24-bit station: with a live 480x320 TFT its ring sat at 10-28 KB and 20% of frames were never produced; with the
     screensaver blanking the screen the same stream filled to **1.29-1.42 MB**, ran at 48,000 frames/s with `sil 0`, and
     **did not fall back when the screen came on again** - so the cost is the fill phase, not drawing per se.
@@ -1116,7 +1117,9 @@ numbers that explain it are the ones above; the fork's own notes carry the short
     `released` under AUDIO_DEBUG, so a soak can confirm it rather than assume it.
 
     The older entry in this file saying "display load as the cause" was measured on a stream that was keeping up
-    (48,000 frames/s, nothing to lose), so it neither contradicts this nor tested it.
+    (48,000 frames/s, nothing to lose), so it neither contradicts this nor tested it. The whole mechanism - the two
+    macros, `audioRingAtRisk()` and `streamBytesPerSecond()` - was removed on 2026.11.27; the measurements above are
+    kept because they are what the boot-time squeeze and the display priority were decided on.
 
 **And one misreading worth recording, because the log invites it.** `feed ok: wrote 640 of 1600, DREQ low` is not
 starvation. The feeder loop breaks when DREQ goes low, so for a partial write that field is the *reason* it stopped: the
@@ -1182,7 +1185,9 @@ was written to scope the sweep from numbers rather than memory, and it stays in 
 flash 3,155,411 (+132) and `sh1106_vs1053_3buttons` 2,561,356 (+16); RAM unchanged on both.
 
 **Partly superseded 2026.11.25**: items 2 and 6 divided the work between two windows by source class, which is what
-made an HLS stream publish from a 500 ms slice. There is one publisher again - see the next section.
+made an HLS stream publish from a 500 ms slice. There is one publisher again - see the next section. **Item 6 is also
+retired outright 2026.11.27**: the display limiter it recorded a rate for has been removed along with
+`m_streamBytesSec`.
 
 1. **The regression was mine, and the comment that justified it was false.** Item 6 above removed the publish from
    `computeAudioTime()` because its guard "wants a local file or a ST_WEBFILE, and a stream is ST_WEBSTREAM". The first
@@ -1242,9 +1247,29 @@ or `5`, and sometimes went **blank**.
    source and every codec - the `m_streamType == ST_WEBSTREAM` gate and the MP3 exclusion are both gone - with an
    explicit floor of one publish per 10 s on top of the rendered-value gate. `computeAudioTime()` keeps measuring, for
    the elapsed time and the file duration, and publishes nothing: its comment now says why, so the next person does not
-   restore it a third time. `m_streamBytesSec` comes from the same 10 s window for every source, which also stops the
-   display limiter reacting to a burst.
+   restore it a third time. (`m_streamBytesSec`, which this item also set from the same window, was removed with the
+   display limiter on 2026.11.27.)
 
 5. **Why not a median.** Both forks already publish an *average*, not a sample: 10 s of input bytes here, an EMA over
    five 2 s windows on the VS1053. A median over several 10 s windows would need 30-50 s to show a real bitrate change
    and would still be built from the same averages - it buys nothing that the window does not already give.
+
+## The Audio-Risk Display Limiter Is Gone (2026.11.27)
+
+**Files changed**: `src/core/options.h`, `src/core/display.cpp`, `src/libraries/I2S_Audio/Audio.cpp` + `Audio.h`,
+`src/libraries/VS1053_Audio/audioVS1053Ex.cpp` + `.h`, `myoptions.h` (the two defines). Both forks build; the image
+sizes are not comparable with the numbers above because `myoptions.h` has changed since (AUDIO_DEBUG on, display
+priority 5), so no delta is claimed here.
+
+**Removed**: `AUDIO_RISK_ENGAGE_MS`, `AUDIO_RISK_RELEASE_MS`, their `#error` guard, `s_audioAtRisk`,
+`audioRingAtRisk()`, the `Audio.risk` transition log, and `streamBytesPerSecond()` with its `m_streamBytesSec` member
+in both libraries - that accessor existed for this limiter and nothing else read it. `loopDspTask()` sleeps plain
+`DSP_TASK_DELAY` again.
+
+**Why.** `DSP_TASK_PRIORITY 5` (it was 2) gives the display the slices it was fighting for, so the throttle had
+nothing left to win. What it still did was make the display visibly stutter: the feature had to be neutralised with
+`AUDIO_RISK_ENGAGE_MS 2` / `AUDIO_RISK_RELEASE_MS 3` in `myoptions.h` to stop it engaging at all, which is the
+clearest sign a feature has outlived its reason. This supersedes item 10 of 2026.11.23, whose measurements stand -
+they are what the priority change and the boot-phase squeeze were decided on.
+
+**Not touched**: the boot-phase slowdown before the WebUI comes up, which is a different mechanism and still real.

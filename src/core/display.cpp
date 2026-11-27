@@ -46,25 +46,6 @@ extern const char batterytxtFmt[] PROGMEM;
   #define DSP_TASK_DELAY 10
 #endif
 
-// Audio-risk display limiter: the display task shares core 1 with the audio task, so while the ring is thin it
-// wakes a quarter as often - engaged below AUDIO_RISK_ENGAGE_MS, released above AUDIO_RISK_RELEASE_MS (options.h).
-// Measured in TIME, never bytes; until a rate exists a 32 KB floor stands in for it.
-static bool s_audioAtRisk = false;
-static bool audioRingAtRisk() {
-  const uint32_t bytes = player.inBufferFilled();
-  const uint32_t bps   = player.streamBytesPerSecond();
-  const uint32_t ms    = bps ? (uint32_t)(((uint64_t)bytes * 1000ULL) / bps)
-                             : (bytes < 32u * 1024u ? 0u : 1000u);
-  const bool risk = s_audioAtRisk ? (ms < AUDIO_RISK_RELEASE_MS) : (ms < AUDIO_RISK_ENGAGE_MS);
-  if (risk != s_audioAtRisk) {
-    s_audioAtRisk = risk;
-    #ifdef AUDIO_DEBUG
-      FUNCTIONLOG("Audio.risk", "%s: %u bytes = %u ms buffered at %u B/s",
-                  risk ? "engaged" : "released", (unsigned)bytes, (unsigned)ms, (unsigned)bps);
-    #endif
-  }
-  return s_audioAtRisk;
-}
 static constexpr uint32_t DSQ_SEND_DELAY = 200;  // ms; xQueueSend timeout in display.putRequest()
 static constexpr uint32_t DSQ_CRITICAL_WAIT = 2000;  // ms; how long SDINDEXSTART/SDINDEXDONE keep retrying a full queue
 // ms; how long the screensaver's info line stays blank after a track change starts.  The request that starts the
@@ -282,8 +263,7 @@ static void loopDspTask(void * pvParameters) {
     #endif
     // The task reports its own core, so the Core Monitor can never name the wrong core.
     cmCountDspLoop((uint8_t)xPortGetCoreID());
-    // A quarter of the wake rate while the audio ring cannot afford the display's slices.
-    vTaskDelay(pdMS_TO_TICKS(DSP_TASK_DELAY * (audioRingAtRisk() ? 4 : 1)));
+    vTaskDelay(pdMS_TO_TICKS(DSP_TASK_DELAY));
   }
   vTaskDelete(NULL);
 }

@@ -244,24 +244,28 @@ bool splitPlaylistLine(const char* line, PlaylistFields& f) {
     f.urlBegin  = tab1 + 1; f.urlEnd  = tab2;
     f.valBegin  = tab2 + 1; f.valEnd  = e;
     f.tabShape = true;
-    return true;
+  } else {
+    const char* valBegin = e;                   // last token: the value
+    while (valBegin > s && !isspace((unsigned char)valBegin[-1])) valBegin--;
+    if (valBegin == s) return false;
+    const char* urlEnd = valBegin;              // second from last: the URL
+    while (urlEnd > s && isspace((unsigned char)urlEnd[-1])) urlEnd--;
+    const char* urlBegin = urlEnd;
+    while (urlBegin > s && !isspace((unsigned char)urlBegin[-1])) urlBegin--;
+    if (urlBegin == s) return false;
+    f.nameBegin = s;        f.nameEnd = urlBegin;   // everything before it: the name
+    f.urlBegin  = urlBegin; f.urlEnd  = urlEnd;
+    f.valBegin  = valBegin; f.valEnd  = e;
   }
 
-  const char* valBegin = e;                     // last token: the value
-  while (valBegin > s && !isspace((unsigned char)valBegin[-1])) valBegin--;
-  if (valBegin == s) return false;
-  const char* urlEnd = valBegin;                // second from last: the URL
-  while (urlEnd > s && isspace((unsigned char)urlEnd[-1])) urlEnd--;
-  const char* urlBegin = urlEnd;
-  while (urlBegin > s && !isspace((unsigned char)urlBegin[-1])) urlBegin--;
-  if (urlBegin == s) return false;
-  const char* nameEnd = urlBegin;               // everything before it: the name
-  while (nameEnd > s && isspace((unsigned char)nameEnd[-1])) nameEnd--;
-  if (nameEnd == s) return false;
-
-  f.nameBegin = s;        f.nameEnd = nameEnd;
-  f.urlBegin  = urlBegin; f.urlEnd  = urlEnd;
-  f.valBegin  = valBegin; f.valEnd  = e;
+  // Fields are trimmed at their edges, so "Name \t url \t dB3" reads the same here as in the importer.
+  while (f.nameBegin < f.nameEnd && isspace((unsigned char)*f.nameBegin)) f.nameBegin++;
+  while (f.nameEnd > f.nameBegin && isspace((unsigned char)f.nameEnd[-1])) f.nameEnd--;
+  while (f.urlBegin < f.urlEnd && isspace((unsigned char)*f.urlBegin)) f.urlBegin++;
+  while (f.urlEnd > f.urlBegin && isspace((unsigned char)f.urlEnd[-1])) f.urlEnd--;
+  while (f.valBegin < f.valEnd && isspace((unsigned char)*f.valBegin)) f.valBegin++;
+  while (f.valEnd > f.valBegin && isspace((unsigned char)f.valEnd[-1])) f.valEnd--;
+  if (f.nameEnd == f.nameBegin || f.urlEnd == f.urlBegin) return false;
   return true;
 }
 

@@ -535,6 +535,19 @@ function readCut(v){
   if(isNaN(n)) return -1;
   return Math.max(0, Math.min(24, n));
 }
+// A token that can be a stream address - for the loose import path only, never for the grammar
+function isUrlToken(t){
+  if(!t) return false;
+  if(t.includes('://') || t.includes('/')) return true;
+  return /^[^\s@]+\.[a-z]{2,}(:\d+)?$/i.test(t);
+}
+// The value column: dBn is ours, a bare number is some other build's unit
+function isValueToken(t){
+  if(!t) return false;
+  if(/^[dD][bB]\d{1,2}$/.test(t)) return true;
+  const n = parseInt(t, 10);
+  return !isNaN(n) && String(n) === t && n >= -64 && n <= 64;
+}
 function parsePlaylistLine(line){
   if(!line) return null;
   const s = line.replace(/^\s+|\s+$/g, '');
@@ -941,8 +954,8 @@ function parseAndAddJSON(content, targetCallback, mode = 'replace') {
           }
         }
       }
-      // only our dBcut counts; foreign ones stay unmeasured
-      const dbcut = (item.dBcut === undefined) ? -1 : Math.max(0, Math.min(24, parseInt(item.dBcut, 10) || 0));
+      // only our dBcut counts: absent, null, empty and unparsable all mean unmeasured
+      const dbcut = readCut(item.dBcut);
       // If no name, generate from URL
       const finalName = name || (url ? urlToName(url) : '');
       // Check for duplicates
@@ -982,193 +995,41 @@ function parseAndAddCSV(content, targetCallback, mode = 'replace') {
   const existingURLs = mode === 'merge' ? getExistingURLs() : new Set();
   let addedCount = 0;
   let duplicateCount = 0;
-  
-  lines.forEach(line => {
-    line = line.trim();
+
+  // Loose shapes: a URL token anywhere, a value token last, everything else is the name.  The grammar is tried first,
+  // so this only runs for lines the device would reject - url first, two columns, no value column.
+  const loose = line => {
+    const tokens = line.split(/\s+/).filter(t => t);
+    const valueIdx = (tokens.length > 1 && isValueToken(tokens[tokens.length - 1])) ? tokens.length - 1 : -1;
+    const urlIdx = (valueIdx > 0 && isUrlToken(tokens[valueIdx - 1])) ? valueIdx - 1 : tokens.findIndex(isUrlToken);
+    if (urlIdx === -1) return null;
+    return {
+      name: tokens.filter((t, i) => i !== urlIdx && i !== valueIdx).join(' '),
+      url: tokens[urlIdx],
+      dBcut: (valueIdx === -1) ? -1 : cutFromToken(tokens[valueIdx])
+    };
+  };
+
+  lines.forEach(raw => {
+    const line = raw.trim();
     if (!line) return;
-    // -1 = source carried no usable measurement
-    let name = '', url = '', dbcut = -1;
-    
-    // Try tab-delimited first
-    if (line.includes('\t')) {
-      const parts = line.split('\t').map(p => p.trim());
-      
-      if (parts.length === 1) {
-        // 1 field: URL only
-        if (parts[0].includes('.') && (parts[0].includes('/') || parts[0].includes('://'))) {
-          url = parts[0];
-          name = ''; // Will be generated from URL later
-          dbcut = -1;
-        }
-      } else if (parts.length === 2) {
-        // two fields: URL and name
-        let urlIdx = -1, nameIdx = -1;
-        for (let i = 0; i < 2; i++) {
-          if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
-            urlIdx = i;
-          } else {
-            nameIdx = i;
-          }
-        }
-        if (urlIdx !== -1 && nameIdx !== -1) {
-          url = parts[urlIdx];
-          name = parts[nameIdx];
-          dbcut = -1;
-        }
-      } else if (parts.length >= 3) {
-        // three or more: URL, cut, name
-        let urlIdx = -1;
-        for (let i = 0; i < parts.length; i++) {
-          if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
-            urlIdx = i;
-            break;
-          }
-        }
-        
-        if (urlIdx !== -1) {
-          url = parts[urlIdx];
-          
-          // dB<n> is ours; a bare number is foreign
-          let dbcutIdx = -1;
-          for (let i = 0; i < parts.length; i++) {
-            if (i === urlIdx) continue; // Skip URL field
-            const tagged = /^[dD][bB]\d{1,2}$/.test(parts[i]);
-            const val = parseInt(parts[i], 10);
-            const bare = !isNaN(val) && parts[i] === val.toString() && val >= -64 && val <= 64;
-            if (tagged || bare) {
-              dbcutIdx = i;
-              dbcut = tagged ? cutFromToken(parts[i]) : -1;
-              break; // Use the first matching value field
-            }
-          }
-          
-          // name is the first non-URL, non-cut field
-          for (let i = 0; i < parts.length; i++) {
-            if (i !== urlIdx && i !== dbcutIdx && parts[i]) {
-              name = parts[i];
-              break;
-            }
-          }
-          
-          if (dbcutIdx === -1) dbcut = -1;
-        }
-      }
-    } else if (/\s{2,}/.test(line)) {
-      // split on two or more spaces
-      const parts = line.split(/\s{2,}/).map(p => p.trim()).filter(p => p);
-      
-      if (parts.length === 1) {
-        // 1 field: URL only
-        if (parts[0].includes('.') && (parts[0].includes('/') || parts[0].includes('://'))) {
-          url = parts[0];
-          name = '';
-          dbcut = -1;
-        }
-      } else if (parts.length === 2) {
-        // two fields: URL and name
-        let urlIdx = -1, nameIdx = -1;
-        for (let i = 0; i < 2; i++) {
-          if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
-            urlIdx = i;
-          } else {
-            nameIdx = i;
-          }
-        }
-        if (urlIdx !== -1 && nameIdx !== -1) {
-          url = parts[urlIdx];
-          name = parts[nameIdx];
-          dbcut = -1;
-        }
-      } else if (parts.length >= 3) {
-        // three or more: URL, then name
-        let urlIdx = -1;
-        for (let i = 0; i < parts.length; i++) {
-          if (parts[i].includes('.') && (parts[i].includes('/') || parts[i].includes('://'))) {
-            urlIdx = i;
-            break;
-          }
-        }
-        
-        if (urlIdx !== -1) {
-          url = parts[urlIdx];
-          // Name is first field that's not the URL
-          for (let i = 0; i < parts.length; i++) {
-            if (i !== urlIdx && parts[i]) {
-              name = parts[i];
-              break;
-            }
-          }
-          dbcut = -1;
-        }
-      }
-    } else {
-      // split on single spaces, find the URL
-      const tokens = line.split(/\s+/);
-      let urlIdx = -1;
-      
-      for (let i = 0; i < tokens.length; i++) {
-        if (tokens[i].includes('.') && (tokens[i].includes('/') || tokens[i].includes('://'))) {
-          urlIdx = i;
-          break;
-        }
-      }
-      
-      if (urlIdx !== -1) {
-        url = tokens[urlIdx];
-        
-        // Name is FIRST field only
-        if (urlIdx > 0) {
-          // URL not first, so name is first token
-          name = tokens[0];
-          // the last token is the value
-          const lastToken = tokens[tokens.length - 1];
-          const lastNum = parseInt(lastToken, 10);
-          const tagged = /^[dD][bB]\d{1,2}$/.test(lastToken);
-          const bare = !isNaN(lastNum) && lastNum >= -64 && lastNum <= 64;
-          if ((tagged || bare) && tokens.length >= 2) {
-            dbcut = tagged ? cutFromToken(lastToken) : -1;
-          }
-        } else {
-          // name is everything after the URL
-          const nameTokens = [];
-          for (let i = urlIdx + 1; i < tokens.length; i++) {
-            nameTokens.push(tokens[i]);
-          }
-          name = nameTokens.join(' ');
-          dbcut = -1;
-        }
-      }
-    }
-    
-    // Add http:// if missing
-    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://' + url;
-    }
-    
-    // If no name, generate from URL
-    if (!name && url) {
-      name = urlToName(url);
-    }
-    
-    // Check for duplicates
-    if (url) {
-      if (existingURLs.has(url)) {
-        duplicateCount++;
-      } else {
-        targetCallback(name, url, dbcut);
-        existingURLs.add(url);
-        addedCount++;
-      }
-    }
+    let rec = parsePlaylistLine(line);      // tab: three fields; spaces: value last, the URL before it
+    if (!rec || !isUrlToken(rec.url)) rec = loose(line);
+    if (!rec || !rec.url) return;
+    let name = (rec.name || '').trim();
+    let url = rec.url.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'http://' + url;
+    if (!name) name = urlToName(url);
+    if (existingURLs.has(url)) duplicateCount++;
+    else { targetCallback(name, url, rec.dBcut); existingURLs.add(url); addedCount++; }
   });
-  
+
   if (mode === 'replace') {
     alert(t('msg_import_replace', 'Import complete: {0} stations loaded.', addedCount));
   } else if (duplicateCount > 0) {
     alert(t('msg_import_merge', 'Import complete: {0} stations added, {1} duplicates skipped.', addedCount, duplicateCount));
   }
 }
-
 function getExistingURLs() {
   const urls = new Set();
   const items = document.getElementById('pleditorcontent').getElementsByTagName('li');

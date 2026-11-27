@@ -6156,6 +6156,14 @@ unmeasured station is quiet rather than blasting while it learns.
   rewritten twice.
 - `formatPlaylistLine()` is the only writer, so the shape cannot fork again. `cleanPlaylist()`,
   `writeStationCut()` and the WebUI's Save/export all go through it.
+- the WebUI's importers are **the same rule, not a second one**: `parseAndAddCSV()` calls `parsePlaylistLine()` first and
+  only falls back to a loose shape (a URL token anywhere, a value token last, everything else is the name) for lines the
+  device would reject - url first, two columns, no value column. It used to take `tokens[0]` as the name whenever the URL
+  was not the first token, which cut every space-delimited name down to its first word, and it carried a `/\s{2,}/`
+  branch that the right-anchored rule already covered. Both are gone. `parseAndAddJSON()` reads `name`/`url`/`dBcut`
+  from the object, and a `dBcut` that is absent, `null` or unparsable means unmeasured (`readCut()`), never 0.
+- fields are trimmed at their edges in `splitPlaylistLine()`, so a padded TAB row (`Name \t url \t dB3`) reads the same
+  on the device and in the editor, and `cleanPlaylist()` writes the padded spaces away.
 - `Utility::writeStationCut(index, value)` persists one learned value with the TMP/rename/`indexPlaylist()` idiom,
   `PM_WEB` only, and only if that row's URL still matches `config.station.url`.
 

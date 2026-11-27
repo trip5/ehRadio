@@ -1605,12 +1605,17 @@ void BitrateWidget::init(BitrateConfig bconf, uint16_t fgcolor, uint16_t bgcolor
 }
 
 void BitrateWidget::setBitrate(uint16_t bitrate){
+  // A DBITRATE ticket sets BOTH fields and each setter that draws costs a clear plus a paint, so a request carrying
+  // the value already on screen must do nothing.  Without this a publisher that repeats its number flickers the badge
+  // on a TFT - an SD file republished its exact bitrate every 2 s for exactly that reason.
+  if (bitrate == _bitrate) return;
   _bitrate = bitrate;   // the raw kbit/s value: the three-character rendering happens in _draw(), so a 1.4 Mbit FLAC
                         // stream reads "1.4" instead of pinning at a 999 ceiling
   _draw();
 }
 
 void BitrateWidget::setFormat(BitrateFormat format){
+  if (format == _format) return;
   _format = format;
   _draw();
 }

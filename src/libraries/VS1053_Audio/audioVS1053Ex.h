@@ -320,7 +320,7 @@ bool                m_f_firstPlayCall = true;          // one-time init in playA
     uint32_t        m_audioFileDuration = 0;
     size_t          m_audioDataSize = 0;            //
     uint32_t        m_avr_bitrate = 0;
-    bool            m_localBitrateSend = true;
+    uint32_t        m_localBitrateSent = 0;   // the exact HDAT0 bitrate last published, so a repeat is never sent
         // Bitrate.  HDAT0 carries one only for MP3, where getAudioCurrentTime() reads it exactly; for every other codec the
     // value is measured in Audio::loop() from the ring balance, so there is nothing to estimate and nothing to latch.
     // m_brFromHeader records that an icy-br: header supplied the first value, which the measurement then corrects.

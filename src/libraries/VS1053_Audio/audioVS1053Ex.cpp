@@ -3281,11 +3281,11 @@ void Audio::setDefaults(){
     m_streamType = ST_NONE;
     m_codec = CODEC_NONE;
     m_playlistFormat = FORMAT_NONE;
-    m_localBitrateSend = false;
     m_audioFileDuration = 0;
         // A new connection must not inherit the previous stream's bitrate.  Without these three lines the first estimate
     // of a stream compares against a stale value, marks itself "unchanged" and reports nothing at all.
     m_avr_bitrate = 0;
+    m_localBitrateSent = 0;
     m_brFromHeader = false;
     bitrateReset();                                          // a new connection starts its own measurement window
         // Per-track state the graft dropped.  The ID3 walk does `m_audioDataStart += id3Size`, so without this reset every
@@ -4580,26 +4580,25 @@ const uint16_t l3id3[16]   = {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192,
 char           brbuf[32];
 uint32_t Audio::getAudioCurrentTime(){
   uint16_t SCIStatus;
-  uint32_t prev_bitrate = m_avr_bitrate;
   if(m_codec == CODEC_MP3){
     SCIStatus=read_register(SCI_HDAT1);
     uint8_t layer = SCIStatus>>1 & 0b11;
     uint8_t id    = SCIStatus>>3 & 0b11;
     SCIStatus = read_register(SCI_HDAT0);
     if(layer==1){ //layer3
-      if(id==3){
-        m_avr_bitrate = l3id3[SCIStatus>>12] * 1000;
-      }else{
-        m_avr_bitrate = l3id012[SCIStatus>>12] * 1000;
-      }
-      m_localBitrateSend = prev_bitrate==m_avr_bitrate;
+      const uint32_t br = (uint32_t)((id==3 ? l3id3[SCIStatus>>12] : l3id012[SCIStatus>>12]) * 1000U);
       // Zero it as well as returning: a caller that retries must be able to tell "no value yet" from "a value".
-      if(m_avr_bitrate < 8000 || m_avr_bitrate > 640000) { m_avr_bitrate = 0; return 0; }
-      sprintf(brbuf, "%lu", m_avr_bitrate);
-      if(audio_bitrate && !m_localBitrateSend) audio_bitrate(brbuf);
-      m_localBitrateSend = true;
-      m_audioFileDuration = 8 * ((float)m_audioDataSize / (m_avr_bitrate));
-      return 8 * ((float)getFilePos() / (m_avr_bitrate));
+      if(br < 8000 || br > 640000) { m_avr_bitrate = 0; return 0; }
+      m_avr_bitrate = br;
+      // Published against its OWN last value, never against m_avr_bitrate: the 2 s measurement rewrites that every
+      // window, so comparing with it republished the same number every other second and flickered the badge on a TFT.
+      if(br != m_localBitrateSent) {
+        m_localBitrateSent = br;
+        sprintf(brbuf, "%lu", (unsigned long)br);
+        if(audio_bitrate) audio_bitrate(brbuf);
+      }
+      m_audioFileDuration = 8 * ((float)m_audioDataSize / (float)br);
+      return 8 * ((float)getFilePos() / (float)br);
     }
     return 0;
   }

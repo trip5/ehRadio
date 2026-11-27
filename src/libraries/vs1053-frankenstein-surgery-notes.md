@@ -1107,7 +1107,7 @@ section; this is what this fork does now.
    so for a partial write that field is the reason it stopped: the chip's FIFO is full and we are ahead of it. Starvation
    reads `feed stalled: wrote 0 of …` with more than a second since the last accepted byte.
 
-## Post-Graft Patch Fixes (2026.11.25)
+## Post-Graft Patch Fixes (2026.11.25 to 2026.11.27)
 
 **Files changed**: `audioVS1053Ex.cpp`. `sh1106_vs1053_3buttons` flash 2,561,352 (-4), RAM 90,524 unchanged.
 
@@ -1123,3 +1123,23 @@ publisher at all** while every other codec was measured. The change is one condi
 
 `getAudioCurrentTime()` keeps its exact value for SD playback, where it is both reachable and better than any
 measurement; the two now agree rather than one silently starving the other.
+
+**And the SD badge republished itself every 2 s.** Reported as "playing from SD with a TFT, the codec badge constantly
+flickers". Two writers touched `m_avr_bitrate`: the 2 s measurement set it to the EMA, and `getAudioCurrentTime()` -
+called at **1 Hz in SD mode** by `ticks()` - overwrote it with the exact `HDAT0` value and published when the two
+differed. An EMA never lands exactly on 128,000, so every second window looked like a change: about 30 repaints a
+minute, each one a `putRequest(DBITRATE)` and **two** widget draws, because a DBITRATE ticket calls both `setBitrate()`
+and `setFormat()` and each drew unconditionally - a clear plus a paint of the badge area, which on a TFT reads as a
+flash.
+
+Two fixes, one at each end:
+
+1. `getAudioCurrentTime()` compares against `m_localBitrateSent` - its own last published value, replacing the
+   `m_localBitrateSend` flag, which was set from a comparison against the measurement's variable and so could never be
+   stable. The exact number is now sent once per file rather than once per measurement window.
+2. `BitrateWidget::setBitrate()` and `setFormat()` return without drawing when the value is unchanged, so a duplicate
+   request costs nothing anywhere on either fork. `init()` sets both fields back to 0/`BF_UNKNOWN`, so a layout change
+   still repaints on the next ticket.
+
+The I2S fork never had this failure: its only publisher is `playChunk()`'s 10 s window, so an SD file produces at most
+two events - the codec report at start and the first window - and with the new guard the second draws nothing.

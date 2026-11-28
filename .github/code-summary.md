@@ -3890,6 +3890,8 @@ thinks the radio forgot everything. The loader-side wait was not built.
   `_plItemHeight` tall while the widget only owns its glyph height. `TextWidget::hasText()` exists for the one case
   `setText()` cannot see - the row moved but the name did not - where it would otherwise paint nothing and leave the row
   blank. Before this, paged mode printed every row with `dsp.print()` and never called `setText()`, so it never scrolled.
+  The composed label (the `numplaylist` number prefix plus the name) is built once per row and used by **both** the direct
+  print and the widget: the number belongs to every row, not just to the selection.
   Every row now goes through `_printRowText()`, which clips the print to the selector's own box (`playlistConf_ptr->width`
   from `TFT_BORDER`, the span `_plcurrent` is moved to) with the same `setClipping()`/`clearClipping()` pair the scrolling
   line uses: a glyph at the edge is drawn and cut, never dropped - the string is not truncated. The rows used to run to

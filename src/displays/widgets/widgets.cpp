@@ -1811,24 +1811,30 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.background);
     dsp.setTextColor(config.theme.playlist[0], config.theme.background);
   }
-  if (selected) {
-    // The selected row is the scrolling widget's: it holds the text, so the scroll survives the next repaint.  The band
-    // fill above stays here, because it is a whole row tall while the widget only owns its glyph height.
-    if (!name || name[0] == '\0') { _current->setText(""); return; }   // an unreadable row must not keep the old name
-    char label[STATION_FIELD_LENGTH + 8];
+  // The number is part of every row, not just the selection: the row printed here and the row handed to the scrolling
+  // widget have to be the same string or selecting a station would change what it reads.
+  char label[STATION_FIELD_LENGTH + 8];
+  label[0] = '\0';
+  if (name && name[0] != '\0') {
     if (config.store.numplaylist) {
       snprintf(label, sizeof(label), "%u ", (unsigned)stationId);
       strlcat(label, name, sizeof(label));
     } else {
       strlcpy(label, name, sizeof(label));
     }
+  }
+
+  if (selected) {
+    // The selected row is the scrolling widget's: it holds the text, so the scroll survives the next repaint.  The band
+    // fill above stays here, because it is a whole row tall while the widget only owns its glyph height.
+    if (label[0] == '\0') { _current->setText(""); return; }   // an unreadable row must not keep the old name
     const bool same = _current->hasText(label);
     _current->setText(label);
     if (same) _current->repaint();   // the row moved but the name did not: setText() issued nothing
     return;
   }
 
-  _printRowText(name, _rowTextY(y));
+  _printRowText(label, _rowTextY(y));
 }
 
 void PlayListWidget::_drawPaged(uint16_t currentItem) {

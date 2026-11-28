@@ -4,7 +4,7 @@
 #include "../core/config.h"
 
 #ifndef DEF_SPI_FREQ
-  #define DEF_SPI_FREQ        32000000UL      /*  set it to 0 for system default */
+  #define DEF_SPI_FREQ        20000000UL      /*  set it to 0 for system default */
 #endif
 
 DspCore::DspCore(): Adafruit_ST7735(&SPI, TFT_CS, TFT_DC, TFT_RST) {}

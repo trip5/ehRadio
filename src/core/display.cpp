@@ -608,12 +608,13 @@ void Display::_buildPager() {
   
   pages[PG_DIALOG]->addPage(_footer);
   // Both playlist widgets go on the page always: playlistPages is a runtime option now, so the page cannot decide at
-  // boot.  Only the fade drawer updates them, and the paged painter fills the list area with the background on every
-  // draw, so a paged playlist simply paints over them.
+  // boot.  The background band belongs to the fade drawer only - the paged painter draws its own band per row - so it is
+  // locked there instead of being left for the rows to cover, which a short page never does.
   if (_plbackground) {
     pages[PG_PLAYLIST]->addWidget(_plbackground);
     _plbackground->setHeight(_plwidget->itemHeight());
     _plbackground->moveTo({0,(uint16_t)(_plwidget->currentTop()-playlistConf_ptr->widget.textsize*2), (int16_t)playlBGConf_ptr->width});
+    if (editorOpt(config.store.playlistPages)) _plbackground->lock(true);
   }
   pages[PG_PLAYLIST]->addWidget(_plcurrent);
   pages[PG_PLAYLIST]->addWidget(_plwidget);
@@ -2119,12 +2120,16 @@ void Display::_reinitWidgets() {
   #endif
   _syncLineRule(_underline, underLineConf_ptr, true);
   _syncLineRule(_overline, overLineConf_ptr, false);
-  // The fade playlist's highlight is only fitted while the fade mode is in use; the paged one ignores it.
+  // The fade playlist's highlight is only fitted while the fade mode is in use; the paged painter draws its own band, so
+  // the fade one must be locked (and cleared) there - the rows only cover it where a station exists.
   if (!editorOpt(config.store.playlistPages)) {
     if (_plbackground) {
+      _plbackground->unlock();
       _plbackground->setHeight(_plwidget->itemHeight());
       _plbackground->moveTo({0,(uint16_t)(_plwidget->currentTop()-playlistConf_ptr->widget.textsize*2), (int16_t)playlBGConf_ptr->width});
     }
+  } else if (_plbackground) {
+    _plbackground->lock(true);
   }
 }
 

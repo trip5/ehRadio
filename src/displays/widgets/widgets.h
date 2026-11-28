@@ -510,6 +510,8 @@ class PlayListWidget: public Widget {
     void _printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name);
     uint16_t _rowTextY(uint16_t rowTop) const;
     void _placeSelection(uint16_t rowTop);
+    void _printRowText(const char* txt, uint16_t y);
+    void _drawTail(uint16_t stationsCount, uint8_t safeCount);
     void _drawFade(uint16_t currentItem);
 };
 

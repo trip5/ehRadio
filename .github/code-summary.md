@@ -3885,6 +3885,21 @@ thinks the radio forgot everything. The loader-side wait was not built.
   `_plItemHeight` tall while the widget only owns its glyph height. `TextWidget::hasText()` exists for the one case
   `setText()` cannot see - the row moved but the name did not - where it would otherwise paint nothing and leave the row
   blank. Before this, paged mode printed every row with `dsp.print()` and never called `setText()`, so it never scrolled.
+  Every row now goes through `_printRowText()`, which clips the print to the selector's own box (`playlistConf_ptr->width`
+  from `TFT_BORDER`, the span `_plcurrent` is moved to) with the same `setClipping()`/`clearClipping()` pair the scrolling
+  line uses: a glyph at the edge is drawn and cut, never dropped - the string is not truncated. The rows used to run to
+  the panel edge while the widget clipped at the box, so a long name lost its last character, and could start scrolling,
+  the instant it was selected. The print itself is bounded at `width / charW + 1` characters: every later glyph is wholly
+  outside the box, so the pixels are identical while the SPI traffic stays proportional to the box, not to a 169-byte
+  name.
+- **The paged painter cannot assume the list area was cleared, and a slot-shaped clear is not enough.** `_plcurrent`
+  erases with its own `_bgcolor`, so the band it leaves is highlight-coloured and exactly as wide as the name it held,
+  and it can be painted *after* the page's own `clearDsp()`: on page activation the widget still sits on the row it held
+  and draws that old name, and the `setText("")` which follows erases it right there. A leftover bar therefore survives
+  any clear that is a rectangle derived from the slot grid. The full-page path now clears the **whole panel**, and
+  `_drawTail()` fills the background from the bottom of the last drawn row to the bottom of the screen on both paths.
+  `_plbackground` is also **locked in paged mode** (boot and APPLYSTATE) and unlocked for fade: it belongs to the fade
+  drawer, and the paged painter draws its own band per row.
   `preText()` tests the flag per codepoint, and the pretext cache key **folds the flag in** - it is keyed on the
   caller's codepoint, taken BEFORE the transform, so without that a toggle would keep serving the capped entry.
   The WebUI never case-transforms: the All Caps option (`config.store.pretextALLCAPS`) reaches only `preText()`,

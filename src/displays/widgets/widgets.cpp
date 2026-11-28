@@ -1722,10 +1722,45 @@ uint16_t PlayListWidget::_rowTextY(uint16_t rowTop) const {
 }
 
 // Put the scrolling widget on the selected row, quietly: the painter repaints the row the selection leaves, so an erase
-// here would stamp the old highlight band back over it.
+// here would stamp the old highlight band back over it.  Its width is the conf's, the same box the rows draw in.
 void PlayListWidget::_placeSelection(uint16_t rowTop) {
   if (!_current) return;
-  _current->moveToQuiet({TFT_BORDER, _rowTextY(rowTop), (int16_t)(dsp.width() - 2 * TFT_BORDER)});
+  _current->moveToQuiet({TFT_BORDER, _rowTextY(rowTop), (int16_t)playlistConf_ptr->width});
+}
+
+// Every row draws in the box the selector uses - playlistConf_ptr->width from TFT_BORDER, the span _plcurrent is moved
+// to.  Same clip the scrolling line uses: a glyph straddling the edge is drawn and cut, never dropped.
+void PlayListWidget::_printRowText(const char* txt, uint16_t y) {
+  if (!txt || txt[0] == '\0') return;
+  // Bound the DRAWING, not the visible text: past this many characters every glyph is wholly outside the clip, while the
+  // one that straddles the edge is still printed and cut, so the pixels are the same and the SPI traffic is not.
+  const uint16_t charW = playlistConf_ptr->widget.textsize * CHARWIDTH;
+  char buf[STATION_FIELD_LENGTH + 8];
+  strlcpy(buf, txt, sizeof(buf));
+  if (charW) {
+    const uint16_t reach = (uint16_t)(playlistConf_ptr->width / charW) + 1;
+    if (utf8_strlen(buf) > reach) {
+      char* cut = (char*)utf8_offset(buf, reach);
+      if (cut) *cut = '\0';
+    }
+  }
+  dsp.setCursor(TFT_BORDER, y);
+  dsp.setClipping({TFT_BORDER, y, playlistConf_ptr->width, (uint16_t)_plItemHeight});
+  dsp.resetUTF8();
+  dsp.print(buf);
+  dsp.clearClipping();
+}
+
+// Paint the background from the bottom of the last drawn row to the bottom of the screen.  The selection widget erases
+// with its own highlight colour and only as wide as its name, and this panel keeps that picture wherever a full clear
+// does not happen, so the tail is cleared by geometry the caller cannot get wrong.  One fill, no slot arithmetic.
+void PlayListWidget::_drawTail(uint16_t stationsCount, uint8_t safeCount) {
+  if (stationsCount < _plPageStart) stationsCount = _plPageStart;
+  uint16_t drawn = (uint16_t)(stationsCount - _plPageStart + 1);
+  if (drawn > safeCount) drawn = safeCount;
+  const uint16_t fromY = (uint16_t)(_plYStart + drawn * _plItemHeight);
+  if (fromY >= dsp.height()) return;
+  dsp.fillRect(0, fromY, dsp.width(), dsp.height() - fromY, config.theme.background);
 }
 
 // ==================== FADE MODE (original centered) ====================
@@ -1759,9 +1794,8 @@ void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
   } else {
     uint8_t plColor = (abs(pos - _plCurrentPos)-1)>4?4:abs(pos - _plCurrentPos)-1;
     dsp.setTextColor(config.theme.playlist[plColor], config.theme.background);
-    dsp.setCursor(TFT_BORDER, _plYStart + pos * _plItemHeight);
     dsp.fillRect(0, _plYStart + pos * _plItemHeight - 1, dsp.width(), _plItemHeight - 2, config.theme.background);
-    dsp.print(item);
+    _printRowText(item, _plYStart + pos * _plItemHeight);
   }
 }
 
@@ -1794,9 +1828,7 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
     return;
   }
 
-  if (!name || name[0] == '\0') return;
-  dsp.setCursor(TFT_BORDER, _rowTextY(y));
-  dsp.print(name);
+  _printRowText(name, _rowTextY(y));
 }
 
 void PlayListWidget::_drawPaged(uint16_t currentItem) {
@@ -1810,7 +1842,7 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
 
   // Same-page partial update: redraw just the two changed slots
   if (_plPrevItem != 0 && _plPageStart == newPageStart) {
-    utility.fillPlaylistRange(_plPageStart, safeCount, _plNames);
+    uint16_t stationsCount = utility.fillPlaylistRange(_plPageStart, safeCount, _plNames);
     uint8_t prevSlot = (_plPrevItem - _plPageStart);
     uint8_t newSlot  = (currentItem - _plPageStart);
     if (newSlot < safeCount) _placeSelection(_plYStart + newSlot * _plItemHeight);
@@ -1820,14 +1852,16 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
     if (newSlot < safeCount) {
       _printPLitemPaged(currentItem, _plYStart + newSlot * _plItemHeight, true, _plNames[newSlot]);
     }
+    _drawTail(stationsCount, safeCount);   // the whole area is NOT repainted on this path
     _plPrevItem = currentItem;
     return;
   }
 
-  // Full page draw: clear area, draw all items, selector is just another item
+  // Full page draw: clear the whole panel, not a rectangle derived from the slot grid - the selection widget's own erase
+  // is name-wide and highlight-coloured, so it can sit outside anything the grid describes - then draw the items.
   _plPageStart = newPageStart;
   _plPrevItem = currentItem;
-  dsp.fillRect(0, _plPlaylistTop, dsp.width(), _plPlaylistBottom - _plPlaylistTop, config.theme.background);
+  dsp.fillRect(0, 0, dsp.width(), dsp.height(), config.theme.background);
   uint16_t stationsCount = utility.fillPlaylistRange(_plPageStart, safeCount, _plNames);
   if (currentItem >= _plPageStart && (uint8_t)(currentItem - _plPageStart) < safeCount) {
     _placeSelection(_plYStart + (currentItem - _plPageStart) * _plItemHeight);
@@ -1837,6 +1871,7 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
     if (itemIndex > stationsCount) break;
     _printPLitemPaged(itemIndex, _plYStart + i * _plItemHeight, itemIndex == currentItem, _plNames[i]);
   }
+  _drawTail(stationsCount, safeCount);
 }
 
 

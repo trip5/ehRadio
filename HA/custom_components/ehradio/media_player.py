@@ -21,7 +21,7 @@ from homeassistant.components.media_player import (
     RepeatMode,
 )
 
-VERSION = '2026.09.22'
+VERSION = '2026.11.28'
 
 _LOGGER      = logging.getLogger(__name__)
 
@@ -379,7 +379,7 @@ class ehradioDevice(MediaPlayerEntity):
       self._state = MediaPlayerState.PLAYING
 
   async def async_media_pause(self):
-      await self.api.set_command("stop")
+      await self.api.set_command("pause")
       self._state = MediaPlayerState.IDLE
   
   async def async_turn_off(self):

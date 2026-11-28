@@ -7,7 +7,7 @@ Order and sections match that file.
 
 | Command(s) | Action |
 | --- | --- |
-| `toggle` | Toggle play/pause. |
+| `pause`, `toggle` | Toggle play/pause. SD playback pauses in place and resumes from the same sample. |
 | `prev` | Play previous station/track. |
 | `next` | Play next station/track. |
 | `voldown`, `volumedown`, `volm`, `vol-` | Step volume down by configured step size. |
@@ -27,7 +27,7 @@ Order and sections match that file.
 | `playstation`, `play` | Play station by playlist index (clamped to valid range). |
 | `shuffle` | Enable/disable SD shuffle; if enabled, advance to next entry. |
 | `start` | Start playback from last station. |
-| `stop` | Stop playback. |
+| `stop` | Stop playback. SD playback restarts from the beginning on the next start. |
 | `plvalidate` | Start (`1`) or stop (`0`) the playlist Validator sweep. Blocked in HTTP/MQTT/Telnet. |
 | `sleep` | Set sleep timer using for,after values (may be disabled by build) |
 | `mode` | Change playback mode: `0` = Radio/Web, `1` = SD card, out-of-range values cycle modes (`2` cycles in Telnet). |

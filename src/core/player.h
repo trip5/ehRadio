@@ -22,14 +22,14 @@
   #define VS_CHIP_DEAD_STRIKES 3  // stalled feeds against a chip answering 0x0000 before the decoder is declared dead
 #endif
 
-enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9, PR_DBCUT = 10, PR_CUTRESET = 11 };
+enum playerRequestType_e : uint8_t { PR_PLAY = 1, PR_STOP = 2, PR_PREV = 3, PR_NEXT = 4, PR_VOL = 5, PR_CHECKSD = 6, PR_VUTONUS = 7, PR_BURL = 8, PR_TOGGLE = 9, PR_DBCUT = 10, PR_CUTRESET = 11, PR_PAUSE = 12 };
 struct playerRequestParams_t
 {
   playerRequestType_e type;
   int payload;
 };
 
-enum plStatus_e : uint8_t{ PLAYING = 1, STOPPED = 2 };
+enum plStatus_e : uint8_t{ PLAYING = 1, STOPPED = 2, PAUSED = 3 };
 
 class Player: public Audio {
   public:
@@ -74,11 +74,13 @@ class Player: public Audio {
     bool hasError() { return strlen(_plError)>0; }
     bool decoderDead() const { return _decoderDead; }  // latched: the decoder stopped answering
     plStatus_e status() { return _status; }
+    bool isPaused() const { return _status == PAUSED; }
     bool isConnecting();  // the title still holds the localized "connecting" placeholder
     const char* validatingLabel();  // the playlist validator's localized indicator string
-    void setResumeFilePos(uint32_t pos) { _resumeFilePos = pos; }
+    void setResumeFilePos(uint32_t pos) { _resumeFilePos = pos; _seekPending = true; }
   private:
     uint32_t    _resumeFilePos = 0;
+    bool        _seekPending = false;  // a setResumeFilePos() is waiting for the next play
     plStatus_e  _status = STOPPED;
     bool        _fatalStream = false;  // 404/410 seen: the arm gate must not start the ladder
     uint8_t     _verdictSeen = 0;      // last audio-library verdict acted on; 0 when none is held
@@ -110,6 +112,8 @@ class Player: public Audio {
 
     void _stop(bool alreadyStopped = false);
     void _play(uint16_t stationId);
+    void _pauseLocal();
+    bool _resumeLocal();
     void _loadVol(uint8_t volume);
     void _applyCut(float db);
     void _dbcutTick();

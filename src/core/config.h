@@ -327,7 +327,6 @@ class Config {
     volatile BitrateFormat configFmt = BF_UNKNOWN;  // volatile: cross-core/task access
     neworkItem ssids[5];
     uint8_t ssidsCount = 0;
-    volatile uint32_t sdResumePos = 0;
     volatile bool     wwwFilesExist = false;
     volatile uint16_t vuThreshold = 0;
     uint32_t          _vuRefMs = 0;              // the reference's release clock; see vuRefTrack()

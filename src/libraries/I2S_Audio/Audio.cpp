@@ -2657,7 +2657,8 @@ bool Audio::pauseResume() {
     if(m_dataMode == AUDIO_LOCALFILE || m_streamType == ST_WEBSTREAM || m_streamType == ST_WEBFILE) {
         m_f_running = !m_f_running;
         retVal = true;
-        if(!m_f_running) {
+        // A local pause keeps the decoded block: performAudioTask() does not touch it until resumed.
+        if(!m_f_running && m_dataMode != AUDIO_LOCALFILE) {
             memset(m_outBuff, 0, m_outbuffSize * sizeof(int16_t)); // Clear OutputBuffer
             m_validSamples = 0;
         }
@@ -7638,6 +7639,7 @@ void Audio::performAudioTask() {
     if(m_codec == CODEC_NONE) return; // wait for codec is  set
     if(m_codec == CODEC_OGG)  return; // wait for FLAC, VORBIS or OPUS
     xSemaphoreTake(mutex_audioTask, 0.3 * configTICK_RATE_HZ);
+    if(!m_f_running) {xSemaphoreGive(mutex_audioTask); return;}  // a pause that arrived while waiting here
     while(m_validSamples) {vTaskDelay(20 / portTICK_PERIOD_MS); playChunk();} // I2S buffer full
     playAudioData();
     xSemaphoreGive(mutex_audioTask);

@@ -141,12 +141,9 @@ void Config::saveLastStationUrl(const char* url, uint16_t waitMs) {
 
 void Config::changeMode(int newmode) {
   #ifdef USE_SD
-    bool pir = player.isRunning();
+    const bool active = player.isRunning() || player.isPaused();
     if (SD_CS==255) return;
     if (network.status==SDOFFLINE) return;  // no mode switching in offline SD mode
-    if (getMode()==PM_SDCARD) {
-      sdResumePos = player.getFilePos();
-    }
     if (network.status==SOFT_AP || display.mode()==LOST) {
       FUNCTIONLOG("REBOOT", "Marking NVS Pref keys for intentional reboot to SD Offline mode. Rebooting.");
       saveValue(&store.bootStableMarker, true);
@@ -185,7 +182,7 @@ void Config::changeMode(int newmode) {
     player.clearMute();   // a mode change always cancels mute
     netserver.requestOnChange(GETPLAYERMODE, 0);
     if (getMode()==PM_SDCARD) {
-      if (pir) player.sendCommand({PR_STOP, 0});
+      if (active) player.sendCommand({PR_STOP, 0});
       display.putRequest(NEWMODE, SDCHANGE);
       unsigned long _modeWaitStart = millis();
       while(display.mode()!=SDCHANGE && millis()-_modeWaitStart<2000)
@@ -200,7 +197,7 @@ void Config::changeMode(int newmode) {
         delay(100);
         ESP.restart();
       }
-      if (pir) {
+      if (active) {
         player.stopSync();  // synchronous stop — closes SD audio file before unmount
         #if MUTE_PIN!=255
           digitalWrite(MUTE_PIN, MUTE_VAL);  // mute output immediately (DMA buffer still drains)
@@ -214,7 +211,7 @@ void Config::changeMode(int newmode) {
     uint32_t _t_plinit = millis();
     initPlaylistMode();
     FUNCTIONLOG("SD", "initPlaylistMode: %lums", millis() - _t_plinit);
-    if (pir) player.sendCommand({PR_PLAY, getMode()==PM_WEB?store.lastStation:store.lastSdStation});
+    if (active) player.sendCommand({PR_PLAY, getMode()==PM_WEB?store.lastStation:store.lastSdStation});
     netserver.resetQueue();
     netserver.requestOnChange(GETINDEX, 0);
     netserver.requestOnChange(PLAYLISTREADY, 0);
@@ -311,7 +308,6 @@ void Config::initSDPlaylist(bool force) {
         lastStation(0);
         setNoStationState();
       }
-      sdResumePos = 0;
     } else {
       store.countStation = utility.playlistLength();
     }

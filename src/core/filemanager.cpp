@@ -131,7 +131,7 @@ bool FileManager::isProtected(const String &path) {
 bool FileManager::isPlaying(const String &path) const {
   if (config.getMode() != PM_SDCARD) return false;
   // A backstop rather than the normal protection: enter() stops the player, so nothing is usually in use.
-  if (!player.isRunning()) return false;
+  if (!player.isRunning() && !player.isPaused()) return false;
   String playing = config.station.url;
   if (playing.length() == 0) return false;
   if (playing.equalsIgnoreCase(path)) return true;
@@ -1409,7 +1409,7 @@ bool FileManager::enter() {
   // again after it replaces itself with "/". _wasPlaying is remembered because the mode is not a play button, and the
   // stop is what lets the manager assume nothing is reading the card.
   if (!_active) {
-    _wasPlaying = player.isRunning();
+    _wasPlaying = player.isRunning() || player.isPaused();
     // Stop the player synchronously, before anything unmounts the card: a remount discards every handle, and a
     // queued PR_STOP only ASKS the player task to stop - so the audio's handle outlived the filesystem and closing it
     // corrupted the heap. stopSync() is the order changeMode() uses; _wasPlaying must be read before it.
@@ -1486,7 +1486,7 @@ void FileManager::leave(bool resumeAudio, const char *why) {
   const bool pairPresent = smartStart && sdman.ready &&
                            sdman.exists(INDEX_SD_PATH) && sdman.exists(PLAYLIST_SD_PATH);
   if (pairPresent && !cardChanged) {
-    FUNCTIONLOG("SDFileManager", "Resuming card playback (offset %lu)", (unsigned long)config.sdResumePos);
+    FUNCTIONLOG("SDFileManager", "Restarting card playback from the beginning");
     player.sendCommand({PR_PLAY, config.lastStation()});
   } else {
     // One line for the whole close, naming the reason; the numbers say why the player was not handed back.

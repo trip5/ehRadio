@@ -1251,6 +1251,12 @@ thinks the radio forgot everything. The loader-side wait was not built.
   - interacts with radio-browser click reporting (clicks are gated on `!network.lostPlaying` so automatic retry
     reconnections do not fire clicks; only explicit user-initiated plays do)
   - calls `rgbled` and `backlightControls` directly during playback start/stop
+- **SD pause is a real pause since 2026.11.28.** `PR_PAUSE` -> `Player::_pauseLocal()` calls `pauseResume()` and holds
+  `InBuff`, `audiofile` and the decoded block; `_resumeLocal()` continues from the same sample. `PAUSED` is a third
+  `plStatus_e`, so `isRunning()` is false (VU, screensaver and MQTT see a stopped player) while the file is still open.
+  `Config::changeMode()`, `PR_CHECKSD` and `FileManager::enter()` treat `PAUSED` as active so the file is closed before
+  any card unmount; a false probe alarm does not auto-play it. There is no `sdResumePos`: only the SD slider sets
+  `_resumeFilePos` + `_seekPending`, and `_play()` consumes that one explicit seek.
 - **A silent audio stop is now recorded, because nothing else can report one.** `Player::loop()`'s
   `!isRunning() && _status==PLAYING` gate prints one `Player` line (pos, duration, InBuff fill, `autoAdvance`, mode,
   and the card's `ready`/strike pair) before it stops. That gate also fires on **every normal SD track change**,
@@ -1425,9 +1431,9 @@ thinks the radio forgot everything. The loader-side wait was not built.
   [`handleEofMp3()`](../src/core/audiohandlers.cpp:328). The WebUI has no handler of its own,
   so its transport commands (`toggle`, `prev`, `next`, `playstation`/`play`, `start`, `stop`, `burl`/`playurl`) now
   call `Controls::screenSaverExit()` from `CommandHandler::exec` as well. That was the pause gap: pause is
-  `player.toggle()` with `_status == PLAYING` -> `PR_STOP` -> `_stop()`, which queues only `DBITRATE`/`PSTOP` and so
-  never reached a mode change, leaving the screensaver up with a dead meter (next/prev/play exit only because they
-  reach `_play()`). Volume and mute deliberately do **not** wake - a level change is not a transport action - and
+  `player.toggle()`, and in SD mode it now queues `PR_PAUSE` for `_pauseLocal()`/`_resumeLocal()`; neither path
+  queues a mode change, so the WebUI's explicit `screenSaverExit()` is what leaves the screensaver. Volume and mute
+  deliberately do **not** wake - a level change is not a transport action - and
   the helper is a no-op once the mode is not a screensaver, so the panel paths that already ran it are unaffected.
 - **The screensaver's background is always black (0), never `config.theme.background`.** The clock, the info line
   and the meter all erase to black while `isScreensaver`; only their *ink* colours come from the theme
@@ -2759,20 +2765,19 @@ thinks the radio forgot everything. The loader-side wait was not built.
   nothing else - no stop, no display change, no `_active` - so the player keeps playing and the display stays put.
   `hEnterApi()` answers 409 `no_card` for that. The mount is attempted BEFORE the stop only on this path: an already
   mounted card must not be remounted until the player is stopped, because the step-down discards every handle.
-- **The mode hands playback back on exit, but only what it took.** `enter()` records `player.isRunning()` in
-  `_wasPlaying`, **on the transition into the mode only**, because SmartStart must not turn the user's own stop into
-  playback - the manager is not a play button. The transition-only part is not tidiness: loading the page more than
-  once (a reload, a second tab) calls `/sdman/enter` again, and doing the stop and the capture on every call broke the
-  resume twice over. That used to be guaranteed rather than merely possible - the page handed itself over to "/" on
-  load and called this again from there - and the page now keeps its own address instead, so the rule survives as the
-  guard for the reload case. The second capture read the player the first call had
-  already stopped, so `_wasPlaying` became false and `leave()` did nothing at all; and the second `PR_STOP` ran
-  `_stop()` again, which overwrote `config.sdResumePos` with the position of a stopped player. Everything else in
-  `enter()` (the on-demand mount and the clock refresh) stays idempotent on purpose.
+- **The mode hands playback back on exit, but only what it took.** `enter()` records
+  `player.isRunning() || player.isPaused()` in `_wasPlaying`, **on the transition into the mode only**, because
+  SmartStart must not turn the player's own stop into playback - the manager is not a play button, and a stopped player
+  is neither running nor paused. The transition-only part is not tidiness: loading the page more than once (a reload, a
+  second tab) calls `/sdman/enter` again, and doing the stop and the capture on every call broke the resume twice over.
+  That used to be guaranteed rather than merely possible - the page handed itself over to "/" on load and called this
+  again from there - and the page now keeps its own address instead, so the rule survives as the guard for the reload
+  case. The second capture read the player the first call had already stopped, so `_wasPlaying` became false and
+  `leave()` did nothing at all; and the second `PR_STOP` ran `_stop()` again. Everything else in `enter()` (the
+  on-demand mount and the clock refresh) stays idempotent on purpose.
   `leave()` then reissues `player.resumeLastWebSource()` for `PM_WEB` or `{PR_PLAY, config.lastStation()}` otherwise,
-  the same two branches as `stopStandby()` and the smartstart block in `setup()`. The card needs no extra state to
-  continue where it left off: `_stop()` saves the byte offset in `config.sdResumePos` and the play path consumes it, and
-  an offset that no longer lands after an edit is left to the player's self-healing (failed connect, index rebuild).
+  the same two branches as `stopStandby()` and the smartstart block in `setup()`. There is no byte offset to keep:
+  implicit SD resume was removed on 2026.11.28, so leaving the manager restarts the current track from the beginning.
   Done and the idle timeout both resume; only the card-gone exit calls `leave(false)`, because the media it would play
   from is what vanished.
 - **A changed card never resumes.** `_cardChanged`, set by every mutation through `markCardChanged()`, suppresses the

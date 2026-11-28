@@ -383,7 +383,6 @@ void AudioHandlers::handleId3Data(const char* info) {
 
 void AudioHandlers::handleEofMp3(const char* info) {
   (void)info;
-  config.sdResumePos = 0;
   player.autoAdvance = true;  // EOF auto-advance: mute must survive this track change
   player.next();
 }
@@ -400,7 +399,7 @@ void AudioHandlers::handleEofStream(const char* info) {
   if (config.getMode() == PM_WEB) {
     player.resumeLastWebSource();
   } else {
-    player.setResumeFilePos(config.sdResumePos == 0 ? 0 : config.sdResumePos - player.sd_min);
+    player.setResumeFilePos(0);
     player.sendCommand({PR_PLAY, config.lastStation()});
   }
 }

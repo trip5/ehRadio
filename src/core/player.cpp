@@ -99,8 +99,8 @@ void Player::init() {
 // Two classes, because losing one of them is much worse than losing the other.  The periodic ticks (PR_CHECKSD,
 // PR_VUTONUS) are idempotent and re-issued a couple of seconds later, so a nearly full queue may refuse them.
 // Everything else is a command with a side effect and an order (PR_PLAY, PR_STOP, PR_PREV, PR_NEXT, PR_TOGGLE,
-// PR_VOL, PR_BURL, PR_DBCUT, PR_CUTRESET): losing one eats a user's Next, or leaves a queued PR_STOP behind a later
-// PR_PLAY, so those wait for room rather than being dropped.
+// PR_PAUSE, PR_VOL, PR_BURL, PR_DBCUT, PR_CUTRESET): losing one eats a user's Next, or leaves a queued PR_STOP
+// behind a later PR_PLAY, so those wait for room rather than being dropped.
 void Player::sendCommand(playerRequestParams_t request) {
   if (playerQueue==NULL) return;
   const bool tick = (request.type == PR_CHECKSD || request.type == PR_VUTONUS);
@@ -187,7 +187,8 @@ void Player::noteStreamStalled() {
 
 void Player::_stop(bool alreadyStopped) {
   log_i("%s called", __func__);
-  if (config.getMode()==PM_SDCARD && !alreadyStopped) config.sdResumePos = player.getFilePos();
+  _resumeFilePos = 0;      // a stop cancels a seek that was waiting for a play
+  _seekPending = false;
   _status = STOPPED;
   _playingStationId = 0;
   setOutputPins(false);
@@ -207,6 +208,34 @@ void Player::_stop(bool alreadyStopped) {
   if (!lockOutput) stopInfo();
   rgbled.stopped();
   backlightControls.restart();
+}
+
+// A local pause keeps the file, the input ring and the decoded block; only the decoder is held still.
+void Player::_pauseLocal() {
+  if (_status != PLAYING) return;
+  if (!isRunning()) { _stop(); return; }   // the track already ended; pausing would revive it
+  pauseResume();
+  if (isRunning()) { _stop(); return; }    // the library refused, or the file died in between
+  _status = PAUSED;
+  setOutputPins(false);                    // hide the I2S DMA drain; the ring is still held
+  display.putRequest(PSTOP);
+  netserver.requestOnChange(MODE, 0);
+  rgbled.stopped();
+  FUNCTIONLOG("Player", "paused at %u of %u", (unsigned)getFilePos(), (unsigned)getFileSize());
+}
+
+bool Player::_resumeLocal() {
+  if (_status != PAUSED) return false;
+  setOutputPins(true);
+  if (!isRunning()) {
+    pauseResume();
+    if (!isRunning()) { _status = STOPPED; setOutputPins(false); return false; }
+  }
+  _status = PLAYING;
+  display.putRequest(PSTART);
+  netserver.requestOnChange(MODE, 0);
+  rgbled.playing();
+  return true;
 }
 
 void Player::initHeaders(const char *file) {
@@ -244,6 +273,7 @@ void Player::loop() {
           case PR_VOL:    cmd = "VOL";    break;
           case PR_BURL:   cmd = "BURL";   break;
           case PR_TOGGLE: cmd = "TOGGLE"; break;
+          case PR_PAUSE:  cmd = "PAUSE";  break;
           case PR_DBCUT:    cmd = "DBCUT";    break;
           case PR_CUTRESET: cmd = "CUTRESET"; break;
           default: break;
@@ -253,6 +283,13 @@ void Player::loop() {
     #endif
     switch (requestP.type) {
       case PR_STOP: _clearMute(); _stop(); break;
+      case PR_PAUSE: {
+        if (config.getMode()==PM_SDCARD) {
+          if (_status==PAUSED) { if (!_resumeLocal()) sendCommand({PR_PLAY, config.lastStation()}); }
+          else _pauseLocal();
+        }
+        break;
+      }
       case PR_PLAY: {
         if (requestP.payload>0) {
           config.setLastStation((uint16_t)requestP.payload);
@@ -302,11 +339,16 @@ void Player::loop() {
             // and unmounting under an open handle strands the audio library with no way to report it.  Close the
             // file first, then ask once more with nothing reading the card.
             FUNCTIONLOG("SD", "card probe failed %u times - stopping the file before the verdict", (unsigned)sdman.cardGoneStrikes());
+            const bool wasPaused = (_status == PAUSED);
             stopSync();
             vTaskDelay(pdMS_TO_TICKS(50));  // let the card finish the block the closed read left in flight
             if (sdman.cardPresent()) {
-              FUNCTIONLOG("SD", "card answers again - resuming the track");
-              sendCommand({PR_PLAY, config.lastStation()});
+              if (wasPaused) {
+                FUNCTIONLOG("SD", "card answers again - the paused track stays stopped");
+              } else {
+                FUNCTIONLOG("SD", "card answers again - resuming the track");
+                sendCommand({PR_PLAY, config.lastStation()});
+              }
             } else if (network.status == SDOFFLINE) {
               sdman.stop();  // changeMode() refuses to act offline, so this mode does it here
               display.putRequest(NEWMODE, PLAYER);
@@ -535,7 +577,14 @@ void Player::_play(uint16_t stationId) {
       return;
     }
   #endif
-  if (_status == PLAYING && stationId > 0 && stationId == _playingStationId) return;
+  const bool seekPending = _seekPending;
+  const uint32_t resumeAt = _resumeFilePos;
+  _seekPending = false;
+  _resumeFilePos = 0;
+  if (stationId > 0 && stationId == _playingStationId) {
+    if (_status == PLAYING && !seekPending) return;
+    if (_status == PAUSED && !seekPending && _resumeLocal()) return;
+  }
   #ifdef USE_SD
     if(config.getMode()==PM_SDCARD && config.store.sdshuffle && stationId > 0 && !_shuffleWalkOwns) {
       _shuffleRestart(stationId);  // Selkecting track manually resets the shuffle
@@ -592,7 +641,7 @@ void Player::_play(uint16_t stationId) {
     #if (SD_PLAY_TRACE_MS > 0)
       uint32_t _t_cfs = millis();
     #endif
-    isConnected=connecttoFS(sdman,config.station.url,config.sdResumePos==0?_resumeFilePos:config.sdResumePos-player.sd_min);
+    isConnected=connecttoFS(sdman,config.station.url,resumeAt);
     #if (SD_PLAY_TRACE_MS > 0)
       FUNCTIONLOG("SD", "connecttoFS: %lums", millis() - _t_cfs);
     #endif
@@ -610,7 +659,6 @@ void Player::_play(uint16_t stationId) {
     _playingStationId = stationId;
     _loadVol(config.store.volume);   // re-apply volume (respects _muted) after connect* — setDefaults() inside it must not win
     if (config.getMode()==PM_SDCARD) {
-      config.sdResumePos = 0;
       config.saveValueButWait(&config.store.lastSdStation, stationId, 3000);  // an NVS write here stalls the loop
     } else {
       config.saveLastStationUrl(config.station.url);
@@ -651,6 +699,7 @@ void Player::_play(uint16_t stationId) {
 
 void Player::browseUrl() {
   if (burl[0] == '\0') return;
+  if (_status == PAUSED) _stop();  // this path is the player task, unlike the netserver direct-play task
   #ifdef AUDIO_DEBUG
     FUNCTIONLOG("Player", "browseUrl: %s", burl);
   #endif
@@ -816,8 +865,8 @@ void Player::next() {
 
 void Player::toggle() {
   network.cancelStreamRetry();
-  if (_status == PLAYING) {
-    sendCommand({PR_STOP, 0});
+  if (_status == PAUSED || _status == PLAYING) {
+    sendCommand({config.getMode()==PM_SDCARD ? PR_PAUSE : PR_STOP, 0});
   } else {
     if (config.getMode() == PM_WEB) {
       resumeLastWebSource();

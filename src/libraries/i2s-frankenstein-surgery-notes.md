@@ -1226,3 +1226,13 @@ or `5`, and sometimes went **blank**.
    five 2 s windows on the VS1053. A median over several 10 s windows would need 30-50 s to show a real bitrate change
    and would still be built from the same averages - it buys nothing that the window does not already give.
 
+## Post-Graft Patch Fixes (2026.11.28)
+
+**File changed**: `src/libraries/I2S_Audio/Audio.cpp` (`pauseResume()`).
+
+`pauseResume()` cleared `m_outBuff` and `m_validSamples` when pausing. The core now pauses a local SD track in place
+and that clear dropped up to one decoded block (26 ms for MP3, up to 93 ms for FLAC) from the resume point. The clear
+is kept for web streams and skipped for `AUDIO_LOCALFILE`, so a paused local track resumes from the exact sample;
+`performAudioTask()` does not touch the held block while `m_f_running` is false. It also re-reads `m_f_running` after
+taking the audio mutex, so a chunk cannot be written after a pause that arrived while it was waiting for that mutex.
+

@@ -68,7 +68,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     return false;
 
   /* Websockets for Player */
-  if (cmdIs(command, "toggle"))      { network.cancelStreamRetry(); controls.screenSaverExit(); player.toggle(); return true; }
+  if (cmdIs(command, "pause", "toggle")) { network.cancelStreamRetry(); controls.screenSaverExit(); player.toggle(); return true; }
   if (cmdIs(command, "prev"))        { network.cancelStreamRetry(); controls.screenSaverExit(); player.prev(); return true; }
   if (cmdIs(command, "next"))        { network.cancelStreamRetry(); controls.screenSaverExit(); player.next(); return true; }
   if (cmdIs(command, "voldown", "volumedown", "volm", "vol-")) { player.stepVol(false); return true; }
@@ -86,7 +86,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
   if (cmdIs(command, "burl", "playurl")) { network.cancelStreamRetry(); controls.screenSaverExit(); return player.queueResolvedUrl(value); }
   if (cmdIs(command, "sdpos")) {
     if (config.getMode()==PM_SDCARD) {
-      uint32_t sdval = static_cast<uint32_t>(atoi(value)); config.sdResumePos = 0;
+      uint32_t sdval = static_cast<uint32_t>(atoi(value));
       if (!player.isRunning()) { player.setResumeFilePos(sdval-player.sd_min); player.sendCommand({PR_PLAY, config.store.lastSdStation}); }
       else { player.setFilePos(sdval-player.sd_min); }
     }
@@ -260,7 +260,7 @@ bool CommandHandler::exec(const char *command, const char *value, uint8_t cid, C
     _activeLocale = l10n_findLocale(value);
     display.putRequest(CLOCK, true);
     if (config.store.showweather) network.buildWeatherString();
-    if (player.status() != PLAYING && display.mode() != UPDATING) {
+    if (player.status() != PLAYING && player.status() != PAUSED && display.mode() != UPDATING) {
       if (player.hasError()) {
         player.setError("");  // we don't remember the error so can not translate - so just clear and do "ready"
         config.setTitle(l10n(L10N_MSG_READY));

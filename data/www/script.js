@@ -594,8 +594,8 @@ function initPLEditor(){
   pllines.forEach((item,index)=>{
     html+=`<li class="pleitem" id="${'plitem'+index}"><span class="grabbable">${("00"+(index+1)).slice(-3)}</span>
       <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
-      <input class="pleinput plename" type="text" value="${quoteattr(item.dataset.name)}" maxlength="140" />
-      <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="140" />
+      <input class="pleinput plename" type="text" value="${quoteattr(item.dataset.name)}" maxlength="169" />
+      <input class="pleinput pleurl" type="text" value="${item.dataset.url}" maxlength="169" />
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>
       <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="${item.dataset.dbcut}" />
       <span class="pleinput plestatus"></span>
@@ -720,8 +720,8 @@ function plAdd(){
   plitem.attr('id', 'plitem'+(cnt.length));
   plitem.innerHTML = '<span class="grabbable">'+("00"+(cnt.length+1)).slice(-3)+'</span>\
       <span class="pleinput plecheck"><input type="checkbox" /></span>\
-      <input class="pleinput plename" type="text" value="" maxlength="140" />\
-      <input class="pleinput pleurl" type="text" value="" maxlength="140" />\
+      <input class="pleinput plename" type="text" value="" maxlength="169" />\
+      <input class="pleinput pleurl" type="text" value="" maxlength="169" />\
       <span class="pleinput pleplay" data-command="preview">&#9658;</span>\
       <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="0" />\
       <span class="pleinput plestatus"></span>';
@@ -1049,8 +1049,8 @@ function addStationToEditor(name, url, dbcut) {
   plitem.id = 'plitem' + cnt;
   plitem.innerHTML = `<span class="grabbable">${("00"+(cnt+1)).slice(-3)}</span>
     <span class="pleinput plecheck"><input type="checkbox" class="plcb" /></span>
-    <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="140" />
-    <input class="pleinput pleurl" type="text" value="${url}" maxlength="140" />
+    <input class="pleinput plename" type="text" value="${name.replace(/"/g, '&quot;')}" maxlength="169" />
+    <input class="pleinput pleurl" type="text" value="${url}" maxlength="169" />
     <span class="pleinput pleplay" data-command="preview">&#9658;</span>
     <input class="pleinput pledbcut" type="number" min="0" max="24" step="1" placeholder="?" value="${(dbcut >= 0) ? dbcut : ''}" />
     <span class="pleinput plestatus"></span>`;

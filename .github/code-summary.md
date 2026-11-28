@@ -3879,6 +3879,12 @@ thinks the radio forgot everything. The loader-side wait was not built.
   the boot default, so an ILI9488 still starts paged and a build that defined `PRETEXT_ALLCAPS` still starts capped.
   Both playlist paths are compiled now and `PlayListWidget::_paged` (taken in `init()`, so APPLYSTATE re-takes it)
   chooses at draw time; `currentTop()` is one function with both shapes and the page carries both playlist widgets.
+  **Both painters now feed the same scrolling widget**: the paged painter places `_plcurrent` on the selected row with
+  `moveToQuiet()` (a loud `moveTo()` would erase at the row it leaves, over the painter's own repaint), hands it the
+  composed label, and stops printing that row's text itself. The band fill stays with the painter because it is a whole
+  `_plItemHeight` tall while the widget only owns its glyph height. `TextWidget::hasText()` exists for the one case
+  `setText()` cannot see - the row moved but the name did not - where it would otherwise paint nothing and leave the row
+  blank. Before this, paged mode printed every row with `dsp.print()` and never called `setText()`, so it never scrolled.
   `preText()` tests the flag per codepoint, and the pretext cache key **folds the flag in** - it is keyed on the
   caller's codepoint, taken BEFORE the transform, so without that a toggle would keep serving the capped entry.
   The WebUI never case-transforms: the All Caps option (`config.store.pretextALLCAPS`) reaches only `preText()`,
@@ -5159,6 +5165,12 @@ default is that macro, now **172** = `STATION_FIELD_LENGTH` + 2, which is what a
 because a `ScrollWidget` keeps `_buffsize - 2` bytes), with the boot line passing `BOOTSTR_LEN` instead and the
 weather row and the screensaver's info line passing `COMPOSED_LINE_BUFF` (`WEATHER_STRING_L` + 2) for the 511-byte
 forecast. A widget's size is repeated at every `init()`, not just at construction: `init()` re-mallocs.
+No other name-sized buffer is allowed to be shorter than the field it carries: `PlayListWidget`'s two scratch arrays
+became one file-scope `_plNames[31][STATION_FIELD_LENGTH]` (the painters are dispatched exclusively and every row is
+copied by the widget that takes it, so the array never outlives a draw - and the two half-size arrays already cost the
+same 5,270 bytes), `Utility::fillPlaylistRange()`/`stationBuf`, the MQTT `statusNameSize`/`statusTitleSize` and the paged
+label are all `STATION_FIELD_LENGTH`, and the Playlist Editor's inputs say `maxlength="169"` instead of the retired 140.
+The whole sweep costs 232 bytes of static RAM on `es3c28p` (109,904 -> 110,136).
 `uppercase` never did anything at all - `PRETEXT_ALLCAPS` is the switch that works. `conf_tool.py` strips the old
 pair out of a conf file (`trim_scroll_conf()`).
 

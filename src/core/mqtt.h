@@ -19,8 +19,8 @@ public:
 private:
   void publishStatus();
   void publishVolume();
-  static constexpr size_t statusNameSize = (STATION_FIELD_LENGTH / 2) + 1;
-  static constexpr size_t statusTitleSize = 129;
+  static constexpr size_t statusNameSize = STATION_FIELD_LENGTH;   // a whole field, same as the display
+  static constexpr size_t statusTitleSize = STATION_FIELD_LENGTH;
   static constexpr size_t statusImageUrlSize = MQTT_URL_SIZE + 1;
   static constexpr size_t statusJsonOverhead = 96;
   static constexpr size_t serverUriSize = 128;

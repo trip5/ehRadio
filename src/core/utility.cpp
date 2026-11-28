@@ -825,7 +825,7 @@ uint16_t Utility::findStationByUrl(const char* url) {
   return 0;
 }
 
-uint16_t Utility::fillPlaylistRange(int from, uint8_t count, char names[][STATION_FIELD_LENGTH / 2]) {
+uint16_t Utility::fillPlaylistRange(int from, uint8_t count, char names[][STATION_FIELD_LENGTH]) {
   for (uint8_t c = 0; c < count; c++) names[c][0] = '\0';
   uint16_t total = playlistLength();
   if (total == 0 || count == 0) return total;
@@ -846,7 +846,7 @@ uint16_t Utility::fillPlaylistRange(int from, uint8_t count, char names[][STATIO
     if (stationId < 1 || stationId > (int)total) continue;
     memset(nameBuf, 0, sizeof(nameBuf));
     if (readStationEntry(playlist, index, (uint16_t)stationId, nameBuf, urlBuf, dBcutBuf)) {
-      strlcpy(names[c], nameBuf, STATION_FIELD_LENGTH / 2);
+      strlcpy(names[c], nameBuf, STATION_FIELD_LENGTH);   // a row may be no shorter than the field it came from
     }
   }
 

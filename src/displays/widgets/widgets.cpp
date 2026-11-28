@@ -1710,20 +1710,37 @@ void PlayListWidget::drawPlaylist(uint16_t currentItem) {
   else        _drawFade(currentItem);
 }
 
+// One scratch buffer for both painters: the modes are dispatched exclusively, every row handed out is copied by the
+// widget that takes it, and nothing outlives a single draw.
+static char _plNames[31][STATION_FIELD_LENGTH];
+
+// Where a paged row's text cursor sits.  The selection is handed to a scrolling widget, so both have to agree or the
+// selected row would sit a pixel or two off its neighbours.
+uint16_t PlayListWidget::_rowTextY(uint16_t rowTop) const {
+  const uint8_t charH = CHARHEIGHT * playlistConf_ptr->widget.textsize;
+  return (uint16_t)(rowTop + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize);
+}
+
+// Put the scrolling widget on the selected row, quietly: the painter repaints the row the selection leaves, so an erase
+// here would stamp the old highlight band back over it.
+void PlayListWidget::_placeSelection(uint16_t rowTop) {
+  if (!_current) return;
+  _current->moveToQuiet({TFT_BORDER, _rowTextY(rowTop), (int16_t)(dsp.width() - 2 * TFT_BORDER)});
+}
+
 // ==================== FADE MODE (original centered) ====================
 
 uint8_t PlayListWidget::_fillPlMenu(int from, uint8_t count) {
-  static char names[31][STATION_FIELD_LENGTH / 2];
   uint8_t safeCount = min(count, (uint8_t)31);
-  uint16_t stationsCount = utility.fillPlaylistRange(from, safeCount, names);
+  uint16_t stationsCount = utility.fillPlaylistRange(from, safeCount, _plNames);
   if (stationsCount == 0) return 0;
   for (uint8_t c = 0; c < safeCount; ++c) {
     int stationId = from + c;
     if (stationId < 1 || stationId > stationsCount) { _printPLitem(c, ""); continue; }
-    if (config.store.numplaylist && names[c][0] != '\0') {
-      String label = String(stationId) + " " + names[c];
+    if (config.store.numplaylist && _plNames[c][0] != '\0') {
+      String label = String(stationId) + " " + _plNames[c];
       _printPLitem(c, label.c_str());
-    } else { _printPLitem(c, names[c]); }
+    } else { _printPLitem(c, _plNames[c]); }
   }
   return safeCount;
 }
@@ -1752,8 +1769,6 @@ void PlayListWidget::_printPLitem(uint8_t pos, const char* item){
 
 void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name){
   dsp.setTextSize(playlistConf_ptr->widget.textsize);
-  uint8_t charH = CHARHEIGHT * playlistConf_ptr->widget.textsize;
-  int16_t textY = y + ((int16_t)_plItemHeight - (int16_t)charH) / 2 + playlistConf_ptr->widget.textsize;
   if (selected) {
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.plcurrentbg);
     dsp.fillRect(TFT_BORDER, y, MAX_WIDTH, _plItemHeight, config.theme.plcurrentbg);
@@ -1762,22 +1777,26 @@ void PlayListWidget::_printPLitemPaged(uint16_t stationId, uint16_t y, bool sele
     dsp.fillRect(0, y, dsp.width(), _plItemHeight, config.theme.background);
     dsp.setTextColor(config.theme.playlist[0], config.theme.background);
   }
-  dsp.setCursor(TFT_BORDER, textY);
-  if (name && name[0] != '\0') {
+  if (selected) {
+    // The selected row is the scrolling widget's: it holds the text, so the scroll survives the next repaint.  The band
+    // fill above stays here, because it is a whole row tall while the widget only owns its glyph height.
+    if (!name || name[0] == '\0') { _current->setText(""); return; }   // an unreadable row must not keep the old name
+    char label[STATION_FIELD_LENGTH + 8];
     if (config.store.numplaylist) {
-      // Clipping is deliberate - the number takes part of a narrow column - but it has to be spelled as a bounded
-      // append rather than left to snprintf, which GCC 14 at -O2 reports as -Wformat-truncation because it cannot know
-      // the truncation is intended.  Behaviour is the same: the tail is cut at sizeof(label).
-      char idbuf[8];
-      snprintf(idbuf, sizeof(idbuf), "%d ", stationId);
-      char label[STATION_FIELD_LENGTH / 2 + 6];
-      strlcpy(label, idbuf, sizeof(label));
+      snprintf(label, sizeof(label), "%u ", (unsigned)stationId);
       strlcat(label, name, sizeof(label));
-      dsp.print(label);
     } else {
-      dsp.print(name);
+      strlcpy(label, name, sizeof(label));
     }
+    const bool same = _current->hasText(label);
+    _current->setText(label);
+    if (same) _current->repaint();   // the row moved but the name did not: setText() issued nothing
+    return;
   }
+
+  if (!name || name[0] == '\0') return;
+  dsp.setCursor(TFT_BORDER, _rowTextY(y));
+  dsp.print(name);
 }
 
 void PlayListWidget::_drawPaged(uint16_t currentItem) {
@@ -1788,18 +1807,18 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
   uint8_t page = (currentItem - 1) / _plPageSize;
   uint16_t newPageStart = page * _plPageSize + 1;
   uint8_t safeCount = min(_plPageSize, (uint8_t)31);
-  static char names[31][STATION_FIELD_LENGTH / 2];
 
   // Same-page partial update: redraw just the two changed slots
   if (_plPrevItem != 0 && _plPageStart == newPageStart) {
-    utility.fillPlaylistRange(_plPageStart, safeCount, names);
+    utility.fillPlaylistRange(_plPageStart, safeCount, _plNames);
     uint8_t prevSlot = (_plPrevItem - _plPageStart);
     uint8_t newSlot  = (currentItem - _plPageStart);
+    if (newSlot < safeCount) _placeSelection(_plYStart + newSlot * _plItemHeight);
     if (prevSlot < safeCount) {
-      _printPLitemPaged(_plPrevItem, _plYStart + prevSlot * _plItemHeight, false, names[prevSlot]);
+      _printPLitemPaged(_plPrevItem, _plYStart + prevSlot * _plItemHeight, false, _plNames[prevSlot]);
     }
     if (newSlot < safeCount) {
-      _printPLitemPaged(currentItem, _plYStart + newSlot * _plItemHeight, true, names[newSlot]);
+      _printPLitemPaged(currentItem, _plYStart + newSlot * _plItemHeight, true, _plNames[newSlot]);
     }
     _plPrevItem = currentItem;
     return;
@@ -1809,11 +1828,14 @@ void PlayListWidget::_drawPaged(uint16_t currentItem) {
   _plPageStart = newPageStart;
   _plPrevItem = currentItem;
   dsp.fillRect(0, _plPlaylistTop, dsp.width(), _plPlaylistBottom - _plPlaylistTop, config.theme.background);
-  uint16_t stationsCount = utility.fillPlaylistRange(_plPageStart, safeCount, names);
+  uint16_t stationsCount = utility.fillPlaylistRange(_plPageStart, safeCount, _plNames);
+  if (currentItem >= _plPageStart && (uint8_t)(currentItem - _plPageStart) < safeCount) {
+    _placeSelection(_plYStart + (currentItem - _plPageStart) * _plItemHeight);
+  }
   for (uint8_t i = 0; i < safeCount; i++) {
     uint16_t itemIndex = _plPageStart + i;
     if (itemIndex > stationsCount) break;
-    _printPLitemPaged(itemIndex, _plYStart + i * _plItemHeight, itemIndex == currentItem, names[i]);
+    _printPLitemPaged(itemIndex, _plYStart + i * _plItemHeight, itemIndex == currentItem, _plNames[i]);
   }
 }
 

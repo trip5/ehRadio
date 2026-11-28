@@ -129,7 +129,7 @@ public:
   bool loadStation(uint16_t stationId);
   uint16_t findStationByUrl(const char* url);
   char* stationByNum(uint16_t num);
-  uint16_t fillPlaylistRange(int from, uint8_t count, char names[][STATION_FIELD_LENGTH / 2]);
+  uint16_t fillPlaylistRange(int from, uint8_t count, char names[][STATION_FIELD_LENGTH]);
   void doSleepW();
   static void requestSleep();
   static void requestSleepWake();
@@ -149,7 +149,7 @@ private:
   static void sleepCore();
   static void doSleep();
   char ipBuf[16] = {0};
-  char stationBuf[STATION_FIELD_LENGTH / 2] = {0};
+  char stationBuf[STATION_FIELD_LENGTH] = {0};
   Ticker sleepTimer;
 };
 

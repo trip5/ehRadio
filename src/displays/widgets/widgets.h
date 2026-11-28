@@ -148,6 +148,9 @@ class TextWidget: public Widget {
     // Virtual because a ScrollWidget must not go through _paint(): its erase is unclipped and as wide as the whole
     // string, which for a scrolling line reaches past its span.
     virtual void repaint();
+    // True when this exact string is already held: setText() will do nothing, so a caller that moved the widget still
+    // needs repaint().
+    bool hasText(const char* txt) const { return _text && txt && strcmp(_text, txt) == 0; }
   protected:
     char *_text = nullptr;
     char *_oldtext = nullptr;
@@ -505,6 +508,8 @@ class PlayListWidget: public Widget {
     bool     _paged;          // playlistPages() as init() read it; the option is a runtime setting now
     void _drawPaged(uint16_t currentItem);
     void _printPLitemPaged(uint16_t stationId, uint16_t y, bool selected, const char* name);
+    uint16_t _rowTextY(uint16_t rowTop) const;
+    void _placeSelection(uint16_t rowTop);
     void _drawFade(uint16_t currentItem);
 };
 

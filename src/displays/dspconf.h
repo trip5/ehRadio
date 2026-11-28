@@ -44,10 +44,10 @@
 // and only the sluggishness term grows with the row.  DSP_WIDTH is the configured width, before rotation, i.e. the
 // space layouts are authored in.
 //
-// THIS NUMBER IS THE DELIVERED SPEED.  How far one paint moves and how often it may push are derived in
-// ScrollWidget::_applyPace(), and _calcX() pays the distance by ELAPSED TIME: a paint moves whatever the wall clock
-// owes, so a panel that drops frames - the audio-risk limiter quarters the display rate while the stream's ring is thin -
-// loses SMOOTHNESS and not speed.  There is no pitch knob, and no per-line pace anywhere in a conf.
+// THIS IS THE SPEED ASKED FOR, not always the speed seen.  _calcX() pays the distance by elapsed time and a paint moves
+// ONE pixel, so a panel that drops frames - an SD transaction on a shared SPI bus is the usual cause - makes the line
+// run slower rather than jump; nothing on screen reveals a marquee being late.  How often a line may push is derived in
+// ScrollWidget::_applyPace() from the panel's measured push cost.  There is no pitch knob, and no per-line pace in a conf.
 //
 // This can be overridden in myoptions.h and is not to be considered a perfect scale.-
 #ifndef SCROLLPX

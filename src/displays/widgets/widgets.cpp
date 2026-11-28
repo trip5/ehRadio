@@ -298,8 +298,6 @@ void ScrollWidget::_applyPace() {
   if (dutyMin < 1)    dutyMin = 1;
   if (dutyMin > 1000) dutyMin = 1000;
   _paintFloorMs = (uint16_t)dutyMin;
-  // One paint never crosses more than a character cell, so a real stall is a pause rather than a jump.
-  _stepMax = _charWidth ? (uint16_t)_charWidth : 1;
   _startscrolldelay = scrollHoldFor(_role);
 }
 
@@ -649,15 +647,20 @@ bool ScrollWidget::_calcX() {
   #ifdef WIDGET_DEBUG
     _dbgWinMs += elapsed;
   #endif
+  // One pixel per paint, and NO chasing: a pass that owes more than a pixel means the display was busy, so the line
+  // takes one pixel and forgets the rest.  A marquee has no external time reference - its wrap point is its own - so
+  // losing a little speed is invisible, while a paint that jumps 4 px to catch up is exactly what reads as steppy.
+  // The fraction is kept either way, which is what turns 10 ms passes owing 0.41 px into 41 px/s.
   uint32_t d = _acc / 1000;
-  _acc -= d * 1000;
-  if (!d) return false;
-  if (d > _stepMax) {           // a stall is a pause, not a jump: the rest of the debt is dropped
-    d = _stepMax; _acc = 0;
+  if (d > 1) {
     #ifdef WIDGET_DEBUG
-      _dbgClamps++;             // the only way this code loses speed, so the count is what explains a low px/s
+      _dbgLate++; _dbgDroppedPx += (d - 1);   // pixels the display cost us, so "is it behind?" has a number
     #endif
+    d = 1; _acc = 0;
+  } else {
+    _acc -= d * 1000;
   }
+  if (!d) return false;
   #ifdef WIDGET_DEBUG
     _dbgMoved += d; _dbgPaints++; _dbgStepSum += d;
     if (d < _dbgSeenMin) _dbgSeenMin = (uint16_t)d;
@@ -666,15 +669,18 @@ bool ScrollWidget::_calcX() {
       _dbgAgeMax = (uint16_t)(elapsed > 60000UL ? 60000UL : elapsed);
     }
     if (_dbgPaints && _dbgWinMs >= 5000) {
-      // Delivered vs COMMANDED px/s answers "is it behind?" on its own; clamps is the count of steps cut to one cell.
+      // Delivered vs COMMANDED px/s answers "is it behind?" on its own.  `late` counts passes that were owed more
+      // than a pixel and `Npx behind` is the distance the display cost us - the two figures that make a slow panel
+      // visible instead of a guess.  Step can only ever be 1 now, so a larger value would mean the rule was bypassed.
       // paints/s x mean step must equal delivered px/s - if it does not, a stamp is stale somewhere else.
-      FUNCTIONLOG("Widgets.pace", "role=%u %lupx/s of %upx/s, %lu paints (%.1f/s), step %u..%u (%u clamps) age %ums mean %.1f, floor %ums",
+      FUNCTIONLOG("Widgets.pace", "role=%u %lupx/s of %upx/s, %lu paints (%.1f/s), step %u..%u (%u late, %lupx behind) age %ums mean %.1f, floor %ums",
                   (unsigned)_role, (unsigned long)(_dbgMoved * 1000UL / _dbgWinMs), (unsigned)_speedPxS,
                   (unsigned long)_dbgPaints, (float)_dbgPaints * 1000.0f / (float)_dbgWinMs,
-                  (unsigned)_dbgSeenMin, (unsigned)_dbgSeenMax, (unsigned)_dbgClamps, (unsigned)_dbgAgeMax,
-                  _dbgPaints ? (float)_dbgStepSum / (float)_dbgPaints : 0.0f, (unsigned)_paintFloorMs);
+                  (unsigned)_dbgSeenMin, (unsigned)_dbgSeenMax, (unsigned)_dbgLate, (unsigned long)_dbgDroppedPx,
+                  (unsigned)_dbgAgeMax, _dbgPaints ? (float)_dbgStepSum / (float)_dbgPaints : 0.0f,
+                  (unsigned)_paintFloorMs);
       _dbgWinMs = 0; _dbgMoved = 0; _dbgPaints = 0; _dbgStepSum = 0;
-      _dbgSeenMin = 0xFFFF; _dbgSeenMax = 0; _dbgAgeMax = 0; _dbgClamps = 0;
+      _dbgSeenMin = 0xFFFF; _dbgSeenMax = 0; _dbgAgeMax = 0; _dbgLate = 0; _dbgDroppedPx = 0;
     }
   #endif
   _x -= (int16_t)d;

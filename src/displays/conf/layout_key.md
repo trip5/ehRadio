@@ -318,11 +318,13 @@ the two boxes plainly overlap in the vertical band.
   wide, `30` at 480) because the same px/s replaces a short row far sooner than a long one. On a 128 px panel the four
   shipped sizes therefore move at 20 / 28 / 35 / 40 px/s. A linear law ("ms per character") holds every size at one
   character rate and reads as a crawl at font 1 and a race at font 4; a constant pixel rate makes small text impossible
-  to read. **The number is the DELIVERED speed**: the distance is paid by elapsed time, so a panel that drops frames
-  loses smoothness rather than speed.
-- **The step and the paint rate are derived**, not set: `_calcX()` moves however many whole pixels elapsed time owes,
-  capped at one character cell so a stall reads as a pause rather than a jump, and `SCROLL_DUTY` caps how often one line
-  may push - a longer floor means rarer, larger steps, which is what stops a wide line tearing on a slow panel.
+  to read. The number is the speed *asked for*: the distance is paid by elapsed time, and a paint moves one pixel, so
+  a panel that drops frames makes the line run slower rather than jump. Nothing on screen reveals a marquee being late,
+  which is why smoothness wins that trade.
+- **The step and the paint rate are derived**, not set: `_calcX()` moves ONE pixel per paint, as soon as the elapsed
+  time owes it, and never repays a backlog - a pass that owes more means the display was busy, and the surplus is
+  dropped. `SCROLL_DUTY` caps how often one line may push; with one-pixel steps a longer floor costs speed rather than
+  smoothness, and it is what stops a wide line tearing on a slow panel.
 
 ### The two clock transforms: `fullClock` and `seconds`
 

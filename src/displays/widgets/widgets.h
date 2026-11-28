@@ -215,23 +215,24 @@ class ScrollWidget: public TextWidget {
     bool _doscroll;
     // The pace is DERIVED, never configured.  _speedPxS is pixels per second: SCROLLPX, which is px/s at fontsize 1,
     // scaled by sqrt(textsize), so a bigger font moves faster in px/s while its character rate falls.
-    // The distance is paid by ELAPSED TIME: a paint moves whatever the wall clock owes, so a dropped frame costs
-    // smoothness and never speed.  _paintFloorMs is the shortest gap between pushes and _stepMax the most one may move.
+    // The distance is paid by ELAPSED TIME through _acc, and a paint moves ONE pixel: when the display is late the line
+    // is late with it rather than jumping, because a marquee has no external time reference.  _paintFloorMs is the
+    // shortest gap between pushes.
     uint16_t _speedPxS = 0;
     uint16_t _paintFloorMs = 0;
-    uint16_t _stepMax = 1;
-    uint32_t _acc = 0;             // pixels owed, x1000
+    uint32_t _acc = 0;             // pixels owed, x1000; its fraction is what turns 0.41 px a pass into 41 px/s
     uint32_t _lastPaintMs = 0;     // last advance, and the moving gate loop() tests
     uint16_t _stepCostUs = 0;      // measured mean cost of one step - 0 until a step has been timed
     uint8_t  _stepCount = 0;
     #ifdef WIDGET_DEBUG
       // Delivered pace, reported every 5 s of MOVING time: px/s and paints/s are what the overhaul is judged on.
       // _dbgAgeMax is the elapsed time behind the largest step, which is the only thing that separates a long pass
-      // from a stamp gone stale on some other path.  _dbgClamps counts steps cut to one character cell, which is the
-      // only way this code loses speed: it drops the rest of the debt, so a nonzero count explains a delivered px/s
-      // below _speedPxS.
+      // from a stamp gone stale on some other path.  _dbgLate counts paints that were owed more than one pixel, and
+      // _dbgDroppedPx totals the pixels NOT moved because of it - the display's cost, and the reason a delivered px/s
+      // reads below _speedPxS.
       uint32_t _dbgMoved = 0, _dbgPaints = 0, _dbgStepSum = 0, _dbgWinMs = 0;
-      uint16_t _dbgSeenMin = 0xFFFF, _dbgSeenMax = 0, _dbgAgeMax = 0, _dbgClamps = 0;
+      uint16_t _dbgSeenMin = 0xFFFF, _dbgSeenMax = 0, _dbgAgeMax = 0, _dbgLate = 0;
+      uint32_t _dbgDroppedPx = 0;
     #endif
     ScrollRole_e _role = SCROLL_ROLE_TITLES;
     uint8_t  _speedPct = 100;

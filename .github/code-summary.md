@@ -4636,16 +4636,24 @@ thinks the radio forgot everything. The loader-side wait was not built.
     was a stray `/10000` where the scale `(textsize+8)^2` is ALREADY a percentage, so `60 * 81 / 10000` floored every
     size to 0 and the `: 1` guard made it 1 px/s - a one-pixel-per-second crawl, reported as "the weather is crawling".
     Three units meet in `_applyPace()` (px/s, ms, µs); each is named at the line it is used on for that reason.
+    **One pixel per paint, and no chasing.** `_acc` holds the owed distance and a paint moves exactly one pixel; a
+    pass that owes more means the display was busy, and the surplus is dropped rather than repaid. A marquee has no
+    external time reference - its wrap point is its own - so a stall that costs a little speed is invisible, while a
+    paint that jumps 4 px to catch up is exactly what reads as steppy. The sub-pixel fraction in `_acc` is kept, which
+    is what turns 10 ms passes owing 0.41 px into 41 px/s. The consequence to know: attainable speed is the paint rate
+    (~100/s at `DSP_TASK_DELAY` 10), far above the fastest shipped line (42 px/s), so only an extreme `SCROLLPX`
+    override would notice, and it would notice by the text running slower than asked rather than by jumping.
     **Reading `Widgets.pace` when someone reports a steppy line.** One line per 5 s of MOVING time:
-    `role=0 41px/s of 41px/s, 205 paints (40.9/s), step 1..2 (0 clamps) age 49ms mean 1.0, floor 6ms`. Delivered px/s
-    beside the COMMANDED `_speedPxS` answers "is it behind?" on its own, and `clamps` counts the steps cut to one
-    character cell - the only path in `_calcX()` that loses speed, because it drops the rest of the debt, and it fires
-    when a paint gap exceeds `charWidth x 1000 / speedPxS` ms.
-    - delivered == commanded, `0 clamps`, and `floor` well below `1000 / paints/s`: the pacing did its job, so a
-      steppy line is the panel's push time or the panel, not this code.
-    - `clamps > 0` with `age` at or past that gap: the display task missed passes and the text paused by design.
-    - `floor` close to `1000 / paints/s`: the duty budget is binding, so the line steps less often and further - that
-      is steppiness in the rendering, and `SCROLL_DUTY` is the knob (higher = more, smaller steps at more panel cost).
+    `role=0 41px/s of 41px/s, 205 paints (40.9/s), step 1..1 (0 late, 0px behind) age 49ms mean 1.0, floor 6ms`.
+    Delivered px/s beside the COMMANDED `_speedPxS` answers "is it behind?" on its own; `late` counts passes that were
+    owed more than a pixel and `Npx behind` totals the distance the display cost us. `step` can only ever be 1.
+    - delivered == commanded, `0 late`, and `floor` well below `1000 / paints/s`: the pacing did its job, so a steppy
+      line is the panel's push time or the panel, not this code.
+    - `Npx behind` climbing with `age` in the hundreds of ms: the display task is being held. On the ILI9488 that is
+      usually an SD transaction on the shared SPI bus, and `[Push] scroll slow ... addr N us` names the wait directly.
+    - delivered below commanded with `0 late`: impossible unless a stamp is stale on another path.
+    - `floor` close to `1000 / paints/s`: the duty budget is binding. With one-pixel steps it can no longer make a
+      step larger, only less frequent, so it costs speed instead of smoothness - `SCROLL_DUTY` is the knob.
     - `paints/s x mean` disagreeing with delivered px/s: a stamp is stale on another path, not a pacing fault.
     **A scrolling line popped whole characters in at one edge - the window string was one character too short.**
     Reported as "fontsize 3 draws no partial glyphs, while 2 and 4 do", with the maple separator arriving "in two
